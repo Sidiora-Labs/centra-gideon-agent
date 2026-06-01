@@ -1,0 +1,20 @@
+{
+  "name": "gideon-knowledge-tools",
+  "version": "1.0.0",
+  "displayName": "Knowledge Tools",
+  "description": "Operate the Knowledge entity \u2014 search the library, create/get/update items, and read library stats for gap detection.",
+  "icon": "BookOpen",
+  "author": "Gideon",
+  "tags": [
+    "tool",
+    "bundled"
+  ],
+  "provider": {
+    "type": "tool",
+    "implementation": "gideon.agents.native.builtin_tools:create_knowledge_tools_provider",
+    "capabilities": [
+      "knowledge"
+    ]
+  },
+  "native": true
+}

@@ -1,0 +1,42 @@
+{
+  "name": "gideon-electron-mac",
+  "version": "0.1.0",
+  "description": "Gideon — AI agent desktop app",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.js",
+    "dist": "electron-builder --mac --config.electronVersion=$(node -p \"require('electron/package.json').version\")"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "io.gideon.app",
+    "productName": "Gideon",
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "icon.png",
+      "target": ["dmg"]
+    },
+    "dmg": {
+      "writeUpdateInfo": false
+    },
+    "files": [
+      "main.js",
+      "context-menu.js",
+      "find-bin.js",
+      "preload.js",
+      "loading.html",
+      "icon.png"
+    ],
+    "extraResources": [
+      {
+        "from": "backend-dist/gideon-backend",
+        "to": "backend-dist/gideon-backend",
+        "filter": ["**/*"]
+      }
+    ]
+  }
+}

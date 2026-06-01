@@ -1,0 +1,20 @@
+{
+  "name": "gideon",
+  "description": "Autonomous personal AI agent — schedules recurring tasks, spawns parallel workers, learns from corrections, and operates independently across your connected channels",
+  "tools": [
+    "@gideon-schedule",
+    "@gideon-core"
+  ],
+  "allowedTools": [
+    "@gideon-schedule",
+    "@gideon-core"
+  ],
+  "hooks": {
+    "postToolUse": [
+      {
+        "matcher": "bash",
+        "command": "{ echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) BASH:\"; cat; echo; } >> ~/.gideon/audit.log"
+      }
+    ]
+  }
+}
