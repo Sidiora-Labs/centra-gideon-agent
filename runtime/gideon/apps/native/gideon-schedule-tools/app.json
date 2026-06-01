@@ -1,0 +1,20 @@
+{
+  "name": "gideon-schedule-tools",
+  "version": "1.0.0",
+  "displayName": "Schedule Tools",
+  "description": "Built-in scheduling tools \u2014 create, list, pause, and resume scheduled jobs.",
+  "icon": "CalendarClock",
+  "author": "Gideon",
+  "tags": [
+    "tool",
+    "bundled"
+  ],
+  "provider": {
+    "type": "tool",
+    "implementation": "gideon.tool_providers.registry:create_schedule_provider",
+    "capabilities": [
+      "schedule_management"
+    ]
+  },
+  "native": true
+}
