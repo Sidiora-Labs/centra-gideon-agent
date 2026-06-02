@@ -88,7 +88,11 @@ class OpenAITtsProvider(TtsProvider):
         try:
             import openai
         except ImportError:
-            logger.error("openai SDK not installed — cannot use remote TTS")
+            logger.error(
+                "openai SDK not installed — cannot use remote TTS. Install it with "
+                "`pip install 'gideon[openai]'` (or reinstall the OpenAI provider "
+                "app); run `gideon doctor` to check provider deps."
+            )
             return None
 
         api_key = self._resolve_api_key()
