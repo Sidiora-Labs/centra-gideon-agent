@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { fvs } from '../../design/fontWeight'
 import { ChevronRight, Loader2, Check, Zap, Maximize2, Lightbulb, AlertTriangle } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { spring } from '../../design/motion'
@@ -32,7 +33,7 @@ export function ToolCard({ seg }: { seg: ToolSegment }) {
         </motion.span>
         <Icon size={14} className="shrink-0 text-primary" />
         {/* stable tool name — the identity you scan for */}
-        <span className="shrink-0 text-on-surface text-[0.8125rem]" style={{ fontVariationSettings: '"wght" 550' }}>{label}</span>
+        <span className="shrink-0 text-on-surface text-[0.8125rem]" style={fvs(550)}>{label}</span>
         {/* refined summary (command / file) — muted, mono, gives way under pressure */}
         {detail && (
           <>
@@ -60,11 +61,11 @@ export function ToolCard({ seg }: { seg: ToolSegment }) {
               {/* Type-aware / native-override OUTPUT. */}
               {renderToolOutput(seg)}
               {seg.done && (seg.output == null || seg.output === '') && (
-                <p className="text-on-surface-low text-[0.7rem]">No output.</p>
+                <p className="text-on-surface-low text-[0.75rem]">No output.</p>
               )}
               {/* Truncation chip + "show full result" (rawRef → tool_result_get). */}
               {seg.truncated && (
-                <div className="mt-1.5 flex items-center gap-2 text-on-surface-low text-[0.68rem]">
+                <div className="mt-1.5 flex items-center gap-2 text-on-surface-low text-[0.75rem]">
                   <span>
                     showing a projection{seg.originalLength ? ` of ${seg.originalLength.toLocaleString()} chars` : ''}
                   </span>
@@ -76,11 +77,45 @@ export function ToolCard({ seg }: { seg: ToolSegment }) {
                   )}
                 </div>
               )}
+              {/* PLATFORM-LEGIBILITY §2: the coded WHAT/WHY/FIX envelope on a failed
+                  call. The same three lines the model reads, shown to the user with a
+                  stable code + did-you-mean suggestions so a failure is legible on both
+                  surfaces. */}
+              {seg.agentError && (
+                <div className="mt-1.5 rounded-md border border-danger/30 bg-danger/5 px-2.5 py-1.5">
+                  <div className="mb-1 flex items-center gap-1 text-on-surface-low text-[0.6875rem] uppercase tracking-wide">
+                    <AlertTriangle size={11} style={{ color: 'var(--color-danger)' }} />
+                    <span className="font-mono">{seg.agentError.code}</span>
+                  </div>
+                  <dl className="flex flex-col gap-0.5 text-[0.75rem] leading-snug">
+                    <div className="flex gap-1.5">
+                      <dt className="shrink-0 text-on-surface-low" style={fvs(600)}>What</dt>
+                      <dd className="min-w-0 text-on-surface-var">{seg.agentError.what}</dd>
+                    </div>
+                    <div className="flex gap-1.5">
+                      <dt className="shrink-0 text-on-surface-low" style={fvs(600)}>Why</dt>
+                      <dd className="min-w-0 text-on-surface-var">{seg.agentError.why}</dd>
+                    </div>
+                    <div className="flex gap-1.5">
+                      <dt className="shrink-0 text-on-surface-low" style={fvs(600)}>Fix</dt>
+                      <dd className="min-w-0 text-on-surface-var">{seg.agentError.fix}</dd>
+                    </div>
+                  </dl>
+                  {seg.agentError.suggestions && seg.agentError.suggestions.length > 0 && (
+                    <div className="mt-1 flex flex-wrap items-center gap-1">
+                      <span className="text-on-surface-low text-[0.6875rem] uppercase tracking-wide">Did you mean</span>
+                      {seg.agentError.suggestions.map((s, i) => (
+                        <span key={i} className="rounded-pill bg-surface-high px-2 py-0.5 font-mono text-on-surface-var text-[0.6875rem]">{s}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
               {/* TC5: concrete next-steps on a failed tool — the contract's recovery_hints,
                   surfaced so the user (and the reading agent) sees how to recover. */}
               {seg.recoveryHints && seg.recoveryHints.length > 0 && (
                 <div className="mt-1.5 rounded-md bg-surface-container px-2.5 py-1.5">
-                  <div className="mb-0.5 flex items-center gap-1 text-on-surface-low text-[0.68rem] uppercase tracking-wide">
+                  <div className="mb-0.5 flex items-center gap-1 text-on-surface-low text-[0.75rem] uppercase tracking-wide">
                     <Lightbulb size={11} /> Next steps
                   </div>
                   <ul className="flex flex-col gap-0.5">

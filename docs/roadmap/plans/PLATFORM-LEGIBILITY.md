@@ -223,3 +223,128 @@ Each session ships independently; Sessions 1-2 alone make every subsequent roadm
 6. An app-building agent can `ui_search("header buttons overflow")` → get a budgeted brief with a follow-up hint → `ui_get("HeaderActions")` → receive props + the ordering tenet as machine-readable bestPractices; the FE drift test fails if a `ui/` primitive ships without a doc object.
 7. The dashboard shows one untouched-capability power-up with a working "try it" deep link; dismissing it persists; disabling `legibility.power_ups` removes the widget; nothing is ever auto-enabled.
 8. For an opted-in project, a marker-fenced Gideon block appears in the project dir's CLAUDE.md with rules top / L0 unloaded-catalog bottom, regenerates in place without duplicating, and never modifies content outside the markers; the in-process `get_context` tool returns rules + tiered memories + the unloaded list, with memory-derived and knowledge-derived content under distinct headings (boundary preserved).
+
+---
+
+## Execution log
+
+### 2026-07-24 — S1 (§1) manifest + drift — DONE
+
+Shipped the self-description endpoint and its drift guard:
+
+- **`src/gideon/manifest.py`** — the generator. `build_manifest(app=None)` →
+  `{apiVersion, tools, routes, app_surfaces, providers}`. `_tools_section()` reads the
+  ONE aggregation seam (`list_all_tools()`), skips the per-install `mcp` fan-in, and
+  enriches each tool with the response-type discriminator + examples from `TOOL_META`.
+  `_routes_section(app)` walks the live aiohttp route table (filtering the HEAD
+  auto-companion + static `_handle`), applies `is_excluded_route`, and marks
+  `agent_callable` for non-ws `/api/*`. `_providers_section()` renders the extension
+  taxonomy + registered instances. `app_surfaces` is an empty (shape-stable) list until
+  S4 populates it. `API_VERSION = 1` bumps only on a SHAPE change.
+- **`src/gideon/manifest_meta.py`** — the one hand-maintained input the drift test
+  audits: `TOOL_META` (all 57 tools of the union → `{response_type, error_codes: [],
+  examples}`, every example arg schema-faithful), `MANIFEST_EXCLUDE` (8 canonical
+  non-`/api` route keys, each with a one-line reason), and the `canonical_route()` /
+  `is_excluded_route()` helpers.
+- **`src/gideon/dashboard/handlers/manifest.py`** + **`dashboard/server.py`** —
+  `GET /api/manifest` served live from `build_manifest(request.app)` (one source, two
+  renderings — the live walk here, the S3 offline reference later).
+- **`tests/test_api_manifest_drift.py`** — 8 tests: every live tool has a faithful
+  `TOOL_META` entry (real params only), no stale entries, shape check; every non-`/api`
+  route is excluded with a reason (AST walk, house route-handler precedent — no boot),
+  no stale exclusions; the canonical-space leak regression; `canonical_route` unit; and
+  the (vacuous-until-S2) declared-error-codes guard.
+- **`web/src/lib/api.ts`** — `Manifest`/`ManifestTool`/`ManifestRoute`/`ManifestProvider`
+  types + `api.manifest()`.
+
+**DISCOVERY — canonical-path leak (fixed in-slice).** Found by live-driving the dev
+gateway (isolated `.dev-home`, tokenless loopback): aiohttp's `resource.canonical`
+reports a `{name:regex}` segment with the regex stripped (`/apps/{name}/api/{tail:.*}`
+→ `/apps/{name}/api/{tail}`), but `MANIFEST_EXCLUDE` was keyed on the source form. So
+`is_excluded_route` matched the AST walk (source vs source) yet FAILED at runtime, and 2
+app-proxy routes leaked into the live `/api/manifest` — precisely the two-rendering
+divergence this slice exists to prevent, invisible to a source-only test. Fix: added
+`canonical_route()` and applied it consistently in the exclusion keys, the live walk, and
+the AST test; added `test_excluded_routes_dont_leak_into_the_live_walk` +
+`test_canonical_route_strips_regex` as regressions. Re-validated live: 498 routes, 0
+non-`/api` leaked; 57 tools; 26 providers.
+
+**Gate:** `make lint` clean (black/isort/flake8/mypy); `make test` 7710 passed / 28
+skipped / 13 xfailed; web typecheck + test (225) + build all green. No E1–E6 blocker.
+Committed clean-break under the pre-1.0 banner (no gates/migrations — this slice adds no
+persisted state). Local branch `feature-platform-legibility`, unpushed.
+
+### 2026-07-25 — S2 (§2) WHAT/WHY/FIX error envelope — DONE
+
+Shipped the platform-wide `AgentError` carrier + its append-only registry, attached at
+exactly the seams §2.2 names — no new dispatch layer:
+
+- **`src/gideon/errors.py`** (new, cycle-free — zero gideon imports) — the
+  `@dataclass(frozen=True) AgentError{code, what, why, fix, suggestions}` with
+  `render()` (the `WHAT:/WHY:/FIX:` + optional `DID YOU MEAN:` lines fed into the model)
+  and `to_dict()` (the structural carrier for the FE card + external clients). Plus
+  `ERROR_CODES` seeded with the 4 codes this slice's seams raise:
+  `ERR_TOOL_ARG_INVALID`, `ERR_MODEL_UNRESOLVED`, `ERR_HOOK_PROVIDER_UNKNOWN`,
+  `ERR_ACTION_PROVIDER_FAILED`. The module docstring pins the §2.2-vs-AgentError
+  boundary (HTTP `lowercase_snake` on the wire vs `ERR_UPPER_SNAKE` into the session —
+  orthogonal by convention AND by surface, so they never collide).
+- **Tool seam** — `ToolResult` (`tool_providers/base.py`) gains optional
+  `agent_error: AgentError`; `format_tool_result` (`agents/native/tools.py`) renders
+  `agent_error.render()` in place of the bare error, hints appended after; the native
+  runtime meta serializer (`runtime.py:~954`) carries `agent_error.to_dict()` on failure.
+- **Action-provider seam** — `ActionResult` (`action_providers/base.py`) gains the same
+  optional field; a module-level `provider_failure(provider_name, exc) → AgentError`
+  (`ERR_ACTION_PROVIDER_FAILED`) wraps uncaught provider exceptions at all three dispatch
+  seams (`hooks.py`, `gateway.py`, `event_triggers.py`) so **app-contributed providers
+  inherit the envelope without knowing it exists**. At the fire-and-forget
+  `event_triggers` seam (no result surface) the coded envelope becomes the
+  `logger.warning(...render())` line — legible where it used to be an opaque debug
+  traceback.
+- **Provider-resolution seam** — `ProviderResolutionError`
+  (`providers/provider_bridge.py`) gains an optional `agent_error`; its `render()` becomes
+  the exception message when present (else the human message survives as fallback), so a
+  background turn that dies on a stale/absent pin tells the agent which use-case to rebind
+  (`ERR_MODEL_UNRESOLVED`, both the stale-pin and no-provider raises).
+- **Gate/validation seam** — `ValidationError` gains an optional `agent_error`;
+  `FieldSpec` gains `enum_error_code` (default `ERR_TOOL_ARG_INVALID`) so the allowed-set
+  branch raises a coded envelope with `suggestions` = the allowed set. The
+  `HOOK_CREATE/UPDATE` `provider` specs override it to `ERR_HOOK_PROVIDER_UNKNOWN`. The
+  message reaches the model verbatim through `mcp_shared.call_tool_with_logging`'s
+  `f"Error: {e}"` (the exception str IS `render()`), so the wiring is live, not dead-ended.
+- **FE** — `chatTypes.ts` gains `ToolSegment.agentError` (+ an `AgentError` interface) and
+  wires `m.meta?.agent_error` in both merge + new-segment paths; `chat_runner.py` spreads
+  `agent_error` into the `tool_result` WS payload and persists it to message meta;
+  `ChatPage.tsx` threads it in `case 'tool_result'`; `ToolCard.tsx` renders a
+  danger-bordered What/Why/Fix `<dl>` + did-you-mean suggestion pills above the recovery
+  hints — no new segment type.
+
+**Append-only enforcement.** `tests/test_error_codes_append_only.py` freezes the 4
+released codes + meanings in a `_RELEASED` baseline (a deliberate copy, not a subset
+import — it detects an in-place reword) and asserts: no removal, no meaning change, the
+`ERR_UPPER_SNAKE` convention (regex), no collision with the §2.2 `lowercase_snake` space,
+and every code has a non-empty meaning. `test_agent_error_envelope.py` covers
+render/to_dict/frozen, envelope-over-bare-error + envelope-then-hints + fallback,
+`provider_failure`, `ProviderResolutionError` render-is-message, and the hook-provider /
+generic-enum code selection. The S1 drift test's `test_declared_error_codes_exist` guard
+is now non-vacuous (imports the real `ERROR_CODES`); per §2 line 99, per-tool
+`error_codes` retrofit stays incremental — `TOOL_META` entries remain `[]` until a tool
+declares one, and the guard enforces the moment one is added.
+
+**DEVIATION — updated 4 pre-existing assertions (root-caused, not weakened).**
+`test_active_selection_naming_unknown_provider_raises_immediately`, `test_string_allowed`,
+`test_learn_add_bad_category`, `test_learn_invalid_category` pinned the OLD prose
+(`"isn't available"`, `"must be one of"`) that the envelope deliberately replaces —
+exactly the S2 deliverable. Grep confirmed NO production code branches on that prose (only
+the raise sites themselves), so this is a documented behavior change, not a test to keep.
+Each assertion was re-pointed at the STRONGER new contract (the offending value is still
+named, plus `agent_error.suggestions` carries the allowed set / `ERR_MODEL_UNRESOLVED` +
+the fix names rebind-or-install), never softened to green.
+
+**Boundary held.** No route handler emits `AgentError`; §2.2 route-error responses are
+untouched. Clean-break under the pre-1.0 banner (no gates/migrations — no persisted-state
+shape change; the FE reads `meta.agent_error` defensively).
+
+**Gate:** `make lint` clean (black/isort/flake8/mypy — 897 files, 457 source files);
+targeted pytest (20, the two new suites) green; `make test` 7730 passed / 28 skipped / 13
+xfailed; web typecheck + test (225) + build all green. No E1–E6 blocker. Local branch
+`feature-platform-legibility-s2` (off S1's branch), unpushed.
