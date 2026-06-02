@@ -10,7 +10,6 @@ from gideon import security
 from gideon.agents.native.tools import format_tool_result
 from gideon.tool_providers.base import ToolResult
 
-
 # ── classify_denial taxonomy ──
 
 
@@ -38,7 +37,9 @@ def test_hook_denial_is_recoverable_adapt_dont_repeat():
 
 
 def test_readonly_denial_is_recoverable():
-    rec, obs = security.classify_denial(security.DENY_KIND_READONLY, "read-only session", "write_file")
+    rec, obs = security.classify_denial(
+        security.DENY_KIND_READONLY, "read-only session", "write_file"
+    )
     assert rec is True
     assert "read-only alternative" in obs
 

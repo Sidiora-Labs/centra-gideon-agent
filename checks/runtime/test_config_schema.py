@@ -14,10 +14,10 @@ from hypothesis import strategies as st
 from gideon.config.loader import (
     AgentConfig,
     AgentProfile,
+    AppConfig,
     DashboardConfig,
     MemoryConfig,
     MemoryStoreConfig,
-    AppConfig,
     SessionConfig,
 )
 from gideon.config.schema import (

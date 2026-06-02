@@ -1,4 +1,5 @@
 """Tests for _parse_options — powers inline Waiting-lane buttons on the board."""
+
 from gideon.dashboard.state import _parse_options
 
 

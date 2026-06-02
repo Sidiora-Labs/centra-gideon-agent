@@ -1,4 +1,5 @@
 """Tests for gideon.sdk.cli — SetupContext + DoctorLine contract (Plan 32)."""
+
 from gideon.sdk.cli import DoctorLine, SetupContext
 
 

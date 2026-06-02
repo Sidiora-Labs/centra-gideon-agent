@@ -13,11 +13,48 @@ Guards two bugs found during the provider-integrity validation sweep:
 from __future__ import annotations
 
 import asyncio
+import sys
+import types
+
+import pytest
 
 import gideon.sdk.model  # noqa: F401 — ensure package import order
 from gideon.llm.capabilities import Capability
 from gideon.llm.registry import ProviderEntry
-from gideon.sdk.provider_helpers import BrandedCatalog, BrandedProviderSpec, register_branded_app
+from gideon.sdk.provider_helpers import (
+    BrandedCatalog,
+    BrandedProviderSpec,
+    register_branded_app,
+)
+
+
+class _FakeAsyncAnthropic:
+    """Stand-in for ``anthropic.AsyncAnthropic`` so provider construction never
+    builds a real HTTP/SSL client. Records the resolved api_key/base_url, which is
+    exactly what the credential-routing tests assert on (``prov._client.api_key``)."""
+
+    def __init__(self, *, api_key: str, base_url: str | None = None) -> None:
+        self.api_key = api_key
+        self.base_url = base_url
+        self.messages = types.SimpleNamespace()
+
+    async def close(self) -> None:  # pragma: no cover - lifecycle no-op
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _fake_anthropic(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Inject a fake ``anthropic`` module for every test in this file.
+
+    These are UNIT tests of credential/option wiring — they must not construct a
+    real ``anthropic.AsyncAnthropic``, whose eager httpx/SSL-context setup fails on
+    runners without a configured trust store (macOS + uv's python-build-standalone →
+    ``X509: NO_CERTIFICATE_OR_CRL_FOUND``). ``AnthropicProvider`` lazy-imports
+    ``anthropic`` inside ``__init__``, so swapping the module in ``sys.modules``
+    replaces the client cleanly."""
+    fake = types.ModuleType("anthropic")
+    fake.AsyncAnthropic = _FakeAsyncAnthropic  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "anthropic", fake)
 
 
 def _run(coro):
@@ -26,9 +63,12 @@ def _run(coro):
 
 def _spec(protocol: str = "anthropic") -> BrandedProviderSpec:
     return BrandedProviderSpec(
-        type=f"test_{protocol}", protocol=protocol,
-        default_base_url="https://example.invalid", api_key_env="",
-        default_model="test-model", capabilities=frozenset({Capability.CHAT, Capability.STREAMING}),
+        type=f"test_{protocol}",
+        protocol=protocol,
+        default_base_url="https://example.invalid",
+        api_key_env="",
+        default_model="test-model",
+        capabilities=frozenset({Capability.CHAT, Capability.STREAMING}),
     )
 
 
@@ -36,9 +76,17 @@ def test_factory_strips_credential_and_routing_fields_from_extra_options():
     spec = _spec("anthropic")
     factory, _, _ = register_branded_app(spec)
     entry = ProviderEntry(
-        name="T", type=spec.type, model="test-model",
-        options={"api_key": "secret", "endpoint": "https://x", "base_url": "https://x",
-                 "model": "test-model", "temperature": 0.5, "top_p": 0.9},
+        name="T",
+        type=spec.type,
+        model="test-model",
+        options={
+            "api_key": "secret",
+            "endpoint": "https://x",
+            "base_url": "https://x",
+            "model": "test-model",
+            "temperature": 0.5,
+            "top_p": 0.9,
+        },
     )
     prov = factory(entry=entry)
     extra = getattr(prov, "_extra_options", {})
@@ -54,14 +102,21 @@ def test_factory_uses_per_instance_key_over_env(monkeypatch):
     otherwise a ZAI/Alibaba instance sends a global ANTHROPIC_API_KEY/OPENAI_API_KEY
     meant for a DIFFERENT provider → 'token expired or incorrect' 401."""
     spec = BrandedProviderSpec(
-        type="test_perinstance", protocol="anthropic", default_base_url="https://x",
-        api_key_env="SOME_GLOBAL_KEY", default_model="m",
+        type="test_perinstance",
+        protocol="anthropic",
+        default_base_url="https://x",
+        api_key_env="SOME_GLOBAL_KEY",
+        default_model="m",
         capabilities=frozenset({Capability.CHAT}),
     )
     factory, _, _ = register_branded_app(spec)
     monkeypatch.setenv("SOME_GLOBAL_KEY", "GLOBAL-WRONG-KEY")
-    entry = ProviderEntry(name="ZAIlike", type=spec.type, model="m",
-                          options={"api_key": "PER-INSTANCE-RIGHT-KEY", "endpoint": "https://z"})
+    entry = ProviderEntry(
+        name="ZAIlike",
+        type=spec.type,
+        model="m",
+        options={"api_key": "PER-INSTANCE-RIGHT-KEY", "endpoint": "https://z"},
+    )
     prov = factory(entry=entry)
     # the provider must carry the per-instance key, NOT the env key
     assert prov._client.api_key == "PER-INSTANCE-RIGHT-KEY"  # noqa: SLF001
@@ -69,13 +124,18 @@ def test_factory_uses_per_instance_key_over_env(monkeypatch):
 
 def test_factory_falls_back_to_env_key_when_no_options_key(monkeypatch):
     spec = BrandedProviderSpec(
-        type="test_envfallback", protocol="anthropic", default_base_url="https://x",
-        api_key_env="MY_ENV_KEY", default_model="m",
+        type="test_envfallback",
+        protocol="anthropic",
+        default_base_url="https://x",
+        api_key_env="MY_ENV_KEY",
+        default_model="m",
         capabilities=frozenset({Capability.CHAT}),
     )
     factory, _, _ = register_branded_app(spec)
     monkeypatch.setenv("MY_ENV_KEY", "ENV-KEY-USED")
-    entry = ProviderEntry(name="EnvOnly", type=spec.type, model="m", options={"endpoint": "https://z"})
+    entry = ProviderEntry(
+        name="EnvOnly", type=spec.type, model="m", options={"endpoint": "https://z"}
+    )
     prov = factory(entry=entry)
     assert prov._client.api_key == "ENV-KEY-USED"  # noqa: SLF001
 
@@ -93,6 +153,7 @@ def test_anthropic_test_connection_probes_completion(monkeypatch):
 
     cat = BrandedCatalog(spec, endpoint="https://x", api_key="k")
     import gideon.llm.anthropic as anth
+
     monkeypatch.setattr(anth.AnthropicProvider, "complete", lambda self, *a, **k: _auth_fail())
     res = _run(cat.test_connection())
     assert res.ok is False and "auth" in (res.detail or "").lower()

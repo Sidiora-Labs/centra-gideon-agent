@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from gideon.acp.client import AcpError
-from gideon.schedule import ScheduleJob, ScheduleDefinition, make_agent_action
+from gideon.schedule import ScheduleDefinition, ScheduleJob, make_agent_action
 
 
 @pytest.fixture

@@ -4,8 +4,8 @@ import uuid
 
 import pytest
 
-from gideon.schedule import ScheduleService, make_agent_action
 from gideon.mcp_schedule import _call_tool_inner
+from gideon.schedule import ScheduleService, make_agent_action
 
 
 def _unique_name() -> str:

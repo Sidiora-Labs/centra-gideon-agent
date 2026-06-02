@@ -92,7 +92,10 @@ class TestWrapArgv:
     @patch("gideon.sandbox.detect_backend", return_value="sandbox-exec")
     @patch("gideon.sandbox.sandbox_exec_argv")
     def test_sandbox_exec_backend(self, mock_sb_argv, mock_detect):
-        mock_sb_argv.return_value = (["sandbox-exec", "-f", "/tmp/p.sb", "gideon"], "/tmp/p.sb")
+        mock_sb_argv.return_value = (
+            ["sandbox-exec", "-f", "/tmp/p.sb", "gideon"],
+            "/tmp/p.sb",
+        )
         result, cleanup = wrap_argv(["gideon"], mode="strict")
         mock_sb_argv.assert_called_once_with(["gideon"], "strict")
 
@@ -189,7 +192,9 @@ class TestSandboxExecArgv:
 
 
 class TestNamespaceArgv:
-    @patch("gideon.sandbox._resolve_real_agent_bin", return_value="/usr/local/bin/gideon")
+    @patch(
+        "gideon.sandbox._resolve_real_agent_bin", return_value="/usr/local/bin/gideon"
+    )
     def test_wraps_with_python_launcher(self, mock_resolve):
         result = namespace_argv(["gideon", "acp"], "strict")
         assert result[0] == sys.executable
@@ -199,7 +204,9 @@ class TestNamespaceArgv:
         # Cleanup temp file
         os.unlink(result[1])
 
-    @patch("gideon.sandbox._resolve_real_agent_bin", return_value="/usr/local/bin/gideon")
+    @patch(
+        "gideon.sandbox._resolve_real_agent_bin", return_value="/usr/local/bin/gideon"
+    )
     def test_launcher_script_is_executable(self, mock_resolve):
         result = namespace_argv(["gideon"], "strict")
         launcher_path = result[1]

@@ -15,8 +15,8 @@ from typing import Any
 
 from gideon.action_providers.base import (
     ActionContext,
-    ActionResult,
     ActionProvider,
+    ActionResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -41,12 +41,25 @@ _SECRET_NAME_PATTERNS = re.compile(
 )
 # Always keep these even if they match the secret pattern — needed by the
 # hook contract or by common Unix tooling.
-_KEEP_NAMES = frozenset({
-    "PATH", "HOME", "USER", "SHELL", "LANG", "LC_ALL", "LC_CTYPE",
-    "TERM", "PWD", "TZ", "TMPDIR",
-    "GIDEON_HOOK_EVENT", "GIDEON_HOOK_CONTEXT",
-    "GIDEON_HOME", "GIDEON_WORKSPACE",
-})
+_KEEP_NAMES = frozenset(
+    {
+        "PATH",
+        "HOME",
+        "USER",
+        "SHELL",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "TERM",
+        "PWD",
+        "TZ",
+        "TMPDIR",
+        "GIDEON_HOOK_EVENT",
+        "GIDEON_HOOK_CONTEXT",
+        "GIDEON_HOME",
+        "GIDEON_WORKSPACE",
+    }
+)
 
 
 def _scrub_env(env: dict[str, str]) -> dict[str, str]:
@@ -99,19 +112,19 @@ class BashActionProvider(ActionProvider):
     ) -> ActionResult:
         command = (action_config.get("command") or "").strip()
         if not command:
-            return ActionResult(
-                success=False, error="Bash hook is missing 'command' field"
-            )
+            return ActionResult(success=False, error="Bash hook is missing 'command' field")
 
         from gideon.sandbox import wrap_argv
 
         start = time.monotonic()
-        env = _scrub_env({
-            **os.environ,
-            **_payload_env(ctx),
-            "GIDEON_HOOK_EVENT": ctx.event,
-            "GIDEON_HOOK_CONTEXT": ctx.context,
-        })
+        env = _scrub_env(
+            {
+                **os.environ,
+                **_payload_env(ctx),
+                "GIDEON_HOOK_EVENT": ctx.event,
+                "GIDEON_HOOK_CONTEXT": ctx.context,
+            }
+        )
         argv = ["/bin/sh", "-c", command]
         wrapped_argv, cleanup_path = wrap_argv(argv)
 

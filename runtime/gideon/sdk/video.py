@@ -14,6 +14,9 @@ from gideon.video_gen.provider import (  # noqa: F401
 from gideon.video_gen.registry import active_video_gen  # noqa: F401
 
 __all__ = [
-    'VideoGenProvider', 'VideoGenModel', 'VideoResult', 'VideoGenError',
-    'active_video_gen',
+    "VideoGenProvider",
+    "VideoGenModel",
+    "VideoResult",
+    "VideoGenError",
+    "active_video_gen",
 ]

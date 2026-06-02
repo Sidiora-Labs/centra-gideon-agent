@@ -5,11 +5,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from gideon.schedule import ScheduleDefinition
 from gideon.mcp_schedule import _call_tool
+from gideon.schedule import ScheduleDefinition
 from gideon.validation import (
-    SCHEDULE_ADD_SCHEMA,
     MCP_SCHEDULE_SCHEMAS,
+    SCHEDULE_ADD_SCHEMA,
     ValidationError,
     validate_tool_args,
 )

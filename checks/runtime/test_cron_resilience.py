@@ -9,8 +9,8 @@ import pytest
 
 import gideon.heartbeat as hb_mod
 from gideon.acp.client import AcpClient
-from gideon.schedule import ScheduleJob, ScheduleService, make_agent_action
 from gideon.heartbeat import _HEADER, HeartbeatService
+from gideon.schedule import ScheduleJob, ScheduleService, make_agent_action
 
 
 async def _wait_for(predicate, timeout=5.0, interval=0.05):

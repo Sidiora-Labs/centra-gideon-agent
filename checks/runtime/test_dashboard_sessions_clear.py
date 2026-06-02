@@ -20,6 +20,7 @@ from gideon.dashboard.handlers import api_sessions_clear
 
 def _history_key_for(key: str) -> str:
     from gideon.dashboard.chat import _history_key_for as _hkf
+
     return _hkf(key)
 
 

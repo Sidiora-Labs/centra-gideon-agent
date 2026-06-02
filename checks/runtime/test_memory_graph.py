@@ -9,7 +9,6 @@ import pytest
 from gideon.dashboard.handlers import api_memory_graph
 from gideon.dashboard.state import DashboardState
 
-
 # ---------------------------------------------------------------------------
 # Unit tests — pure logic, no HTTP
 # ---------------------------------------------------------------------------
@@ -100,7 +99,7 @@ class TestMemoryGraphNodeExtraction:
         monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
         state = self._make_state(
             tmp_path,
-            projects="## Gideon\n- Repository: ssh://git.example.com/gideon\n- Branch: main",
+            projects="## Gideon\n- Repository: ssh://git.example.com/gideon\n- Branch: main",  # noqa: E501
         )
         request = MagicMock()
         request.app = {"state": state}
@@ -137,9 +136,7 @@ class TestMemoryGraphNodeExtraction:
         monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
         lessons = [
             Lesson(rule="Always check for existing CRs", category="tool", ts="2026-03-25"),
-            Lesson(
-                rule="Use make build release for tests", category="knowledge", ts="2026-03-25"
-            ),
+            Lesson(rule="Use make build release for tests", category="knowledge", ts="2026-03-25"),
         ]
         state = self._make_state(tmp_path)
         state.lessons.load_all.return_value = lessons

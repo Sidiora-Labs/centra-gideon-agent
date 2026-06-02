@@ -16,7 +16,6 @@ import pytest
 
 from gideon import app_cli
 from gideon.apps import manager
-from gideon.sdk.cli import DoctorLine
 
 
 @pytest.fixture(autouse=True)

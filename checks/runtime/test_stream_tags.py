@@ -1,11 +1,6 @@
 """Tests for the cross-chunk streaming tag splitter."""
 
-from gideon.llm.stream_tags import (
-    KIND_OUTSIDE,
-    Segment,
-    StreamingTagSplitter,
-)
-
+from gideon.llm.stream_tags import KIND_OUTSIDE, StreamingTagSplitter
 
 _DEFAULT_TAGS = {"think": "thinking"}
 
