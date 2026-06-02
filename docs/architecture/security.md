@@ -6,6 +6,12 @@ scoped tokens, supply-chain gates, untrusted-content fencing, and a
 tamper-evident audit log. Paths are relative to
 `Gideon/src/gideon/`.
 
+> This is the internal architecture reference. For the externally-facing view —
+> trust boundaries, the OWASP Agentic Top-10 (ASI) mapping, and an honest
+> statement of limitations — see the public [threat model](../security/threat-model.md)
+> and [limitations](../security/limitations.md). To report a vulnerability, see
+> [`SECURITY.md`](../../SECURITY.md).
+
 ## Auth modes
 
 `auth/modes.py` defines four modes, selected via `GIDEON_AUTH_MODE`
