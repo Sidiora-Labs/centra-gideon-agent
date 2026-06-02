@@ -47,8 +47,9 @@ class TestSpawnListAgentNames:
         fake_cfg = MagicMock()
         fake_cfg.agents = {"yolo-general": MagicMock()}
 
-        with patch("gideon.mcp_subagents._get", return_value=fake_response), patch(
-            "gideon.config.loader.AppConfig.load", return_value=fake_cfg
+        with (
+            patch("gideon.mcp_subagents._get", return_value=fake_response),
+            patch("gideon.config.loader.AppConfig.load", return_value=fake_cfg),
         ):
             result = _call_tool_inner("subagent_list", {})
 

@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from gideon.config.loader import DashboardConfig, AppConfig
+from gideon.config.loader import AppConfig, DashboardConfig
 
 
 def _load_from_raw_string(content: str) -> AppConfig:

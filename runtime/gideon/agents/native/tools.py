@@ -64,7 +64,13 @@ class InProcessMcpToolProvider(ToolProvider):
     name so both ``gideon-core`` and ``gideon-schedule`` reuse it.
     """
 
-    def __init__(self, *, module: str = "gideon.mcp_core", provider_name: str = "gideon-core", display: str = "Gideon Core") -> None:
+    def __init__(
+        self,
+        *,
+        module: str = "gideon.mcp_core",
+        provider_name: str = "gideon-core",
+        display: str = "Gideon Core",
+    ) -> None:
         self._tools: list[ToolDefinition] | None = None
         self._module = module
         self._provider_name = provider_name
@@ -107,7 +113,11 @@ class InProcessMcpToolProvider(ToolProvider):
             # so a module can override the inference. Feeds both the approval gate
             # (via the runtime's risk map) and the Tools-page indicator.
             declared = str(tool.get("risk_level", "")).lower()
-            risk = declared if declared in ("safe", "caution", "destructive") else infer_risk_from_name(name)
+            risk = (
+                declared
+                if declared in ("safe", "caution", "destructive")
+                else infer_risk_from_name(name)
+            )
             defs.append(
                 ToolDefinition(
                     name=name,

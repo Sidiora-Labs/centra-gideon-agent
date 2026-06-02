@@ -9,8 +9,6 @@ configured key). The two MUST resolve to the same file, inside ``data/`` (A2-pre
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from gideon.providers.settings import ProviderSettings
@@ -19,8 +17,10 @@ from gideon.providers.settings import ProviderSettings
 @pytest.fixture(autouse=True)
 def _isolate(tmp_path, monkeypatch):
     import gideon.apps.manager as mgr
+
     monkeypatch.setattr(mgr, "config_dir", lambda: tmp_path)
     import gideon.config.loader as cfg
+
     monkeypatch.setattr(cfg, "config_dir", lambda: tmp_path)
     return tmp_path
 

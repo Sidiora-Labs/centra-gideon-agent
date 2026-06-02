@@ -29,12 +29,20 @@ async def test_api_agent_config_put_succeeds(tmp_path):
 
     request.json = mock_json
 
-    with patch("gideon.dashboard.handlers._installed_agent_config", return_value=installed), \
-         patch("gideon.dashboard.handlers._find_agent_config", return_value=defaults), \
-         patch("gideon.dashboard.handlers._reset_all_sessions", new_callable=AsyncMock), \
-         patch("gideon.dashboard.handlers.config_path", return_value=pc_cfg), \
-         patch("gideon.agent.build_agent_config", return_value={"toolsSettings": {"execute_bash": {"deniedCommands": ["rm -rf"]}}}), \
-         patch("gideon.agent.get_shipped_tools", return_value={"tools": ["a", "c"], "allowedTools": ["b"]}):
+    with (
+        patch("gideon.dashboard.handlers._installed_agent_config", return_value=installed),
+        patch("gideon.dashboard.handlers._find_agent_config", return_value=defaults),
+        patch("gideon.dashboard.handlers._reset_all_sessions", new_callable=AsyncMock),
+        patch("gideon.dashboard.handlers.config_path", return_value=pc_cfg),
+        patch(
+            "gideon.agent.build_agent_config",
+            return_value={"toolsSettings": {"execute_bash": {"deniedCommands": ["rm -rf"]}}},
+        ),
+        patch(
+            "gideon.agent.get_shipped_tools",
+            return_value={"tools": ["a", "c"], "allowedTools": ["b"]},
+        ),
+    ):
 
         response = await api_agent_config(request)
 

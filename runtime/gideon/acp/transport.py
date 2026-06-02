@@ -6,7 +6,8 @@ stderr draining, liveness) and the raw stdio primitives (stdin ``write``, stdout
 ``readline``) used to live fused inside :class:`~gideon.acp.client.AcpClient` next
 to its inline single-reader turn loop. Pulled out here so BOTH the one-session client and
 the concurrent :class:`~gideon.acp.session.AcpConnection` drive the SAME process
-machinery — no duplicate spawn/kill/track code — and so a :class:`~gideon.acp.reader.FrameRouter`
+machinery — no duplicate spawn/kill/track code — and so a
+:class:`~gideon.acp.reader.FrameRouter`
 can take ``readline`` as its line source directly.
 
 Vendor-neutral: the caller supplies the launch argv; this layer knows nothing about any
