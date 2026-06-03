@@ -12,18 +12,35 @@ Forward-looking work is tracked in [docs/roadmap/](docs/roadmap/roadmap.md).
 
 ### Added
 
-- **Gideon describes its own UI kit, proposes capabilities you haven't
-  tried, and hands external agents a routed project context.** Three legibility
-  surfaces land together. (1) The `ui/` component kit is now self-documenting: each
-  primitive ships a `.doc.ts` object (purpose, props, best-practice tenet) compiled
-  into `ui-docs.json` at build time, and two agent tools — `ui_search(query)` for a
-  budgeted brief and `ui_get(name)` for machine-readable props — let an app-building
-  agent find the right primitive instead of hand-rolling chrome; a drift test fails
-  the build if a primitive ships without its doc. (2) A dashboard **power-ups**
-  widget surfaces ONE capability you've never used at a time — a two-sentence lesson
-  plus a "try it" deep link — computed against your tool-usage history; it only
-  points and hides (dismissals persist per capability), never enables anything, and
-  the whole widget is behind the `legibility.power_ups` config flag. (3) Gideon
+- **The animated dot-wave backdrop is now a choosable background style.** A new
+  **Background** control in Settings → Design → Backdrop & motion switches the
+  surface behind chat, the new-chat composer, and onboarding between four modes:
+  `waves` (the animated breathing dot-wave surface, default), `still` (the same
+  dot field frozen — the lattice without the motion), `glow` (only the soft light
+  hugging the composer, no dots), and `none` (a plain, empty canvas). The choice
+  persists in your appearance settings and applies live with no reload. Motion
+  modes still honor `prefers-reduced-motion` (they render one static frame).
+- **Gideon describes its own UI kit, guides you to the parts of itself you
+  haven't tried, and hands external agents a routed project context.** Three
+  legibility surfaces land together. (1) The `ui/` component kit is now
+  self-documenting: each primitive ships a `.doc.ts` object (purpose, props,
+  best-practice tenet) compiled into `ui-docs.json` at build time, and two agent
+  tools — `ui_search(query)` for a budgeted brief and `ui_get(name)` for
+  machine-readable props — let an app-building agent find the right primitive
+  instead of hand-rolling chrome; a drift test fails the build if a primitive ships
+  without its doc. (2) A **Discover** surface guides you through the parts of
+  Gideon you haven't tried yet — a hand-authored catalog of user-facing areas
+  (Chat, goal loops, automation, Tasks, Projects, Inbox, Knowledge, Memory, Skills,
+  Apps), each a one- or two-sentence lesson with a deep link into the page that owns
+  it. It is deliberately NOT tool-derived: the tool surface is an implementation
+  detail you're never meant to drive by hand. The dashboard shows a rotating
+  spotlight of the first few; a dedicated **Discover hub** (`#/discover`, also in the
+  command palette) lists every tip grouped by area. A tip leaves the feed two ways,
+  both hide-only: an explicit dismiss that persists forever, and an auto-hide once
+  you've actually used that area (detected from state that already exists — a chat on
+  disk, a knowledge item, a scheduled job…). It only points and hides, never enables
+  anything, and the whole surface is behind the `legibility.discover_tips` config
+  flag. (3) Gideon
   can act as a **routed-context provider** for external coding agents: per project it
   assembles a tiered manifest — hard rules/brief at the top, scored memories + skills
   + knowledge *pointers* in the middle, and an L0 catalog of what was NOT loaded (with
