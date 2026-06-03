@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gideon-client"
-version = "0.1.1"
+version = "0.1.2"
 description = "Gideon Client — async Python client for the Gideon Gateway"
 readme = "README.md"
 license = { text = "MIT" }
