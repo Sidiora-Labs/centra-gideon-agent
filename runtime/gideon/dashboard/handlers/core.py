@@ -464,10 +464,17 @@ _EDITABLE_CONFIG: dict[str, dict] = {
     "resilience.remediation.idle_minutes_healthy": {"type": "int", "min": 1, "max": 1440},
     "resilience.remediation.tick_minutes_degraded": {"type": "int", "min": 1, "max": 1440},
     "tools.projection_rules": {"type": "projection_rules"},
+    # Context Economy §4 — background compression feature flags (runtime-editable).
+    "tools.bg_compress_enabled": {"type": "bool"},
+    "tools.bg_compress_idle_days": {"type": "float", "min": 0.0, "max": 365.0},
     "feedback.enabled": {"type": "bool"},
     "feedback.retire_threshold": {"type": "float", "min": 0.1, "max": 0.9},
     "feedback.min_n": {"type": "int", "min": 3, "max": 50},
     "feedback.window_days": {"type": "int", "min": 7, "max": 365},
+    # AGENT-ROUTING — suggest-first specialist routing (runtime-editable).
+    "agents_routing.enabled": {"type": "bool"},
+    "agents_routing.min_confidence": {"type": "float", "min": 0.3, "max": 0.95},
+    "agents_routing.cooldown_hours": {"type": "float", "min": 0.0, "max": 720.0},
     "agent.orchestrator_skill": {"type": "bool"},
     "agent.acp_concurrent_sessions": {"type": "bool"},
     # The assistant's display name — consumed by the prompt engine ({{bot_name}}

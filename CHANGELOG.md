@@ -19,6 +19,27 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
 
 ### Added
 
+- **Artifacts: collections + save-time dedup.** Saved artifacts can now carry a
+  **collection** label (a free-form grouping for the coming library), settable at
+  save time and reassignable later, and filterable via `GET /api/artifacts?collection=`
+  and the `artifact_list` tool. And saving no longer silently mints duplicates: a
+  fresh `artifact_save` (or `POST /api/artifacts`) whose name matches an existing
+  artifact now **refuses with a hint** — the tool tells the agent to update the
+  existing slug or pass `force`, and the REST route returns `409 similar_artifact_exists`
+  with the existing slug (bypass with `?force=1`). File-backed saves keep their
+  existing source-path dedup. Pre-existing artifacts load unchanged (tolerant read).
+- **Agent routing: suggest the right specialist, never route silently.** Give an
+  installed agent a **Specialty** and comma-separated **Routing hints** (in the agent
+  editor), and when a message in a default-agent chat clearly fits it, a quiet
+  "route to `<agent>`?" chip appears above the composer. One click re-targets the
+  session (via the existing agent-switch path); the ✕ dismisses it and suppresses
+  that agent for a cooldown (three dismissals mute it until you re-enable). It is a
+  **proposal** — nothing changes until you click — and classification is
+  deterministic-first (keyword-phrase overlap, then embedding cosine when an
+  embedding model is bound), with the LLM never in the hot path. Silent auto-routing
+  is deliberately out of scope. Route/dismiss also feed the routing pair's accuracy
+  into Settings → AI feedback. Tune it in Settings → Chat → Agent routing
+  (`agents_routing.*`); zero behavior change until you author routing metadata.
 - **Chat craft: seven chat-surface mechanics.** The chat surface gains the pieces
   the sibling platforms proved out. **True rewind** — edit ANY past user message and
   replay from there; the discarded answers are kept in this chat's history (viewable
@@ -36,6 +57,19 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
   Chat). **Smoother streaming** — the reveal snaps to word boundaries so text lands in
   whole words, with a new Settings → Chat "Streaming text reveal" (smooth | immediate)
   control.
+- **Background compression keeps long chats fast.** Old, idle conversation history
+  is now topic-segmented and compressed in the background on the maintenance
+  cadence — the always-on complement to on-demand tool-output projection. A
+  transcript untouched for a week (default) is split into topics (by embedding drift
+  when an embedding model is bound; a deterministic turn-count fallback otherwise),
+  then compressed by attention: the most-recent topic stays verbatim, middle topics
+  reduce to their request/response pairs, and the oldest tier is summarized by a
+  cheap background model. It only ever touches sessions **at rest** (never a live
+  turn), incognito/temporary chats are skipped entirely, every dropped span is
+  archived first (fully recoverable) and any tool-result recovery handle is
+  preserved, and savings land in the TokenJuice ledger under `bg_topic`. Toggle and
+  idle window live in Settings → Chat config (`tools.bg_compress_enabled` /
+  `tools.bg_compress_idle_days`); disabling it stops the pass within one tick.
 - **Feedback that actually teaches: 👍/👎 on AI judgments.** Inbox classifications,
   drafted replies, digests, and loop findings now carry a quiet thumbs pair. 👍 is
   silent-positive ("Mark accurate" — it only feeds the accuracy denominator); 👎
