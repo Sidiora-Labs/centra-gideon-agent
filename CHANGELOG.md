@@ -12,9 +12,30 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
 > ordered fallback-chain semantics. Old stores read cleanly (a single binding is a
 > one-entry chain); consider `gideon snapshot` before upgrading, per the
 > pre-1.0 banner.
+>
+> **Note (0.x clean break):** true rewind adds a `rewound` field to persisted chat
+> messages (the retained discarded tail). Old sessions read cleanly (missing field =
+> today's behavior — no migration); consider `gideon snapshot` before upgrading.
 
 ### Added
 
+- **Chat craft: seven chat-surface mechanics.** The chat surface gains the pieces
+  the sibling platforms proved out. **True rewind** — edit ANY past user message and
+  replay from there; the discarded answers are kept in this chat's history (viewable
+  under a "rewound from here" divider, restorable as a fork) and the provider context
+  rebuilds from the truncated transcript, so the agent never references the undone
+  turns. **Queue with manners** — each queued message now has an "Interrupt now" that
+  gracefully stops the running turn and runs that message next. **Find in
+  conversation** — Cmd/Ctrl+F opens an in-chat find bar (count, next/prev, jump-to-
+  match) that highlights every occurrence without ever re-rendering the markdown.
+  **Quote toolbar** — selecting transcript text floats a Quote + Copy toolbar; Quote
+  inserts an attributed blockquote (who said it) into the composer, now from keyboard
+  and touch selections too. **Follow-up chips** — after each reply, 2-3 suggested next
+  messages appear via one cheap background call (never blocks the turn; skipped for
+  temporary/incognito chats and silent when no model is bound; toggle in Settings →
+  Chat). **Smoother streaming** — the reveal snaps to word boundaries so text lands in
+  whole words, with a new Settings → Chat "Streaming text reveal" (smooth | immediate)
+  control.
 - **Feedback that actually teaches: 👍/👎 on AI judgments.** Inbox classifications,
   drafted replies, digests, and loop findings now carry a quiet thumbs pair. 👍 is
   silent-positive ("Mark accurate" — it only feeds the accuracy denominator); 👎
@@ -27,6 +48,15 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
   no model calls, and feedback never leaves the instance. Apps record feedback on
   their own judgments via `gideon.sdk.feedback` / `POST /api/feedback`
   (namespaced server-side, so an app can never impersonate a core source).
+- **Investigate anywhere: chat about any entity with its context pre-loaded.** Inbox
+  items and loop findings (more surfaces to follow) gain an "Investigate in chat"
+  button that opens a fresh chat carrying the entity's full context — composed
+  server-side from the owning store, injected as fenced untrusted data on your
+  first message (never pasted into your visible text), with the composer pre-filled
+  with an editable opening question. The session opens in read-only **Ask** mode —
+  investigating never mutates the entity; you escalate the mode yourself. A header
+  chip deep-links back to the source. Apps get the same primitive via
+  `useInvestigate` in the app SDK.
 - **Model use-cases v2: routing sub-categories + fallback chains.** Chat work is
   now routable by kind — `background` (titles, tags, suggestions, digests,
   consolidation), `orchestration` (supervising turns and model-less subagents),

@@ -779,6 +779,8 @@ export interface FeedbackProducersResponse {
   min_n: number
   window_days: number
 }
+// Investigate Anywhere (plan 60): the origin chip fields the session detail carries.
+export interface InvestigateOrigin { kind: string; title: string; back_link: string }
 
 export interface ToolsSavings {
   saved_chars: number
@@ -923,6 +925,8 @@ export interface DashboardConfig {
   // server-stored message display prefs (consistent across browsers)
   send_on_enter: boolean; show_timestamps: boolean; show_thinking_inline: boolean
   simplified_tool_names: boolean; confirm_close_session: boolean
+  // Follow-up chips after each reply (default on) + streaming reveal cadence.
+  followup_chips: boolean; stream_reveal: 'smooth' | 'immediate'
   // Vestigial server field from the retired customizable-bento dashboard (the
   // grid + per-user layout persistence were dropped in the v2 launcher-forward
   // redesign — everyone gets one curated content-first layout now). No FE
@@ -1577,14 +1581,24 @@ export const api = {
   // every tab); returns the now-active index. 409 if the session is mid-turn.
   switchVariant: (session: string, index: number) =>
     post<{ ok: boolean; index: number }>(`/api/chat/sessions/${session}/switch-variant`, { index }),
-  editResend: (session: string, content: string, ts?: string, index?: number, client_ts?: string) =>
-    post<{ ok: boolean }>(`/api/chat/sessions/${session}/edit-resend`,
+  editResend: (session: string, content: string, ts?: string, index?: number, client_ts?: string, rewind?: boolean) =>
+    post<{ ok: boolean; rewound: number }>(`/api/chat/sessions/${session}/edit-resend`,
       // Prefer the original turn's ts to LOCATE the message; always send the index
       // as a fallback (un-hydrated optimistic turns have no ts) + a fresh client_ts
       // the backend stores on the re-appended message so a repeat edit still matches.
-      { content, ...(ts ? { ts } : {}), ...(index !== undefined ? { index } : {}), ...(client_ts ? { client_ts } : {}) }),
+      // rewind=true → fork-and-swap (edit ANY past turn): retain the discarded tail
+      // on the edited message + reset the provider so context rebuilds truncated.
+      { content, ...(ts ? { ts } : {}), ...(index !== undefined ? { index } : {}), ...(client_ts ? { client_ts } : {}), ...(rewind ? { rewind: true } : {}) }),
+  // Interrupt the running turn but KEEP the queue (unlike /stop). Optional queueId
+  // promotes that queued message to the front so it runs next (queue_promoted WS echo).
+  interruptChat: (session: string, queueId?: string) =>
+    post<{ ok: boolean }>(`/api/chat/sessions/${session}/interrupt`, queueId ? { queue_id: queueId } : {}),
   forkSession: (session: string, at_message_index?: number) =>
     post<{ ok: boolean; key: string; title: string; messages: number; prompt?: string }>(`/api/chat/sessions/${session}/fork`, at_message_index != null ? { at_message_index } : {}),
+  // Restore a rewind tail (CHAT-CRAFT S1) as a NEW fork — reconstructs pre-edit
+  // history + the retained tail into a fresh session (restore = fork, never swap).
+  forkRewound: (session: string, index: number, snapshot_index?: number) =>
+    post<{ ok: boolean; key: string; title: string; messages: number }>(`/api/chat/sessions/${session}/fork-rewound`, { index, ...(snapshot_index != null ? { snapshot_index } : {}) }),
   voiceSynthesize: (text: string, session = '') => post<{ ok: boolean; chunks: number }>('/api/voice/synthesize', { text, session }),
 
   // ── Unified Loop client (/api/loops, kind-aware) — the ONE surface for every kind
@@ -2065,6 +2079,9 @@ export const api = {
     get<FeedbackProducersResponse>(`/api/feedback/producers${windowDays ? `?window_days=${windowDays}` : ''}`),
   feedbackSnooze: (producer: FeedbackProducer) => post<{ ok: boolean }>('/api/feedback/producers/snooze', producer),
   feedbackClear: (producer: FeedbackProducer) => post<{ ok: boolean }>('/api/feedback/producers/clear', producer),
+  // Investigate Anywhere (plan 60): server-composed context envelope + staged session.
+  investigate: (body: { kind: string; id: string; back_link?: string }) =>
+    post<{ session_key: string; context: InvestigateOrigin & { snapshot: string; opening_prompt?: string } }>('/api/investigate', body),
 
   // upload (multipart — no JSON headers)
   // Extracted text content for an uploaded attachment (what the agent saw) — used
