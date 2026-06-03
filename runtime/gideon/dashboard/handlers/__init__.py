@@ -85,7 +85,10 @@ from gideon.dashboard.handlers.agents import (  # noqa: E402, F401
 # ── Core (handlers/core.py) ──
 from gideon.dashboard.handlers.core import (  # noqa: E402, F401
     _DIST_DIR,
+    api_incident,
+    api_incident_resume,
     api_logout,
+    api_models_health,
     api_gideon_config,
     api_gideon_config_patch,
     api_security_denied_commands,
