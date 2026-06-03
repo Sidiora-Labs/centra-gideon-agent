@@ -8,8 +8,38 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
 
 ## [Unreleased]
 
+> **Note (0.x clean break):** model bindings in `active_models.json` now carry
+> ordered fallback-chain semantics. Old stores read cleanly (a single binding is a
+> one-entry chain); consider `gideon snapshot` before upgrading, per the
+> pre-1.0 banner.
+
 ### Added
 
+- **Feedback that actually teaches: 👍/👎 on AI judgments.** Inbox classifications,
+  drafted replies, digests, and loop findings now carry a quiet thumbs pair. 👍 is
+  silent-positive ("Mark accurate" — it only feeds the accuracy denominator); 👎
+  optionally takes a one-line "why". Every verdict is attributed to the source that
+  produced the judgment — the bound prompt, the loop judge, a workflow's surfacing —
+  and per-source rolling accuracy lives in Settings → AI feedback (honest counts,
+  shown only after enough verdicts). A source that keeps being wrong **stops
+  surfacing** and raises a one-time "retire this rule?" notification with a deep
+  link; snooze or clear it after an edit. Everything is deterministic counting —
+  no model calls, and feedback never leaves the instance. Apps record feedback on
+  their own judgments via `gideon.sdk.feedback` / `POST /api/feedback`
+  (namespaced server-side, so an app can never impersonate a core source).
+- **Model use-cases v2: routing sub-categories + fallback chains.** Chat work is
+  now routable by kind — `background` (titles, tags, suggestions, digests,
+  consolidation), `orchestration` (supervising turns and model-less subagents),
+  `loops` (goal-loop workers and judges), alongside the existing `code_tools` and
+  `reasoning` — each bindable in Settings → Models under a new **Chat routing**
+  group, falling back to your Chat chain when unbound. Bind a cheap or local model
+  to `background` and housekeeping chores stop burning your flagship chat model.
+- **Every model binding is an ordered fallback chain.** The first model is the
+  default; later entries take over when an earlier provider's circuit breaker is
+  open or a call fails (background calls advance mid-batch; a failed chain surfaces
+  one clear error). The Models panel gains a chain editor with reordering and
+  per-entry provider-health dots; the composer's model pick sits above the chain —
+  if the picked model fails, the chain takes over.
 - **Type-routed tool-output compressors.** Large tool results now project smarter: a
   JSON array of thousands of items becomes a per-field schema (names, types, ranges,
   null counts) plus the first/last item verbatim; a large code file becomes a
