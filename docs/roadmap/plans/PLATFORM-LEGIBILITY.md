@@ -348,3 +348,140 @@ shape change; the FE reads `meta.agent_error` defensively).
 targeted pytest (20, the two new suites) green; `make test` 7730 passed / 28 skipped / 13
 xfailed; web typecheck + test (225) + build all green. No E1–E6 blocker. Local branch
 `feature-platform-legibility-s2` (off S1's branch), unpushed.
+
+### 2026-07-25 — S3 (§3) `gideon-api` skill + offline reference + eval gate — DONE
+
+Shipped the operator-facing half of legibility: the skill that teaches the driving
+methodology, the offline reference it points to, and the eval battery that proves the
+pair works — one source, two renderings from the S1 manifest generator.
+
+- **`src/gideon/manifest_reference.py`** (new) — the build-time renderer. Reuses the
+  S1 drift-test seam (clear `tool_reg._providers` + `prov_reg._registry`, register every
+  `BUNDLED_DIR` native manifest with a `.provider`, then `build_manifest(app=None)`) so
+  tools + providers render WITHOUT booting a gateway. Routes come from a static AST walk of
+  `dashboard/*.py` (the design rule `manifest.py` states — booting has security-critical
+  startup side effects: extension load, binding migration), with a global name→docstring
+  index resolving every handler reference (bare `api_x`, `handlers.api_x`, `_up.api_x` — the
+  callable's final identifier). `_ROUTE_SIG_PREFIX`/`_clean_summary` strip a docstring's
+  leading `GET /api/foo —` restatement (the markdown already prints method+path).
+  `render_reference()` → `{filename: markdown}` deterministic (sorted, no timestamps);
+  `reference_dir()` resolves via `importlib.resources` (wheel/editable/source);
+  `python -m gideon.manifest_reference` regenerates.
+- **`src/gideon/reference/`** (new subpackage) — the GENERATED `index.md` (orient-then-
+  drill map + repo gotchas + what-NOT-to-do), `tools.md` (57 tools / 10 providers, full input
+  schemas + worked JSON examples), `routes.md` (424 agent-callable routes of 426), `providers.md`
+  (taxonomy + 26 registered). Shipped via `pyproject.toml` package-data (`reference/*.md`).
+- **`src/gideon/skills/bundled/gideon-api/SKILL.md`** (new) — the operator twin of
+  `gideon-features`: orient-then-drill, never-guess-copy-it, the mandatory verify-after-mutate
+  loop (read the entity back; a silent miss is a failure), branch-on-`code` error-envelope
+  reading (the S2 deliverable), 5 worked patterns, and scope guardrails. Discoverable through
+  the native marketplace (audit=pass).
+- **`gideon doctor --paths`** (`cli.py` + `cli_doctor.py::_doctor_paths`) — prints
+  tab-separated `key<TAB>path` for reference / config / skills / install, so an external agent
+  locates the reference from the installed binary alone (the `doctor get install-dir` pattern).
+- **`tests/test_agent_reference.py`** (new, 7) — byte-compares the checked-in reference against
+  a fresh render (the drift guard — a tool/route added without its `TOOL_META`/route entry
+  reddens the build), asserts the four files, prefix-stripping, provider coverage, valid-JSON
+  examples, and the skill's cross-references + `doctor --paths` resolution.
+- **`tests/eval_gideon_api_battery.py`** (new, 3 + `score_answers`) — the checked-in 5-task
+  regression harness the plan requires: the task prompts, the code-verified `ANSWER_KEY`, the
+  scorer (right tool/route + exact params + a verify step = correct; right action minus verify
+  = silent miss), and a test asserting the key still matches the LIVE manifest (a signature
+  change breaks THIS battery, forcing reference + key to regenerate together).
+
+**Eval gate PASSED (§3.2 / §9 Session 3 — the ship blocker).** Ran the with/without eval on
+fresh context-free subagents. The **with** arm (skill + reference in context, forbidden from
+grepping the repo) scored **5/5, 5/5, 5/5** first-try, 0 silent misses — bar cleared on all
+three. The **without** arm (one-paragraph description only) scored **2/5 and 1/5**, failing on
+exactly the invented signatures the reference exists to kill: `schedule_create`/`schedule`
+instead of `hook_register`; a fabricated `PUT /api/models/bindings/chat` + `{model, provider}`
+body instead of the real `PUT /api/models/active/{use_case}` + `{models:[...]}`; and
+`skill_create(name, description, content)` instead of `skill_remember(title, body)`. The
+1–2 → 5 lift is the measured value of the slice.
+
+**DEVIATION — reference ships as the `gideon.reference` subpackage, not the plan's
+literal `docs/agent-reference/`.** Repo-root `docs/` does not ship in a wheel, and §3.1's whole
+point is that an EXTERNALLY-installed agent reads exact signatures — so the docs must be
+package-data resolvable via `importlib.resources`, which `doctor --paths` surfaces from the
+installed binary. Same content, same generator, same drift discipline; only the on-disk home
+moved to where a `pip install` can find it. (Owner-approved during the session.)
+
+**Gate:** `make lint` clean (black/isort/flake8/mypy — 901 files, 459 source files); targeted
+pytest (18 — the eval battery + reference + S1 drift) green; `make test` 7737 passed / 28
+skipped / 13 xfailed; `web/` untouched (no frontend surface — the skill/reference are backend +
+CLI), so the web gate is N/A. CHANGELOG `Added` entry landed. No E1–E6 blocker. Clean-break
+under the pre-1.0 banner (the reference is generated build artifact, not persisted user state).
+Local branch `feature-platform-legibility-s3` (off S2's branch), unpushed.
+
+### 2026-07-25 — S4 (§4) app legibility — declared skills + auto-surfaced route tools — DONE
+
+Made an installed app's two agent-facing surfaces LEGIBLE and DRIVABLE from a static
+manifest declaration, both readable without executing app code — closing the exact
+manifest-vs-UI dead-path the audit kept refinding (§4 recon facts, log lines 32–33).
+
+**§4.1 — app-declared skills, seeded through the chokepoint.** Revived the dead
+`skills` manifest field (was a LEGACY stripped no-consumer field) as a typed
+`list[AppSkill]` (`{path}`, dir relative to app root, holding a `SKILL.md`).
+- **`src/gideon/apps/skill_seed.py`** (new) — the prompt-seed twin with the one
+  rule prompts don't need: an app skill NEVER bypasses the supply-chain gate. A
+  transient single-app `_AppSkillsMarketplace` (subclasses `SkillsMarketplace`) feeds
+  each declared dir through `install_scanned` (quarantine → `scan_dir` at the app's
+  trust tier → commit + `.gideon-lock.json` provenance/SEL) — a DANGEROUS verdict
+  refuses always, WARNING without force. Idempotent + non-clobbering (an existing
+  same-named dir is left untouched); `remove_app_skills` deletes ONLY dirs whose lock
+  records `source == app:<name>`, never a user's own or another app's.
+- **`apps/manifest.py`** — `AppSkill` dataclass + `skills` threaded through
+  `to_dict`/`from_dict`/`validate` (traversal-guarded path). **`providers/loader.py`** —
+  `_seed_extension_skills` at startup discovery (bundled `builtin` tier; installed apps
+  at their ledger origin) + `_seed_promptonly_installed_apps` covers no-provider apps.
+  **`apps/app_manager.py`** — seed on enable/install, remove on disable/uninstall,
+  remove-old→re-seed-new across `/update` (re-scans a changed skill).
+
+**§4.2 — route-table tool surfacing (MCPify, adapted).** One generic provider, never
+N generated ones.
+- **`apps/manifest.py`** — `RouteEntry` (`op`/`method`/`path`/`summary`/`params`/`body`/
+  `agentCallable`) + `BackendConfig.routes`; `validate()` enforces `ROUTE_OP_RE`, unique
+  ops, `/`-rooted traversal-free paths.
+- **`src/gideon/tool_providers/app_routes.py`** (new) — `AppRoutesToolProvider`
+  re-reads enabled apps on every `list_tools` (enable/disable/`/update` resync for
+  free — no registration churn), surfacing `app_<name>_<op>` tools with verb-keyed risk
+  (GET→SAFE, POST/PUT/PATCH→CAUTION, DELETE→DESTRUCTIVE). `resolve_route` is the SINGLE
+  gate (refuses an undeclared/non-`agentCallable` op with an `ERR_APP_ROUTE_UNKNOWN`
+  envelope carrying the callable ops as `suggestions`), substitutes path placeholders,
+  and splits leftover args to query (safe verbs) vs JSON body (mutating). `call_app_route`
+  proxies through the existing reverse proxy under `LOOPBACK_INTERNAL` with a fresh
+  app-scoped token (`ERR_APP_BACKEND_UNAVAILABLE` when the backend's down). `app_surfaces()`
+  renders the same declarations for the manifest (`tool: null` for a documented-but-not-
+  callable route); `note_proxy_status` fires a deduped `app.route.drift` notification on
+  the first proxy 404 (dead-declared route caught the moment it's called). Registered once
+  in `loader.py`.
+- **`action_providers/call_app_route_provider.py`** (new) — the ONE `call-app-route` action
+  (per-app generated providers can't be enumerated in the static allowlist), sharing
+  `resolve_route`+`call_app_route` so the tool path and action path can't diverge. Added to
+  `ALLOWED_HOOK_PROVIDERS` (`validation.py`) + registered in `action_providers/registry.py`
+  in the same change (else hook create/update rejects it).
+- **`manifest.py`** — `/api/manifest`'s `app_surfaces[]` now delegates to `app_surfaces()`.
+- **Proving pair retrofitted:** Growth `app.json` (17 routes) + Minutes `app.json` (24
+  routes) in `GideonApps` — both validate clean and round-trip.
+
+**Drift-safe by design:** the manifest drift test's fixture registers only native
+`BUNDLED_DIR` provider manifests into a cleared tool registry, and a bare test home has no
+enabled apps with routes — so the runtime-only `AppRoutesToolProvider` and its dynamic
+`app_<name>_<op>` tools never appear there (no `TOOL_META` needed), while at runtime they
+DO flow into `tools[]` + `app_surfaces[]`.
+
+**Tests:** `tests/test_app_owned_skills.py` (7 — chokepoint provenance, idempotent
+non-clobber, provenance-keyed removal leaving user + other-app skills untouched, skip flag,
+empty no-op) and `tests/test_app_routes.py` (25 — callable-only tool generation + verb risk,
+disabled→zero, param-schema union, gate refusals with suggestions, path/query/body split,
+`app_surfaces` null-tool + sorting, one-shot drift, proxy up/down/404, action refusals +
+shared-gate + allowlist/registration).
+
+**Gate:** `make lint` clean (black/isort/flake8/mypy — 906 files, 462 source files; fixed a
+mypy arg-type on `_AppSkillsMarketplace` by making it subclass `SkillsMarketplace`); targeted
+pytest (105 — new pair + prompts + manifest + drift + supply-chain) green; `make test` 7762
+passed / 28 skipped / 13 xfailed; `web/` untouched (backend + manifest only), web gate N/A.
+CHANGELOG `Added` entry landed. No E1–E6 blocker. Clean-break under the pre-1.0 banner (the
+`skills` seed writes provenance-locked user-tree state, removable on disable; route tools are
+read-through, no persisted state). Local branch `feature-platform-legibility-s4` (off S3's
+branch), unpushed.

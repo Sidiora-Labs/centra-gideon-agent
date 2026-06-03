@@ -12,6 +12,35 @@ Forward-looking work is tracked in [docs/roadmap/](docs/roadmap/roadmap.md).
 
 ### Added
 
+- **Apps surface their skills and backend routes to the agent (declared, not
+  discovered).** An app now declares two legible surfaces in `app.json`, both
+  readable without executing app code. `skills[]` names SKILL.md directories the
+  app ships and OWNS: on enable they seed into the user skills tree **through the
+  supply-chain chokepoint** (quarantine → scan at the app's trust tier →
+  `.gideon-lock.json` provenance) — an app skill never bypasses the gate just
+  because it arrived inside an app — and are removed provenance-keyed on disable,
+  never touching a user's own or another app's skill. `backend.routes[]` names the
+  app's agent-callable HTTP surface (`op`, method, path, summary, param/body
+  hints); one generic tool provider turns every enabled app's `agentCallable`
+  routes into `app_<name>_<op>` tools (risk keyed off the verb) and drives them
+  through the existing loopback reverse proxy, and a `call-app-route` action lets
+  hooks/crons fire the same routes — both share one resolver so the callable gate
+  can't diverge. The routes also render into `GET /api/manifest`'s `app_surfaces[]`
+  (a non-callable route documents the surface with `tool: null`), and a declared
+  route whose backend answers 404 raises a one-shot drift notification so a
+  dead-declared route is caught the moment it's called. First-party Growth (17
+  routes) and Minutes (24 routes) ship their route tables.
+- **Offline agent reference + `gideon-api` skill** — an agent driving Gideon
+  from outside a running gateway now reads exact tool/route signatures instead of
+  guessing them. The distribution ships a generated markdown reference
+  (`gideon/reference/`: every registered tool with its input schema +
+  examples, the agent-callable HTTP routes, and the provider taxonomy) rendered
+  from the same source as the live `GET /api/manifest`, plus a bundled `gideon-api`
+  operator skill (the never-guess-copy-it + verify-after-mutate discipline). Locate
+  the files from the installed binary with the new `gideon doctor --paths`,
+  which prints the resolved reference / config / skills / install directories. A
+  drift test byte-compares the checked-in reference against a fresh render, so a
+  tool or route added without its metadata reddens the build.
 - **Render-smoke gate** (`npm run smoke:render`): the built SPA is now loaded
   in headless Chromium — key routes must mount real content with no uncaught
   errors — before any frontend-affecting push (repository-owned pre-push hook,
