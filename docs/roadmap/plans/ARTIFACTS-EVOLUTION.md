@@ -161,3 +161,60 @@ def _inject_artifact_content(state, session, message) -> str: ...
   unsupervised overnight execution (atomic-completability: ship the finished backend half,
   do the risky FE relocation with care). S1b is the next Artifacts session; S2 (library
   surface) builds on the split, so S1b precedes it.
+- [2026-07-27][S1b] DONE (T1.3, route split): artifacts are their own top-level surface.
+  `web/src/pages/artifacts/` is the new home — `ArtifactList.tsx` + `ArtifactViewer.tsx`
+  relocated verbatim via `git mv` (imports repointed; `artifactKindMeta`/`relTime` stay in
+  `files/fileMeta` — they have 10+ cross-page consumers, moving them is churn not cleanup)
+  plus a new `ArtifactsSection.tsx` host: viewer fills width, list is the right-docked
+  hidable SidePanel (the Files-era layout carried over), deep-link `#/artifacts/<slug>`,
+  selection writes the slug to the URL (replace). App.tsx: `artifacts` NAV entry (FileCode,
+  Platform group) + lazy route; e2e `routes.ts` gains the route (needsData). FilesSection:
+  the ARTIFACTS_TAB, its render branch, and all `isArtifacts` state are DELETED (clean
+  break — files-only now); a legacy `#/files/<slug>` deep-link redirects (replace) to
+  `#/artifacts/<slug>` — kept for persisted references in old transcripts/events, not a
+  dual path; a stale `files-tab=artifacts` localStorage value self-heals to the first root.
+  "Save as artifact" navigates to the new page; the file-tree drift badge keeps its
+  `artifactPaths` feed. Cross-page emitters updated: ProjectsSection + LoopsSection now
+  navigate to `artifacts/<slug>`. The bundled artifacts SKILL.md prose already said
+  `/artifacts/<slug>` (was aspirational; now true — no edit needed). Validated as a user
+  on :10020 (Playwright): `#/artifacts` renders the nav entry + list + live widget render;
+  `#/artifacts/<slug>` deep-link opens the artifact; legacy `#/files/<slug>` lands on
+  `#/artifacts/<slug>` (hash verified rewritten) with the viewer working; `#/files` shows
+  root tabs only (no Artifacts tab) with the explorer intact; ZERO console errors on all
+  routes. Gate: web typecheck + 251 vitest + build green, `make lint` green, full backend
+  suite green. Remaining: S2 (library surface — grid/previews/collections) builds on this.
+- [2026-07-28][S2] DONE (T2.1-T2.4, the library surface): the `#/artifacts` route is now a
+  real library. **T2.1 ArtifactCard + ArtifactGrid:** live srcdoc-per-kind previews —
+  widget/html/infographic/document/svg via `buildSrcdoc`, react via `buildReactSrcdoc`
+  (the EXACT chat-widget sandbox: `sandbox="allow-scripts"`, theme tokens injected, mode-
+  aware), scaled 0.4x (rendered 2.5x-size then transformed), INERT (pointer-events-none +
+  tabIndex -1 — the tile is one click target), LAZY (per-card IntersectionObserver,
+  200px rootMargin), and LRU-CAPPED at 12 live iframes (module-level slot registry;
+  evicted cards demote to kind-pill placeholders). markdown/text/json render a cheap
+  600-char excerpt (no iframe); images use `/raw` with `loading="lazy"`. The lazy detail
+  fetch also carries `live_dirty` → the "source changed" drift badge on file-backed cards.
+  NEW `ui/TileButton` primitive (+doc) — the block-level clickable card the kit lacked
+  (the raw <button> card tripped the primitive-adoption ratchet; fixed by adoption, not a
+  baseline bump). DISCOVERY: `test_rendering_registry_parity.py` forbids hand-rolled
+  IFRAME_KINDS/EDITABLE_KINDS Sets (the registry owns capability dispatch) — the card's
+  iframe-kind check is now DERIVED from the registry (`isSandboxed(resolveContentType(...))`
+  plus document/svg, which the full page renders in-DOM sanitized for the comment layer but
+  the mini card sandboxes — no comment layer at card scale, one isolation path); `binary`
+  from the registry replaces the image kind check. **T2.2 toolbar:** search + kind Segmented + source/collection Popover
+  menus + Recent/Name/Kind sort — all URL-query-backed (?q/?kind/?src/?col/?sort, replace)
+  so filter state is shareable; collections derive from the library; a header "Set
+  collection" control on the detail assigns via PATCH (promptInput). **T2.3 detail
+  polish:** `?v=N` deep-links a historical snapshot (viewer gains initialVersion/
+  onVersionChange/defaultDetailsOpen; reload(keepVersion) honors the pin on first load
+  only — save/snapshot/revert still return to current); version picks write ?v; the
+  details rail opens automatically on a pinned load. **T2.4 perf proof:** 204-artifact
+  seeded library (200 text fixtures + 4 mixed) — Playwright scroll through the full grid
+  measured **283 frames, 0 long frames (>50ms), exactly 3 live iframes** at rest (≤ the
+  12 cap); `GET /api/artifacts` verified content-free end-to-end. Validated as a user on
+  :10021: grid renders live theme-correct widget preview; kind filter → ?kind=widget URL;
+  card click → detail; v2 snapshot then `?v=1` deep-link shows the read-only historical
+  banner + details rail open; collection filter → ?col=Dashboards showing exactly the 2
+  collected cards; react artifact renders in the Babel frame; ZERO console errors
+  throughout. Gate: web typecheck + 251 vitest + build green, `make lint` green, full
+  backend suite green. **Remaining: S3 (Wave 3 — iterate-with-agent via the investigate
+  registry, version diffs, @-artifact chat references).**
