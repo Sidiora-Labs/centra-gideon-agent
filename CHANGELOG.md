@@ -176,6 +176,25 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
   says so plainly instead of quietly doing nothing. New `GET /api/tools/groups` reports
   the partition for anything else that needs it.
 
+- **Personalities: themes that carry an identity, not just a palette.** Settings → Design
+  now offers a **personality** — one switch that sets the color scheme, the wordmark, the
+  browser tab title, and the interface density together, and can offer the assistant a
+  matching name. Two are included as starting points (a mono-green **Retro Terminal** with
+  a terse operator voice, and **Gideon Arcade**), alongside the default Gideon identity.
+  Renaming the assistant is **offered, never assumed**: activating a personality shows a
+  toggle naming the exact setting it would change, and declining it switches the look while
+  leaving your configuration alone. Switching back restores everything, including the name.
+  Every personality's palette goes through the same accessibility contrast checks as the
+  built-in schemes, so a personality can't ship an unreadable theme.
+
+- **A username, so your contributions stay attributable.** Settings → Account now takes
+  a short handle (Settings suggests one from your name), and Gideon stamps it onto
+  things you create — tasks and task comments carry an author. It's a label, not a login:
+  nothing signs in with it, and leaving it empty keeps records unattributed exactly as
+  before. Renaming it affects future writes only; existing records keep the name they
+  were written with, because rewriting them would falsify the very history attribution
+  exists to preserve.
+
 - **Backups you can actually read and verify: `gideon backup`.** Alongside the
   opaque snapshot tarball, state can now be exported as **deterministic shards** —
   one canonical JSONL file per store plus a SHA-256 manifest. Identical state always
