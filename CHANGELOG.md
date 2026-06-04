@@ -19,6 +19,70 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
 
 ### Added
 
+- **The agent navigates your code by symbol instead of grepping blind.** Asking
+  "where is this function defined and what calls it?" used to cost a grep, a couple
+  of file reads, and often another grep — every round-trip spending tokens on
+  navigation instead of the actual work. A new `code_map` tool answers it in one
+  call from a tree-sitter index of your workspace, and `code_map_overview` gives the
+  shape of an unfamiliar codebase (the most-referenced modules and their public
+  surface) in one read.
+
+  Indexing Python, TypeScript, JavaScript, Rust and Go: on a 1,500-file repository
+  the first pass takes about four seconds and later passes are effectively
+  instant, since only changed files are re-read. The same index makes SDLC planning
+  passes start from a map of the codebase rather than exploring for it, and ranks
+  the chat composer's `@` file picker so widely-used modules surface above
+  same-named leaves.
+
+  It is strictly an accelerator: with no index, no parsers, or an unparseable file,
+  everything falls back to the grep-and-read behavior it had before, and the tool
+  says so plainly rather than guessing.
+- **Memory now knows what it's *about*.** Every memory is linked to the people,
+  projects and tools it names, so asking "what do I know about Ana?" follows those
+  links instead of hoping a similarity search surfaces everything. A memory about a
+  standup, a stored fact about a repo, and a lesson from last month finally connect
+  when they concern the same thing.
+
+  Linking happens the moment a memory is written and **costs nothing** — no tokens,
+  no model call, just exact-name matching against the people and projects you've
+  named. Links are typed, so the graph distinguishes a memory that's *about* you
+  from one that merely mentions a project.
+
+  Unknown names are **proposed, never invented**: a name that shows up across three
+  separate memories appears in Memory → Health for one-click accept, because a junk
+  entity quietly degrades every future search. Everything is reversible through the
+  existing memory undo. Find it under **Settings → Memory → Health**, where
+  *Rebuild links* seeds entities from what you've already stored and links your
+  whole history in one pass. `memory.graph_enabled` turns it off — existing links
+  are kept, so turning it back on needs no rebuild.
+
+  > **Note (0.x clean break):** this adds tables to `memory.db` (schema v7). Old
+  > stores upgrade in place on first run with no data loss and nothing to migrate;
+  > consider `gideon snapshot` beforehand, per the pre-1.0 banner.
+- **Point your IDE at your assistant: a read-only MCP endpoint.** Gideon can
+  now answer questions from a local MCP client (your IDE, an MCP inspector) over
+  `POST /mcp` — JSON-RPC 2.0, with `initialize`, `tools/list` and `tools/call`.
+  It is **off until you deliberately turn it on**, and turning it on takes two
+  separate steps that are both re-checked on every request:
+
+  ```bash
+  gideon inbound token create mcp        # printed once — copy it now
+  gideon config set inbound.mcp.enabled true
+  ```
+
+  Because both are checked per request, `inbound.mcp.enabled false` is an immediate
+  kill switch — no restart. The surface answers **loopback callers only** unless you
+  explicitly declare a public URL and opt into remote access in the config file;
+  neither of those knobs is editable from the dashboard, so widening your network
+  exposure can't be one mis-click in a browser. Requests are capped on every
+  dimension an outside caller controls (body size, rate, concurrency, result size),
+  refused requests come back with a real JSON-RPC error, and every request — allowed
+  or refused — is recorded in `<home>/inbound_audit.jsonl`, with refusals also
+  landing in the security event log. This release ships the surface with **no tools
+  yet**: a client can connect and see an empty table. The five curated read-only
+  tools (memory, knowledge, tasks, sessions, status) follow next, and by
+  construction they can only ever read — there is no path from an inbound request to
+  a write.
 - **Tool groups: the agent loads the tools it needs, not all of them.** Every tool
   provider is now an activatable **group** (`schedule`, `artifacts`, `memory`, one
   per MCP server or app, …), and a session can run with only the groups it needs —
