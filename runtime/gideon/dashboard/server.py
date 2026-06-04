@@ -365,6 +365,18 @@ async def start_dashboard(
     # WebSocket (multiplexed real-time events)
     app.router.add_get("/api/ws", ws.api_ws)
 
+    # Inbound read-only MCP surface (MCP-READONLY-INBOUND). Mounts ONLY when
+    # enablement passes (config flag + a valid dedicated token); a refusal logs one
+    # line naming the failing condition and /mcp simply 404s. Registered here so it
+    # sits outside the dashboard's cookie-auth world — it carries its own bearer
+    # credential and its own loopback rail.
+    try:
+        from gideon.inbound.mcp_http import mount as _mount_inbound_mcp
+
+        _mount_inbound_mcp(app)
+    except Exception:  # noqa: BLE001 — an inbound fault must never block startup
+        logging.getLogger(__name__).warning("inbound: /mcp mount failed", exc_info=True)
+
     # Status / system
     app.router.add_get("/api/healthz", handlers.api_healthz)
     app.router.add_get("/api/status", handlers.api_status)
@@ -547,6 +559,15 @@ async def start_dashboard(
     app.router.add_get("/api/memory/observability", handlers.api_memory_observability)
     app.router.add_get("/api/memory/graph", handlers.api_memory_graph)
     app.router.add_post("/api/memory/promote", handlers.api_memory_promote)
+    # MEMORY-GRAPH-AND-VAULT §1 — the typed entity graph (distinct from
+    # /api/memory/graph, which renders the record visualization).
+    app.router.add_get("/api/memory/entities", handlers.api_memory_entities)
+    app.router.add_post("/api/memory/entities", handlers.api_memory_entity_create)
+    app.router.add_post("/api/memory/entities/proposals", handlers.api_memory_entity_proposals)
+    app.router.add_get(
+        "/api/memory/entities/{entity_id}/backlinks", handlers.api_memory_entity_backlinks
+    )
+    app.router.add_post("/api/memory/graph/rebuild", handlers.api_memory_graph_rebuild)
 
     # Crons, lessons, spawn, send-message, notifications
     # are registered via _register_mcp_routes() above.
