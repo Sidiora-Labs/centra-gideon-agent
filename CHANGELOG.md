@@ -19,6 +19,42 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
 
 ### Added
 
+- **Backups now happen on their own, and they get checked.** Gideon takes a
+  full snapshot nightly and exports whatever changed every hour, so how much you can
+  lose is bounded by an hour rather than by when you last remembered to run
+  `gideon snapshot`.
+
+  Retention keeps a *spread* instead of a window — two weeks of daily snapshots, then
+  weekly, then monthly — so a year of history costs about 30 files and you can still
+  reach back to January. Settings → shows exactly which snapshots the policy would
+  keep and which it would remove, before it removes anything.
+
+  Once a month it also runs a **restore drill**: the newest snapshot is unpacked into
+  a temporary directory and every database inside it is integrity-checked, then you
+  get a pass/fail notification. A backup nobody has restored is a hope, not a backup —
+  and a failure is reported as a warning, so it isn't hidden by quiet hours.
+  `durability.auto_backup` turns the schedule off if you'd rather do it by hand.
+
+  Fixed while building it: the incremental export had been unable to notice memory
+  changes at all. Databases run in WAL mode, so a saved change lands in a companion
+  file and the main database's timestamp never moves — the export saw "nothing
+  changed" through an entire session of work.
+- **Find any chat by what was said in it.** Chat search now runs against a real
+  full-text index of your transcripts instead of scanning the 500 most recent files,
+  so a conversation from months ago is as findable as yesterday's — and each result
+  shows the matching passage with your terms highlighted, so you can tell at a glance
+  which chat is the one you meant.
+
+  On a 120-chat history a content search returns in about 30 milliseconds. The index
+  keeps itself current as you chat and repairs itself on a schedule, so there is
+  nothing to maintain. **Incognito and temporary chats are never indexed** — and a
+  chat you switch to incognito after the fact disappears from search immediately.
+  If the index is ever unavailable, search quietly falls back to the previous
+  behavior rather than failing.
+
+  Fixed along the way: a chat marked incognito *after* some of it was written could
+  still appear in content search, because only its saved mode was checked and that
+  still read "persistent". Both search paths now honor the live setting.
 - **The agent navigates your code by symbol instead of grepping blind.** Asking
   "where is this function defined and what calls it?" used to cost a grep, a couple
   of file reads, and often another grep — every round-trip spending tokens on

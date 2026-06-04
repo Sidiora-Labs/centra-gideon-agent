@@ -120,6 +120,13 @@ from gideon.dashboard.handlers.doctor import (  # noqa: E402, F401
     api_provider_selftest,
 )
 
+# ── Durability: scheduled backups + retention (handlers/durability.py) ──
+from gideon.dashboard.handlers.durability import (  # noqa: E402, F401
+    api_durability_run,
+    api_durability_snapshots,
+    api_durability_status,
+)
+
 # ── Files & Workspaces (handlers/files.py) ──
 from gideon.dashboard.handlers.files import (  # noqa: E402, F401
     _validate_dashboard_path,
