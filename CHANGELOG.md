@@ -19,6 +19,21 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
 
 ### Added
 
+- **Tool groups: the agent loads the tools it needs, not all of them.** Every tool
+  provider is now an activatable **group** (`schedule`, `artifacts`, `memory`, one
+  per MCP server or app, …), and a session can run with only the groups it needs —
+  so unused capabilities cost one line of catalog instead of every schema. Measured
+  on the 69-tool built-in surface: a background session's tool block drops **56%
+  (~6,900 tokens per turn)**. The agent manages this itself via a new `reset_tools`
+  tool that takes the *final* set of groups it wants.
+  Capability is never reduced, only context: **every tool stays callable by name
+  even while its group is inactive**, each inactive group advertises itself in one
+  line, and `tool_search` still searches everything — naming the activation step
+  when it finds a tool in an inactive group. Off by default (`tools.groups_enabled`),
+  and interactive chat keeps every group active even when on, so nothing changes for
+  the chat you're watching; background, loop, and subagent runs start focused
+  (tune per surface with `tools.group_defaults`). `GET /api/tools` now reports each
+  tool's group.
 - **The artifacts library: live previews, search, and collections.** The new
   Artifacts page is now a real library: a responsive grid where every card renders
   a **live preview** — widgets/HTML/React/documents/SVG in the same sandboxed,
@@ -138,6 +153,21 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
 - **Background prose summarizer.** Long natural-language output on background paths
   can be model-summarized with a guaranteed deterministic fallback (never wired into
   the synchronous tool path).
+
+### Changed
+
+- **Breaking-change policy is now written down, and it distinguishes maintainer from
+  contributor.** During 0.x the maintainer keeps making backward-incompatible
+  clean-break architectural changes with no migrations — that stays true, and the
+  README now says plainly that this is expected to last a while, because
+  migration-backed discipline (the lifecycle doctrine) is scheduled deliberately late,
+  once the architecture stops moving. What's new is the other half: **contributors are
+  not expected to make breaking changes.** Contributor guidance stays
+  lifecycle-doctrine-shaped — additive by default, no hand-rolled gate or migration
+  machinery, and surface a needed break in an issue or PR description instead of
+  shipping it, so the maintainer decides whether to take it, reshape it, or schedule
+  it. See [CONTRIBUTING.md](CONTRIBUTING.md#breaking-changes); the PR template's change
+  class now spells out both paths.
 
 Forward-looking work is tracked in [docs/roadmap/](docs/roadmap/roadmap.md).
 
