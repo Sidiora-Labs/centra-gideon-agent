@@ -19,6 +19,36 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
 
 ### Added
 
+- **Shelves for your knowledge library — including ones that fill themselves.** Saved
+  documents, notes and links were one flat list. You can now group them onto
+  **collections**: a *manual* shelf holds whatever you put on it, and a **smart** shelf
+  holds whatever matches a search you name once — so "everything about the borrow
+  checker" stays current on its own as you save more, with nothing to re-run and no
+  backfill step.
+
+  Items can sit on several shelves at once, and a shelf is a *view*, not a container:
+  deleting one leaves every document in your library untouched (the confirmation says
+  so). Each shelf has its own URL, so you can link straight to one. Alongside it, items
+  gain a **reading state** — unread → reading → read, because "reading" is the state a
+  reading list exists to represent — and a **favorite** star. Marking something read
+  deliberately does *not* count as editing it, so working through a backlog won't
+  reshuffle a library sorted by recency.
+- **Clean up a long chat list in one action, and let old chats retire themselves.**
+  Conversations pile up, and until now the only tools were one-at-a-time. You can now
+  select many chats at once and **archive**, restore, tag, re-file, or exempt them in a
+  single action — and chats you haven't touched in a while (30 days by default) move to
+  **Archived** on their own.
+
+  Archiving is not deleting, and that's the point: an archived chat keeps its full
+  transcript, **stays searchable**, and is one click from coming back. That's what makes
+  it safe to do automatically. Anything you want kept in the list forever can be pinned
+  "never archive", and opening or replying to an archived chat brings it back by itself.
+  Set the window in Settings, or set it to 0 to switch auto-archive off entirely.
+
+  Two deliberate limits: bulk **delete** is not offered beside archive — irreversible
+  actions shouldn't sit one mis-click from reversible ones — and chats with no recorded
+  activity yet (everything from before this shipped) are never auto-archived, so
+  upgrading can't sweep away your history.
 - **On a shared task board, your assistant only works on *your* tasks.** If tasks come
   from somewhere other people also write to, task rows now show who a task belongs to,
   and you can switch between "Mine" and "Everyone" — the filter appears only when
