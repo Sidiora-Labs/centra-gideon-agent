@@ -332,6 +332,41 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
 
 ### Fixed
 
+- **Knowledge and memory could never embed with a config-defined provider.** With an
+  embedding model bound to a provider you configured yourself (an Ollama endpoint, say),
+  ingested knowledge items sat at "processing" with no embedding **forever** — no error,
+  no notification, just nothing. Semantic search and the entity graph had nothing to work
+  with, and memory's semantic layer could not embed at all. Chat through the very same
+  provider worked, which made it look like embedding was broken rather than unavailable.
+  The cause: configured providers are replayed into the model registry during gateway
+  startup, but the background embed pass could run before or outside that path and then
+  saw an empty registry. It now replays the configured providers itself when a lookup
+  misses, so the embed succeeds instead of silently returning nothing — and a provider
+  that genuinely is not configured still reports that plainly rather than retrying. (#47)
+- **Binding a model can no longer fail silently.** `PUT /api/models/active/{use_case}`
+  answered "ok" in two cases where the binding had not actually taken. A request whose
+  body never mentioned `models` — an automation or a person reasonably guessing the key
+  name — was read as "clear this binding", so it **unset the use-case's model and still
+  reported success**. And on a fresh install (a config with no providers configured yet)
+  the unknown-provider check was skipped entirely, so a model reference naming a provider
+  that does not exist was stored unchallenged as a dead binding. Now a body without
+  `models` is a `400` that names the keys it did receive, clearing requires an explicit
+  `{"models": []}`, and an unknown provider is rejected whether or not other providers are
+  configured. The model *id* is still deliberately not checked against the discovered
+  catalog — a real provider that is slow to enumerate its models must not have valid
+  references rejected. (#48)
+- **Settings and the Store no longer blink to a loading skeleton when you touch
+  anything.** Clicking "Check" for updates, flipping a toggle, rotating a key, adding a
+  lexicon entry, or finishing an app install tore the whole panel (or the entire apps
+  grid) down to a skeleton and rebuilt it — reading as a jarring full-page refresh even
+  though the data had barely changed. One shared cause: the stale-while-revalidate cache
+  dropped its value the instant a panel asked to reload, so every panel's "no data yet →
+  show a skeleton" branch fired on the way to fresh data that was already in flight.
+  Reloading now *holds* what is on screen and swaps in the new data when it lands, which
+  is what stale-while-revalidate was supposed to mean. Switching to a genuinely different
+  resource still clears, so one page's rows can never paint under another's filter. The
+  fix is in the shared data hook, so all **88 reload sites across 32 panels** are covered
+  at once. (#52)
 - **Installing an app and updating Gideon both failed on a `uv` virtualenv.**
   A `uv venv` ships no `pip` module — uv is the installer — but four separate code
   paths hardcoded `python -m pip install`, so each died with `No module named pip`
