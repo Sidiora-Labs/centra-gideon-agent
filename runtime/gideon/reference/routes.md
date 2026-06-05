@@ -83,6 +83,8 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `POST /api/chat/nav/resolve-links` — batch-summarize bare links.
 - `GET /api/chat/sessions` — list all chat sessions.
 - `POST /api/chat/sessions` — create a new chat session.
+- `POST /api/chat/sessions/auto-archive` — run (or preview) the auto-archive rule.
+- `POST /api/chat/sessions/bulk` — apply one op to many sessions.
 - `POST /api/chat/sessions/cleanup` — bulk-archive inactive sessions to history.
 - `DELETE /api/chat/sessions/{session}` — stop and remove a UI session.
 - `GET /api/chat/sessions/{session}` — message history for a session.
@@ -100,6 +102,7 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `POST /api/chat/sessions/{session}/generate-title` — manually trigger title generation.
 - `POST /api/chat/sessions/{session}/handoff` — hand off session to channel DM thread.
 - `POST /api/chat/sessions/{session}/interrupt` — stop the turn, KEEP the queue.
+- `PATCH /api/chat/sessions/{session}/lifecycle` — archive/restore one session.
 - `POST /api/chat/sessions/{session}/model` — set model for a chat session.
 - `PATCH /api/chat/sessions/{session}/pin` — toggle pinned state.
 - `DELETE /api/chat/sessions/{session}/queue/{queue_id}` — cancel a queued message.
@@ -188,6 +191,13 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `POST /api/incident` — current state; POST /api/incident — activate.
 - `POST /api/incident/resume` — turn incident mode OFF.
 - `POST /api/investigate` — _(no summary)_
+- `GET /api/knowledge/collections` — every shelf in rail order.
+- `POST /api/knowledge/collections` — create a manual or smart shelf.
+- `DELETE /api/knowledge/collections/{id}` — remove the shelf, keep the items.
+- `PATCH /api/knowledge/collections/{id}` — rename / re-icon / re-query / reorder.
+- `GET /api/knowledge/collections/{id}/items` — resolve the shelf.
+- `POST /api/knowledge/collections/{id}/items` — shelve one or many items.
+- `DELETE /api/knowledge/collections/{id}/items/{item_id}` — unshelve one item.
 - `POST /api/knowledge/embedding/generate` — - embed all unembedded items (or re-embed all).
 - `GET /api/knowledge/embedding/status` — - embedding config and progress.
 - `GET /api/knowledge/entities` — _(no summary)_
@@ -209,11 +219,13 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `PATCH /api/knowledge/items/{id}` — - update fields.
 - `GET /api/knowledge/items/{id}/content` — - plain text for clipboard.
 - `GET /api/knowledge/items/{id}/extracted` — - the per-item extracted-content
+- `POST /api/knowledge/items/{id}/favorite` — star or unstar.
 - `GET /api/knowledge/items/{id}/file` — - serve a media item's original bytes.
 - `POST /api/knowledge/items/{id}/generate-intelligence` — - (re)run the FULL
 - `GET /api/knowledge/items/{id}/graph` — - the ingestion node-graph SHAPE for this
 - `GET /api/knowledge/items/{id}/ingest/stream` — - per-item node-graph ingestion
 - `GET /api/knowledge/items/{id}/intents` — - the intents this item contributed to
+- `POST /api/knowledge/items/{id}/read-state` — unread | reading | read.
 - `GET /api/knowledge/items/{id}/related` — - items sharing entities with given item.
 - `GET /api/knowledge/items/{id}/thumbnail` — - serve a generated thumbnail (image/webp).
 - `GET /api/knowledge/providers` — - registered knowledge providers (native
