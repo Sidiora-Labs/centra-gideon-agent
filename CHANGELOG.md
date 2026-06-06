@@ -25,6 +25,24 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
 
 ### Added
 
+- **Memory can now offer itself, not just answer when asked.** Mention a person, project or
+  tool the entity graph knows and Gideon can volunteer up to three linked memories for
+  that turn — including ones that share no words with what you typed, which ordinary search
+  structurally cannot find ("ships Fridays" doesn't match "when does Sparrow release?"). It
+  costs no tokens or model calls, and it's **off by default**, because putting context in
+  front of the model that you didn't ask for should be your choice. Turn it on under
+  **Settings → Memory**, along with how confident a match has to be. The Health tab shows how
+  often what it volunteered actually got used afterwards, so you can tighten the setting from
+  evidence instead of guesswork. Temporary chats get nothing; incognito chats get the benefit
+  without anything being recorded.
+
+- **Take a conversation with you, and stop rebuilding the same chat setup.** Any chat can
+  now be exported as **Markdown or JSON** from its context menu in the chat history —
+  readable, pasteable, and **credential-redacted**, including the messages you typed
+  yourself. Save a chat's setup (agent, model, reasoning effort) as a **starter** from its
+  header, and it appears on the new-chat screen ready to pick; manage or remove starters
+  under **Settings → Chat**. A starter captures the setup only, never the conversation.
+
 - **Hand an artifact to the agent, or point at one mid-conversation.** An artifact — a
   widget, a document, a chart — can now be opened straight into a chat set up to *change*
   it: the agent starts with the current version in front of it and a prompt that names the
@@ -462,6 +480,17 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
   representation that leaves your machine.
 
 ### Fixed
+
+- **Auto-archive skipped the very chats it existed to tidy — and you couldn't see or
+  change the rule.** Chats are archived after a period of inactivity (30 days by default),
+  but the sweep only considered conversations currently loaded in memory. Since old chats
+  aren't loaded until you open them, a conversation idle for months was exactly the one the
+  rule could never reach: it ran hourly and reported that nothing was stale. The sweep now
+  covers chats that exist only on disk, archiving them in place without loading them.
+  Separately, the threshold had no control anywhere in the app — it now lives under
+  **Settings → Chat → Context & lifecycle**, showing how many chats are currently stale so
+  you can see what the rule would do before it does it. Archiving remains fully
+  reversible; nothing is deleted.
 
 - **The "Steer" button never steered.** Typing while an answer was streaming showed a
   button labelled *"Steer — send into the running turn"*, and clicking it queued the
