@@ -346,3 +346,176 @@ Extends **Session 4** (which already owns the proposal fold-in): T4.1 becomes th
   **Gates:** `make lint` clean (mypy 553 files) · `make test` **9249 passed, 0 failed**.
   Tests: `test_notification_kinds.py` (45), `test_notification_rules.py` (60), +14 route
   cases in `test_entity_settings_routes.py` (37 in file).
+
+- 2026-07-30 — **DONE (Session 3: T3.1–T3.3).** The notifications settings page gains the
+  per-(source, kind) rules matrix + digest schedule; the inbox's own alert fields are
+  retired and backfilled into rule conditions; docs rewritten.
+
+  **T3.1 — the matrix.** `NotificationRulesMatrix` renders one row per REGISTERED kind
+  (the registry is the row list, so an uncustomized kind still appears with its default
+  rather than being invisible until edited), grouped **by source** because "quieten
+  everything from heartbeat" is the common ask and shouldn't require finding four rows. Mode
+  via the canonical `SegPills`; targets/conditions behind a per-row disclosure so the common
+  case stays one line. A `reset` control appears **only** when the user has actually diverged
+  from the default — a "default" tag on every untouched row is noise on the common case.
+  `push`/`native` targets are labelled "(mobile app required)" rather than hidden: the
+  setting persists for when those plans land, but the label doesn't promise delivery today.
+
+  **T3.2 — the backfill (DEVIATION: not a `lifecycle/` migration).** Per the standing owner
+  ruling this is an **idempotent backfill keyed on data inspection** — it runs only when
+  `notification_rules.json` is ABSENT and `inbox.json` still carries the legacy fields, and
+  writing the rules file is itself the marker that it has run. That last property is
+  load-bearing: without it, a user who deliberately CLEARED their keywords would have them
+  resurrected on the next read, silently undoing a deliberate choice. Verified live.
+  Projected onto **both** `inbox/alert` and `agent/message` — an alert was about the message
+  arriving, and narrowing to one kind would quietly reduce coverage.
+
+  **The clean break, in one change.** `alert_keywords`/`alert_on_name_mention` are gone from
+  `INBOX_DEFAULTS` (so a PUT naming them is now dropped rather than persisted into a store
+  nothing reads), `evaluate_alert()` lost its `settings` parameter entirely rather than
+  keeping it and ignoring it (a caller still passing retired fields would silently get no
+  alerts — exactly the failure a clean break should make impossible), and the now-dead
+  `load_inbox_settings()` read + `re` import in `inbox.py` were deleted. Frontend: the alert
+  controls were removed from **both** inbox settings panels and the settings bento widget
+  (which now surfaces retention, what the inbox still owns) and replaced with a pointer to
+  the rules matrix.
+
+  **DISCOVERY — a test that had become circular.** `test_conditions_match_agrees_with_inbox_
+  evaluate_alert` compared the engine to `evaluate_alert`, which now DELEGATES to it — so it
+  was asserting the engine agrees with itself. Rewritten to pin the semantics against a
+  **verbatim copy of the retired pre-S3 implementation** kept in the test as an oracle, with
+  11 cases. That is what actually protects a user whose keywords were backfilled.
+
+  **The primitive-adoption ratchet caught two raw `<button>`s and two raw inputs** in the new
+  matrix. Fixed by using `Button`/`Checkbox`/`TextInput` (which already supports `mono` for
+  the cron field) — **not** by raising the baseline, which was the tempting shortcut.
+
+  **Validated as a user** on an isolated dev home (port 10743, never :10000) seeded as a
+  **PRE-S3 install**: legacy `inbox.json` with two keywords + name-mention on, and no rules
+  file. On first read the backfill produced both rules with the migrated conditions; `GET
+  /api/inbox/settings` no longer surfaces the retired fields; a PUT naming them dropped them
+  while still applying `retention_days`; clearing the keywords through the API did **not**
+  resurrect them on re-read; and `evaluate_alert` fired for a keyword, for a name mention,
+  and stayed silent otherwise. In a real browser: the matrix rendered grouped by source with
+  `Notify` selected everywhere (the behavior-preserving default), the Inbox bento card showed
+  retention instead of alert keywords, and clicking **Badge** on Heartbeat persisted
+  `heartbeat/status: {mode: badge}` to disk while the migrated `inbox/alert` conditions
+  survived untouched. **0 gateway tracebacks.**
+
+  **Gates:** `make lint` clean (mypy 553 files) · `make test` **9327 passed, 0 failed** ·
+  web typecheck + **302** vitest + build + render smoke green.
+  Tests: +19 backfill/oracle cases in `test_notification_rules.py` (79 in file), +3 in
+  `test_entity_settings_routes.py` (40), `test_inbox.py` alert tests rewritten against the
+  rule, `test_inbox_service.py` helper now writes a real rule.
+
+- 2026-07-30 — **DONE (Session 4: T4.1–T4.4).** Skill proposals and outlived tool approvals
+  become durable inbox items, answerable in place.
+
+  **T4.1 — proposals surface and resolve.** `enqueue()` raises a `proposal` item deduped by
+  proposal id; the inbox detail panel loads the FULL proposal (the list summary truncates the
+  procedure at 280 chars — approving a body you can't read isn't a review) and runs the same
+  accept/reject endpoints the skills page uses, so there is **one** installation path rather
+  than a second that could drift.
+
+  **The ordering trap worth naming:** `accept()` calls `reject()` internally to clear the
+  queue entry, so the naive wiring leaves an *installed* skill's row reading "dismissed" —
+  the item is the only record of which answer the user gave. Resolution therefore runs
+  DISMISSED in `reject()` and is corrected to HANDLED after, and `_resolve_inbox_item` accepts
+  a terminal→terminal correction while never moving an item backwards into an open state.
+  Tested in both directions.
+
+  **T4.2 — DEVIATION: idempotent backfill, not a `lifecycle/` migration.** Idempotent **by
+  pid** and keyed on data inspection: any item referencing the pid counts as "has one",
+  **including a resolved one**, so a proposal the user already answered is never re-raised —
+  re-asking a decided question is the worst failure available here. Runs from `list_pending()`,
+  the read path both the skills page and the API use, so the first look after an upgrade is
+  already correct.
+
+  **T4.3 — DECISION (the plan offered embed-or-link):** kept `SkillProposals` as the editing
+  surface and **cross-linked** rather than embedding a filtered inbox. The skills page owns
+  the edit-then-approve flow; duplicating that into the inbox would be the second approval UI
+  the task explicitly warns against. The inbox answers "yes/no" and offers "Edit first" →
+  Skills. Both surfaces call the same endpoints and answering either resolves the other.
+
+  **T4.4 — approval mirroring, with a grace period.** An approval prompt is session-modal for
+  latency, and `chat_runner` waits up to **7200s** on it — so a prompt the user walked away
+  from is a standing request they cannot see. It is now mirrored as an `agent_request` item
+  only after `_APPROVAL_MIRROR_GRACE_SECS` (90s), so approving promptly leaves no litter.
+  **`asyncio.shield` is load-bearing here:** without it `wait_for`'s timeout would CANCEL the
+  approval future — the mechanism meant to surface the prompt would destroy it, and the second
+  wait would hang on a dead future. There is a test asserting the shield protects it.
+  Answering in the session resolves the mirror (approved → HANDLED, otherwise DISMISSED).
+
+  **Validated as a user** on an isolated dev home (port 10744, never :10000) seeded as a
+  **PRE-S4 install**: a proposal in its own store with **no** inbox item. `GET
+  /api/skills/proposals` triggered the backfill and the item appeared; accepting over HTTP
+  marked it **handled**; a fresh enqueue→reject marked its item **dismissed**. In a real
+  browser the row rendered with the full procedure, collapsed provenance, and Install /
+  Reject / Edit first — and clicking **Install skill** in the inbox wrote the real skill to
+  `skills/auto/` and flipped the item to handled. Three items ended recording three distinct
+  answers. **0 gateway tracebacks.**
+
+  *(A false alarm worth recording: the first live check showed the backfilled item missing
+  over HTTP while present on disk — a stale in-memory store in a gateway that had been
+  running before the seed, not a bug. Confirmed by restart.)*
+
+  **Gates:** `make lint` clean (mypy 553 files) · `make test` **9359 passed, 0 failed** ·
+  web typecheck + 302 vitest + build + render smoke green.
+  Tests: `tests/test_inbox_proposals.py`, 32 cases.
+
+- 2026-07-30 — **DONE (Session 5: T5.1–T5.3). The plan is COMPLETE (S1–S5).**
+
+  **T5.1 — the digest.** `build_digest_body` groups by kind (the point of a digest is that "9
+  heartbeats" is ONE fact, not nine), newest-first within a group, capped at
+  `DIGEST_LINES_PER_GROUP` with a remainder count so a busy day can't produce an unbounded
+  summary. `run_digest` drains **before** writing: a write failure loses one digest body
+  rather than leaving entries that get re-digested tomorrow *and* re-notified. An empty queue
+  produces **nothing** — a daily "you have no notifications" item would be a reminder that
+  nothing happened. Shipped as a deterministic action provider (`notification-digest`), not an
+  agent turn: a digest is a grouping of things that already happened, so a model would add
+  latency, cost, and a chance of inventing detail for a summary whose whole value is accuracy.
+  Registered as a `silent` system cron — the digest's OUTPUT is an inbox item, so a cron-result
+  toast would be a notification about your notifications.
+
+  **T5.2 — the demotion.** `unread_count()` now counts inbox items in PENDING. The two stores
+  had become two answers to one question: the log tracked "was a toast acknowledged", the inbox
+  tracks "is this dealt with" — so handling a request in the inbox still left a badge lit, and
+  dismissing a toast cleared the badge for work that was still outstanding. Counts PENDING
+  only, not SEEN: the badge means "new since you last looked". Fails to 0 rather than raising —
+  a badge is chrome and must not take down the sessions payload.
+
+  **T5.3 — the accepted state break, in the CHANGELOG.** The badge resets once on upgrade.
+  Written for a user, not a developer: what changes, that nothing is lost, why it's more honest
+  afterwards, and `gideon snapshot` per the banner.
+
+  **THREE integration gaps the full suite caught that unit tests could not:**
+  1. `notification-digest` was registered as an action provider but absent from
+     `ALLOWED_HOOK_PROVIDERS`, so **trigger validation would have refused to dispatch it** —
+     the cron would look healthy and produce no digest. (`test_native_hook_providers` exists
+     precisely to catch a registered-but-unroutable provider.)
+  2. Two harness tests cascaded from the same gap.
+  3. **A bug my own fakes hid.** `reconcile_digest_cron` read `getattr(job, "cron_expr")`, but
+     the real `ScheduleJob` stores it at `job.schedule.cron_expr` (a nested
+     `ScheduleDefinition`) — a flat read always yields None, so the reconcile would have
+     "converged" the schedule on **every startup**, churning the job file forever. My
+     `_FakeJob` had invented the flat attribute, so the fake agreed with the bug. Fixed the
+     code, rebuilt the fake on the real dataclass, and added
+     `test_fake_job_matches_the_real_schedule_shape` so a future shape change fails loudly
+     instead of silently re-hiding this.
+
+  **Validated as a user** on an isolated dev home (port 10745, never :10000). Set `digest` mode
+  on two kinds and fired notifications through the **real** `notify()`: 7 queued, 1 badge-only
+  persisted, 0 toasts broadcast. `run_digest` produced one item titled "Digest — 7
+  notifications" with the grouped body (`**Scheduled job result** — 2` / `**Heartbeat** — 5` +
+  "…and 2 more"), drained the queue, and a second run returned "" with nothing created.
+  Against the **real** `ScheduleService`: the cron registered as `kind=cron cron=0 8 * * *
+  silent=True provider=notification-digest`, three reconciles with an unchanged schedule were a
+  no-op, and editing the schedule in the rules store converged the job to `30 6 * * 1-5`. The
+  badge: 1 PENDING item → `unread_count() == 1`; **20 delivered toasts left it at 1**; handling
+  the item took it to 0. **0 gateway tracebacks.**
+
+  **Gates:** `make lint` clean (mypy 554 files) · `make test` **9387 passed, 0 failed**.
+  Tests: +25 digest/cron cases in `test_notification_rules.py` (102 in file), `TestUnreadDerived`
+  rewritten to the inbox contract (`test_dashboard.py`, 27 in file — its old isolation patched
+  only `state.config_dir`, so my inbox read hit the DEVELOPER'S real inbox and returned 39;
+  both `config_dir` seams are now patched).
