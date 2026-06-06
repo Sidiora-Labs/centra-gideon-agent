@@ -1,6 +1,6 @@
 # Plan: Knowledge Library — Collections, Curation, and Reading
 
-**Status:** IN PROGRESS — Session 1 (collections + item curation) shipped 2026-07-29; Sessions 2-4 not started. Created as DESIGNED — created 2026-07-18 (roadmap rev 10; owner ask: more library-management capabilities for knowledge articles)
+**Status:** IN PROGRESS — Session 1 (collections + item curation) shipped 2026-07-29; S2 T2.1 + T2.3 shipped 2026-07-29 (curation display/filters + bulk ops); T2.2 (tags taxonomy) needs an owner re-scope — see the S2 log. Created as DESIGNED — created 2026-07-18 (roadmap rev 10; owner ask: more library-management capabilities for knowledge articles)
 **Created:** 2026-07-18
 **Wave:** 2 (S1-2: collections + curation) + 3 (S3: reading experience + saved views)
 **Depends on:** nothing hard (builds on the shipped knowledge store). Coordinates with KNOWLEDGE-SYNTHESIS (5 — synthesis nodes produce library items), WATCHED-SOURCES (15 — watched sources land in collections), DESIGN-SYSTEM-CONSISTENCY (51 — the library UI is a flagship consistency surface), MEMORY-GRAPH-AND-VAULT (14 — knowledge-side graph is distinct: knowledge.db = the user's items).
@@ -218,3 +218,119 @@ Sequence these **independently of S1-S3** — they touch the store's indexing la
 - **Silent recall regression from ANN** is the sharpest risk — an approximate index that drops relevant items looks like a working search. This is why H1.4's tolerance test is a required gate and not an optimization check.
 - **Do not redesign fusion.** The RRF + graph + cliff-cut + honest-null-locator machinery is a strength; every task above feeds it better inputs. A task proposing to retune thresholds or fusion weights is out of scope (escalation E6) unless a measurement demands it.
 - **Open:** whether the graph arm should also index chunks (entity mentions currently resolve at item granularity). Deferred — item-level entity resolution is coherent, and chunk-level mentions would multiply the graph without a demonstrated need.
+- 2026-07-29 — **DONE (S2: T2.3 bulk ops).** `bulk_apply` + `POST /api/knowledge/bulk`
+  + a multi-select bar on the library list. Seven ops: collect, uncollect, read_state,
+  favorite, archive, restore, pin.
+
+  **Followed `session_bulk.py` (SESSION-MANAGEMENT S2) as the house precedent**, and
+  deliberately over the *other* one: `POST /api/tasks/bulk` validates-all-then-aborts,
+  which is right for task creation and wrong here. A knowledge selection can go stale
+  between the click and the request, so per-item best-effort with
+  `changed`/`unchanged`/`missing` is the honest shape — "38 shelved · 2 not found" beats
+  a wholesale failure. S1's own `add_collection_items` already made this call inside the
+  very file being edited, so this is consistency, not novelty.
+
+  **`delete` is NOT an op**, mirroring `session_bulk`'s explicit exclusion: every op here
+  is reversible, and putting an irreversible one beside them is one mis-click from data
+  loss. The task line asked for delete in the bulk bar; declining it is a deliberate
+  deviation, pinned by a test. Deleting stays the single-item path with its confirmation.
+
+  **`unchanged` is load-bearing, not cosmetic.** `add_to_collection` is `INSERT OR
+  IGNORE`, so a naive implementation reporting rowcount would claim 40 changes for
+  re-shelving 40 already-shelved items. The bulk path checks membership first. Verified
+  live: re-shelving the same two items reports **"Added to Reading: 0 · 2 already set"**.
+
+  **Argument problems are typed 400s, not silent no-ops.** A caller that forgot
+  `collection_id` would otherwise get `{"ok": true}` with an empty `changed` list over a
+  40-item selection — which reads as "nothing matched" rather than "you left out an
+  argument". `smart_collection_immutable` keeps its own code so the frontend can explain
+  that a smart shelf fills itself from its query instead of showing a generic failure.
+
+  **Read-state and favorite stay NON-touching writes** through the bulk path too (they
+  route through `set_read_state`/`set_favorited`). Marking a backlog read must not
+  masquerade as editing every item, or it reshuffles a recency-sorted library out from
+  under the user. Archive/pin DO touch, because they genuinely change an item's standing.
+  A test pins `updated_at` surviving a bulk read-state pass.
+
+  **Closed a coverage gap the audit found:** S1 shipped 9 collection/curation routes with
+  **zero HTTP-level tests** (only store-level). New `tests/test_knowledge_bulk_api.py`
+  (10 cases) covers the endpoint's own job — validation, error envelopes, the 500-item
+  cap, route registration — using the `_app()` harness pattern from
+  `test_knowledge_typed_items.py`. Also closed the SEL gap for this route (`_sel_log`,
+  which the S1 block omitted entirely).
+
+  **FE:** row checkbox via the shared `Checkbox` primitive (a raw one would trip the
+  primitive-adoption ratchet), hidden until hover or an active selection so the list
+  stays calm when nobody is curating; a wrapper stops the tick from also opening the
+  peek. Selection is deliberately NOT URL-backed — a transient selection isn't
+  meaningfully deep-linkable, and restoring one on reload re-arms a state the user didn't
+  ask for. The outcome note renders OUTSIDE the bar so it survives the bar unmounting
+  when the selection clears on success. Only MANUAL shelves appear as "Add to …" targets.
+
+  Validated as a user on an isolated dev home (port 10734): ticked 2 of 4 seeded items,
+  shelved them in one action (chip went to "Reading 2" live), re-ran to confirm the
+  unchanged report, marked 2 read and confirmed `read_state` persisted for exactly those
+  two, and confirmed over HTTP that a smart shelf refuses with its typed code and a
+  501-item selection is refused. Zero console errors.
+
+  **NOT done: T2.1's remainder and T2.2.** T2.1 is ~85% shipped by S1 — what's left is
+  purely FE (neither read-state nor favorite renders ON the row; there's no
+  unread/favorites filter chip, so favoriting is currently write-only) plus a premise
+  correction: **the plan's "verify pin weighting unaffected" is moot — pin has no
+  retrieval weighting.** Its only effect is `ORDER BY` in the *unsearched* list branch
+  (`handlers/knowledge.py:201`); nothing in `knowledge/retrieval.py` reads `is_pinned`.
+  **T2.2 (tags taxonomy) is NOT startable as written:** its done-when requires a
+  "dual-path" JSON→table migration, which the pre-Lifecycle-Doctrine doctrine forbids
+  (class-B changes are plain clean breaks), and knowledge.db has **no schema version** to
+  gate a one-shot backfill on. It also has a wider blast radius than the plan implies:
+  tags reach the FTS index as the raw JSON string via **4 manual sync sites**, the agent's
+  tool contract declares `tags` in 3 schemas, and `pipeline/runner.py:519-527` preserves
+  user-authored tags by **list-equality on the JSON shape**. Recommend re-scoping to a
+  derived tag registry (counts + hierarchy, JSON stays authoritative) — additive, no
+  migration, and it satisfies the stated done-when. Owner ruling needed before starting.
+- 2026-07-29 — **DONE (S2: T2.1 remainder).** S1 shipped the store API, routes and
+  context-menu verbs for read state and favorites; **neither state rendered anywhere**,
+  which made favoriting **write-only** — you could star an item and then had no way to
+  find your stars. This closes the display and filter half.
+
+  **Row affordances.** Favorite gets its **own glyph** (a star). It shared the `Pin`
+  icon before, which made two deliberately distinct concepts indistinguishable on the
+  row — pin floats an item to the top of the list, favorite is a personal mark with no
+  ordering effect. A `reading` badge marks the in-progress state, and a read item's
+  title drops to a lighter weight and a dimmer tone. **Unread deliberately gets NO
+  marker:** it is the default state, and badging every fresh item would turn the whole
+  library into noise. Only states a reader actually set are shown.
+
+  **Filter chips** for Reading / Unread / Read / Favorites, client-side like the
+  existing type/provider/tag filters (keeping the full item set loaded, per the
+  page's own stated convention). Each chip appears **only when the state it filters is
+  present** — an always-visible "Favorites 0" is a dead end that teaches nothing — and
+  the Unread chip additionally hides when *everything* is unread, since filtering to
+  "all of it" is not a filter. Counts ride on the chips.
+
+  **Reader controls.** The dedicated item page gained a read-state cycle and a favorite
+  toggle beside Pin/Archive, with self-describing labels ("Mark as reading" →
+  "Reading — mark read" → "Read — mark unread"). A **cycle rather than a toggle** because
+  the middle state is the one a reading list exists to represent. Both route through the
+  dedicated curation endpoints, **not** `updateKnowledge`: these are non-touching writes,
+  and going through the generic update path would bump `updated_at` and reshuffle a
+  recency-sorted library. Verified live — after cycling and favoriting one item, its
+  `updated_at` was still the original second while its siblings' had moved.
+
+  **Premise correction carried from the audit:** the plan's T2.1 done-when says "verify
+  weighting unaffected" for favorite-vs-pin. **There is no retrieval weighting to
+  affect.** `is_pinned` appears only in the no-query list branch's `ORDER BY`
+  (`handlers/knowledge.py:201`); nothing in `knowledge/retrieval.py` reads it, so pin
+  affects neither searched results nor agent retrieval. Favorite was therefore already
+  fully distinct from pin; the verification is satisfied by inspection, not by code.
+
+  Validated as a user on an isolated dev home (port 10735): seeded four items with one
+  reading / one read / one favorited, confirmed the chips render with correct counts
+  (Reading 1 · Unread 2 · Read 1 · Favorites 1), and confirmed **every filter returns
+  exactly the right item(s)** and toggling off restores all four. Drove the reader's full
+  read-state cycle and favorite toggle, confirmed both persisted, and confirmed the
+  non-touching guarantee. Zero console errors. Gate: `make lint` green · `make test`
+  **8912 passed** · web typecheck + 283 vitest + build green.
+
+  **T2.1 is now complete.** Remaining in S2: **T2.2 (tags taxonomy)**, which still needs
+  the owner re-scope ruling recorded in the T2.3 log above.
