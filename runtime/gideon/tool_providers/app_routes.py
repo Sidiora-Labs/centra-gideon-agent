@@ -36,6 +36,7 @@ import json
 import logging
 from typing import Any, Iterator
 
+from gideon import notification_kinds
 from gideon.apps.manifest import AppManifest, RouteEntry
 from gideon.errors import AgentError
 from gideon.tool_providers.base import RiskLevel, ToolDefinition, ToolProvider, ToolResult
@@ -343,7 +344,7 @@ def note_proxy_status(app_name: str, op: str, status: int) -> None:
         if state is None:
             return
         state.notify(
-            "app.route.drift",
+            notification_kinds.APP_ROUTE_DRIFT,
             f"App {app_name!r} declares a dead route",
             f"Route {op!r} is declared in {app_name}'s app.json but its backend "
             f"returns 404. Fix the declared path in backend.routes[] or add the route.",
