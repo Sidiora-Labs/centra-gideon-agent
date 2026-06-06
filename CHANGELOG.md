@@ -67,6 +67,38 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
   tasks**. Someone else's task can never quietly become something your assistant picks
   up. Dependencies are still honored across everyone, so a task of yours blocked by a
   colleague's unfinished work is correctly *not* ready rather than falsely startable.
+- **Your reading state and favorites are now visible, and filterable.** Marking a saved
+  item as reading, read, or a favorite already worked — but nothing showed it anywhere,
+  so favoriting was effectively write-only: you could star something and then had no way
+  to find it again. Items now carry a **star** for favorites and a **reading** badge, a
+  read item's title dims, and chips let you filter to Reading, Unread, Read or Favorites
+  (each appearing only when there's something to show, with a count).
+
+  Favorites finally have their own mark instead of borrowing the pin icon — pinning
+  floats an item to the top of the list, favoriting is a personal bookmark, and they read
+  as different things now. The reader gained the same two controls beside Pin and
+  Archive. Unread items stay unbadged on purpose: it's the default state, and marking
+  every new item would just be noise.
+
+- **Curate a whole shelf of saved items in one action.** Working through a knowledge
+  library one item at a time is what makes nobody do it. Select many items and **mark
+  read or unread, favorite, add to a shelf, or archive** them together. Each action
+  reports what actually happened — "38 shelved · 2 already there" — because a selection
+  can go stale between the click and the request, and a partial success is not a failure.
+
+  Marking a backlog read deliberately does *not* count as editing those items, so
+  catching up won't reshuffle a library sorted by recency. Bulk **delete** is not
+  offered beside these: everything here is reversible, and an irreversible action
+  shouldn't sit one mis-click away from a safe one.
+- **See what changed between two versions of an artifact.** An artifact keeps every
+  version, but the only way to tell what actually moved between two of them was to open
+  each in turn and compare by eye. **Compare versions** now shows a real side-by-side
+  diff — for images, the two versions themselves, before and after. It opens on the two
+  most recent versions, since "what changed in the last pass?" is usually the question,
+  and you can pick any pair or swap which side is which.
+
+  Whitespace-only changes are shown rather than hidden: an agent re-rendering a widget
+  often re-indents it, and reporting "nothing changed" would be a lie.
 - **Backups now happen on their own, and they get checked.** Gideon takes a
   full snapshot nightly and exports whatever changed every hour, so how much you can
   lose is bounded by an hour rather than by when you last remembered to run
