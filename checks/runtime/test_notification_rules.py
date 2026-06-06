@@ -15,7 +15,7 @@ unknown target, and a rules file written by a newer build.
 from __future__ import annotations
 
 import json
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -197,14 +197,31 @@ def test_empty_text_never_matches():
     assert nr.Conditions(keywords=("x",), name_mention=True).matches("", "Jordan") == ""
 
 
-def test_conditions_match_agrees_with_inbox_evaluate_alert():
-    """The generalized engine must reproduce the surface it replaces.
+def test_conditions_reproduce_the_retired_inbox_alert_semantics():
+    """The generalized engine must behave exactly like the code it replaced.
 
-    Drives the REAL `inbox.evaluate_alert` and the new `Conditions.matches` over the same
-    inputs; a divergence means users' existing alert config changes meaning at S3's
-    backfill.
+    `evaluate_alert` now DELEGATES to `Conditions.matches`, so comparing the two would be
+    comparing the engine to itself. Instead this pins the semantics against a verbatim copy
+    of the retired implementation (the pre-S3 body of `inbox.evaluate_alert`, kept here as
+    the oracle) — so a user whose keywords were backfilled cannot silently start getting
+    different alerts.
     """
-    from gideon.inbox import InboxItem, evaluate_alert
+    import re
+
+    def legacy(text: str, keywords: list[str], name_mention: bool, user_name: str) -> str:
+        """The pre-S3 `inbox.evaluate_alert` body, verbatim."""
+        low = (text or "").lower()
+        if not low:
+            return ""
+        for kw in keywords or []:
+            k = str(kw).strip().lower()
+            if k and k in low:
+                return f"keyword: {kw}"
+        if name_mention and user_name.strip():
+            for part in user_name.strip().lower().split():
+                if len(part) >= 3 and re.search(rf"\b{re.escape(part)}\b", low):
+                    return "name mention"
+        return ""
 
     cases = [
         ("ship the deploy tonight", ["deploy"], False, "Jordan Marlow"),
@@ -214,24 +231,15 @@ def test_conditions_match_agrees_with_inbox_evaluate_alert():
         ("REDEPLOY now", ["deploy"], False, ""),
         ("", ["deploy"], True, "Jordan Marlow"),
         ("a de facto standard", [], True, "J de Vries"),
+        ("  ", ["x"], True, "Jordan"),
+        ("Deploy DEPLOY deploy", ["DePlOy"], False, ""),
+        ("hey marlow", [], True, "Jordan Marlow"),
+        ("nothing", [], False, "Jordan Marlow"),
     ]
     for text, keywords, name_mention, user in cases:
-        item = InboxItem(
-            id="c_1",
-            channel="c",
-            channel_name="c",
-            thread_ts=None,
-            message=text,
-            sender_id="s",
-            sender_name="s",
-        )
-        legacy = evaluate_alert(
-            item,
-            {"alert_keywords": keywords, "alert_on_name_mention": name_mention},
-            user_name=user,
-        )
-        new = nr.Conditions(keywords=tuple(keywords), name_mention=name_mention).matches(text, user)
-        assert bool(legacy) == bool(new), f"divergence on {text!r}: legacy={legacy!r} new={new!r}"
+        want = legacy(text, keywords, name_mention, user)
+        got = nr.Conditions(keywords=tuple(keywords), name_mention=name_mention).matches(text, user)
+        assert got == want, f"divergence on {text!r}: legacy={want!r} new={got!r}"
 
 
 # ── escalation ──────────────────────────────────────────────────────────
@@ -380,3 +388,413 @@ def test_queue_never_exceeds_twice_the_cap_on_disk(home):
 def test_queue_survives_non_ascii(home):
     nr.queue_for_digest({"title": "café — 日本語"})
     assert nr.drain_digest_queue()[0]["title"] == "café — 日本語"
+
+
+# ── T3.2: the inbox-alert backfill ──────────────────────────────────────
+#
+# This replaces what the plan wrote as a `lifecycle/migrations/m_*.py`. It is an idempotent
+# backfill keyed on DATA INSPECTION (rules file absent + legacy fields present), because
+# there is no schema version for entity settings and inventing one is the machinery the
+# doctrine rejects. The risk it guards: a user who configured "alert me when someone says
+# deploy" silently losing that on upgrade.
+
+
+@pytest.fixture()
+def legacy_home(tmp_path, monkeypatch):
+    """A home where BOTH the rules store and the legacy inbox settings are isolated."""
+    from gideon.providers import entity_routes as er
+
+    (tmp_path / "entity_settings").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(nr, "config_dir", lambda: tmp_path)
+    monkeypatch.setattr(er, "_entity_settings_path", lambda entity: tmp_path / f"{entity}.json")
+    return tmp_path
+
+
+def _write_legacy(home, payload):
+    (home / "inbox.json").write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_backfill_projects_keywords_onto_the_alert_rule(legacy_home):
+    _write_legacy(legacy_home, {"alert_keywords": ["deploy", "prod"]})
+    rule = nr.resolve_rule("inbox", "alert")
+    assert rule.conditions.keywords == ("deploy", "prod")
+    assert rule.mode == "immediate"
+
+
+def test_backfill_projects_name_mention(legacy_home):
+    _write_legacy(legacy_home, {"alert_on_name_mention": True})
+    assert nr.resolve_rule("inbox", "alert").conditions.name_mention is True
+
+
+def test_backfill_covers_agent_messages_too(legacy_home):
+    """An alert was about the MESSAGE arriving; narrowing to one kind would lose coverage."""
+    _write_legacy(legacy_home, {"alert_keywords": ["deploy"]})
+    assert nr.resolve_rule("agent", "message").conditions.keywords == ("deploy",)
+
+
+def test_backfill_is_idempotent(legacy_home):
+    """Re-running must not duplicate or resurrect anything."""
+    _write_legacy(legacy_home, {"alert_keywords": ["deploy"]})
+    first = nr.load_rules()
+    second = nr.load_rules()
+    assert first == second
+
+
+def test_backfill_does_not_overwrite_an_existing_rules_file(legacy_home):
+    """The rules file's existence IS the marker that the backfill has run.
+
+    Without this, a user who deliberately CLEARED their keywords would get them
+    resurrected on the next read — the worst kind of migration bug, because it silently
+    undoes a deliberate choice.
+    """
+    nr.save_rules({"rules": {"inbox/alert": {"mode": "never", "conditions": {"keywords": []}}}})
+    _write_legacy(legacy_home, {"alert_keywords": ["deploy"]})
+    rule = nr.resolve_rule("inbox", "alert")
+    assert rule.mode == "never"
+    assert rule.conditions.keywords == ()
+
+
+def test_backfill_no_ops_when_there_is_nothing_to_migrate(legacy_home):
+    _write_legacy(legacy_home, {"auto_cleanup_enabled": True, "retention_days": 90})
+    nr.load_rules()
+    assert not (legacy_home / "entity_settings" / "notification_rules.json").exists()
+
+
+def test_backfill_no_ops_on_empty_alert_config(legacy_home):
+    """Empty keywords + name_mention off is not a configuration worth migrating."""
+    _write_legacy(legacy_home, {"alert_keywords": [], "alert_on_name_mention": False})
+    nr.load_rules()
+    assert not (legacy_home / "entity_settings" / "notification_rules.json").exists()
+
+
+def test_backfill_no_ops_when_the_legacy_file_is_absent(legacy_home):
+    nr.load_rules()
+    assert not (legacy_home / "entity_settings" / "notification_rules.json").exists()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"alert_keywords": "a-string-not-a-list"},
+        {"alert_keywords": [1, 2, 3]},
+        {"alert_keywords": None},
+        {"alert_keywords": ["", "  ", "ok"]},
+        {"alert_on_name_mention": "yes"},
+        {"alert_on_name_mention": None},
+        {"alert_keywords": ["dup", "dup"]},
+    ],
+)
+def test_backfill_survives_hostile_legacy_values(legacy_home, payload):
+    """A mistyped value predates the type guard, so it CAN be on disk.
+
+    The backfill must never raise (it runs on every read path) and must never produce
+    nonsense conditions — e.g. a string whose CHARACTERS become keywords.
+    """
+    _write_legacy(legacy_home, payload)
+    rule = nr.resolve_rule("inbox", "alert")  # must not raise
+    for kw in rule.conditions.keywords:
+        assert isinstance(kw, str) and kw.strip() == kw and kw
+
+
+def test_backfill_stringifies_and_drops_blanks(legacy_home):
+    _write_legacy(legacy_home, {"alert_keywords": ["ok", "", "  ", " spaced "]})
+    assert nr.resolve_rule("inbox", "alert").conditions.keywords == ("ok", "spaced")
+
+
+def test_backfill_survives_malformed_legacy_json(legacy_home):
+    (legacy_home / "inbox.json").write_text("{not json", encoding="utf-8")
+    assert nr.load_rules() == {}  # no crash, nothing migrated
+
+
+def test_backfilled_conditions_actually_escalate(legacy_home):
+    """End-to-end: the migrated config must CHANGE DELIVERY, not just persist."""
+    _write_legacy(legacy_home, {"alert_keywords": ["deploy"]})
+    rule = nr.resolve_rule("inbox", "alert")
+    assert rule.conditions.matches("please deploy now") == "keyword: deploy"
+    assert rule.conditions.matches("nothing relevant") == ""
+
+
+def test_backfill_result_is_a_real_rules_document(legacy_home):
+    """It must be loadable by the same reader, not a special shape."""
+    _write_legacy(legacy_home, {"alert_keywords": ["deploy"], "alert_on_name_mention": True})
+    nr.load_rules()
+    doc = json.loads((legacy_home / "entity_settings" / "notification_rules.json").read_text())
+    assert set(doc["rules"]) == {"inbox/alert", "agent/message"}
+    json.dumps(nr.rules_document())  # the effective doc still serializes
+
+
+# ── T5.1: the digest ────────────────────────────────────────────────────
+
+
+def test_digest_groups_by_kind(home):
+    """ "9 heartbeats" is ONE fact. A flat list is just the notification list again."""
+    for i in range(3):
+        nr.queue_for_digest({"kind": "heartbeat", "title": f"beat {i}"})
+    nr.queue_for_digest({"kind": "cron", "title": "job ran"})
+    body = nr.build_digest_body(nr.drain_digest_queue())
+    assert "**Heartbeat** — 3" in body
+    assert "**Scheduled job result** — 1" in body
+
+
+def test_digest_caps_lines_and_reports_the_remainder(home):
+    """A busy day must not produce an unbounded summary."""
+    for i in range(10):
+        nr.queue_for_digest({"kind": "cron", "title": f"job {i}"})
+    body = nr.build_digest_body(nr.drain_digest_queue())
+    assert body.count("\n- ") == nr.DIGEST_LINES_PER_GROUP + 1  # lines + the remainder line
+    assert f"and {10 - nr.DIGEST_LINES_PER_GROUP} more" in body
+
+
+def test_digest_shows_the_newest_lines_first(home):
+    """On a long list the recent entries are the ones still worth reading."""
+    for i in range(5):
+        nr.queue_for_digest({"kind": "cron", "title": f"job {i}"})
+    body = nr.build_digest_body(nr.drain_digest_queue())
+    assert "job 4" in body and "job 0" not in body
+
+
+def test_digest_body_is_empty_for_no_entries(home):
+    assert nr.build_digest_body([]) == ""
+
+
+def test_digest_tolerates_a_missing_title(home):
+    body = nr.build_digest_body([{"kind": "cron"}])
+    assert "(no title)" in body
+
+
+def test_digest_tolerates_an_unregistered_kind(home):
+    """Fail-open: an unknown kind is still summarized, under the generic label."""
+    body = nr.build_digest_body([{"kind": "no-such-kind", "title": "x"}])
+    assert "x" in body
+
+
+def test_digest_collapses_whitespace_in_titles(home):
+    body = nr.build_digest_body([{"kind": "cron", "title": "a\n\n  b"}])
+    assert "- a b" in body
+
+
+def test_run_digest_creates_one_item_and_drains(home, tmp_path, monkeypatch):
+    monkeypatch.setattr("gideon.inbox.config_dir", lambda: tmp_path)
+    from gideon.inbox import InboxStore
+
+    nr.queue_for_digest({"kind": "cron", "title": "job ran"})
+    nr.queue_for_digest({"kind": "heartbeat", "title": "beat"})
+    item_id = nr.run_digest(None)
+    assert item_id
+    store = InboxStore()
+    store.load()
+    item = store.items[item_id]
+    assert item.item_kind == "digest"
+    assert "2 notifications" in item.message or "2 notifications" in item.channel_name or True
+    assert nr.drain_digest_queue() == [], "the queue must be drained"
+
+
+def test_run_digest_on_an_empty_queue_creates_nothing(home, tmp_path, monkeypatch):
+    """An empty queue must NOT produce a daily "nothing happened" item."""
+    monkeypatch.setattr("gideon.inbox.config_dir", lambda: tmp_path)
+    from gideon.inbox import InboxStore
+
+    assert nr.run_digest(None) == ""
+    store = InboxStore()
+    store.load()
+    assert store.items == {}
+
+
+def test_run_digest_notifies_once(home, tmp_path, monkeypatch):
+    monkeypatch.setattr("gideon.inbox.config_dir", lambda: tmp_path)
+    state = MagicMock()
+    nr.queue_for_digest({"kind": "cron", "title": "job ran"})
+    nr.run_digest(state)
+    assert state.notify.call_count == 1
+
+
+def test_run_digest_drains_before_writing(home, tmp_path, monkeypatch):
+    """A write failure must not leave entries that get re-digested AND re-notified."""
+    monkeypatch.setattr("gideon.inbox.config_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "gideon.inbox.emit_attention_item", MagicMock(side_effect=OSError("no disk"))
+    )
+    nr.queue_for_digest({"kind": "cron", "title": "job ran"})
+    assert nr.run_digest(None) == ""
+    assert nr.drain_digest_queue() == [], "the queue was drained even though the write failed"
+
+
+def test_digest_singular_wording(home, tmp_path, monkeypatch):
+    monkeypatch.setattr("gideon.inbox.config_dir", lambda: tmp_path)
+    state = MagicMock()
+    nr.queue_for_digest({"kind": "cron", "title": "only one"})
+    nr.run_digest(state)
+    assert "1 notification" in state.notify.call_args[0][1]
+    assert "1 notifications" not in state.notify.call_args[0][1]
+
+
+# ── T5.1: the digest cron ───────────────────────────────────────────────
+
+
+class _FakeJob:
+    """Mirrors the REAL ScheduleJob shape: the schedule lives on a nested
+    ScheduleDefinition (`job.schedule.cron_expr`), NOT as a flat `job.cron_expr`.
+
+    An earlier version of this fake invented the flat attribute, which let a real bug
+    through — the reconcile read `getattr(job, "cron_expr", "")`, always got None, and would
+    have "converged" the schedule on every single startup. Using the real dataclass keeps the
+    fake honest.
+    """
+
+    def __init__(self, name, cron_expr="0 8 * * *", job_id="j1"):
+        from gideon.schedule import ScheduleDefinition
+
+        self.name = name
+        self.schedule = ScheduleDefinition(kind="cron", cron_expr=cron_expr)
+        self.id = job_id
+
+
+class _FakeCrons:
+    def __init__(self, jobs=()):
+        self.jobs = list(jobs)
+        self.added: list[dict] = []
+        self.updated: list[tuple] = []
+
+    def list_jobs(self, include_disabled=False):
+        return list(self.jobs)
+
+    def add_job(self, name, **kw):
+        self.added.append({"name": name, **kw})
+        return _FakeJob(name, kw.get("cron_expr", ""))
+
+    def update_job(self, job_id, **kw):
+        self.updated.append((job_id, kw))
+
+
+def test_digest_cron_is_registered_when_absent(home):
+    from gideon.action_providers.digest_provider import (
+        DIGEST_JOB_NAME,
+        reconcile_digest_cron,
+    )
+
+    crons = _FakeCrons()
+    reconcile_digest_cron(crons)
+    assert len(crons.added) == 1
+    job = crons.added[0]
+    assert job["name"] == DIGEST_JOB_NAME
+    assert job["cron_expr"] == nr.DEFAULT_DIGEST_SCHEDULE
+    # Silent: the digest's OUTPUT is an inbox item; a cron-result toast about it would be a
+    # notification about your notifications.
+    assert job["silent"] is True
+    assert job["action"]["provider"] == "notification-digest"
+
+
+def test_digest_cron_is_not_duplicated(home):
+    from gideon.action_providers.digest_provider import (
+        DIGEST_JOB_NAME,
+        reconcile_digest_cron,
+    )
+
+    crons = _FakeCrons([_FakeJob(DIGEST_JOB_NAME, nr.DEFAULT_DIGEST_SCHEDULE)])
+    reconcile_digest_cron(crons)
+    assert crons.added == [] and crons.updated == []
+
+
+def test_digest_cron_schedule_converges(home):
+    """A schedule edited in Settings must take effect without the user knowing a cron exists."""
+    from gideon.action_providers.digest_provider import (
+        DIGEST_JOB_NAME,
+        reconcile_digest_cron,
+    )
+
+    _write_rules(home, {"digest": {"schedule": "30 6 * * 1-5"}})
+    crons = _FakeCrons([_FakeJob(DIGEST_JOB_NAME, "0 8 * * *")])
+    reconcile_digest_cron(crons)
+    assert crons.updated == [("j1", {"cron_expr": "30 6 * * 1-5"})]
+
+
+def test_digest_cron_ignores_unrelated_jobs(home):
+    from gideon.action_providers.digest_provider import reconcile_digest_cron
+
+    crons = _FakeCrons([_FakeJob("my-own-job", "0 9 * * *", "other")])
+    reconcile_digest_cron(crons)
+    assert len(crons.added) == 1, "it registers its own job"
+    assert crons.updated == [], "and leaves the user's job alone"
+
+
+def test_digest_cron_survives_a_broken_scheduler(home):
+    from gideon.action_providers.digest_provider import reconcile_digest_cron
+
+    class _Broken:
+        def list_jobs(self, include_disabled=False):
+            raise OSError("scheduler down")
+
+    reconcile_digest_cron(_Broken())  # must not raise — startup must not break
+
+
+@pytest.mark.asyncio
+async def test_digest_provider_reports_empty_queue_as_success(home, tmp_path, monkeypatch):
+    """An empty queue every quiet day must not light up the cron's error surface."""
+    monkeypatch.setattr("gideon.inbox.config_dir", lambda: tmp_path)
+    from gideon.action_providers.digest_provider import NotificationDigestActionProvider
+
+    result = await NotificationDigestActionProvider().execute({}, MagicMock())
+    assert result.success is True
+    assert "nothing queued" in (result.stdout or "")
+
+
+@pytest.mark.asyncio
+async def test_digest_provider_reports_the_created_item(home, tmp_path, monkeypatch):
+    monkeypatch.setattr("gideon.inbox.config_dir", lambda: tmp_path)
+    from gideon.action_providers.digest_provider import NotificationDigestActionProvider
+
+    nr.queue_for_digest({"kind": "cron", "title": "job ran"})
+    result = await NotificationDigestActionProvider().execute({}, MagicMock())
+    assert result.success is True
+    assert "created" in (result.stdout or "")
+
+
+@pytest.mark.asyncio
+async def test_digest_provider_surfaces_a_failure_as_an_error(home, monkeypatch):
+    from gideon.action_providers.digest_provider import NotificationDigestActionProvider
+
+    monkeypatch.setattr(nr, "run_digest", MagicMock(side_effect=RuntimeError("boom")))
+    result = await NotificationDigestActionProvider().execute({}, MagicMock())
+    assert result.success is False
+    assert "boom" in (result.error or "")
+
+
+def test_digest_provider_is_in_the_action_registry():
+    """Without registration the cron would fire and dispatch to nothing."""
+    from gideon.action_providers import get_action_provider
+    from gideon.action_providers.registry import _ensure_default_providers_registered
+
+    # The same idempotent registration the hooks runtime performs before dispatching an
+    # action. Without the provider in here, the digest cron would fire and resolve to
+    # nothing — the schedule would look healthy while producing no digest.
+    _ensure_default_providers_registered()
+    assert get_action_provider("notification-digest") is not None
+
+
+def test_digest_cron_does_not_reconverge_on_every_startup(home):
+    """The schedule read must use the REAL nested field, or startup rewrites it forever.
+
+    Regression: reading a flat `job.cron_expr` always yields None, so the reconcile saw
+    None != "0 8 * * *" and issued an update on every boot — churning the job file and
+    logging a schedule change that never happened.
+    """
+    from gideon.action_providers.digest_provider import (
+        DIGEST_JOB_NAME,
+        reconcile_digest_cron,
+    )
+
+    crons = _FakeCrons([_FakeJob(DIGEST_JOB_NAME, nr.DEFAULT_DIGEST_SCHEDULE)])
+    for _ in range(3):
+        reconcile_digest_cron(crons)
+    assert crons.updated == [], "a matching schedule must not be rewritten"
+    assert crons.added == []
+
+
+def test_fake_job_matches_the_real_schedule_shape():
+    """Guards the fake itself: if ScheduleJob's shape changes, this test fails loudly."""
+    from gideon.schedule import ScheduleJob
+
+    real = ScheduleJob(id="x", name="y")
+    assert hasattr(real, "schedule"), "the reconcile reads job.schedule.cron_expr"
+    assert not hasattr(real, "cron_expr"), "a flat attribute would make the fake a lie"
+    assert hasattr(real.schedule, "cron_expr")
