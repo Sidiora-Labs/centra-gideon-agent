@@ -72,8 +72,9 @@ sensible default. Common ones:
 | `GIDEON_IMAGE_TAG` | `latest` | pin a release |
 | `GIDEON_PORT` | `10000` | gateway port inside the container |
 | `GIDEON_BIND_HOST` | `0.0.0.0` (in compose) | so port-forwarding works |
-| `GIDEON_AUTH_MODE` | `local_token` | `api_key` is convenient for headless Docker |
-| `GIDEON_API_KEY` | — | set when `GIDEON_AUTH_MODE=api_key` |
+| `GIDEON_AUTH_MODE` | `local_token` | only `none` is honored as an override, and it forces a loopback bind |
+| `GIDEON_LOGIN_USER` | — | seeds the owner login once, at first boot |
+| `GIDEON_LOGIN_PASSWORD` | — | the password for that login (≥12 characters) |
 
 The images set `GIDEON_INSTALL_KIND=container` so the gateway knows it is a
 container install — the in-app Updates panel then shows the correct update
@@ -88,8 +89,41 @@ printed to the gateway logs at startup and can be regenerated:
 docker compose -f deploy/compose/compose.yaml exec gideon-gateway gideon token
 ```
 
-For headless deployments prefer `GIDEON_AUTH_MODE=api_key` with
-`GIDEON_API_KEY` set in `.env`, and send `Authorization: Bearer <key>`.
+## Owner login (a password instead of a token URL)
+
+A container has no terminal to type a password at, so the credential can be seeded from the
+environment on **first boot**:
+
+```dotenv
+# .env — the password must be at least 12 characters
+GIDEON_LOGIN_USER=you
+GIDEON_LOGIN_PASSWORD=a-long-passphrase-you-remember
+```
+
+Then turn the login form on (once, inside the container) and restart:
+
+```bash
+docker compose -f deploy/compose/compose.yaml exec gideon-gateway gideon auth enable
+docker compose -f deploy/compose/compose.yaml restart gideon-gateway
+```
+
+Three things worth knowing:
+
+- **Seeding never overwrites.** If a credential already exists the variables are ignored, so
+  leaving them in `.env` cannot reset a password you later changed. Rotate with
+  `gideon auth set-password` (or clear the credential first).
+- **Seeding does not enable the form.** Enrolling a credential and opening a front door are
+  separate decisions — `gideon auth enable` is the second one. Check either with
+  `gideon auth status`.
+- **The token URL keeps working.** Login is an *additional* way in, never a replacement, so a
+  misconfigured password can't lock you out of your own box.
+
+Prefer a Docker/compose secret or an `EnvironmentFile` with 0600 permissions over a
+world-readable `.env` — these two variables are as sensitive as the password itself.
+
+> `GIDEON_AUTH_MODE=api_key` is **not** wired up: `AuthConfig.from_env` honors only
+> `none` (which forces a loopback bind). Use the owner login above for headless access, or
+> mint a long-lived token with `gideon token --ttl`.
 
 ## Backups
 
