@@ -1551,6 +1551,122 @@ class WorkflowsConfig:
             "from starting without touching stored definitions.",
         ),
     )
+    max_active_runs: int = field(
+        default=10,
+        metadata=_meta(
+            "Max Active Runs",
+            "How many workflow runs may execute at once. A trigger firing faster than "
+            "its runs finish would otherwise stack them without bound.",
+        ),
+    )
+    max_concurrent_nodes: int = field(
+        default=6,
+        metadata=_meta(
+            "Max Concurrent Nodes",
+            "Total node slots per run, partitioned across typed lanes (llm/io/compute) "
+            "so a long local-model action cannot block the run's model calls.",
+        ),
+    )
+    default_node_timeout_total_secs: int = field(
+        default=900,
+        metadata=_meta(
+            "Node Timeout — Total",
+            "Wall-clock cap for one node, in seconds. 0 disables it.",
+        ),
+    )
+    default_node_timeout_stall_secs: int = field(
+        default=300,
+        metadata=_meta(
+            "Node Timeout — Stall",
+            "Kill a node after this many seconds with NO progress, even when it is "
+            "under the total cap. Progress events reset the clock, so a slow-but-"
+            "working node survives while a wedged one does not.",
+        ),
+    )
+    retention_per_def: int = field(
+        default=100,
+        metadata=_meta(
+            "Runs Kept Per Workflow",
+            "Oldest runs beyond this are pruned. Matches the per-job cap schedules use.",
+        ),
+    )
+    max_concurrent_llm_nodes: int = field(
+        default=4,
+        metadata=_meta(
+            "Lane Cap — Model Calls",
+            "How many model-backed nodes (stage/infer) may run at once in one workflow.",
+        ),
+    )
+    max_concurrent_io_nodes: int = field(
+        default=2,
+        metadata=_meta(
+            "Lane Cap — Actions",
+            "How many action nodes may run at once. Kept low on purpose: a fan-out over "
+            "minutes-long local-model actions would otherwise starve the run's model "
+            "calls behind it.",
+        ),
+    )
+    model_tier_reasoning: str = field(
+        default="reasoning",
+        metadata=_meta(
+            "Model Tier — Reasoning",
+            "Which model use case a node asking for the `reasoning` tier resolves to. "
+            "Templates name an intent, never a model, so they stay portable.",
+        ),
+    )
+    model_tier_standard: str = field(
+        default="background",
+        metadata=_meta("Model Tier — Standard", "Use case for the `standard` tier."),
+    )
+    model_tier_fast: str = field(
+        default="background",
+        metadata=_meta("Model Tier — Fast", "Use case for the `fast` tier."),
+    )
+
+    def lane_caps(self) -> dict[str, int]:
+        """Per-lane admission caps for the frontier (WF2-R21). `compute` is unmetered —
+        a transform is microseconds of pure data reshaping, so capping it adds only
+        latency."""
+        return {
+            "llm": self.max_concurrent_llm_nodes,
+            "io": self.max_concurrent_io_nodes,
+            "compute": 64,
+        }
+
+    def model_tiers(self) -> dict[str, str]:
+        """The tier → use-case slot map (WF2-R16)."""
+        return {
+            "reasoning": self.model_tier_reasoning,
+            "standard": self.model_tier_standard,
+            "fast": self.model_tier_fast,
+        }
+
+    def __post_init__(self) -> None:
+        # Clamp rather than reject: a nonsensical value from a hand-edited config must
+        # not stop the gateway booting, and 0 concurrency would deadlock every run.
+        if self.max_active_runs < 1:
+            object.__setattr__(self, "max_active_runs", 1)
+        if self.max_concurrent_nodes < 1:
+            object.__setattr__(self, "max_concurrent_nodes", 1)
+        if self.default_node_timeout_total_secs < 0:
+            object.__setattr__(self, "default_node_timeout_total_secs", 0)
+        if self.default_node_timeout_stall_secs < 0:
+            object.__setattr__(self, "default_node_timeout_stall_secs", 0)
+        if self.retention_per_def < 1:
+            object.__setattr__(self, "retention_per_def", 1)
+        if self.max_concurrent_llm_nodes < 1:
+            object.__setattr__(self, "max_concurrent_llm_nodes", 1)
+        if self.max_concurrent_io_nodes < 1:
+            object.__setattr__(self, "max_concurrent_io_nodes", 1)
+        # An empty tier mapping would resolve to no use case at all, so fall back to a
+        # real axis rather than letting a node fail at dispatch time.
+        for name, fallback in (
+            ("model_tier_reasoning", "reasoning"),
+            ("model_tier_standard", "background"),
+            ("model_tier_fast", "background"),
+        ):
+            if not str(getattr(self, name, "") or "").strip():
+                object.__setattr__(self, name, fallback)
 
 
 # ---------------------------------------------------------------------------
@@ -2610,6 +2726,30 @@ class AppConfig:
             ),
             workflows=WorkflowsConfig(
                 enabled=bool(workflows_data.get("enabled", True)),
+                max_active_runs=_safe_int(workflows_data.get("max_active_runs", 10), 10),
+                max_concurrent_nodes=_safe_int(workflows_data.get("max_concurrent_nodes", 6), 6),
+                default_node_timeout_total_secs=_safe_int(
+                    workflows_data.get("default_node_timeout_total_secs", 900), 900
+                ),
+                default_node_timeout_stall_secs=_safe_int(
+                    workflows_data.get("default_node_timeout_stall_secs", 300), 300
+                ),
+                retention_per_def=_safe_int(workflows_data.get("retention_per_def", 100), 100),
+                max_concurrent_llm_nodes=_safe_int(
+                    workflows_data.get("max_concurrent_llm_nodes", 4), 4
+                ),
+                max_concurrent_io_nodes=_safe_int(
+                    workflows_data.get("max_concurrent_io_nodes", 2), 2
+                ),
+                model_tier_reasoning=str(
+                    workflows_data.get("model_tier_reasoning", "reasoning") or "reasoning"
+                ),
+                model_tier_standard=str(
+                    workflows_data.get("model_tier_standard", "background") or "background"
+                ),
+                model_tier_fast=str(
+                    workflows_data.get("model_tier_fast", "background") or "background"
+                ),
             ),
             learning=LearningConfig(
                 enabled=bool(learning_data.get("enabled", True)),
