@@ -27,7 +27,6 @@ The extension-provider taxonomy (the capability types an app can contribute) and
 - **notify-action** — type `action` / `` (enabled); capabilities: execute
 - **run-prompt-action** — type `action` / `` (enabled); capabilities: execute
 - **run-script-action** — type `action` / `` (enabled); capabilities: execute
-- **run-workflow-action** — type `action` / `` (enabled); capabilities: execute
 - **send-message-action** — type `action` / `` (enabled); capabilities: execute
 - **native-agents** — type `agent` / `` (enabled); capabilities: crud, acp
 - **filesystem-inbox** — type `inbox` / `` (enabled); capabilities: approvals, inputs
@@ -42,10 +41,9 @@ The extension-provider taxonomy (the capability types an app can contribute) and
 - **gideon-knowledge-tools** — type `tool` / `` (enabled); capabilities: knowledge
 - **gideon-memory** — type `tool` / `` (enabled); capabilities: memory
 - **gideon-project-tools** — type `tool` / `` (enabled); capabilities: projects
+- **gideon-prompts** — type `tool` / `` (enabled); capabilities: prompts
 - **gideon-schedule-tools** — type `tool` / `` (enabled); capabilities: schedule_management
 - **gideon-subagents** — type `tool` / `` (enabled); capabilities: subagents
 - **gideon-tasks-tools** — type `tool` / `` (enabled); capabilities: task
 - **gideon-tools** — type `tool` / `` (enabled); capabilities: skills, notification, system
 - **gideon-ui-docs** — type `tool` / `` (enabled); capabilities: ui_docs
-- **gideon-workflows** — type `tool` / `` (enabled); capabilities: workflows
-- **native-workflows** — type `workflow` / `` (enabled); capabilities: crud, scoped, semantic-match

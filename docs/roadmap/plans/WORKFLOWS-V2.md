@@ -845,3 +845,171 @@ Each slice is independently shippable and testable. Rev-2 scope grows the estima
 | WF2-A1 | `step_cached` ledger event + `cached` flag on `workflow_node_done`; cache-hit regression pair (outside-closure cached / inside-closure re-run, ledger-asserted) | `workflows/journal.py`, `workflows/tick.py`, Slice 11 test file | edit-then-rerun fixture shows N cached + M re-run nodes exactly matching the binding closure; zero model calls for cached nodes |
 | WF2-A2 | Node inspection endpoint returning resolved prompt/inputs/output/attempts/ledger slice | `workflows/handlers.py`, `lib/api.ts` | endpoint returns the §5 reconstructability set for any terminal node; secrets absent (RedactingSink fixture) |
 | WF2-A3 | FE inspector drawer (run detail + widget node rows) with cached badge rendering | `web/src/pages/workflows/WorkflowRunDetail.tsx`, `WorkflowProgressCard.tsx` | a user can open any node and read its exact resolved prompt, inputs, and output; cached nodes visually distinct |
+
+---
+
+## Execution log
+
+- 2026-07-31 — **DONE (Phase 0: relocate shared code trapped in the old feature).**
+  The three §7 Phase-0 items, plus the premise audit that has to precede a 32-session
+  program. **No behavior change** — this is pure relocation, so Phase 1's deletion can
+  be surgical instead of collateral.
+
+  **Premise audit — all four §7 claims verified against code before touching anything:**
+  (a) `mcp_prompts.py` and `agents/identity.py` did not exist; (b) `resolve_agent_id` had
+  exactly ONE real consumer (`chat_runner.py:276`, through a thin `_resolve_agent_id`
+  wrapper) plus its tests; (c) `_CURRENT_AGENT_ID` is owned by `mcp_core` and used by
+  `mcp_workflows` only — so it stays in `mcp_core` for the new feature exactly as the plan
+  says; (d) the `workflow` `_TypeHandler` really does register into
+  `workflows/registry.py` (`providers/registry.py:224,229,628`), so the repoint-in-the-
+  same-commit rule in §7 is real. The old package is 1758 lines across 9 modules with 23
+  consumer files.
+
+  **T0.1 — `prompt_render` → `mcp_prompts.py` (new tool category).** Saved Prompts are
+  their own entity; the tool lived in `mcp_workflows` only because both were authored
+  together, and Phase 1 deletes that module **wholesale**. Registered through BOTH sites
+  the platform requires — `mcp_core._AGGREGATED_CATEGORY_MODULES` (the ACP MCP-server
+  surface: an unlisted module is invisible to every ACP agent) and a
+  `create_prompts_provider` factory reached via a new native app manifest
+  (`apps/native/gideon-prompts/app.json`), mirroring `gideon-artifacts`.
+  Removed from `mcp_workflows` in the same commit — no duplicate, no shim.
+
+  **T0.2 — `resolve_agent_id` → `agents/identity.py`.** `chat_runner` was importing an
+  identity rule across the workflow boundary. `composition.py` re-exports it so its own
+  callers keep working (that file dies in Phase 1 anyway); `chat_runner` now imports the
+  new home directly.
+
+  **T0.3 — no action needed**, per the audit above: `_CURRENT_AGENT_ID` has no consumer
+  outside `mcp_core`/`mcp_workflows`, so the plan's "if clean, keep it in mcp_core"
+  branch applies.
+
+  **DISCOVERY — a test file the §7 delete-list does not mention.**
+  `tests/test_prompt_render_tool.py` asserted the tool's LOCATION (`mcp_workflows._post`
+  patch targets), so it broke on the move and is repointed. Worth noting for Phase 1: §7's
+  test-deletion list is 8 files, but `test_prompt_render_tool.py` must NOT be deleted with
+  them — it now covers a surviving surface.
+
+  **LANDMINE CONFIRMED — a new tool category has FOUR registration points, not one.**
+  Two are code (aggregator tuple + provider factory/manifest) and two are guards that fail
+  only after the fact: `tests/test_native_tool_categories.py` deliberately duplicates the
+  aggregator list (`_CATEGORY_MODULES` + `_CATEGORY_PROVIDERS`) so a silent addition is
+  impossible, and the offline reference needs
+  `python -m gideon.manifest_reference` re-run (providers 28 → 29; tool count stays
+  66 — it MOVED, it was not added). All four updated.
+
+  **Three new boundary tests** pin the relocation so Phase 1 cannot quietly undo it:
+  `prompt_render` is absent from the workflows category, `mcp_prompts` imports nothing
+  workflow-related, and the aggregated ACP surface still exposes it.
+  `tests/test_agent_identity.py` (6 cases) rescues the identity coverage from
+  `test_workflows_composition.py`, which Phase 1 deletes — with two edge cases the
+  original lacked (all-absent → `""` not `None`; whitespace stripping).
+
+  **🔴 FINDING FOR PHASE 1 — the §7 delete-list has a gap that would break a SHIPPED
+  feature.** `workflows/surfacing.py:113` consults `feedback.suppressed_producers()`, and
+  `tests/test_feedback.py` asserts the `("workflow_surfacing", …)` producer pair round-trips
+  (lines 141-173). Deleting `workflows/surfacing.py` per §7 therefore breaks
+  Feedback-Signal S3's only *gated* consumer — its own execution log records that skills
+  surfacing was deliberately NOT wired, so workflow surfacing is the sole live one.
+  Phase 1 must either re-wire the suppression check into the v2 surfacing path or
+  re-scope those feedback assertions deliberately. **Not a blocker for Phase 0; recorded
+  before it becomes a surprise.**
+
+  **Gates:** `make lint` clean (black/isort/flake8 + mypy, 565 files) · `make test`
+  **9791 passed, 0 failed**. **Validated as a user** on an isolated dev home (:10777,
+  never :10000): created a saved prompt with two `{{variables}}` through the real API,
+  rendered it through the relocated tool end-to-end ("Report on the docs site for
+  platform."), confirmed `gideon-prompts` and `gideon-workflows` both appear
+  enabled in the Store, and confirmed each provider exposes exactly its own tools
+  (1 and 5). **0 tracebacks.**
+
+  **NOT in this session:** Phase 1 (delete the old feature) and Slice 0 (the new package).
+  Phase 0 stands alone and is strictly better without them — the shared code is no longer
+  hostage to a feature that is about to be deleted.
+- 2026-07-31 — **DONE (Phase 1: delete the old feature entirely).** Owner-approved clean
+  break ("Delete now, rebuild fast"), accepting the gap on `main` until the engine slices
+  land. Everything §7 Phase 1 lists is gone; the namespace is reused, no compat shim.
+
+  **Deleted:** the whole `workflows/` package (9 modules, 1758 lines), `mcp_workflows.py`,
+  `run_workflow_provider.py`, 3 native app dirs (`native-workflows`,
+  `gideon-workflows`, `run-workflow-action`), `web/src/pages/workflows/` (7 files),
+  and the 8 test files §7 names. Surgical edits landed in `context.py` (the
+  `[PREFERRED WORKFLOW]` surfacing block + force-include path), `server.py` (route
+  registration + the session-expire SOP sweep), `loop_routes.py` (classifier catalog),
+  `validation.py` (5 tool schemas, `_WORKFLOW_SCOPES`, the `run-workflow` hook entry),
+  `mcp_core.py`, `fs_watch.py`, `action_providers/registry.py`, `config/loader.py`.
+
+  **The `_TypeHandler` repoint — the constraint that shaped this commit.** §7's warning is
+  real and verified: `providers/registry.py` registered app-contributed workflow providers
+  into `workflows/registry.py`, and `PROVIDER_TYPES` must equal the runtime handler set or
+  installing/reinstalling ANY app declaring a workflow provider is refused (#47's bug
+  class, guarded by `test_manifest_types_match_handlers`). So `workflows/defs.py` — the v2
+  def-provider registry + `WorkflowDefProvider` ABC — is landed EARLY, in the same commit
+  as the deletion, and the handler now points at it. It is the seam only; read/list are
+  required and write is optional (a bundled template pack is legitimately read-only), and
+  a provider can never return a run — execution is engine-owned, since two writers on the
+  journal would break terminal-write ownership.
+
+  **User data preserved, not deleted.** `workflows/legacy.py` archives pre-v2
+  `<name>/WORKFLOW.md` dirs to `workflows/_legacy_sops/` on startup. Idempotent by data
+  inspection (no schema version exists; the house pattern), never raises (a permissions
+  problem on one stale dir must not stop the gateway booting), collision-safe (a
+  pre-existing archived name gets a `-2` suffix rather than being clobbered — it is the
+  user's own writing), and it skips `_`-prefixed dirs so it cannot re-archive its own
+  archive. 7 tests. **Verified on a real boot:** a planted SOP moved with content intact.
+
+  **DEVIATION — the blast radius is materially wider than §7 documents.** Five surfaces
+  had to be handled that its edit-list does not mention, each verified before touching:
+  1. **`workflow_ids` is a PERSISTED SQLite column** on the loops table (`loop/store.py:159`)
+     with 38 references across 21 files, including both LLM classifier prompts
+     (`suggested_workflow_ids`) and the per-phase `execution_plan`. Removing it would be a
+     class-B data change far beyond "surgical edits". **Kept intact**: the field persists,
+     the loop capability contract still returns its `(skills, workflows)` pair, and
+     `context.py` still accepts `force_workflow_ids` (documented as unused until Slice 6).
+     The classifier catalog's workflow half simply returns empty — which, given the prompts
+     say "use ONLY ids that appear in the catalog … empty when nothing fits", makes an
+     empty list the correct model output rather than a prompt change to re-tune three
+     slices later.
+  2. **Five FE files** consumed the deleted `WorkflowItem` type and `api.workflows()`:
+     `CapabilityPicker` (a shared primitive — its workflow peek branch removed, the `kind`
+     discriminant deliberately kept so Slice 7 can re-add one without re-threading it),
+     `ActionConfig` (the `workflow` widget, dead once no provider declares it),
+     `AgentDetail` (the agent-scoped-SOP list — v2 defs are not agent-scoped, so nothing
+     equivalent exists), and both plan reviews. A `WorkflowDefStub` type keeps the
+     length-guarded pickers compiling against the persisted field.
+  3. **`test_prompt_render_tool.py`** — as Phase 0 predicted, NOT deleted with the other 8;
+     its Phase-0 boundary test flipped to asserting `mcp_workflows` is *gone*.
+  4. **`TOOL_META`** had 5 stale entries; removing the block also removed `prompt_render`'s
+     (it sat immediately after), caught by `test_api_manifest_drift` and restored under its
+     own heading. Reference regenerated: 61 tools (was 66), providers 29 → 26.
+  5. **Config:** `workflows.match_threshold` deleted (surfacing-only), `enabled` kept and
+     re-documented as the engine kill-switch. The namespace is reused per §7.
+
+  **🔴 CAPABILITY REGRESSION, recorded not hidden.** Phase 0 flagged that deleting
+  `workflows/surfacing.py` breaks Feedback-Signal's suppression gate. Confirmed and
+  resolved honestly: plan line 53 deliberately deletes embedding-based auto-surfacing (v2
+  replaces it with an `[ACTIVE WORKFLOWS]` block for RUNNING runs), so there is no
+  eligibility gate to rewire — **and therefore no runtime consumer of
+  `suppressed_producers()` remains**. The Settings panel still reads it for display and
+  `check_retire_candidates` still proposes retirement, but nothing is actually withheld.
+  `workflow_surfacing` STAYS in `PRODUCER_KINDS` (append-only Tier-S — records on disk
+  reference it). `TestSurfacingSuppression` now pins the contract shape a consumer reads
+  plus the vocabulary invariant, and names Slice 6 / the flywheel skill work as where an
+  end-to-end case returns.
+
+  **Gates:** `make lint` clean (black/isort/flake8 + mypy, 557 files — down from 565) ·
+  `make test` **9698 passed, 0 failed** (down from 9791: 8 test files deleted with the
+  feature) · web `typecheck` + **307 vitest** + `build` all green.
+
+  **Validated as a user** on isolated dev homes (:10788, never :10000), driving the real
+  UI in a browser: the dashboard renders with **no Workflows nav entry** and all 16 other
+  sections intact; `#/workflows` no longer renders a broken page; Triggers, Loops, Apps,
+  Prompts and Inbox all load; `/api/workflows*` returns 404 while status/apps/prompts/
+  loops/triggers stay 200; the agent tool surface shows **zero `workflow_*` tools** with
+  `prompt_render` present; the action-provider list is 9 with `run-workflow` absent and
+  `run-prompt` present (so the UI cannot offer an action that would fail at dispatch); a
+  planted legacy SOP was archived with content preserved. **0 console errors**; the 2
+  gateway tracebacks are "no model provider configured" on a keyless seeded home.
+
+  **NOT in this session:** Slice 0 (models/store/bindings/validator) onward. `defs.py`
+  ships as the registry seam only — deliberately the minimum that keeps the provider-type
+  parity guard honest.
