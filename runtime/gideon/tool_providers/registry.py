@@ -78,6 +78,18 @@ def create_workflows_provider(config: dict[str, Any] | None = None) -> ToolProvi
     )
 
 
+def create_prompts_provider(config: dict[str, Any] | None = None) -> ToolProvider:
+    """Extension factory for the ``gideon-prompts`` tool surface — in-process
+    over ``mcp_prompts`` (render the user's saved, parameterized Prompts)."""
+    from gideon.agents.native.tools import InProcessMcpToolProvider
+
+    return InProcessMcpToolProvider(
+        module="gideon.mcp_prompts",
+        provider_name="gideon-prompts",
+        display="Gideon Prompts",
+    )
+
+
 def create_memory_provider(config: dict[str, Any] | None = None) -> ToolProvider:
     """Extension factory for the ``gideon-memory`` tool surface — in-process
     over ``mcp_memory`` (persistent lessons + on-demand recall)."""
