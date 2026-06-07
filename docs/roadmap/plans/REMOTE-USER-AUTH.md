@@ -404,3 +404,172 @@ Under the pre-1.0 banner this executes as a clean break (no lifecycle gate/migra
   public-exposure hardening (Secure cookie / `wss` CSP / trusted-proxy headers / enrollment
   codes). S2 stands alone: a credential exists, is reachable from the CLI, and no surface offers
   it yet — `login_enabled` defaults off, so behavior is unchanged for every existing install.
+
+- 2026-07-30 — **DONE (S3: the login front door — routes, lockout, `/login`, Account panel).**
+
+  **One ISSUER, not a second authorization path.** `POST /api/auth/login` verifies argon2 and then
+  calls the same `generate_token` the `?token=` link and `gideon token` already call, setting
+  the same `pc_token_{port}` cookie with the same flags. The middleware cannot tell the two apart —
+  which is Success Criterion 2, and is asserted by validating a login-minted token through the
+  ordinary `validate_token` path. No new validator exists to drift out of step with the old one.
+
+  **The anti-brick property is enforced by CODE, not by documentation.** `_login_offered()` requires
+  BOTH `login_enabled` AND an actually-configured credential before any page redirects to `/login`,
+  and any exception falls back to the paste-token gate. So enabling login and then losing/corrupting
+  the credential file leaves the gate — the escape hatch — reachable, rather than bouncing every
+  page to a form nobody can pass. Verified live on a fresh gateway with a corrupted
+  `credentials.json`: the page served **403 with the gate** and login refused fail-closed.
+
+  **`revoke_token()` added, because "logout" was otherwise theatre.** Only `revoke_all_sessions`
+  existed. Clearing the cookie alone leaves the token live for anyone holding a copy (a synced
+  browser profile, a proxy log), so logout now revokes the nonce in memory **and** in the durable
+  store. The durable half is the security half — the same class of bug S1 fixed for revoke-all: an
+  in-memory-only drop would be re-accepted after a restart.
+
+  **Lockout is per-IP, fail-OPEN on bookkeeping, and refuses the correct password too.** A lockout
+  that let a correct guess through would be decorative. The failure table is in memory (persisting
+  it would give an unauthenticated endpoint a write primitive) and capped at 4096 IPs so address
+  rotation cannot grow it. `X-Forwarded-For` is deliberately IGNORED for the client key: an
+  untrusted peer can forge it, which would let an attacker both reset their own counter and lock out
+  an arbitrary victim. S4 (T4.1) introduces trusted-proxy handling.
+
+  **No enumeration.** Wrong username and wrong password both return `auth_invalid_credentials` and
+  both pay the argon2 cost (S2's timing equalization). `auth_not_enabled` is deliberately distinct —
+  "this door does not exist here" is the owner's own configuration, not a secret, and conflating it
+  would make a misconfiguration indistinguishable from a typo. TOTP is checked AFTER the password so
+  a valid-password/missing-code case is not separable by timing.
+
+  **Exemptions are exactly three**, pinned by a test: `/login`, `/api/auth/login`,
+  `/api/auth/status`. Logout, the session view and the password setter stay behind the middleware,
+  verified by driving them through the REAL middleware rather than only inspecting the list.
+  `/api/auth/status` returns two booleans and never the username or whether a credential exists.
+
+  **DEVIATION — `POST /api/auth/password` accepts a password in a request body.** This looks like it
+  contradicts S2's "CLI-only" rule, and the distinction is deliberate: it sits BEHIND the session
+  middleware and the CSRF origin check, so it cannot be reached without an existing valid session.
+  T3.4 asks for setting credentials from the browser on the LAN; the alternative is that a user who
+  only ever reaches their box through a browser can never set a password at all. What stays true is
+  that no UNAUTHENTICATED path accepts a password, and the PATCH allowlist still refuses anything
+  password-shaped.
+
+  **Found and fixed a collision of my own making.** My new handler was also named `api_auth_status`,
+  colliding with the pre-existing `handlers_system.api_auth_status` behind `/api/auth-status` in the
+  build-time reference generator (which keys on function name) — the generated docs silently replaced
+  the older route's description with mine. Renamed to `api_login_status`; both routes now document
+  correctly. Two repo guards earned their keep: the reference-drift test and
+  `test_api_manifest_drift`, which required `/login` to be explicitly declared UI-transport rather
+  than left as an undocumented surface.
+
+  **ARCC was NOT queried — the MCP server is unavailable in this session.** Standard practice
+  applied: HttpOnly + SameSite=Lax cookie (asserted), CSRF origin check on every mutating auth
+  route, fail-closed verification, no enumeration oracle, per-IP rate limit with `Retry-After`,
+  durable revocation, SEL trail on `login_success`/`login_failed`/`login_locked_out`/
+  `session_revoked`/`password_set`, and no password or hash in any response, log, or status payload.
+
+  **Validated as a user** on an isolated dev home across **three real gateway boots** (ports
+  10853/10854, never :10000): unauthenticated page → **302 to /login** while an API request still
+  got **JSON 403**; wrong password → 401 `auth_invalid_credentials`; correct password → cookie that
+  authorized both a page (200) and `/api/sessions` (200); logout → the same cookie **stopped
+  working** (302/403); 3 failures → **429 with `Retry-After: 899`** and the
+  correct password also refused; with login enabled AND locked out, the local `?token=` path still
+  returned **200** (the escape hatch); a corrupted credential file → the **paste-token gate**, not a
+  redirect loop; and a login session **survived a gateway restart**. **0 tracebacks across all
+  three boots.**
+
+  **Gates:** `make lint` clean (mypy 561 files) · `make test` **9701 passed, 0 failed** · web
+  typecheck + **302 vitest** + build green. Tests: `tests/test_auth_login.py`, 45 cases.
+
+  **NOT in this session** (S4): `Secure` cookie + `wss` CSP + trusted-proxy forwarded headers off
+  `dashboard.public_url`, the TOTP QR in Settings, remote enrollment codes
+  (`/api/auth/enroll/start|complete`), and `docs/guides/remote-access.md`.
+
+- 2026-07-30 — **DONE (S4: exposure hardening + TOTP at login + device enrollment + the guide).**
+
+  **DEVIATION — `dashboard.public_url` did not exist; the plan named a field that was never built.**
+  Only `inbound.public_url` (MCP-READONLY-INBOUND) existed. Added `dashboard.public_url` +
+  `dashboard.trusted_proxies`, and put the resolution in ONE place (`dashboard/exposure.py`) that
+  prefers the dashboard field and falls back to the inbound one — because the plan's own
+  coordination note says there is one "this instance is exposed" signal serving two surfaces. An
+  operator who already declared exposure for the inbound surface should not have to say it twice
+  and silently keep an unhardened dashboard.
+
+  **`dashboard.url` is deliberately NOT the signal**, though it already exists and looks apt. It
+  means "a URL to put in links", and people legitimately set it to a LAN/`http://` address.
+  Deriving `Secure` from it would set a flag that makes the cookie undeliverable over plain http —
+  the user would be silently unable to log in with nothing pointing at the cause. Pinned by a test.
+
+  **The forwarded-header rule was the real vulnerability.** `_resolved_client_ip` trusted
+  `X-Real-IP` based on the SHAPE of the peer address (`10.`/`172.1x`/`192.168.`). On an exposed
+  box every container neighbour, LAN device and SSRF-able local service sits on a private address,
+  so any of them could set that header and move a session's IP binding. Now: exposed ⇒ only a peer
+  in `trusted_proxies` is believed (empty = trust nothing); NOT exposed ⇒ **behavior unchanged**,
+  because breaking every compose/nginx user to harden the few would be a regression paid by
+  everyone. **Mutation-verified**: reverting the hardening makes
+  `test_forwarded_header_ignored_from_an_untrusted_peer_when_exposed` fail (403 vs 200), so the
+  test detects the actual vulnerability rather than merely covering the line.
+
+  **`Secure` is shared, not duplicated.** Both mint paths (middleware + login handler) call one
+  `secure_cookies()`, so a login cookie cannot end up with a different posture than a link cookie.
+  An `http://` public URL deliberately does NOT get `Secure` — insecure by nature, but not broken;
+  the guide says plainly that TLS termination is the precondition.
+
+  **Enrollment codes bound the blast radius of an 8-character string:** single-use (consumed and
+  persisted BEFORE the session is minted, so a race cannot redeem twice), 300s TTL, at most 5
+  outstanding (an attacker cannot widen the guess space by asking for thousands), SHA-256 at rest
+  in a 0600 file (reading it yields nothing redeemable), constant-time compared, fail-closed on an
+  unreadable store, and wrong codes count toward the same lockout as passwords. Alphabet excludes
+  I/O/0/1 because the code is read off one screen and typed into another.
+
+  **A REAL BUG found only by live validation, and it was pre-existing on `main`.**
+  `gideon auth revoke --all` printed success while the revoked session **kept working**.
+  Two faults: (1) my CLI cleared the on-disk store while the running gateway held the nonces in
+  memory — a two-process state bug no in-process test can see; (2) the root cause — **`/api/logout`
+  was missing from `_BYPASS_EXACT`**, so the dashboard middleware demanded a session token before
+  `api_logout`'s own loopback + `X-Local-Secret` check could run. Every `gideon logout` has
+  been returning 403 while the CLI reported "✅ All dashboard sessions revoked." A
+  revoke-everything command that could never revoke anything.
+
+  Fixed by routing the CLI through the running gateway (reusing the existing rail, no new
+  authenticated surface) and adding `/api/logout` beside `/api/token/local` — the precedent for a
+  route that authenticates ITSELF. Exempting it opens nothing; it lets the request reach the check
+  that guards it, asserted by a test that drives the middleware and then the handler. Both
+  regression tests are **mutation-verified**. I first tried `internal_paths`, which was the wrong
+  lever (that branch wants `X-Internal-Secret`) and reverted it.
+
+  **DEVIATION — `auth revoke <nonce>` is not built; only `--all`.** A per-nonce revoke means
+  printing live nonces so the user can choose one, and a nonce in a terminal or shell history is a
+  credential. Re-authenticating is cheap; leaking a session identifier to save a step is not.
+
+  **T4.4 guide** (`docs/guides/remote-access.md`, linked from the README) walks a reader from
+  tunnel → password → `public_url` → 2FA → phone pairing, and has an explicit **"what this does not
+  protect you from"** section (weak passwords, compromised devices, the tunnel provider, the
+  agent's own reach, plain-http exposure). Also fixed `containers.md`, which recommended
+  `GIDEON_AUTH_MODE=api_key` — a mode `AuthConfig.from_env` does not honor, so readers
+  believed they had configured auth they did not have.
+
+  **ARCC was NOT queried — the MCP server is unavailable in this session.** Standard practice
+  applied: default-deny trusted proxies, no shape-based trust of attacker-controlled headers,
+  `Secure`+`HttpOnly`+`SameSite=Lax` cookies on an exposed instance, single-use hashed short-lived
+  codes, rate limiting on the pre-auth redemption endpoint, 0600 on every new file, fail-closed
+  reads throughout, and no secret in any log, status payload or response.
+
+  **Validated as a user** across **four gateway boots** on an isolated dev home (port 10861, never
+  :10000), configured as exposed: the session cookie carried **`Secure; HttpOnly; SameSite=Lax`**;
+  the CSP contained **`wss://pc.example.com https://pc.example.com`**; a CLI-minted code
+  (`FYHW-PB9C`) paired a device (200) and was then **refused on reuse**; the code store held **no
+  plaintext** at 0600; `require_totp` refused a password-only login with `auth_totp_required` and
+  accepted it with a live code; and after the fix `auth revoke --all` **killed the live session**
+  (302) with `gideon logout` working again. **0 tracebacks.**
+
+  **Gates:** `make lint` clean (mypy 563 files) · `make test` **9752 passed, 0 failed** · web
+  typecheck + **302 vitest** green. Tests: `tests/test_auth_exposure.py`, 51 cases.
+
+  **Storage decision (plan's request to record):** `auth/credentials.json` joins the
+  snapshot/export set; `auth/signing_key`, `auth/sessions.json` and `auth/enroll_codes.json` are
+  **excluded** — a signing key or live nonce in a portable archive is a credential in a backup,
+  and enrollment codes are 5-minute artifacts that would be expired garbage on restore.
+
+  **Remaining in this plan:** the TOTP **QR image** in Settings (the secret + `otpauth://` URI are
+  both surfaced, so enrollment works today by paste; a rendered QR needs a frontend qr dependency
+  — deferred as a taste/dependency call, not a blocker), and passkey/WebAuthn, which the plan
+  already lists as a future extension rather than v1 scope.
