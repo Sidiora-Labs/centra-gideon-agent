@@ -53,8 +53,8 @@ mandatory.
 | 1 | **Slice 2a** — extended outcome states through state/journal/ledger; typed attempt records + mutation-hint retries + structured retry payloads | G1 | ✅ DONE |
 | 2 | **Slice 2b** — engine-owned completion: verification ladder, `required_artifacts`, `gate.verify{script}`, fresh-judge invariant, closed verdict enum | G1 | ✅ DONE |
 | 3 | **Slice 2c** — deterministic circuit breaker in frontier; escalation artifact; budgets (node soft caps, extend gates, baseline_check, topology estimate); two-knob timeout warm-up split; foreach `on_item_error` + per-item checkpointing | G1 | ✅ DONE |
-| 4 | **Slice 3a** — effect ledger: idempotency keys, effect_status, redo_effects gate, caller idempotency dedupe, BYOI teardown | G2 | TODO |
-| 5 | **Slice 3b** — v2 `run-workflow` action provider + `ALLOWED_HOOK_PROVIDERS`; write-scope enforcement (pre/post fs diff, scope_violation); termination (sticky cancel, protocol-violation, `workflow_audit`); secrets (`{{secret:KEY}}`, `_has*` stripping, RedactingSink) | G2 | TODO |
+| 4 | **Slice 3a** — effect ledger: idempotency keys, effect_status, redo_effects gate, caller idempotency dedupe, BYOI teardown | G2 | ✅ DONE (#139) |
+| 5 | **Slice 3b** — v2 `run-workflow` action provider + `ALLOWED_HOOK_PROVIDERS`; write-scope enforcement (pre/post fs diff, scope_violation); termination (sticky cancel, protocol-violation, `workflow_audit`); secrets (`{{secret:KEY}}`, `_has*` stripping, RedactingSink) | G2 | ✅ DONE (#140) |
 | 6 | **Slice 4a** — `mutations.py`: op types incl. `run_from`, batch validator, spec-history writer, epoch/inputs-hash logic | G3 | TODO |
 | 7 | **Slice 4b** — binding-dependency cascade closure, engine-computed preview, `inputs_stale`, rollback-vs-revert, TOCTOU re-verify; mutation queue in the controller; grammar hardening a-f | G3 | TODO |
 | 8 | **Slice 4c** — rewind (archive outputs + journal region, epoch bump, memoized replay); checkpoints + `fork`; property tests (rewind idempotence, cascade = binding closure, fork isolation) | G3 | TODO |
@@ -185,3 +185,43 @@ mandatory.
   run and no notice; (b) `model_tier_standard` defaults to `orchestration` not `background`,
   or `standard` and `fast` collapse to one model and the three tiers are decorative;
   (c) added `GateKind.LADDER` + `GateKind.JUDGE` rather than overloading `verify_command`.
+- 2026-08-01 — session 4 (Slice 3a, the effect ledger) DONE → **PR #139**. `effects.py`:
+  `sha256(run_id+instance_path+epoch)` identity, the 5-state effect lifecycle in
+  `events.jsonl`, the committed-effect redo boundary, teardown-before-redo, strict
+  one-object BYOI stdout parsing, and `CallerDedupe` for the Slice-6 tool surface.
+  10075 tests (+26). Validated live against the REAL bash provider: fired 1x and committed
+  `output_id=res-42`; an epoch bump without `redo_effects` blocked (`committed_effect`) with
+  the provider never dispatched — still 1x; with `redo_effects` the teardown received
+  `res-42` and the node re-fired exactly once.
+  DEVIATIONS: (a) **`BLOCKED` added to `TERMINAL_STATES`** — it means "the engine refused,
+  a human must decide", so leaving it schedulable made the frontier relaunch-and-refuse
+  forever (the silent hang the state exists to prevent); its absence also made
+  `_ROOT_TO_RUN[BLOCKED]` unreachable. 351 workflow tests confirm no regression.
+  (b) PR base is `main`, not `feature-wf2-slice2`: #138 squash-merged mid-session, so the
+  branch was rebased `--onto origin/main` to shed the duplicated pre-squash slice-2 content.
+  **Stacking lesson: when the predecessor PR merges mid-session, rebase onto the squashed
+  main rather than opening against a deleted branch.**
+  (c) **DCO landmine, cost one CI failure:** `git commit --amend -F -` REPLACES the message
+  and silently drops the `Signed-off-by` trailer. Always `--amend -s`. Verify with
+  `git log -1 --format='%(trailers:key=Signed-off-by,valueonly)'` before pushing.
+- 2026-08-01 — session 5 (Slice 3b) DONE → **PR #140**. `scope.py` (snapshot/diff write-scope
+  with symlink resolution, warn-vs-reject, opt-in), `audit.py` (`workflow_audit` diagnose/heal,
+  dry-run-default, live-controller protection, `blocked{protocol_violation}`), `secrets.py`
+  (`_has*` strip / node-id-keyed re-inject / inline-secret lint), and the v2 `run-workflow`
+  provider re-registered + re-allowlisted in one commit. 10148 tests (+73).
+  Validated live on real disk: a provider clobbering a real file above the workspace was
+  caught by name in warn (complete + ledgered) and reject (scope_violation); a real symlink
+  escape resolved out of scope; an 8h-stale node healed to blocked/protocol_violation while
+  dry-run changed nothing.
+  DEVIATIONS/DISCOVERIES: (a) **`_epoch` used `time.mktime` on UTC `...Z` stamps** in BOTH
+  `audit.py` and `controller.py` — mktime reads the struct as LOCAL time, so the offset
+  cancelled the measured age and the stale-running check was permanently inert; in the
+  controller it only showed as an hour-wrong duration across a DST boundary. Both now
+  `calendar.timegm`, regression-pinned. (b) **Consolidated the duplicate credential-shape
+  list**: `validator.py` had its own prefix tuple, so two vendor-shape lists would drift
+  until one stopped catching a provider. It now reads `secrets.py`; the stale validator
+  keeps-entry was removed and `secrets.py` added, carrying over `gho_`/`hf_` (a test caught
+  that the consolidation would have dropped them). (c) `watch_roots` is necessarily WIDER
+  than `allowed_write_paths` — snapshotting only allowed paths makes a violation
+  undetectable by construction; it reaches one level above the workspace, not `$HOME`, and
+  the limitation is stated in the module rather than papered over.
