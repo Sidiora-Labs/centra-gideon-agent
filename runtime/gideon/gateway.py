@@ -1836,8 +1836,15 @@ class GatewayOrchestrator:
         # working" while nothing is.
         if self._cfg.workflows.enabled:
             from gideon.workflows.controller import EngineServices
+            from gideon.workflows.native_defs import register_native_provider
             from gideon.workflows.tick import Limits
             from gideon.workflows.watchdog import WorkflowWatchdog
+
+            # The native filesystem def provider — where a user's OWN workflows live.
+            # `defs.py` is only a registry seam, so without this nothing writable is
+            # registered and saving a definition fails with "no writable provider" unless
+            # an app happens to contribute one.
+            register_native_provider()
 
             wf_cfg = self._cfg.workflows
             self.workflow_watchdog = WorkflowWatchdog(
@@ -1851,6 +1858,21 @@ class GatewayOrchestrator:
                 ),
             )
             self.workflow_watchdog.start()
+            # Publish the supervisor so BOTH consumers can reach it: the REST handlers
+            # (Slice 7a) read `state.workflows`, and the `run-workflow` action provider
+            # reads `ActionServices.workflows`. Without this the routes create runs nobody
+            # drives, and the trigger provider returns "no supervisor available" — both
+            # already handle a None, but both are inert until this line runs.
+            if self.dashboard_state is not None:
+                self.dashboard_state.workflows = self.workflow_watchdog
+            try:
+                from gideon.action_providers.services import get_action_services
+
+                svc = get_action_services()
+                if svc is not None:
+                    svc.workflows = self.workflow_watchdog
+            except Exception:
+                logger.debug("could not attach the workflow supervisor to action services")
 
     async def _init_inbox(self) -> None:
         """Construct the Inbox service (state + store + on-demand AI triage).
