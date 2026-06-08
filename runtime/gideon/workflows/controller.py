@@ -40,8 +40,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from gideon.workflows import journal as journal_mod
-from gideon.workflows import store
-from gideon.workflows.bindings import BindingContext
+from gideon.workflows import mutations, store
+from gideon.workflows.bindings import BindingContext, node_deps
 from gideon.workflows.effects import (
     EffectRecord,
     EffectStatus,
@@ -53,6 +53,7 @@ from gideon.workflows.effects import (
     run_teardown,
 )
 from gideon.workflows.engine import NodeResult, dispatch
+from gideon.workflows.human_input import drop_continuations
 from gideon.workflows.journal import CacheKey, Journal, inputs_hash, spec_region_hash
 from gideon.workflows.models import (
     SUCCESS_STATES,
@@ -190,6 +191,10 @@ class RunController:
         #: between commit and completion double-fires on resume — the exact hole the
         #: ledger closes (WF2-R1).
         self._effects: dict[str, list[EffectRecord]] = effect_history(run.id)
+        #: Validated batches awaiting the tick loop's drain point. A queue rather than
+        #: direct application: a handler applying a mutation mid-launch would make two
+        #: writers of run state (WF2-R10).
+        self._pending_mutations: list[tuple[mutations.BatchResult, str]] = []
         self._outputs: dict[str, Any] = {}
         self._terminal = asyncio.Event()
         self._load_outputs()
@@ -221,9 +226,16 @@ class RunController:
     # ── public lifecycle ──
 
     async def start(self) -> None:
-        """Launch the tick loop as a background task."""
+        """Launch the tick loop as a background task.
+
+        The terminal event is CLEARED here. It is set when a loop exits, so a controller
+        restarted in place after a rewind (the run went terminal, a mutation reset part of
+        it, work remains) would otherwise have `run_to_completion` return the previous
+        run's status immediately without waiting for the new work.
+        """
         if self._task and not self._task.done():
             return
+        self._terminal.clear()
         self._task = asyncio.create_task(self._tick_loop())
 
     async def run_to_completion(self, *, timeout: float = 0.0) -> RunStatus:
@@ -313,6 +325,11 @@ class RunController:
             await self._finish(RunStatus.CANCELLED)
             return True
 
+        # Mutations drain HERE — lock held, nothing mid-launch (WF2-R20 safety #1). Before
+        # the frontier, so an applied edit is reflected in this step's scheduling rather
+        # than a tick later.
+        self._drain_mutations()
+
         self._wake_due_nodes()
 
         fr = self._frontier()
@@ -347,12 +364,415 @@ class RunController:
 
         if not self._inflight and not fr.ready and not fr.deferred:
             waiting = [p for p, i in self.instances.items() if i.state == InstanceState.WAITING]
+            gates = [p for p in waiting if self._is_gate(p)]
+            # A gate awaiting a HUMAN surfaces as needs_input IMMEDIATELY (WF2-R7): a run
+            # that parks quietly for 45s and only then surfaces is a run nobody knows to
+            # answer. Surfacing and terminating are separate, though — see below.
+            for path in gates:
+                self._ensure_continuation(path)
+            if gates and self.run.status != RunStatus.NEEDS_INPUT:
+                self._surface_needs_input()
             if waiting and self._next_wake_delay() is None:
-                # Parked on a human/external signal with no deadline: needs_input, which
-                # is a real surfaced state, not a hang.
+                # Nothing will wake this run: no deadline, no in-flight work. NOW it is
+                # terminal. With a deadline still pending the loop keeps ticking so the
+                # unattended timeout can actually fire — a surfaced run is waiting, not
+                # finished.
                 await self._finish(RunStatus.NEEDS_INPUT)
                 return True
         return False
+
+    def _surface_needs_input(self) -> None:
+        """Publish the needs-input state without ending the run.
+
+        Split from `_finish` deliberately: a gate with an unattended deadline must be
+        VISIBLE now and still able to time out later. Collapsing the two would force a
+        choice between surfacing promptly and honouring the timeout.
+        """
+        self.run.status = RunStatus.NEEDS_INPUT
+        self._save_run()
+        self._publish("workflow_run_update", {"status": RunStatus.NEEDS_INPUT.value})
+
+    def _is_gate(self, path: str) -> bool:
+        """Is this waiting instance a human-input gate (versus a `wait` deadline)?
+
+        A `wait` is parked on the CLOCK and resolves itself, so surfacing it as needs_input
+        would ask a human to answer something nobody asked them.
+        """
+        node = dict(_walk(self.root)).get(_base_path(path))
+        if node is None or node.kind != NodeKind.GATE:
+            return False
+        raw = str((node.config or {}).get("kind", "") or "")
+        return raw in ("approval", "event")
+
+    def _ensure_continuation(self, path: str) -> None:
+        """Mint a durable resume point for a waiting gate (WF2-R7), once per epoch.
+
+        Idempotent by (path, epoch): a run can pass through `needs_input` repeatedly as the
+        watchdog polls it, and a fresh token per poll would leave a pile of live approval
+        links for one question — each of them individually valid.
+        """
+        from gideon.workflows.human_input import (
+            create_continuation,
+            handoff_bundle,
+            list_continuations,
+        )
+
+        inst = self._instance(path)
+        for existing in list_continuations(self.run.id):
+            if existing.instance_path == path and existing.epoch == inst.epoch:
+                return
+        node = dict(_walk(self.root)).get(_base_path(path))
+        ask = dict(self.run.attention or {}) if self.run.attention else {}
+        outstanding = [
+            p for p, i in self.instances.items() if i.state not in TERMINAL_STATES and p != path
+        ]
+        cont = create_continuation(
+            self.run.id,
+            node_id=node.id if node else "",
+            instance_path=path,
+            epoch=inst.epoch,
+            resolved_inputs=self._resolved_for_path(path),
+            ask=ask,
+            handoff=handoff_bundle(
+                scope=self.run.workflow_name,
+                status="blocked on human input",
+                outstanding=outstanding,
+                checks_run=[p for p, i in self.instances.items() if i.state in SUCCESS_STATES],
+                next_steps=[f"answer the gate at {node.id if node else path}"],
+            ),
+        )
+        self._publish(
+            "workflow_needs_input",
+            {
+                "node_id": cont.node_id,
+                "instance_path": path,
+                "resume_token": cont.token,
+                "ask": cont.ask,
+                "handoff": cont.handoff,
+                "expires_at": cont.expires_at,
+            },
+        )
+
+    def _resolved_for_path(self, path: str) -> dict[str, Any]:
+        """What this node had already resolved — the field that makes a resume re-enter
+        the STEP rather than re-run the enclosing subgraph."""
+        node = dict(_walk(self.root)).get(_base_path(path))
+        if node is None:
+            return {}
+        deps = node_deps(node.config or {})
+        return {dep: self._outputs.get(dep) for dep in sorted(deps)}
+
+    def resume(self, token: str, answer: Any) -> dict[str, Any]:
+        """Answer a waiting gate. The out-of-band entry point (widget, inbox, HTTP, chat).
+
+        The answer is VALIDATED before the token is consumed: rejecting afterwards would
+        have already destroyed the token, leaving a dead link and an unanswered gate. Then
+        the token is consumed ATOMICALLY, so a double-click or a retried POST cannot replay
+        one approval into two actions.
+        """
+        from gideon.workflows.human_input import (
+            Ask,
+            consume_continuation,
+            expired_item,
+            load_continuation,
+        )
+
+        cont = load_continuation(self.run.id, token)
+        if cont is None:
+            return {"ok": False, "code": "WF_RESUME_UNKNOWN_TOKEN"}
+        if cont.expired:
+            consume_continuation(self.run.id, token)
+            item = expired_item(cont)
+            self._publish("workflow_needs_input", item)
+            return {"ok": False, "code": "WF_RESUME_EXPIRED", "item": item}
+
+        ask = Ask.from_dict(cont.ask)
+        problem = ask.validate_answer(answer)
+        if problem:
+            # Validated BEFORE consuming: the token survives so the user can correct it.
+            return {"ok": False, "code": "WF_RESUME_INVALID_ANSWER", "message": problem}
+
+        claimed = consume_continuation(self.run.id, token)
+        if claimed is None:
+            # Another resume won the race. Exactly one answer applies.
+            return {"ok": False, "code": "WF_RESUME_ALREADY_USED"}
+
+        inst = self._instance(cont.instance_path)
+        if inst.epoch != cont.epoch:
+            # The node was rewound under the token: applying it would land the answer in
+            # the wrong epoch, which is worse than refusing.
+            return {"ok": False, "code": "WF_RESUME_STALE_EPOCH"}
+
+        filled = ask.apply_defaults(answer)
+        approved = _is_approved(ask, filled)
+        inst.wake_at = 0.0
+        if approved:
+            inst.state = InstanceState.DONE
+            ref, preview = self.journal.store_output(
+                cont.instance_path, {"answer": filled, "approved": True}
+            )
+            inst.output_ref = ref
+            if cont.node_id:
+                self._outputs[cont.node_id] = preview
+        else:
+            inst.state = InstanceState.FAILED
+            inst.failure = Failure(
+                failure_class=FailureClass.USER,
+                cause_plain="the gate was denied",
+                remediation="adjust the work the gate rejects, then re-run from this node",
+                terminal_reason="denied",
+            )
+        inst.completed_at = _now()
+        self.journal.write(
+            journal_mod.GATE_RESOLVED,
+            instance_path=cont.instance_path,
+            node_id=cont.node_id,
+            epoch=cont.epoch,
+            approved=approved,
+            answer=filled,
+        )
+        self.run.attention = None
+        self._persist_state()
+        self._save_run()
+        self._publish(
+            "workflow_gate_resolved",
+            {"node_id": cont.node_id, "instance_path": cont.instance_path, "approved": approved},
+        )
+        return {"ok": True, "approved": approved, "node_id": cont.node_id}
+
+    # ── mid-flight mutation (WF2-R2 / R20) ──
+
+    def submit_mutation(
+        self,
+        raw_ops: list[dict[str, Any]],
+        *,
+        actor: str = "user",
+        confirm: bool = False,
+        expect_version: int | None = None,
+    ) -> dict[str, Any]:
+        """Validate a batch and QUEUE it; the tick loop applies it.
+
+        Returns the preview and issues synchronously — a caller needs to see the cascade
+        before it lands, and a batch that cannot pass validation should not reach the queue
+        at all. Nothing here writes run state: this is a handler, and handlers request
+        while the loop decides (WF2-R10).
+
+        A cascade that re-runs completed work needs `confirm=True`. Without the gate, a
+        one-line prompt edit could silently re-run (and re-bill) a dozen finished stages.
+        """
+        if expect_version is not None and int(expect_version) != int(self.run.spec_version):
+            return {
+                "ok": False,
+                "issues": [
+                    {
+                        "code": "WF_MUT_VERSION_MISMATCH",
+                        "message": (
+                            f"spec is at version {self.run.spec_version}, not "
+                            f"{expect_version} — refetch and reapply"
+                        ),
+                        "node_id": "",
+                    }
+                ],
+                "preview": mutations.CascadePreview().to_dict(),
+            }
+
+        result = mutations.prepare_batch(raw_ops, self.spec, self.instances, effects=self._effects)
+        body = result.to_dict()
+        if not result.ok:
+            return body
+        if result.preview.needs_confirmation and not confirm:
+            body["ok"] = False
+            body["needs_confirmation"] = True
+            body["issues"] = [
+                {
+                    "code": "WF_MUT_CONFIRM_REQUIRED",
+                    "message": (
+                        "this batch re-runs completed nodes "
+                        f"({', '.join(result.preview.rerun[:5])}); resubmit with confirm=true"
+                    ),
+                    "node_id": "",
+                }
+            ]
+            return body
+        self._pending_mutations.append((result, actor))
+        body["queued"] = True
+        return body
+
+    def _drain_mutations(self) -> None:
+        """Apply queued batches. Called under the lock, between scheduling steps.
+
+        Each batch is RE-VERIFIED here (WF2-R2 TOCTOU): nodes complete while a user reads a
+        preview, so a node that was pending at submit may be frozen by now. Re-validating
+        against current state is the only way to catch that, and `validate_batch` is pure
+        so running it twice costs nothing.
+        """
+        if not self._pending_mutations:
+            return
+        queued = list(self._pending_mutations)
+        self._pending_mutations.clear()
+        for result, actor in queued:
+            try:
+                root = Node.from_dict(self.spec.get("root") or {})
+            except ValueError:
+                logger.warning("workflow %s: spec unreadable, dropping mutation", self.run.id)
+                continue
+            issues = mutations.validate_batch(result.ops, root, self.instances)
+            if issues:
+                # The state moved under the preview. Rejected, and journaled as rejected —
+                # a silently dropped batch is indistinguishable from an applied one.
+                self.journal.write(
+                    journal_mod.MUTATION_REJECTED,
+                    actor=actor,
+                    ops=[o.to_dict() for o in result.ops],
+                    issues=[i.to_dict() for i in issues],
+                )
+                self._publish(
+                    "workflow_mutation_rejected",
+                    {"issues": [i.to_dict() for i in issues], "actor": actor},
+                )
+                continue
+            self._commit_mutation(result, actor)
+
+    def _commit_mutation(self, result: mutations.BatchResult, actor: str) -> None:
+        """Swap in the candidate spec, apply state effects, journal the batch."""
+        if result.spec is None:
+            return
+        self.spec = result.spec
+        self.run.spec_version += 1
+        self.root = Node.from_dict(self.spec.get("root") or {"kind": "sequence"})
+        store.write_spec(self.run.id, self.spec)
+        store.write_spec_history(
+            self.run.id,
+            self.run.spec_version,
+            mutations.history_record(
+                result.ops,
+                actor=actor,
+                version=self.run.spec_version,
+                spec=self.spec,
+                preview=result.preview,
+            ),
+        )
+        self.journal.user_edited_mid_flight([o.to_dict() for o in result.ops])
+
+        for op in result.ops:
+            if op.kind in (mutations.OpKind.REWIND, mutations.OpKind.RUN_FROM):
+                self._apply_reentry(op, result.preview)
+            elif op.kind == mutations.OpKind.SKIP:
+                self._skip_by_id(op.node_id)
+            elif op.kind == mutations.OpKind.SET_INPUT:
+                self.run.inputs.update(op.overrides)
+            elif op.kind == mutations.OpKind.FORK:
+                self._apply_fork(op)
+
+        # Nodes whose inputs changed but which are NOT being re-run (WF2-R2 #3). Flagged
+        # rather than silently serving an answer computed from inputs that no longer exist.
+        self._flag_stale(result.preview)
+        self._save_run()
+        self._persist_state()
+        self._publish(
+            "workflow_spec_updated",
+            {
+                "spec_version": self.run.spec_version,
+                "actor": actor,
+                "preview": result.preview.to_dict(),
+            },
+        )
+
+    def _apply_reentry(self, op: mutations.Op, preview: mutations.CascadePreview) -> None:
+        """Reset the binding closure so it re-runs.
+
+        `rewind` resets the seed node AND its consumers; `run_from` resets only the
+        consumers, leaving the seed's output in place — that is the whole distinction
+        ("redo the synthesis with the same gathered data").
+
+        The outputs are ARCHIVED, not deleted: a rewind that discarded the prior answer
+        would make the edit irreversible, and the attic is what lets a reader see what the
+        run used to say.
+        """
+        targets = set(preview.rerun)
+        if op.kind == mutations.OpKind.RUN_FROM:
+            targets.discard(op.node_id)
+        paths = [path for path, node in _walk(self.root) if node.id in targets for _ in (0,)]
+        epoch = mutations.next_epoch(self.instances, paths, force=op.force)
+        for path in paths:
+            inst = self._instance(path)
+            if inst.output_ref:
+                store.archive_output(self.run.id, path, self.run.spec_version)
+            inst.state = InstanceState.PENDING
+            inst.epoch = epoch
+            inst.output_ref = ""
+            inst.failure = None
+            inst.completed_at = None
+            inst.wake_at = 0.0
+            inst.attempt = 0
+            node = dict(_walk(self.root)).get(_base_path(path))
+            if node is not None and node.id:
+                # Drop the cached output so a binding cannot resolve a stale value between
+                # the reset and the re-run.
+                self._outputs.pop(node.id, None)
+            self.journal.invalidate_prefix(path)
+            # A pending approval for a node about to re-run would resume a step that no
+            # longer exists in that form (WF2-R7) — drop the token rather than let it land
+            # in the wrong epoch.
+            drop_continuations(self.run.id, instance_prefix=path)
+
+    def _apply_fork(self, op: mutations.Op) -> None:
+        """Branch a child run. THIS run is untouched — that is the whole point of fork.
+
+        The child is left in DRAFT: starting it is the caller's decision, because a fork is
+        usually created to be edited before it runs ("try a stricter judge"). Auto-starting
+        would race the edit it exists to receive.
+        """
+        from gideon.workflows.checkpoints import fork_run
+
+        try:
+            result = fork_run(
+                self.run,
+                self.spec,
+                self.instances,
+                checkpoint_id=op.checkpoint_id,
+                note=op.note,
+                now=_now(),
+            )
+        except ValueError as exc:
+            self.journal.write(
+                journal_mod.MUTATION_REJECTED,
+                actor="engine",
+                ops=[op.to_dict()],
+                issues=[{"code": "WF_MUT_UNKNOWN_CHECKPOINT", "message": str(exc), "node_id": ""}],
+            )
+            return
+        self.journal.write(
+            journal_mod.CHILD_RUN_ATTACH,
+            parent_run_id=self.run.id,
+            child_run_id=result.child.id,
+            node_id=op.node_id,
+        )
+        self._publish("workflow_forked", result.to_dict())
+
+    def _skip_by_id(self, node_id: str) -> None:
+        for path, node in _walk(self.root):
+            if node.id == node_id:
+                self._skip(path)
+
+    def _flag_stale(self, preview: mutations.CascadePreview) -> None:
+        """Journal `inputs_stale` for done nodes outside the re-run set (WF2-R2 #3)."""
+        rerun = set(preview.rerun)
+        for path, node in _walk(self.root):
+            if not node.id or node.id in rerun:
+                continue
+            inst = self.instances.get(path)
+            if inst is None or inst.state not in SUCCESS_STATES:
+                continue
+            if not (node_deps(node.config or {}) & rerun):
+                continue
+            self.journal.write(
+                journal_mod.INPUTS_STALE,
+                instance_path=path,
+                node_id=node.id,
+                epoch=inst.epoch,
+                stale_deps=sorted(node_deps(node.config or {}) & rerun),
+            )
 
     def _skip(self, path: str) -> None:
         """Mark a whole subtree skipped. The subtree matters: skipping only the case root
@@ -647,6 +1067,9 @@ class RunController:
             completion=self.services.completion,
             get_provider=self.services.get_provider,
             verify=self.services.verify,
+            # The run's mode decides a gate's deadline: background times out fast and
+            # surfaces, blocking waits because a human is right there (WF2-R7).
+            mode=self.run.mode,
         )
         if total and total > 0:
             try:
@@ -1365,6 +1788,23 @@ def _preview(value: Any, limit: int = 500) -> Any:
             return str(value)[:limit]
         return text[:limit]
     return value
+
+
+def _is_approved(ask: Any, answer: Any) -> bool:
+    """Did the human say yes?
+
+    Only an `approval` ask can DENY — a text or form answer is data, not a verdict, and
+    treating an empty string as a denial would fail a gate the user actually answered.
+    """
+    from gideon.workflows.human_input import AskKind
+
+    if ask.kind != AskKind.APPROVAL:
+        return True
+    if isinstance(answer, bool):
+        return answer
+    if isinstance(answer, dict):
+        return bool(answer.get("approved"))
+    return False
 
 
 def _secret_resolver(key: str) -> str:

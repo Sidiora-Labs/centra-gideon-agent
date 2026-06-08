@@ -67,6 +67,9 @@ STEP_ATTEMPT = "step_attempt"
 STEP_ESCALATED = "step_escalated"
 GATE_REJECTED = "gate_rejected"
 GATE_CRITERION = "gate_criterion"
+#: A human answered a waiting gate (WF2-R7). Journaled with the answer so a later reader
+#: knows WHO decided what, not merely that the run continued.
+GATE_RESOLVED = "gate_resolved"
 EFFECT = "effect"
 #: A node wrote outside its declared `allowed_write_paths` (WF2-R19). Ledgered whether
 #: the mode was warn or reject — an escape a `warn` run continued past still has to be
@@ -74,6 +77,12 @@ EFFECT = "effect"
 STEP_SCOPE = "step_scope_violation"
 ITERATION = "iteration"
 USER_EDITED_MID_FLIGHT = "user_edited_mid_flight"
+#: A queued batch failed its TOCTOU re-verify (state moved under the preview). Journaled
+#: because a silently dropped mutation is indistinguishable from an applied one.
+MUTATION_REJECTED = "mutation_rejected"
+#: A done node whose inputs changed but which is NOT being re-run (WF2-R2 #3) — better a
+#: visible flag than an answer computed from inputs that no longer exist.
+INPUTS_STALE = "inputs_stale"
 CONSULTED = "consulted"
 CHILD_RUN_ATTACH = "child_run_attach"
 RUN_ABANDONED = "run_abandoned"
@@ -93,8 +102,11 @@ LEDGER_KINDS = frozenset(
         STEP_ESCALATED,
         GATE_REJECTED,
         GATE_CRITERION,
+        GATE_RESOLVED,
         EFFECT,
         STEP_SCOPE,
+        MUTATION_REJECTED,
+        INPUTS_STALE,
         ITERATION,
         USER_EDITED_MID_FLIGHT,
         CONSULTED,
