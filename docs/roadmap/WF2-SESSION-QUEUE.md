@@ -65,8 +65,8 @@ mandatory.
 | 13 | **Slice 6c** — staged-turn contract for mutation tools; `[ACTIVE WORKFLOWS]` context block (never-break-a-turn); blocking-mode handler | G5 | ✅ DONE (#149) |
 | 14 | **Slice 7a** — `handlers.py` REST routes for defs + runs; register in `dashboard/server.py`; per-run SSE stream endpoint | G6 | ✅ DONE (#150) |
 | 15 | **Slice 7b** — FE `pages/workflows/`: list page, def detail, run detail (snapshot-then-subscribe); `lib/api.ts` methods + nav entry | G6 | ✅ DONE (#152) |
-| 16 | **Slice 8a** — `WorkflowProgressCard.tsx`; event pipeline: dedup keys, deterministic ids, event-fold law, epoch-tagged supersede-drop, node-keyed patches | G7 | TODO |
-| 17 | **Slice 8b** — per-observer debounced coalescing (~25ms), schema-validated snapshot projection, `result_omitted` spill boundary; FE lifecycle-union registration + backend⊆FE test | G7 | TODO |
+| 16 | **Slice 8a** — `WorkflowProgressCard.tsx`; event pipeline: dedup keys, deterministic ids, event-fold law, epoch-tagged supersede-drop, node-keyed patches | G7 | ✅ DONE (#153) |
+| 17 | **Slice 8b** — per-observer debounced coalescing (~25ms), schema-validated snapshot projection, `result_omitted` spill boundary; FE lifecycle-union registration + backend⊆FE test | G7 | ✅ DONE (#154) |
 | 18 | **Slice 8c** — typed ask renderer (approval/choice/text/form) in the attention banner + needs-input inbox projection; blocking-mode rendering; two-step delete; foreach progress rows; degraded rendering | G7 | TODO |
 | 19 | **Slice 9a** — author 6 bundled templates incl. `produce-and-audit`; macros (`judge_panel`, `verify_panel`, `route`, `research_sweep`) | G8 | TODO |
 | 20 | **Slice 9b** — conventions pack (triage-first, Finding record, baseline capture, `bundled/shared/`, template-lint, steering_examples); `artifact_update` provider; bundled-sync; FE template picker | G8 | TODO |
@@ -418,3 +418,55 @@ mandatory.
   (d) Three font sizes were off the documented ramp (0.875/0.6875rem) — snapped to real rungs.
   (e) The preflight model probe is now PINNED in its test rather than relying on ambient
   environment state.
+- 2026-08-01 — session 16 (Slice 8a) DONE → **PR #153** (stack #152→#153). The event
+  envelope stamped at the ONE `_publish` seam (`event_id` deterministic, `seq` monotonic,
+  `epoch` = the RUN's max, plus `node_epoch` on node events); `workflowFold.ts` (pure,
+  unit-locked, 4 guards); `WorkflowProgressCard` folding SSE through the SAME fold the run
+  page uses. 10559 py · 368 web (+39) · typecheck + build clean.
+  Validated live: captured 7 REAL frames off the wire (evt-9…evt-14) carrying the full
+  envelope; browser showed the resumed run Complete 3/3; `foldRealFrames.test.ts` asserts the
+  fold law against those exact frames.
+  DEVIATIONS/DISCOVERIES:
+  (a) **`workflow_node_started` overrode the run epoch** — it passed the NODE's epoch as
+  `epoch`, so `started` and `done` for one node reported DIFFERENT run epochs; a consumer
+  folding the lower one would treat the next real event as superseded and go permanently
+  silent. Node epoch now goes under `node_epoch`, and a STRUCTURAL test fails if any call
+  site re-introduces a bare `epoch` in a payload (the dicts are spread into the envelope, so
+  a regression would otherwise be invisible).
+  (b) **`seq` was in the envelope but the fold never used it.** Folding REAL captured frames
+  OUT OF ORDER regressed a node from Done back to Running. Added a PER-NODE seq floor —
+  per-node, not global, because two different nodes' events are independent and a global
+  floor would drop a legitimate sibling. **Found by replaying real frames, not fixtures.**
+  (c) `window.location.hash` in the card violated the url-navigation doctrine test; replaced
+  with a plain `<a href>` matching SdlcProgressCard.
+- 2026-08-01 — session 17 (Slice 8b) DONE → **PR #154** (stack #152→#153→#154). New
+  `coalescer.py` (per-observer debounced batching, ~25ms window, `workflow_batch` frame) wired
+  into the watchdog's publisher; new `projection.py` (explicit field-table validation before
+  transmission) behind the per-run SSE snapshot; `store_output` spill extended from size-only
+  to content-based binary detection; FE `unwrapBatch` + batch listener; transport-doctrine test
+  extended. 10616 py · 380 web (+12) · typecheck + build clean.
+  Validated live: a 12-item foreach delivered **26 logical events in 3 wire frames**
+  (run_update / 24-member batch / terminal run_update), every member carrying the full envelope
+  with seq dense 1-26 and the batch flushed BEFORE the terminal status. Those exact frames are
+  checked in as `__fixtures__/realBatchFrames.json`. In a real browser a 30s fan-out went
+  Running/Waiting → Complete/Done live, zero console errors.
+  DEVIATIONS/DISCOVERIES:
+  (a) **The binary check's first version detected nothing.** A PNG's leading `\x89`
+  utf-8-encodes to TWO bytes (`\xc2\x89`), so a utf-8 round-trip matched no magic number at
+  all. Recovered with latin-1 instead (codepoints 0-255 map back to the identical bytes). Found
+  by the test failing, not by review.
+  (b) **Base64 added as a second carrier** beyond the plan's "magic-prefix binary detection": a
+  node output is JSON, and JSON cannot hold arbitrary bytes, so in practice a screenshot or
+  fetched asset arrives base64'd — a raw-bytes check alone would miss every realistic case.
+  (c) **Coalescing keyed by `(event, instance_path)`, not path alone.** Path-only would let a
+  node's `started` be eaten by the `done` that follows in the same window, so the node would
+  never render as active — a fan-out would look like it teleported from pending to finished.
+  (d) A pass-through event FLUSHES the pending batch (not in the plan's wording, but required):
+  otherwise a status flip overtakes the node events that logically precede it.
+  (e) Two existing tests were pinned to the un-coalesced shape and were updated to unwrap
+  (`test_workflows_watchdog.py::test_events_reach_the_per_run_sse_key`) or to the new projection
+  seam (`test_workflows_api.py::test_it_is_snapshot_then_subscribe`) — the CLAIM each makes is
+  unchanged.
+  (f) `workflow_node_progress` was NOT added to the FE union or the allowlist: no call site
+  publishes it yet (it arrives with Slice 8c's foreach progress rows), and registering it now
+  would be a dead path.
