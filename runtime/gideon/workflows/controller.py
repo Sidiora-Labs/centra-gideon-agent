@@ -41,6 +41,16 @@ from typing import Any
 from gideon.workflows import journal as journal_mod
 from gideon.workflows import store
 from gideon.workflows.bindings import BindingContext
+from gideon.workflows.effects import (
+    EffectRecord,
+    EffectStatus,
+    committed_effect,
+    effect_history,
+    idempotency_key,
+    output_id_of,
+    redo_blocked,
+    run_teardown,
+)
 from gideon.workflows.engine import NodeResult, dispatch
 from gideon.workflows.journal import CacheKey, Journal, inputs_hash, spec_region_hash
 from gideon.workflows.models import (
@@ -54,6 +64,16 @@ from gideon.workflows.models import (
     NodeKind,
     RunStatus,
     WorkflowRun,
+)
+from gideon.workflows.resilience import (
+    Attempt,
+    BreakerState,
+    attempt_from_failure,
+    check_breaker,
+    check_budget,
+    error_signature,
+    escalation_artifact,
+    retry_prompt,
 )
 from gideon.workflows.tick import (
     Frontier,
@@ -102,6 +122,10 @@ class EngineServices:
     node_timeout_total: int = 900
     node_timeout_stall: int = 300
     cwd: str = ""
+    #: `(command, output_id) -> (ok, detail)` — effect teardown execution. Injected so
+    #: tests never run real teardown subprocesses; production defaults to the
+    #: subprocess runner in `effects.run_teardown`.
+    teardown_runner: Any = None
 
 
 @dataclass
@@ -146,6 +170,19 @@ class RunController:
         self._declined_edges: set[str] = self._collect_declined_edges()
         self._iterations: dict[str, int] = {}
         self._dry_streaks: dict[str, int] = {}
+        #: path -> the attempts already made. Feeds the correction hint on the next try,
+        #: and the escalation artifact when retries run out.
+        self._attempts: dict[str, list[Attempt]] = {}
+        #: loop path -> breaker evidence. Cheap counters; the breaker costs no model call.
+        self._breakers: dict[str, BreakerState] = {}
+        #: Whether the 80% budget warning has already been emitted (once per run, not
+        #: once per node — repeating it every node would bury the signal).
+        self._budget_warned = False
+        #: path -> effect records, folded from the ledger at construction so a RESUMED
+        #: run knows which effects already committed. Without the rehydrate, a crash
+        #: between commit and completion double-fires on resume — the exact hole the
+        #: ledger closes (WF2-R1).
+        self._effects: dict[str, list[EffectRecord]] = effect_history(run.id)
         self._outputs: dict[str, Any] = {}
         self._terminal = asyncio.Event()
         self._load_outputs()
@@ -278,6 +315,8 @@ class RunController:
             await self._finish(status)
             return True
 
+        self._check_budget_warning()
+
         if self._budget_exceeded():
             # SOFT budget: pause resumably rather than fail. The user can extend and
             # resume; killing the run would discard completed work.
@@ -393,9 +432,16 @@ class RunController:
             )
             return
 
+        if not await self._effect_preflight(item, inst):
+            return
+
         inst.state = InstanceState.RUNNING
         inst.started_at = _now()
         inst.attempt += 1
+        if item.node.kind == NodeKind.ACTION:
+            # ATTEMPTED goes down BEFORE dispatch: a crash between here and the outcome
+            # must leave evidence the effect MAY have fired (WF2-R1).
+            self._record_effect(item, inst, EffectStatus.ATTEMPTED)
         self._persist_state()
         self.journal.step_started(item.path, item.node.id, epoch=inst.epoch, lane=item.lane)
         self._publish(
@@ -413,6 +459,157 @@ class RunController:
             task=task, ready=item, started=now, last_progress=now, cache_key=key
         )
 
+    # ── effect ledger (WF2-R1) ──
+
+    def _effect_key(self, item: ReadyNode, inst: NodeInstance) -> str:
+        return idempotency_key(self.run.id, item.path, inst.epoch)
+
+    def _record_effect(
+        self,
+        item: ReadyNode,
+        inst: NodeInstance,
+        status: EffectStatus,
+        *,
+        key: str = "",
+        **fields: Any,
+    ) -> None:
+        """Journal one effect event and fold it into the in-memory history, so a
+        same-process re-read agrees with what a resumed process would reconstruct.
+
+        `key` overrides the derived key for records about a PRIOR epoch's effect — a
+        COMPENSATED must carry the committed effect's own key, or `committed_effect`
+        can never match the two and the boundary never clears.
+        """
+        record = EffectRecord(
+            instance_path=item.path,
+            idempotency_key=key or self._effect_key(item, inst),
+            effect_status=status,
+            epoch=inst.epoch,
+            node_id=item.node.id,
+            provider=str((item.node.config or {}).get("provider", "") or ""),
+            output_id=str(fields.get("output_id", "") or ""),
+            compensation_ref=str(fields.get("compensation_ref", "") or ""),
+        )
+        self.journal.effect(
+            item.path,
+            idempotency_key=record.idempotency_key,
+            effect_status=status.value,
+            epoch=inst.epoch,
+            node_id=record.node_id,
+            provider=record.provider,
+            output_id=record.output_id,
+            compensation_ref=record.compensation_ref,
+            detail=str(fields.get("detail", "") or ""),
+        )
+        self._effects.setdefault(item.path, []).append(record)
+
+    async def _effect_preflight(self, item: ReadyNode, inst: NodeInstance) -> bool:
+        """The committed-effect boundary, enforced before an action node re-executes.
+
+        Returns False when the node was refused (a terminal state was written). Only
+        ACTION nodes are side-effecting dispatches; every other kind passes through.
+        A same-epoch retry passes too — it reuses the same idempotency key, which an
+        idempotent receiver dedupes, so it is the retry contract working, not a
+        double-fire.
+        """
+        if item.node.kind != NodeKind.ACTION:
+            return True
+        committed = committed_effect(self._effects.get(item.path, []))
+        if committed is None or committed.epoch == inst.epoch:
+            return True
+        if redo_blocked(item.node.config or {}, committed, inst.epoch):
+            inst.state = InstanceState.BLOCKED
+            inst.completed_at = _now()
+            inst.failure = Failure(
+                failure_class=FailureClass.USER,
+                cause_plain=(
+                    f"node {item.node.id or item.path} has a committed external effect "
+                    f"from epoch {committed.epoch}; re-running would fire it again"
+                ),
+                remediation=(
+                    "set `redo_effects: true` on the node to deliberately re-fire "
+                    "(a declared teardown runs first), or skip the node"
+                ),
+                terminal_reason="committed_effect",
+            )
+            self.journal.step_failed(
+                item.path,
+                item.node.id,
+                epoch=inst.epoch,
+                failure=inst.failure,
+                attempt=inst.attempt,
+                retries_exhausted=True,
+            )
+            self._persist_state()
+            self._publish(
+                "workflow_node_done",
+                {
+                    "node_id": item.node.id,
+                    "instance_path": item.path,
+                    "status": InstanceState.BLOCKED.value,
+                    "degraded_reason": "committed_effect",
+                },
+            )
+            return False
+        # redo_effects: true — tear down the committed resource first, then proceed.
+        if committed.compensation_ref:
+            runner = self.services.teardown_runner
+            ok, detail = await run_teardown(
+                committed.compensation_ref, committed.output_id, runner=runner
+            )
+            if not ok:
+                # A failed teardown leaves an UNKNOWN external state; proceeding would
+                # stack a second resource on top of a live first one.
+                inst.state = InstanceState.BLOCKED
+                inst.completed_at = _now()
+                inst.failure = Failure(
+                    failure_class=FailureClass.INTERNAL,
+                    cause_plain=f"effect teardown failed: {detail}"[:500],
+                    remediation="fix the teardown command, or clean up the external "
+                    "resource manually and clear redo_effects",
+                    terminal_reason="teardown_failed",
+                )
+                self.journal.step_failed(
+                    item.path,
+                    item.node.id,
+                    epoch=inst.epoch,
+                    failure=inst.failure,
+                    attempt=inst.attempt,
+                    retries_exhausted=True,
+                )
+                self._persist_state()
+                return False
+            self._record_effect(
+                item,
+                inst,
+                EffectStatus.COMPENSATED,
+                key=committed.idempotency_key,
+                output_id=committed.output_id,
+                compensation_ref=committed.compensation_ref,
+                detail=detail[:500],
+            )
+        return True
+
+    def _with_retry_hint(self, item: ReadyNode) -> Node:
+        """On a retry, hand the dispatcher a node whose prompt carries the correction.
+
+        Returns the node UNCHANGED on a first attempt and for kinds with no prompt, so
+        the common path pays nothing. A copy is returned rather than mutating the spec
+        node: the spec is shared across every instance of a `foreach` body, and editing it
+        in place would leak one item's failure into every sibling's prompt.
+        """
+        attempts = self._attempts.get(item.path)
+        if not attempts:
+            return item.node
+        prompt = (item.node.config or {}).get("prompt")
+        if not isinstance(prompt, str) or not prompt:
+            return item.node
+        import copy
+
+        node = copy.deepcopy(item.node)
+        node.config["prompt"] = retry_prompt(prompt, attempts)
+        return node
+
     async def _execute(self, item: ReadyNode, ctx: BindingContext) -> NodeResult:
         """Run a dispatcher under the total-timeout knob.
 
@@ -421,8 +618,9 @@ class RunController:
         because timeouts only ever execute under failure.
         """
         total = self.services.node_timeout_total
+        node = self._with_retry_hint(item)
         coro = dispatch(
-            item.node,
+            node,
             ctx,
             now=time.time(),
             subagents=self.services.subagents,
@@ -570,18 +768,38 @@ class RunController:
                 )
             return
 
-        # Retry, when the failure class says it is worth spending on.
-        if result.state == InstanceState.FAILED and self._should_retry(item, inst, result):
-            inst.state = InstanceState.PENDING
-            self.journal.step_failed(
-                item.path,
-                item.node.id,
-                epoch=inst.epoch,
-                failure=result.failure or Failure(),
-                attempt=inst.attempt,
-                retries_exhausted=False,
+        # Retry, when the failure class says it is worth spending on. The attempt is
+        # RECORDED before the retry so the next one can be corrected rather than blind —
+        # a blind retry re-sends the same prompt and reproduces the same failure.
+        if result.state == InstanceState.FAILED:
+            failure = result.failure or Failure()
+            record = attempt_from_failure(
+                inst.attempt, failure, tokens=result.tokens, duration_secs=duration
             )
-            return
+            self._attempts.setdefault(item.path, []).append(record)
+            if self._should_retry(item, inst, result):
+                if item.node.kind == NodeKind.ACTION:
+                    # Same epoch, same idempotency key: the receiver can dedupe. The
+                    # RETRIED record keeps the ledger honest about how many dispatches
+                    # the external system may have seen.
+                    self._record_effect(item, inst, EffectStatus.RETRIED)
+                inst.state = InstanceState.PENDING
+                self.journal.write(
+                    journal_mod.STEP_ATTEMPT,
+                    instance_path=item.path,
+                    node_id=item.node.id,
+                    epoch=inst.epoch,
+                    **record.to_dict(),
+                )
+                self.journal.step_failed(
+                    item.path,
+                    item.node.id,
+                    epoch=inst.epoch,
+                    failure=failure,
+                    attempt=inst.attempt,
+                    retries_exhausted=False,
+                )
+                return
 
         inst.state = result.state
         inst.completed_at = _now()
@@ -589,6 +807,21 @@ class RunController:
         inst.failure = result.failure
         inst.tokens = result.tokens
         self._decline(inst, result.declined_edges)
+
+        if item.node.kind == NodeKind.ACTION:
+            if result.state in SUCCESS_STATES and result.state != InstanceState.NO_CHANGE:
+                # COMMITTED captures the teardown ref AT COMMIT TIME: a later spec edit
+                # must not change what tears down an already-provisioned resource.
+                self._record_effect(
+                    item,
+                    inst,
+                    EffectStatus.COMMITTED,
+                    output_id=output_id_of(result.output),
+                    compensation_ref=str((item.node.config or {}).get("teardown", "") or ""),
+                )
+            elif result.state == InstanceState.NO_CHANGE:
+                # The provider reported `skip` — nothing fired, and the ledger says so.
+                self._record_effect(item, inst, EffectStatus.SKIPPED)
 
         if result.state in SUCCESS_STATES:
             ref, preview = self.journal.store_output(item.path, result.output)
@@ -627,6 +860,15 @@ class RunController:
                     "input_hash": entry.cache_key.inputs_hash,
                 },
             )
+            # Retries are spent. Produce the typed escalation artifact rather than just
+            # dying: five named options let a human act, where a bare "it failed" leaves
+            # them to invent the next move (WF2-R4).
+            self._escalate(
+                item.path,
+                item.node.id,
+                reason="retries_exhausted",
+                detail=(result.failure.cause_plain if result.failure else ""),
+            )
 
         self._advance_loop(item)
         self._publish(
@@ -659,6 +901,44 @@ class RunController:
             return False
         return inst.attempt < max_attempts
 
+    def _escalate(self, path: str, node_id: str, *, reason: str, detail: str = "") -> None:
+        """Record the escalation artifact and surface it as run attention.
+
+        Journaled AND surfaced: journaling alone leaves an unattended run looking merely
+        failed, and surfacing alone loses the evidence a later reader needs.
+        """
+        artifact = escalation_artifact(
+            node_id, reason=reason, detail=detail, attempts=self._attempts.get(path, [])
+        )
+        # The artifact already carries `node_id` and `kind`; splatting it alongside
+        # explicit kwargs would collide on both.
+        self.journal.write(
+            journal_mod.STEP_ESCALATED,
+            instance_path=path,
+            **{k: v for k, v in artifact.items() if k != "kind"},
+        )
+        self.run.attention = artifact
+        self._publish(
+            "workflow_attention",
+            {"node_id": node_id, "kind": "escalation", "ask": artifact},
+        )
+
+    def _check_budget_warning(self) -> None:
+        """Emit the 80% warning ONCE per run, so a user can extend before work stops."""
+        cap = getattr(self.run.budget, "max_tokens", 0) or 0
+        verdict = check_budget(self.run.total_tokens, int(cap))
+        if verdict.warn and not self._budget_warned:
+            self._budget_warned = True
+            self._publish(
+                "workflow_run_update",
+                {
+                    "status": self.run.status.value,
+                    "budget_warning": verdict.reason,
+                    "spent": verdict.spent,
+                    "cap": verdict.cap,
+                },
+            )
+
     def _decline(self, inst: NodeInstance, edges: list[str]) -> None:
         if not edges:
             return
@@ -683,6 +963,36 @@ class RunController:
             self._dry_streaks[parent_path] = self._dry_streaks.get(parent_path, 0) + 1
         else:
             self._dry_streaks[parent_path] = 0
+
+        # Feed the breaker, then consult it BEFORE the next iteration. Deterministic and
+        # LLM-free: a loop thrashing on the same error is the most common autonomous-run
+        # failure, and paying a model to notice it would be slower and less reliable.
+        inst = self._instance(item.path)
+        breaker = self._breakers.setdefault(parent_path, BreakerState())
+        breaker.record(
+            signature=error_signature(inst.failure) if inst.failure else "",
+            output=output,
+            tokens=inst.tokens,
+        )
+        verdict = check_breaker(node, breaker)
+        if verdict.tripped:
+            loop_inst = self._instance(parent_path)
+            # ESCALATED, deliberately NOT FAILED: "I gave up and a human must decide" is a
+            # different fact from "this broke", and collapsing them loses what the user
+            # needs to act on.
+            loop_inst.state = InstanceState.ESCALATED
+            loop_inst.completed_at = _now()
+            self.journal.iteration(
+                parent_path,
+                node.id,
+                iteration=iteration,
+                outcome=f"breaker:{verdict.reason}",
+                error_signature=breaker.error_signatures[-1] if breaker.error_signatures else "",
+                tokens=inst.tokens,
+            )
+            self._escalate(parent_path, node.id, reason=verdict.reason, detail=verdict.detail)
+            return
+
         ctx = BindingContext(
             inputs=self.run.inputs,
             node_outputs=self._outputs,

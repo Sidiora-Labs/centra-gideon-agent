@@ -60,6 +60,11 @@ STEP_COMPLETED = "step_completed"
 STEP_FAILED = "step_failed"
 STEP_SKIPPED = "step_skipped"
 STEP_CACHED = "step_cached"
+#: One try at one node — typed, so a retry gets actionable feedback rather than prose,
+#: and so the flywheel can later see WHICH corrections actually worked (WF2-R4).
+STEP_ATTEMPT = "step_attempt"
+#: Retries spent or the breaker tripped — a typed decision record, not a bare failure.
+STEP_ESCALATED = "step_escalated"
 GATE_REJECTED = "gate_rejected"
 GATE_CRITERION = "gate_criterion"
 EFFECT = "effect"
@@ -80,6 +85,8 @@ LEDGER_KINDS = frozenset(
         STEP_FAILED,
         STEP_SKIPPED,
         STEP_CACHED,
+        STEP_ATTEMPT,
+        STEP_ESCALATED,
         GATE_REJECTED,
         GATE_CRITERION,
         EFFECT,
@@ -387,14 +394,32 @@ class Journal:
         )
 
     def effect(
-        self, path: str, *, idempotency_key: str, effect_status: str, compensation_ref: str = ""
+        self,
+        path: str,
+        *,
+        idempotency_key: str,
+        effect_status: str,
+        epoch: int = 0,
+        node_id: str = "",
+        provider: str = "",
+        output_id: str = "",
+        compensation_ref: str = "",
+        detail: str = "",
     ) -> None:
+        """One effect-lifecycle event (WF2-R1). ATTEMPTED is written BEFORE dispatch, so
+        a crash between attempt and outcome leaves evidence the effect MAY have fired —
+        "unknown, possibly fired" and "never fired" demand different recovery."""
         self.write(
             EFFECT,
             instance_path=path,
             idempotency_key=idempotency_key,
             effect_status=effect_status,
+            epoch=int(epoch),
+            node_id=node_id,
+            provider=provider,
+            output_id=output_id,
             compensation_ref=compensation_ref,
+            detail=detail,
         )
 
     # ── resume cache ──

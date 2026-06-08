@@ -108,6 +108,13 @@ class GateKind(str, Enum):
     VERIFY_SCRIPT = "verify_script"
     EVENT = "event"
     EXPRESSION = "expression"
+    #: An ordered static→runtime→system ladder with per-criterion hard thresholds. A hard
+    #: failure at any rung fails the gate — never averaged, because averaging lets a
+    #: confident model pass a gate it structurally failed (WF2-R3).
+    LADDER = "ladder"
+    #: An LLM judge returning the CLOSED verdict enum (PASS|RETRY|ESCALATE|REJECT), run in
+    #: a session distinct from the producing node unless `self_judge` is set.
+    JUDGE = "judge"
 
 
 class SessionMode(str, Enum):
@@ -250,6 +257,9 @@ class InstanceState(str, Enum):
 
 
 #: States after which a node will not run again without an explicit mutation.
+#: BLOCKED belongs here: it is "the engine refused to proceed and a human must decide"
+#: — leaving it schedulable would relaunch-and-refuse forever, the silent hang the
+#: state exists to prevent. (Its absence also made `_ROOT_TO_RUN[BLOCKED]` unreachable.)
 TERMINAL_STATES = frozenset(
     {
         InstanceState.DONE,
@@ -260,6 +270,7 @@ TERMINAL_STATES = frozenset(
         InstanceState.SCOPE_VIOLATION,
         InstanceState.DISCARDED,
         InstanceState.ESCALATED,
+        InstanceState.BLOCKED,
         InstanceState.CANCELLED,
     }
 )
