@@ -68,7 +68,7 @@ def create_artifacts_provider(config: dict[str, Any] | None = None) -> ToolProvi
 
 def create_workflows_provider(config: dict[str, Any] | None = None) -> ToolProvider:
     """Extension factory for the ``gideon-workflows`` tool surface — in-process
-    over ``mcp_workflows`` (the Workflows/SOPs entity tool group)."""
+    over ``mcp_workflows`` (the v2 workflow engine's 19-tool chat surface)."""
     from gideon.agents.native.tools import InProcessMcpToolProvider
 
     return InProcessMcpToolProvider(

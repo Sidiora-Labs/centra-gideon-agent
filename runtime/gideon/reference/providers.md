@@ -47,3 +47,4 @@ The extension-provider taxonomy (the capability types an app can contribute) and
 - **gideon-tasks-tools** — type `tool` / `` (enabled); capabilities: task
 - **gideon-tools** — type `tool` / `` (enabled); capabilities: skills, notification, system
 - **gideon-ui-docs** — type `tool` / `` (enabled); capabilities: ui_docs
+- **gideon-workflows** — type `tool` / `` (enabled); capabilities: workflows

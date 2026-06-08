@@ -32,6 +32,7 @@ _CATEGORY_MODULES = [
     "gideon.mcp_prompts",
     "gideon.mcp_memory",
     "gideon.mcp_subagents",
+    "gideon.mcp_workflows",
 ]
 _CATEGORY_PROVIDERS = {
     "gideon-core",
@@ -39,6 +40,7 @@ _CATEGORY_PROVIDERS = {
     "gideon-memory",
     "gideon-artifacts",
     "gideon-prompts",
+    "gideon-workflows",
 }
 # The cross-cutting tools that stay in residual core (not a single entity category).
 # skill_invoke + skill_search + skill_remember are the skill-library-spanning trio
