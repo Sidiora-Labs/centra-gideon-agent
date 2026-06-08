@@ -55,10 +55,10 @@ mandatory.
 | 3 | **Slice 2c** — deterministic circuit breaker in frontier; escalation artifact; budgets (node soft caps, extend gates, baseline_check, topology estimate); two-knob timeout warm-up split; foreach `on_item_error` + per-item checkpointing | G1 | ✅ DONE |
 | 4 | **Slice 3a** — effect ledger: idempotency keys, effect_status, redo_effects gate, caller idempotency dedupe, BYOI teardown | G2 | ✅ DONE (#139) |
 | 5 | **Slice 3b** — v2 `run-workflow` action provider + `ALLOWED_HOOK_PROVIDERS`; write-scope enforcement (pre/post fs diff, scope_violation); termination (sticky cancel, protocol-violation, `workflow_audit`); secrets (`{{secret:KEY}}`, `_has*` stripping, RedactingSink) | G2 | ✅ DONE (#140) |
-| 6 | **Slice 4a** — `mutations.py`: op types incl. `run_from`, batch validator, spec-history writer, epoch/inputs-hash logic | G3 | TODO |
-| 7 | **Slice 4b** — binding-dependency cascade closure, engine-computed preview, `inputs_stale`, rollback-vs-revert, TOCTOU re-verify; mutation queue in the controller; grammar hardening a-f | G3 | TODO |
-| 8 | **Slice 4c** — rewind (archive outputs + journal region, epoch bump, memoized replay); checkpoints + `fork`; property tests (rewind idempotence, cascade = binding closure, fork isolation) | G3 | TODO |
-| 9 | **Slice 5a** — typed ask payload, mode-dependent gate timeouts, `timed_out_unattended`; continuation records + durable resume tokens + expiry | G4 | TODO |
+| 6 | **Slice 4a** — `mutations.py`: op types incl. `run_from`, batch validator, spec-history writer, epoch/inputs-hash logic | G3 | ✅ DONE (#141) |
+| 7 | **Slice 4b** — binding-dependency cascade closure, engine-computed preview, `inputs_stale`, rollback-vs-revert, TOCTOU re-verify; mutation queue in the controller; grammar hardening a-f | G3 | ✅ DONE (#142) |
+| 8 | **Slice 4c** — rewind (archive outputs + journal region, epoch bump, memoized replay); checkpoints + `fork`; property tests (rewind idempotence, cascade = binding closure, fork isolation) | G3 | ✅ DONE (#143) |
+| 9 | **Slice 5a** — typed ask payload, mode-dependent gate timeouts, `timed_out_unattended`; continuation records + durable resume tokens + expiry | G4 | ✅ DONE (#144) |
 | 10 | **Slice 5b** — action-node clarification → needs_input; auto-approve for trigger-origin; owner binding + default-DENY for remote gates; `gate{kind: event}` transient hold | G4 | TODO |
 | 11 | **Slice 6a** — `mcp_workflows.py`: the 19 chat tools incl. `workflow_observe`/`run_from`/`audit`/`manifest`; wire into `_AGGREGATED_CATEGORY_MODULES`; validation schemas | G5 | TODO |
 | 12 | **Slice 6b** — spec ingestion: strict mode + repromptable errors, dry-run-before-save, provenance actor, run-start preflight (`can_resolve_use_case`), generated manifest + CI drift test | G5 | TODO |
@@ -225,3 +225,65 @@ mandatory.
   than `allowed_write_paths` — snapshotting only allowed paths makes a violation
   undetectable by construction; it reaches one level above the workspace, not `$HOME`, and
   the limitation is stated in the module rather than papered over.
+- 2026-08-01 — session 6 (Slice 4a, `mutations.py`) DONE → **PR #141** (stacked on #140,
+  which was still open — normal stacking, no rebase needed). Typed op vocabulary, the
+  binding-dependency cascade, transactional batch (parse → validate → apply-to-copy →
+  re-validate), grammar hardening a-d, spec-history writer, force-only epoch bump.
+  10199 tests (+51). Validated live on a real completed 4-node run: **tree subtree of
+  `gather` = ['gather'] vs BINDING closure = ['analyze','gather','report']** — a tree reset
+  would have missed both consumers (the WF2-R2 stale-input bug, demonstrated rather than
+  asserted); editing a done node rejected `WF_MUT_FROZEN_NODE`; a spec-breaking delete
+  wrote nothing.
+  NOTES: `rewind`/`run_from`/`fork` are spec-level no-ops here by design — they change
+  INSTANCE STATE and run identity, which Slice 4c owns; `inline_subworkflow` is a typed
+  refusal until Slice 10. Both are explicit, not silent.
+- 2026-08-01 — session 7 (Slice 4b, the mutation queue) DONE → **PR #142** (stack:
+  #140→#141→#142). `submit_mutation` (validate + queue + synchronous preview + confirm gate
+  + `expect_version`), `_drain_mutations` at the documented safe point with the **TOCTOU
+  re-verify**, rewind/run_from state reset, `store.archive_output` (attic, not delete),
+  `inputs_stale` journaling, spec-history writing. 10224 tests (+25).
+  Validated live: unconfirmed rewind refused with nothing queued; confirmed reset exactly
+  ['analyze','report'] leaving gather/unrelated done; 2 outputs archived; re-run cost
+  exactly 2 model calls; `spec_history/v002.json` + 1 journaled edit.
+  DEVIATION/BUGFIX: **`_terminal` stayed set after a loop exited**, so a controller
+  restarted in place after a rewind returned the PREVIOUS run's status instantly without
+  waiting for the new work. `start()` now clears it. Found by the end-to-end rewind test —
+  not by inspection, which is the argument for driving the real thing.
+  NOTE: rollback-vs-revert is only half-landed. `rewind` (rollback: hard reset with
+  preserved forward refs) is done; `revert` (inverse-patch ONE node's effects, 409 with the
+  conflict named on overlapping later state) needs the checkpoint machinery from 4c to
+  identify what "later state" is, so it moves to session 8. Recorded rather than faked.
+- 2026-08-01 — session 8 (Slice 4c) DONE → **PR #143** (stack #140→#141→#142→#143).
+  **Slice 4 is complete.** `checkpoints.py`: checkpoints (instance map + spec version, NOT
+  outputs), `fork_run` (own run dir, `root_run_id` propagation, copied journal prefix +
+  outputs, `fork_axis` disambiguator, SHARED_AXES surfaced), `prune_fork` (traversal-refusing),
+  `revert_node`/`revert_paths` (409-style refusal with dependents NAMED). The `fork` op is
+  wired through the mutation queue; the child lands in DRAFT deliberately (a fork exists to
+  be edited before it runs — auto-starting would race that edit). All six plan-named
+  property tests landed. 10267 tests (+43).
+  Validated live: **a fork of a complete run resumed with ZERO model calls** (the cache-key
+  claim proven, not asserted); parent byte-identical after fork; `root_run_id` stable across
+  a fork-of-a-fork; revert of a consumed node refused with `dependents=['b']` while the leaf
+  was allowed; `prune_fork('../../etc')` refused.
+  NOTE: session 7's carried-over `revert` is now landed here, as planned. The remaining
+  Slice-4 gap is the journal-region attic (`journal/attic/v<NNN>/`): outputs are archived and
+  the in-memory cache is invalidated, but the journal FILE stays append-only by contract, so
+  region archival belongs with the retention sweep rather than here. Recorded, not faked.
+- 2026-08-01 — session 9 (Slice 5a, the human-input contract) DONE → **PR #144**
+  (stack #140→#141→#142→#143→#144). `human_input.py`: typed Ask (4 kinds, per-field types +
+  defaults + validation), continuation records with `resolved_inputs` + handoff bundle,
+  ATOMIC single-use consumption via unlink, typed `resume_expired`, mode-dependent gate
+  timeouts. `controller.resume()` is the out-of-band entry point for widget/inbox/HTTP/chat.
+  10313 tests (+46).
+  Validated live: a real run blocked with a handoff naming what had already run; an invalid
+  answer was refused with the token INTACT; a **fresh controller** (standing in for a gateway
+  restart between question and answer) approved it and the immediate second resume was
+  refused; the run completed with `deployed=true`; an expired token returned a typed item.
+  DEVIATIONS/DISCOVERIES: (a) **surfacing and terminating had to be split.** Giving
+  background gates a default deadline meant an unanswered gate had a wake time and stopped
+  reporting `needs_input` — it waited silently. `_surface_needs_input` publishes without
+  ending the run, so a gate is visible NOW and can still time out later. A regression pair
+  pins both, because an earlier cut broke whichever behaviour was written last.
+  (b) `wait` nodes are excluded from needs-input surfacing — parked on the clock, they
+  resolve themselves. (c) Rewind drops tokens PREFIX-SCOPED, not globally: dropping every
+  token on any rewind would cancel approvals a rewind cannot affect. Both directions tested.
