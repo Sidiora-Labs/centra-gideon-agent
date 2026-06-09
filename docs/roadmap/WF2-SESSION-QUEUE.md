@@ -1205,3 +1205,187 @@ the five-moves audit in `template_lint.py`. 11697 tests (+68), lint clean at 609
   hook is likewise deferred: `assess_separation` is pure and tested, but the probe that FEEDS
   it needs a live model call on the save path, and putting a model call in a save is a latency
   decision worth making deliberately rather than in passing.
+
+### Session 33 — Loops Evolution: FE + coexistence (`feature-wf2-loops-fe`, PR NOT OPENED — push blocked)
+
+`workflows/loop_aliases.py` (read-time legacy-kind aliases + cockpit key equivalence), the same two
+in `web/src/pages/workflows/containerKey.ts` with a backend↔FE drift test, the R14 steering endpoints
+(`/steer`, `/steering`) + service functions + FE client methods, and the alias manifest surfaced
+through `/api/workflows/manifest`. 11750 tests (+53 py, +13 ts), lint clean at 610 files, full FE gate
+green.
+
+**Deviations and findings:**
+
+(a) **A test of mine LEAKED a run into the real `~/.gideon/workflows/runs.db`** — the exact
+  thing the doctrine forbids. My `run_store` fixture patched `gideon.config.loader.config_dir`,
+  but `store.py` does `from ... import config_dir` (a MODULE-LEVEL bind), so the patch never reached
+  it and `store.save()` wrote to the developer's actual home. The leak surfaced THREE test files away
+  as `test_custom_agent_gets_hook_transform` failing, because a live run makes `build_message`
+  prepend an `[ACTIVE WORKFLOWS]` block to every message. Root-caused (not masked), the stray
+  `r-steer` row deleted from the real db, and the fixture fixed to patch `store.config_dir` directly.
+  The `[[gideon-test-isolation-hazards]]` memory gets a new entry.
+
+(b) **The cockpit key-equivalence fix (R10c) is the whole point of coexistence, and it is a SILENT
+  regression class:** `loop:<id>` (loop cockpit) vs a run-scoped key compared with `==` drops every
+  event with no error — the stream connects, the cockpit renders, nothing updates. `base_container`
+  strips any of four prefixes (longest-first, so `workflow:run:` beats `workflow:`) and compares the
+  bare id. Implemented identically on both sides with a drift test I verified FAILS on divergence.
+
+(c) **The alias layer is deliberately ONE-WAY.** A loop kind resolves to a template; a template does
+  NOT resolve back. Reverse lookup would invite writing new references in the legacy vocabulary, and
+  an alias layer that accepts new writes is a second API rather than a bridge. A test asserts no
+  `template_to_*` / `*_to_kind` export exists.
+
+(d) **An unknown kind resolves to "" , never a default.** Guessing a template for an unrecognised
+  identifier would silently run the WRONG workflow, and "it ran something" is far harder to debug
+  than "it ran nothing and said why".
+
+(e) **`goal` + a verify command resolves to the VERIFIABLE variant.** A goal loop carrying a command
+  that proves it was the verifiable variant in all but name; honouring that beats dropping the user
+  into a template that ignores the command they already supplied.
+
+(f) **Every alias points at a SHIPPED template** — asserted per-alias against `template_names()`,
+  because an alias to a missing template is a dead reference that only fails when a user clicks it.
+  `code` maps to `code-implementation` (which ships) rather than the deferred `code-project`.
+
+(g) **Steering is QUEUED on the run, consumed at the iteration boundary** — same single-writer
+  discipline as pause/cancel. Injecting mid-iteration would race the worker's state, and the pending
+  queue is exposed via `/steering` because a queued instruction the user cannot see is
+  indistinguishable from one that was dropped.
+
+(h) **The routes-reference doc is GENERATED, not hand-edited.** My manual edit to `routes.md` went
+  stale against `manifest_reference`; regenerating produced better entries from the handler
+  docstrings. Regenerated and committed.
+
+(i) **NOT DONE (deliberately, needs the run-path wiring these sit above):** the steering queue is
+  stored and surfaced but the tick loop does not yet CONSUME it — that is the same controller-tick
+  seam sessions 30 and 32 also stopped short of, and wiring all three at once against a live run is a
+  single coherent change rather than three half-changes. Likewise the template-picker widget itself
+  (the alias table + manifest are the data it needs; the React component is not built) and the
+  cockpit's actual adoption of `keysEquivalent` (the function + its tests exist; swapping the
+  cockpit's `===` comparisons over to it is a behaviour-visible edit to a live surface). The
+  as-a-user validation of all 8 templates is bounded by the same run-path gap. These are honestly the
+  back half of "FE + coexistence" and belong with the engine-integration session that consumes the
+  three decision layers built in 30/32/33.
+
+### Session 34 — Knowledge Synthesis: store semantics (`feature-wf2-knowledge-store`, PR NOT OPENED — push blocked)
+
+`knowledge/semantics.py` (typed kinds, logical identity, content/chunk hashing, confidence
+aggregation, claims/mentions, freshness, the idempotency decision, typed item relations),
+`knowledge/schema_conventions.py` (the `schema.md` conventions contract), the five additive columns
++ `item_relations` table + logical-key index in `store.py`, and `KnowledgeConfig` through all four
+wiring points. 11829 tests (+79), lint clean at 612 files, validated against the real dev-home store.
+
+**Deviations and findings:**
+
+(a) **`KnowledgeConfig` did not exist** — the plan says "four-point wiring" as though it were an
+  existing dataclass gaining fields. Created it from scratch: dataclass + `_meta` on every field,
+  the `AppConfig` field, the `load()` mapping AND its `knowledge_data` section read, the `to_dict`
+  entry, and four entries in `_EDITABLE_CONFIG`. A test asserts all four points, because omitting
+  any one makes a knob silently inert.
+
+(b) **`report_budget_chars` would have been a knob that does nothing.** My first cut had
+  `check_persist` read the module constant. Added `effective_budgets()` which consults config, and
+  verified with a real config file that a 100-char budget actually rejects a 500-char report. A
+  misconfigured `0` is treated as unset rather than as "nothing may be written".
+
+(c) **The logical-key index needed to be created in `_migrate`, not the schema block.** The schema
+  block runs BEFORE `_migrate` adds the column, so a `CREATE INDEX` there fails on a fresh db and
+  silently no-ops on an upgraded one — I hit both. Creating it after the ALTERs is the only ordering
+  that works for either.
+
+(d) **My own index test was asserting nothing.** It matched `str(sqlite3.Row)` — an object repr —
+  against "index", which can never contain it. Reading the `detail` column instead revealed the
+  index genuinely was missing (plan: `SCAN items`), which is how the real gap in (c) surfaced. A
+  test that cannot fail is worse than no test.
+
+(e) **Confidence aggregation reached exactly 1.0 at ten sources,** contradicting my own docstring.
+  A claim at 1.0 is unfalsifiable — no later contradiction can lower it — so `MAX_CONFIDENCE = 0.999`
+  is now a hard ceiling, and a test asserts it across 1/2/10/50 sources.
+
+(f) **Aggregation is `1 - ∏(1 - cᵢ)`, deliberately not a sum or a mean.** Three sources at 0.6 give
+  0.936: more than any one, less than certainty. Summing exceeds 1.0; averaging makes corroboration
+  WEAKEN a strong claim, which is the opposite of what agreement means.
+
+(g) **The same source twice is not two confirmations.** Mentions dedupe on `source_ref`, or one loud
+  source could manufacture consensus with itself.
+
+(h) **Supersession sets `invalid_at` and never deletes** — "what was true when" stays queryable,
+  which is the difference between a knowledge base and a cache.
+
+(i) **`schema.md` is written once and never overwritten.** An owner's conventions are the one thing
+  in the store the system has no business editing; a "helpful" refresh would discard the reasoning
+  they encode. Loading is bounded at a LINE boundary (half a convention is worse than none), and an
+  absent document returns "" rather than silently adopting the defaults.
+
+(j) **Migration verified additive on a simulated pre-migration db:** columns dropped back out, then
+  reopened through the store — every column returns, `item_relations` is recreated, and the existing
+  row survives. Re-opening twice is safe.
+
+(k) **NOT DONE (this session is the groundwork the next one consumes):** `knowledge_persist` /
+  `knowledge_retrieve` are session 35 — the semantics module is pure and store-agnostic on purpose,
+  so the providers can be written against it without re-deriving identity rules. The `ops` op-list
+  payload, `also_artifact` dual-write, and the async enrichment/backfill loop all belong to that
+  provider pair. Nothing yet WRITES `kind`/`logical_key`/`content_hash` on the live ingest path —
+  the columns exist and are indexed, and populating them is the persist provider's job.
+
+### Session 35 — Knowledge Synthesis: the provider pair (`feature-wf2-knowledge-providers`, PR NOT OPENED — push blocked)
+
+`action_providers/knowledge_persist_provider.py` + `knowledge_retrieve_provider.py`, registered in
+the action registry AND `ALLOWED_HOOK_PROVIDERS`, plus node provenance threaded through
+`dispatch_action`. 11870 tests (+41), lint clean at 614 files. The three-node pattern was driven
+end-to-end through the live engine, including an idempotent re-run.
+
+**Deviations and findings — six defects, every one found by measuring:**
+
+(a) **`items_fts` has NO triggers.** It is an EXTERNAL-CONTENT fts5 index over a view, so a row
+  written with plain SQL is simply not searchable. Every retrieve fell through to
+  `substring_fallback` until the persist provider synced the index — and a substring fallback looks
+  identical in the output to a working hybrid search, so the whole retrieval tier would have been
+  quietly useless. The store's own docstring warns that `'rebuild'` against a stale content target
+  WIPES THE INDEX AND REPORTS SUCCESS, so this uses the delete-then-insert pattern the store's
+  existing manual sync sites use.
+
+(b) **The FTS delete has to read the OLD values BEFORE the row is rewritten.** `items_fts_src` is a
+  VIEW over the live row, so reading it after the UPDATE returns the NEW content and the delete
+  removes nothing. Measured: "aardvark" still matched after the body had been replaced with
+  "buffalo". Fixed with `_fts_snapshot` taken pre-write.
+
+(c) **The hybrid retriever's scores are RRF (~1/(60+rank)), not cosine.** A top hit scores about
+  0.033. My 0.30 "relevance cliff", borrowed from cosine space, rejected EVERY hybrid result — the
+  provider silently returned nothing on a store that plainly contained the answer. The cliff now
+  applies only to tiers whose scores are similarities; create-safety uses RANK for fused results.
+
+(d) **`HybridRetriever.search` does not return `kind`,** or any of the timestamp columns. So the
+  kind filter matched nothing (every hit had `kind: None`) and every freshness reading was zero,
+  both silently. Added `_enrich` to fill them from the store.
+
+(e) **Both tag tables have NOT NULL timestamp columns** (`tags.created_at`, `item_tags.added_at`).
+  Omitting them made every tag insert fail, and my broad `except` swallowed it so cleanly that a
+  measurement run showed `tags: []` with no error anywhere. Now logged at WARNING with a returned
+  count — best-effort has to be best-effort about something that works.
+
+(f) **`ActionContext` carries only `event`/`context`/`payload`.** Reading `ctx.run_id` (as my first
+  cut did) silently produced "workflow:unknown" for every persisted item. Provenance now comes from
+  `ctx.payload`, and `dispatch_action` threads `node_id` in. The RUN id is genuinely unavailable at
+  that seam — `dispatch_action` does not receive the run and `BindingContext` does not carry it — so
+  the provider degrades to a node-scoped ref and says so rather than the engine growing a parameter
+  nothing else needs yet.
+
+(g) **"Always included" and "always first" are different guarantees.** The `overview` was inserted
+  only when absent from the hits, so when it WAS a hit it stayed wherever ranking put it — measured,
+  second, behind a plain fact. It is now promoted rather than inserted.
+
+(h) **Create-safety is rank AND tier, not rank alone.** A substring hit that merely shared a common
+  word ranked first for an unrelated query and was reported `probable`. A top-ranked substring match
+  is a coincidence of characters; a top-ranked semantic or keyword match is evidence. The asymmetry
+  is deliberate: `unknown` leaves a duplicate for the curator, while a wrong `probable` silently
+  overwrites unrelated knowledge and no later pass can tell it happened.
+
+(i) **NOT DONE:** the `ops` op-list payload, `also_artifact` dual-write, `read_when` MATCHING at
+  retrieve time (the triggers are stored and returned; matching them against node task text is
+  retrieval-side work that belongs with session 37's synthesizer), the `coverage_gap` run-journal
+  EVENT (the flag is in the payload; journaling it needs the ledger seam), and the async
+  enrichment/backfill loop (`_enqueue_enrichment` is a best-effort hook whose target
+  `knowledge.ingest.enqueue_item` does not exist yet — it degrades silently by design, and the
+  backfill that covers what the queue missed is session 37's).

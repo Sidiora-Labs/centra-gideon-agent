@@ -563,3 +563,59 @@ Templates are the plan's proof-of-life — field-tested shapes with real daily c
 8. The rich-ingest template turns one meeting transcript into typed knowledge items + created tasks in one pass — and writes nothing to memory.db (asserted in the test).
 9. The `publish-article` workflow goes draft → dual-review → revise → gate → persist, appending a `kind: decision` item at the gate.
 10. With no LLM provider bound, `knowledge_persist` still files entries (`extraction: heuristic`) and the enrichment workflow upgrades them when a provider returns.
+
+---
+
+## Execution log
+
+- **2026-08-01 — CODE DONE (push blocked) — Store semantics groundwork (session 34 of the WF2 queue).**
+  Branch `feature-wf2-knowledge-store`. `knowledge/semantics.py`: the 10-kind taxonomy, logical
+  identity (`{kind}:{normalized_title}`, unicode/case/punctuation-folded), content + chunk hashing,
+  `1-∏(1-cᵢ)` confidence aggregation with a hard sub-1.0 ceiling, claims/mentions with
+  source-dedup and `invalid_at` supersession, freshness from `last_verified`/`expires_at`, the
+  create/update/reinforce/no-op decision, and the 5-verb typed item relations.
+  `knowledge/schema_conventions.py`: the write-once `schema.md` contract. `store.py`: five additive
+  columns, the `item_relations` table, and the logical-key index. `KnowledgeConfig` through all four
+  wiring points. 11829 tests.
+
+- **DEVIATION — `KnowledgeConfig` did not exist.** The plan reads as though it were an existing
+  dataclass gaining fields; it was created from scratch through all four points (dataclass + `_meta`,
+  `AppConfig` field, `load()` mapping + section read, `to_dict`, `_EDITABLE_CONFIG`).
+
+- **DISCOVERY — three of my own defects, each caught by measuring rather than reading.** The
+  logical-key index had to be created inside `_migrate` (the schema block runs before the column
+  exists — it failed on a fresh db and silently no-opped on an upgraded one). My index test was
+  asserting against a `sqlite3.Row` repr and so could never fail, which is how the missing index went
+  unnoticed until the assertion was fixed. And confidence aggregation reached exactly 1.0 at ten
+  sources, contradicting its own docstring and making such a claim unfalsifiable.
+
+- **NOT DONE — nothing writes the new columns yet.** They exist, are indexed, and the semantics
+  module is pure and store-agnostic so the session-35 provider pair (`knowledge_persist` /
+  `knowledge_retrieve`) can be written against it without re-deriving the identity rules. The `ops`
+  payload, `also_artifact` dual-write and async enrichment/backfill belong to that pair.
+
+- **2026-08-01 — CODE DONE (push blocked) — The provider pair (session 35 of the WF2 queue).**
+  Branch `feature-wf2-knowledge-providers`. `knowledge-persist` (idempotent, error-as-return, claims
+  with mention accumulation, tags, TTL, FTS sync) and `knowledge-retrieve` (degradation ladder with
+  strategy telemetry, create-safety, freshness, per-result detail caps, always-first overview,
+  coverage-gap reporting). Both registered in the action registry AND `ALLOWED_HOOK_PROVIDERS` in the
+  same commit. Node provenance threaded through `dispatch_action`. 11870 tests.
+
+- **DISCOVERY — six defects, all found by measuring rather than reading.** `items_fts` is an
+  external-content index with NO triggers, so a plain SQL write is not searchable and every retrieve
+  degraded to substring silently; the FTS delete must read the OLD values before the row is rewritten
+  (a view over the live row returns the new ones, so the delete removed nothing); the hybrid
+  retriever fuses with RRF so its ~0.033 scores were rejected wholesale by a cosine-space 0.30 cliff;
+  it does not return `kind` or the timestamp columns, so the kind filter matched nothing and freshness
+  read zero; both tag tables have NOT NULL timestamps, so every tag insert failed inside a swallowing
+  `except`; and `ActionContext` has no `run_id` attribute, so provenance read as "unknown".
+
+- **Validated end-to-end through the live engine:** a three-node retrieve → persist → confirm
+  template. First run: coverage gap, create, then a hybrid hit with `safety=exists`. Second run of the
+  same template: the SAME `item_id`, `created: false`, "identical content already stored — idempotent
+  no-op". That is the property the whole session exists to provide.
+
+- **NOT DONE:** the `ops` payload, `also_artifact` dual-write, retrieve-time `read_when` matching, the
+  `coverage_gap` ledger event, and the async enrichment/backfill loop — the last is a deliberate
+  best-effort hook whose target does not exist yet, and the backfill covering what the queue missed
+  belongs to session 37.
