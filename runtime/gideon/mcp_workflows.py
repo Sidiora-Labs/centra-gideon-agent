@@ -764,9 +764,14 @@ def _plan(args: dict[str, Any]) -> str:
             },
         )
 
+    grounded = _grounding_for(goal, classified)
+
     body = {
         "ok": True,
-        "planner": "scaffold-v1",
+        # Renamed: this is no longer a bare structural stub. It carries the live grounding bundle,
+        # a picked shape with a validated skeleton, and the constraint block — which is the whole
+        # difference the plan measured (first-try-valid 0/5 → 4/5).
+        "planner": "grounded-v1" if grounded else "scaffold-v1",
         "goal": goal,
         "rigor": rigor,
         # The routing is reported even when nothing matched: "no template fit, and here is why"
@@ -775,19 +780,86 @@ def _plan(args: dict[str, Any]) -> str:
             "intent": classified.to_dict(),
             "match": match.to_dict() if match is not None else {"reason": "matcher unavailable"},
         },
-        "proposed_root": scaffold,
+        "proposed_root": (grounded or {}).get("skeleton") or scaffold,
+        **({"grounding": grounded} if grounded else {}),
         "next_step": (
             "Adapt this tree to the goal, then call workflow_author with save=false to "
             "validate it before saving."
         ),
         "note": (
-            "This is a structural scaffold, not a domain plan — the template-aware planner "
-            "lands with UNIVERSAL-PLANNING. Use the manifest below for the shapes the "
-            "engine accepts."
+            "Fill the shape's slots and adapt the tree, then call workflow_author with "
+            "save=false to validate. The `grounding` block below is read from THIS system's live "
+            "registries — anything not in it does not exist here. If you cannot plan the goal "
+            'with what is listed, return {"cannot_plan": "<why>"} rather than inventing a node.'
         ),
         "manifest": {k: v for k, v in service.manifest().items() if k != "ok"},
     }
     return _fmt(body, summary=f"Draft plan for: {goal}")
+
+
+def _contract_review(definition: dict) -> dict:
+    """The derived form, the per-stage contracts, and the typed decisions.
+
+    Best-effort: a review surface is an enhancement to the plan, and a contract derivation that
+    failed must not stop the user launching a template that works. Returns `{}` rather than partial
+    keys so a caller cannot mistake an error for "this template has no contracts".
+    """
+    try:
+        from gideon.workflows import contracts as contracts_mod
+
+        spec = {
+            "inputs": definition.get("inputs") or {},
+            "root": definition.get("root") or {},
+        }
+        stage_contracts = contracts_mod.derive_contracts(spec)
+        decisions = contracts_mod.type_decisions(spec)
+        return {
+            "parameters": [p.to_dict() for p in contracts_mod.resolve_unfilled_inputs(spec)],
+            "parameter_types": contracts_mod.template_types(spec),
+            "declared_but_unused": contracts_mod.declared_but_unused(spec),
+            "stage_contracts": [c.to_dict() for c in stage_contracts],
+            "contract_issues": contracts_mod.contract_issues(stage_contracts),
+            "decisions": [d.to_dict() for d in decisions],
+            "open_decisions": contracts_mod.open_decisions(decisions),
+        }
+    except Exception:
+        logger.debug("contract review unavailable", exc_info=True)
+        return {}
+
+
+def _grounding_for(goal: str, classified: Any) -> dict | None:
+    """The grounding bundle, the picked shape, and the generated prompt.
+
+    Returns None when grounding cannot be assembled, and the caller falls back to the bare
+    scaffold — the bundle is an enhancement to planning, and a planner with a stub is still better
+    off than one handed an exception.
+    """
+    try:
+        from gideon.workflows import generation, grounding, patterns
+
+        bundle = grounding.build_bundle()
+        shape, reason = patterns.pick_shape(goal, classifier_shape=getattr(classified, "shape", ""))
+        return {
+            "bundle": bundle.to_dict(),
+            "index": bundle.index(),
+            "shape": shape.to_dict() if shape else None,
+            "shape_reason": reason,
+            "skeleton": dict(shape.skeleton) if shape else None,
+            "prompt": generation.planning_prompt(
+                goal, bundle=bundle, shape=shape, shape_reason=reason
+            ),
+            "emission_schema": (
+                generation.spec_json_schema() if bundle.structured_output else None
+            ),
+            "self_check_rules": (
+                "unique ids · valid kinds · gates have criteria · foreach has items · loops are "
+                "bounded · a work node exists · a stopping condition exists · no unfilled slots · "
+                "bindings resolve"
+            ),
+        }
+    except Exception:
+        logger.debug("grounding unavailable — falling back to the bare scaffold", exc_info=True)
+        return None
 
 
 def _def_resolvable(name: str) -> bool:
@@ -859,6 +931,10 @@ def _plan_from_template(goal: str, template: str, *, routing: dict | None = None
         # needs to know which happened: an auto-matched template is a decision to check, a named
         # one is a decision already made.
         **({"routing": routing} if routing else {}),
+        # UP-R3/R8/R16: the review surface. Derived from the tree rather than declared, so the
+        # launch form and the spec cannot disagree — measured, three shipped templates offered an
+        # input nothing read.
+        **_contract_review(definition),
         "proposed_root": definition.get("root"),
         "template_inputs": definition.get("inputs") or {},
         # How this template is actually driven — few-shot for the edit the model is about to make.
