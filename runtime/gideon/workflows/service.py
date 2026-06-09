@@ -24,12 +24,15 @@ run. A read that lazily started something would make polling a side-effecting ac
 from __future__ import annotations
 
 import logging
+import re
+import shutil
 import time
 from typing import Any
 
+from gideon.workflows import attention, blocks
 from gideon.workflows import defs as defs_mod
 from gideon.workflows import journal as journal_mod
-from gideon.workflows import mutations, secrets, store
+from gideon.workflows import macros, mutations, secrets, store, template_lint
 from gideon.workflows.models import (
     TERMINAL_RUN_STATUSES,
     InstanceState,
@@ -158,6 +161,23 @@ async def author_def(
         "provenance": provenance,
     }
 
+    # Macros expand HERE, before validation and before the write — so what is stored, what is
+    # validated and what the engine runs are the same core nodes. Expanding at run time
+    # instead would mean the journal, the resume cache and the rewind cascade all had to know
+    # macros exist, and a user could never hand-edit the expansion to graduate from the
+    # pattern (their edit would be regenerated over).
+    try:
+        spec = macros.expand_spec(spec)
+        # Blocks AFTER macros, not before: a macro emits block references (the judge panel cites
+        # the Finding record), and resolving first would leave those unresolved in the output.
+        spec = blocks.resolve_spec(spec)
+    except (macros.MacroError, blocks.BlockError) as exc:
+        return _err("WF_DEF_MACRO_INVALID", str(exc), repromptable=True)
+    # The EXPANDED root is what gets written, so the stored spec, the validated spec and the
+    # spec the engine runs are the same tree.
+    expanded_root = spec.get("root")
+    root = expanded_root if isinstance(expanded_root, dict) else root
+
     inline = secrets.find_inline_secrets(spec)
     if inline:
         # Refused, never merely warned: once saved, the value is on disk and every later
@@ -173,6 +193,11 @@ async def author_def(
         "valid": result.ok,
         "issues": [i.to_dict() for i in result.issues],
         "levels": result.levels,
+        # Conventions ADVICE, attached and never fatal (WF2-R15). A user's own half-finished
+        # workflow is theirs to leave rough, so the lint informs rather than refuses — but an
+        # author who never sees it cannot follow a convention they were not told about. The
+        # bundled library is held to lint-clean by test instead.
+        "lint": template_lint.lint_template(spec).to_dict(),
     }
     if not result.ok:
         return _err("WF_DEF_INVALID", "the spec did not validate", **body, repromptable=True)
@@ -278,6 +303,12 @@ async def start_run(
             f"missing required input(s): {', '.join(missing)}",
             missing=missing,
         )
+    # Declared defaults are APPLIED, not merely documented. Before this they were validated and
+    # then ignored: a template declaring `acceptance` with a default and a run that omitted it
+    # failed on `binding failed: unresolved reference at 'acceptance'` — so every optional input
+    # was a landmine, and a template could only be run by passing every key it declared. Found by
+    # starting a bundled template from the UI with its optional field left blank.
+    inputs = _with_declared_defaults(spec, inputs or {})
 
     # Run-start preflight (WF2-R12): credentials, binaries, models and action providers.
     # Blocking here rather than degrading at node 7, which has already paid for six nodes.
@@ -525,6 +556,52 @@ def cancel_run(run_id: str, *, supervisor: Any = None) -> dict[str, Any]:
     return _ok(run_id=run_id, cancel_requested=True)
 
 
+def delete_run(run_id: str, *, supervisor: Any = None) -> dict[str, Any]:
+    """Delete a TERMINAL run and its artifacts.
+
+    Refused while a run can still move. Deleting a live run would leave its controller writing
+    journal entries and terminal status to a row that no longer exists — the single-writer
+    discipline (WF2-R10) assumes the row outlives the writer. Cancel first, then delete: two
+    deliberate steps for two genuinely different intents.
+
+    Removes the run DIRECTORY as well as the row. A row-only delete would leave the journal,
+    outputs and continuations on disk forever, invisible to every surface — the run would look
+    gone while still costing the disk and still holding a live resume token.
+    """
+    run = store.get(run_id)
+    if run is None:
+        return _err("WF_RUN_NOT_FOUND", f"no run {run_id!r}")
+    if run.status not in TERMINAL_RUN_STATUSES:
+        return _err(
+            "WF_RUN_NOT_TERMINAL",
+            f"run is {run.status.value}; cancel it before deleting",
+            status=run.status.value,
+        )
+    # A controller for a terminal run is finished but may still be registered; dropping it
+    # first means nothing holds a handle to a run being deleted.
+    controller = _live(run_id, supervisor)
+    if controller is not None and supervisor is not None:
+        try:
+            supervisor.forget(run_id)
+        except Exception:
+            logger.debug("could not unregister the controller for %s", run_id, exc_info=True)
+
+    # Traversal guard, same shape as `prune_fork`: the id reaches here from a URL, and a
+    # crafted one must not walk out of the runs root.
+    target = store.run_dir(run_id).resolve()
+    root = store.runs_root().resolve()
+    if root not in target.parents:
+        return _err("WF_RUN_DELETE_REFUSED", "refusing to delete a path outside the runs root")
+    if target.is_dir():
+        shutil.rmtree(target, ignore_errors=True)
+    # The inbox rows go too: a gate that was open when the run was cancelled would otherwise
+    # outlive the run entirely and be unanswerable forever. The state comes off the supervisor,
+    # which is what the route has — a delete is a request path, not the engine's own.
+    attention.resolve_run_items(getattr(supervisor, "_state", None), run_id)
+    deleted = store.delete(run_id)
+    return _ok(run_id=run_id, deleted=deleted)
+
+
 def pause_run(run_id: str, *, supervisor: Any = None) -> dict[str, Any]:
     """Stop launching new nodes; in-flight ones finish.
 
@@ -709,6 +786,11 @@ def manifest() -> dict[str, Any]:
         mutation_ops=[o.value for o in mutations.OpKind],
         instance_states=[s.value for s in InstanceState],
         run_statuses=[s.value for s in RunStatus],
+        # Authoring sugar, in the manifest because the manifest is what an authoring model reads
+        # to learn the shapes it may write. A macro or block absent here is one a model will
+        # never use, so the library would be dead weight.
+        macros=macros.macro_names(),
+        shared_blocks=blocks.block_names(),
     )
 
 
@@ -743,6 +825,32 @@ def _missing_required_inputs(spec: dict[str, Any], provided: dict[str, Any]) -> 
     return sorted(missing)
 
 
+def _with_declared_defaults(spec: dict[str, Any], provided: dict[str, Any]) -> dict[str, Any]:
+    """Fill in every declared input the caller omitted, using its declared default.
+
+    Applied at RUN START, once, so the run record shows the values the run actually used — a run
+    whose inputs were completed lazily at each binding would leave a record that does not explain
+    its own behaviour.
+
+    A declared input with NO default still gets a key, valued "": the alternative is a binding
+    error on an input the template said was optional, which is the bug this function exists to
+    fix. An optional input's whole meaning is "the workflow works without it".
+
+    The caller's value always wins, including an explicit empty string — a user who deliberately
+    cleared a field is not asking for the default back.
+    """
+    declared = spec.get("inputs") or {}
+    if not isinstance(declared, dict):
+        return provided
+    out = dict(provided)
+    for key, meta in declared.items():
+        if key in out:
+            continue
+        default = meta.get("default") if isinstance(meta, dict) else None
+        out[str(key)] = "" if default is None else default
+    return out
+
+
 def _nodes_of(run_id: str) -> list[dict[str, Any]]:
     instances = store.read_state(run_id)
     spec = store.read_spec(run_id)
@@ -754,20 +862,35 @@ def _nodes_of(run_id: str) -> list[dict[str, Any]]:
                     ids[path] = node.id
         except ValueError:
             pass
+    # How many instances share each base path — the `12` in "[3/12]". Counted here rather than
+    # stored, so a rewind that re-expands a fan-out cannot leave a stale total behind.
+    totals: dict[str, int] = {}
+    for path in instances:
+        totals[path.split("#")[0].split("@")[0]] = (
+            totals.get(path.split("#")[0].split("@")[0], 0) + 1
+        )
+
     out: list[dict[str, Any]] = []
     for path in sorted(instances):
         inst = instances[path]
         base = path.split("#")[0].split("@")[0]
-        out.append(
-            {
-                "instance_path": path,
-                "node_id": ids.get(base, ""),
-                "state": inst.state.value,
-                "attempt": inst.attempt,
-                "degraded_reason": inst.degraded_reason,
-                "failure": inst.failure.to_dict() if inst.failure else None,
-            }
-        )
+        row: dict[str, Any] = {
+            "instance_path": path,
+            "node_id": ids.get(base, ""),
+            "state": inst.state.value,
+            "attempt": inst.attempt,
+            "degraded_reason": inst.degraded_reason,
+            "failure": inst.failure.to_dict() if inst.failure else None,
+        }
+        # Per-item foreach context (WF2-R5), included only for an actually-iterated instance:
+        # an `item_index` on a lone node would render "[1/1]", which is noise.
+        suffix = re.search(r"[#@](\d+)$", path)
+        if suffix and totals.get(base, 0) > 1:
+            row["item_index"] = int(suffix.group(1))
+            row["item_total"] = totals[base]
+            if inst.item_label:
+                row["item_label"] = inst.item_label
+        out.append(row)
     return out
 
 
