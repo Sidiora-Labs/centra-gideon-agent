@@ -619,3 +619,105 @@ Templates are the plan's proof-of-life — field-tested shapes with real daily c
   `coverage_gap` ledger event, and the async enrichment/backfill loop — the last is a deliberate
   best-effort hook whose target does not exist yet, and the backfill covering what the queue missed
   belongs to session 37.
+
+- **2026-08-01 — CODE DONE (push blocked) — Long-run engine additions (session 36 of the WF2 queue).**
+  Branch `feature-wf2-engine-longrun`. `workflows/longrun.py` + the `until_cancelled` loop mode and
+  its reaper, `{{siblings.*}}`/`{{previous.output}}` with the `window`/`unseen`/`significant`/`full`/
+  `hygiene`/`clamp` pipes, buffer-seal `wait`, adaptive-delay clamp, four ledger kinds, two new
+  validator errors. 11957 tests.
+
+- **DEVIATION (premise mismatch, resolved in place) — `join: any` does NOT cancel a watcher.** The
+  plan says it does; measured, `container_outcome` checks for non-terminal children before the ANY
+  rule, so the run never completes. That check is deliberate (a join must not fire early on a
+  fan-out). So reaping is a separate pure rule, `reap_watchers`, rather than a change to join
+  semantics. The plan's intent was buildable as written; only its stated mechanism was wrong.
+
+- **DISCOVERY — three PRE-EXISTING engine defects, all live on `main`, all found by running the
+  plan's flagship shape.** `_base_path` truncated at the last iteration marker instead of removing
+  it, so a `wait` inside a loop body was looked up as its parent sequence and read as a gate ("gate
+  timed out with no answer", for a template with no gate); `_loop_parent` required the path to END
+  at `@N`, so a container-bodied loop never advanced and the run deadlocked after one iteration; and
+  instance paths sorted as strings, so `body@10` preceded `body@2` and "oldest first" silently
+  became wrong at the tenth cycle. Five SHIPPED templates use container-bodied loops. Fixing the
+  second also required advancing the counter only when the whole body is terminal, derived through
+  the scheduler's own `derive_state` rather than a second notion of completeness.
+
+- **Validated end-to-end through the live engine:** the sibling view grew 2→4→8 across cycles as the
+  worker produced, `previous.output` chained each cycle to its predecessor, the seen-set journaled
+  one novel item per cycle, and `watcher_reaped` fired with `accompanied_work_complete` — the run
+  COMPLETED in 10s instead of hanging forever.
+
+- **NOT DONE:** the `transform(hygiene|unseen)` node preset (the pipes ship), LLM-summarize for
+  oversized sibling payloads (deterministic truncate ships as the always-works fallback), and the
+  run-continuity INJECTION SITE (the functions ship and are tested; wiring them onto the trigger
+  record is session 37's recurring-run work).
+
+- **2026-08-01 — CODE DONE (push blocked) — Consolidation + maintenance (session 37 of the WF2 queue).**
+  Branch `feature-wf2-knowledge-maintenance`. `knowledge/consolidation.py` (gate stack, deterministic
+  pre-dedup, injectable-metric clustering, lineage caps, health checks, differential refresh, phantom
+  hubs, lint cadence), the `knowledge-health` / `knowledge-consolidate` / `knowledge-gaps` providers,
+  the three bundled templates, four config knobs. 12059 tests.
+
+- **DEVIATION — the plan's 0.75 cluster threshold is an EMBEDDING number.** Measured: six human
+  paraphrases of one fact score 0.12-0.36 pairwise on token Jaccard, so applying 0.75 to the
+  embedder-free metric clustered nothing at all — a pass that ran, reported success, and consolidated
+  zero items every time. The metric is now injectable and the DEFAULT THRESHOLD FOLLOWS THE METRIC
+  (0.30 token / 0.75 cosine). Same defect class as session 35's cosine-cliff-vs-RRF bug.
+
+- **DEVIATION — the plan's `<100-char` stub rule over-fires on real content.** An 83-character
+  complete fact is not a stub, and six of those in a stub report trains the reader to ignore it. A
+  stub is now short AND unspecific (no number, path, identifier or version).
+
+- **DISCOVERY — five silent-failure bugs.** `items_fts` is keyed by ROWID not item id (every item
+  read as unindexed; the reindex path had the mirror bug, writing entries no search can match);
+  `content_hash()` is keyword-only and `items.item_type` is NOT NULL (the hand-rolled INSERT failed,
+  so the write now goes through `knowledge-persist` — one writer per table); the persist provider
+  silently DROPPED a `metadata=` argument, so the whole consolidation lineage never reached the row
+  (now an explicit `lineage` key, not an open passthrough that could clobber `claims`); an embedder
+  returning None must not be cached as an empty vector, because a 0.0 cosine silently means
+  "unrelated" and that item would never cluster again; and phantom-hub detection is a set difference,
+  not a search — the first draft passed `min_mentions` as a search query.
+
+- **NOT DONE:** `gap-healing`'s drafting stage was not observed to completion live (a real Bedrock
+  call still running after ~5 min, cancelled). Gap drafts are NOT routed to
+  `learning.proposals.enqueue`: its `Kind` enum is CLOSED to six kinds and none is a knowledge draft,
+  so filing there needs either a seventh kind or a mislabel — the extension belongs to the flywheel
+  plan that owns the enum. The template persists a TTL'd `probe` tagged `proposal` instead.
+  Contradiction-at-persist (§3.2) and typed-edge inference are session 38's.
+
+- **2026-08-01 — CODE DONE (push blocked) — Contradiction + retrieval polish (session 38 of the WF2 queue).**
+  Branch `feature-wf2-contradiction`. `knowledge/contradiction.py` + `knowledge/session_brief.py`, the
+  persist-time conflict pass with typed-edge writes, the `fenced_sources` binding filter, read-only
+  conflict/relations routes, a `ConflictPanel` Knowledge view, two config knobs. 12123 tests.
+
+- **DISCOVERY — a PRE-EXISTING split-brain in the knowledge store path.** The dashboard's `AppState`
+  opens `<home>/workspace/knowledge/knowledge.db`; every provider from sessions 35-38 composed
+  `<home>/knowledge/knowledge.db`. Workflow-persisted knowledge landed in a second database the UI
+  could never read — both writes "succeeded", both reads "worked", and the browsed store simply never
+  contained what workflows wrote. Found only by driving the new conflicts route live after a workflow
+  had written a conflict. Now ONE `knowledge_db_path()` in `store.py`, all four call sites through it,
+  plus a test asserting no module composes the path itself.
+
+- **DISCOVERY — six more silent-failure bugs.** The numeric conflict branch skipped the similarity
+  gate (two unrelated properties of one subject read as a conflict); the prose-negation rule was
+  UNREACHABLE behind the SPO gate, which requires the very decomposition those statements fail;
+  plain Jaccard is the wrong instrument for a polarity comparison because negating ADDS tokens
+  (measured 0.60 vs a 0.75 floor — added `core_similarity`); conflict details built from the
+  normalized object lost the decimal point; the neighbour scan searched FTS for CLAIM text, which
+  is not in the index, so it found nothing unless a claim echoed its item's title; and the edge
+  write used RUN provenance as a row id, so the foreign key silently wrote nothing while the
+  conflict record looked correct.
+
+- **DEVIATION — no resolve endpoint, deliberately.** Both claims are always kept and the precedence
+  ladder returns "" for two same-tier sources. Deciding a conflict is a judgement about the sources;
+  a resolve route would invite the system to discard evidence irreversibly.
+
+- **Validated live:** a workflow persisted two contradicting claims, the conflict was flagged at
+  ingest with `prefer` favouring the user-origin decision, both API routes returned it (edges from
+  both directions with resolved titles), and a second run read `{{brief.count}} = 2` with the
+  decision ranked first and every item fenced.
+
+- **NOT DONE:** the model-tier conflict pass is built and tested but unwired to a live model — that
+  needs a `stage` node, since an LLM call inside an action provider is what the action/stage split
+  exists to prevent. Background typed-edge inference beyond `contradicts` is parse-ready but unwired.
+  The `coverage_gap` → persist-proposal loop and the template slate are session 39's.
