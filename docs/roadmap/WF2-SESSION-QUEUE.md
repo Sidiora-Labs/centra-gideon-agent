@@ -90,26 +90,26 @@ mandatory.
 |---|---|---|---|
 | 29 | Judge contract + `runtime_hints` spec; typed verdict enum; judge isolation; deterministic pre-tier + `fallback_check` | G13 | ✅ DONE (#168) |
 | 30 | Engine loop-node middleware: breaker + fingerprinting + escalation ladder + failure-class routing; fresh-session protocol; interrupt queue | G13 | ✅ DONE (#169) |
-| 31 | Author the 8 template YAML specs + integration tests through the engine | G14 | TODO |
-| 32 | Calibration + acceptance instrumentation: rubric contract, verdict ledger, divergence events, template lint, nodding-loop detector | G14 | TODO |
-| 33 | FE + coexistence: template picker, cockpit live-follow, interrupt-queue UI, legacy alias layer, as-a-user validation of all 8 | G15 | TODO |
+| 31 | Author the 8 template YAML specs + integration tests through the engine | G14 | ✅ DONE (#170) |
+| 32 | Calibration + acceptance instrumentation: rubric contract, verdict ledger, divergence events, template lint, nodding-loop detector | G14 | ✅ DONE (#171) |
+| 33 | FE + coexistence: template picker, cockpit live-follow, interrupt-queue UI, legacy alias layer, as-a-user validation of all 8 | G15 | ✅ DONE (#172) |
 
 ## D. Knowledge Synthesis (`-KNOWLEDGE-SYNTHESIS.md`) — needs engine Slices 0-2
 
 | # | Session | PR group | Status |
 |---|---|---|---|
-| 34 | Store semantics: `kind`/`logical_key`/`last_verified`/`expires_at`, `item_relations`, hashing, `KnowledgeConfig` four-point wiring, `schema.md` | G16 | TODO |
-| 35 | The provider pair: `knowledge_persist` + `knowledge_retrieve`, allowlist, native `search()`, three-node pattern end-to-end | G16 | TODO |
-| 36 | Engine additions: `until_cancelled` loop mode + seen-set, `{{siblings.*}}`/`{{previous.output}}`, buffer-seal wait, adaptive delay clamp | G17 | TODO |
-| 37 | Consolidation + maintenance: reflect mechanics, `knowledge-health`/`lint`/`gap-healing` templates, proposal routing, differential refresh | G17 | TODO |
-| 38 | Contradiction + retrieval polish: persist-time conflict pass, typed-edge inference, contradiction UI, Session Brief, fencing filter | G18 | TODO |
-| 39 | Template slate + long-run validation (idempotent re-runs, bounded cycle cost, seen-set across restart) | G18 | TODO |
+| 34 | Store semantics: `kind`/`logical_key`/`last_verified`/`expires_at`, `item_relations`, hashing, `KnowledgeConfig` four-point wiring, `schema.md` | G16 | ✅ DONE (#173) |
+| 35 | The provider pair: `knowledge_persist` + `knowledge_retrieve`, allowlist, native `search()`, three-node pattern end-to-end | G16 | ✅ DONE (#174) |
+| 36 | Engine additions: `until_cancelled` loop mode + seen-set, `{{siblings.*}}`/`{{previous.output}}`, buffer-seal wait, adaptive delay clamp | G17 | ✅ DONE (#175) |
+| 37 | Consolidation + maintenance: reflect mechanics, `knowledge-health`/`lint`/`gap-healing` templates, proposal routing, differential refresh | G17 | ✅ DONE (#175) |
+| 38 | Contradiction + retrieval polish: persist-time conflict pass, typed-edge inference, contradiction UI, Session Brief, fencing filter | G18 | ✅ DONE (#176) |
+| 39 | Template slate + long-run validation (idempotent re-runs, bounded cycle cost, seen-set across restart) | G18 | ✅ DONE (#177) |
 
 ## E. Universal Planning (`-UNIVERSAL-PLANNING.md`) — needs engine + Loops templates
 
 | # | Session | PR group | Status |
 |---|---|---|---|
-| 40 | Matching + classification: intent classifier, tiered `match_template()` T1-T5, metadata extensions, CI routing fixtures; delete dead chat plan-mode | G19 | TODO |
+| 40 | Matching + classification: intent classifier, tiered `match_template()` T1-T5, metadata extensions, CI routing fixtures; delete dead chat plan-mode | G19 | ✅ DONE (#178) |
 | 41 | Grounded generation: grounding bundle from live registries, pattern-shape registry, schema-constrained `oneOf`, repair-not-regenerate, brownfield pass | G19 | TODO |
 | 42 | Contracts + parameterization: done-means contracts + lint + preflight, `resolve_unfilled_inputs()`, triage-first, blocking/open decision typing | G20 | TODO |
 | 43 | Review + revision: streaming multi-view review, typed merge-by-id, TTL'd sketches, plan-as-artifact, `revise{step_ref, comment}` | G20 | TODO |
@@ -1077,3 +1077,131 @@ drift test. 11442 tests (+63), lint clean at 608 files, full FE gate green (type
   properly belong to. The R13 context-overflow recovery (reactive one-shot compaction) needs the
   summarizer seam the architecture doc already records as absent. This session is the pure
   decision layer those consume; it is fully unit- and sequence-validated in isolation.
+
+### Session 31 — Loops Evolution: the loop-kind templates (`feature-wf2-loops-templates`, PR NOT OPENED — push blocked)
+
+Five new bundled templates (`goal-pursuit-open-ended`, `goal-pursuit-verifiable`, `general-project`,
+`design-project`, `diagnose-run`) + `tests/test_workflows_loop_templates.py` (132 tests).
+11629 tests (+187), lint clean at 608 files, all 11 templates verified in a built wheel and
+through the live API.
+
+**Deviations and findings:**
+
+(a) **FIVE new templates, not eight.** The plan's §"Per-Kind Template Designs" describes six
+  families; `deep-research` (the research-loop descendant) ALREADY SHIPS from Slice 9a, and the
+  `goal-pursuit-monitor` variant is **not buildable yet** — its design is a parked run driven by
+  `set_onetime_task`/`set_recurring_task`, tools that belong to AUTOMATION-SUBSTRATE and do not
+  exist (verified: no such symbol anywhere in the tree). Authoring it would mean shipping a
+  template whose central mechanism silently no-ops. Recorded rather than faked.
+
+(b) **`{{defaults.runtime_hints.judge.rubric}}` IS NOT A VALID BINDING.** The plan's YAML uses it
+  throughout; the engine's binding roots are `inputs`/`nodes`/`item`/`iter`/`last` only
+  (validator.py:346), and it was flagged as `WF_UNKNOWN_BINDING_ROOT`. Rubrics and forbidden-mode
+  lists are therefore INLINED into judge prompts — also more legible to the judge than a rendered
+  data structure. A test now asserts every declared rubric criterion and forbidden mode actually
+  appears in a judge prompt, because a rubric the judge never sees scores nothing.
+
+(c) **Two more spec-key mismatches in the plan's YAML,** both caught by the validator: a gate's
+  kind is `config.kind`, not `gate_kind`; an `until` loop needs `config.condition`, not
+  `config.until`.
+
+(d) **`continue_on_error` does not exist** — I invented it for the baseline action. The bundled
+  action-arg guard (a landmine recorded from an earlier session) caught it: the real key is
+  `allow_failure` INSIDE `with`, as `code-implementation` already does.
+
+(e) **`design-project` shipped with NO JUDGE in my first cut** — its refinement loop exited on a
+  self-reported `issues_resolved`, which is exactly the "no agent certifies its own work" rule the
+  plan calls the platform's oldest. My own structural test caught it; added a fresh-isolated
+  read-only judge.
+
+(f) **The terminal `accept` gate lacked the anti-leniency line.** It is the LAST check before the
+  run reports success to the user, so it is the one place that most needs "do not talk yourself
+  into approving".
+
+(g) **A prose collision with a convention gate:** "Finding issues is the normal outcome" tripped
+  `test_every_review_stage_uses_the_canonical_Finding_record`, which greps for the literal
+  "Finding". Reworded to "Reporting real issues…" — the doctrine was worth keeping, the capital F
+  was incidental.
+
+(h) **Two of my own tests were wrong, not the templates:** `_judges()` classified any
+  `tools_posture: verify` stage as a judge (diagnose-run's trace stage is read-only because it
+  reads a LEDGER), and `required` + `default: null` is the LOADER's normalization rather than an
+  authoring conflict.
+
+(i) **`EXPECTED` in `test_workflows_bundled.py` grew 6 → 11,** so the pre-existing convention suite
+  now holds the new templates to every gate it applies to the originals — strict validation,
+  lint-clean-as-bundled, canonical Finding record, action-arg nesting, name/dir agreement.
+
+(j) **NOT DONE:** the monitor variant (a), and the `code-project` SDLC template — the plan's design
+  for it is the largest of the six (WIP=1 enforcement, four structural gates, an initializer stage,
+  `tick.evaluate` porting) and it overlaps `code-implementation`, which already ships. Reconciling
+  the two is a judgement about whether to replace a working template or add a second beside it,
+  which is a product decision rather than a mechanical port.
+
+### Session 32 — Loops Evolution: calibration + acceptance instrumentation (`feature-wf2-loops-calibration`, PR NOT OPENED — push blocked)
+
+`workflows/judge_calibration.py` (verdict ledger, divergence records, the nodding-loop detector,
+stuck detection, the judge canary, the hardening-loop exemplars) + six anti-pattern lint rules and
+the five-moves audit in `template_lint.py`. 11697 tests (+68), lint clean at 609 files.
+
+**Deviations and findings:**
+
+(a) **FIVE false positives from my own first draft of the lint rules — all on the SHIPPED
+  library, none of them real template defects.** In order: the amnesiac rule accepted only
+  `{{last.}}`/`{{iter.}}` when `{{nodes.}}` inside a loop body is equally cross-iteration
+  state; the nodding rule demanded a field literally named `verdict` when `refuted: boolean`
+  routes just as well; it demanded `tools_posture: verify` from `infer` nodes, which have no
+  tools BY DEFINITION; the tangled rule required `progress_field` when `streak` alone is a
+  valid `until_dry` exit, and required a literal int `max_iterations` when a binding
+  (`{{inputs.rounds}}`) is a perfectly good cap; and the blind rule only recognised verifiers
+  with "judge" in the name, missing `verify_refute`, `completeness_critic` and `round_gaps`.
+
+  Each was fixed **at the rule**, not exempted at the call site. `KNOWN_ANTI_PATTERNS` is
+  empty and a test asserts it stays empty. A lint that cries wolf on the library it ships
+  with is a lint authors learn to ignore, which is worse than no lint.
+
+(b) **I nearly shipped one of those false positives as a "real finding".** I had written
+  `audit-sweep`'s amnesiac flag into the queue as a genuine latent defect with a reasoned
+  exemption — and the `test_the_known_finding_is_still_real` self-check I wrote alongside it is
+  what proved the exemption wrong once the rule was fixed. Worth recording because the
+  plausible-sounding write-up was the dangerous part, not the rule.
+
+(c) **A verdict record keeps DISCARDED iterations** (`status="discard"`). A ledger of only the
+  verdicts that stuck cannot answer "does this judge ever reject?", and excluding them would
+  let a template look like a nodder precisely BECAUSE its judge was forcing rewinds.
+
+(d) **`pass_rate` and `median_overall` return None, not 0.0, on no data** — 0.0 reads as
+  "always fails", which is a different and alarming claim.
+
+(e) **`false_pass_rate` is reported SEPARATELY from any accuracy figure.** An instrument that
+  is 90% accurate but wrong in the dangerous direction every time is not 90% good, and one
+  averaged number would hide exactly that.
+
+(f) **A probe that could not RUN is not a blind judge.** `calibrated=None` is distinct from
+  `False`; declaring a judge untrustworthy because the probe broke would halt runs for an
+  infrastructure problem. The separation threshold is asserted equal to
+  `loop/instrument._CANARY_MIN_SEPARATION` — a second threshold would make the same judge
+  trustworthy to one caller and blind to another.
+
+(g) **A malformed `scores` field raised `AttributeError`,** which my `except (TypeError,
+  ValueError)` did not name — so the "degrades gracefully" docstring was false. Fixing it
+  raised the better question: such a row is still USABLE (its verdict is what the detector
+  counts), so it is now kept with empty scores rather than dropped. Dropping it would lose a
+  real rejection over a secondary field.
+
+(h) **`OBSTRUCTING` (never passes) does NOT block a template from becoming default,** while
+  `NODDING` does. Both are broken, but obstruction fails work that should pass — visible and
+  annoying — whereas nodding passes work that should fail, invisibly.
+
+(i) **Validated against the REAL Bedrock verdict captured in session 29:** it journals, round-
+  trips with its `prompt_version` intact, reads as `discriminating` inside a realistic 10-run
+  history, and a simulated human override becomes a labelled `false_reject` exemplar with the
+  user's reasoning verbatim.
+
+(j) **NOT DONE:** the calibration is not yet CALLED from the run path — nothing emits
+  `judge_verdict` / `judge_divergence` events yet (the kinds are registered and the FE union
+  knows them, from session 30). Wiring the emit points means touching the controller tick and
+  the human-override UI, which is session 33's FE work. The `probe_judge` template-save-time
+  hook is likewise deferred: `assess_separation` is pure and tested, but the probe that FEEDS
+  it needs a live model call on the save path, and putting a model call in a save is a latency
+  decision worth making deliberately rather than in passing.
