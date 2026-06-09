@@ -824,3 +824,58 @@ These loop-engine behaviors are baked into `gateway._fire`, the watchdog, and th
 9. Mid-flight editing works (user pauses a running research workflow, edits the synthesis prompt, resumes; edited template surfaces the re-validate warning).
 10. The five-moves audit + anti-pattern lint pass in CI for all 8 bundled templates (R6b).
 11. The template picker correctly suggests `code-project` for coding intents and `deep-research` for research intents; legacy loop-kind names resolve via aliases (R10a).
+
+---
+
+## Execution log
+
+- **2026-08-01 — DONE — Judge contract + runtime_hints + enforcement invariants (session 29 of the WF2 queue).**
+  Branch `feature-wf2-loops-judge`, PR #167. `workflows/judge_contract.py` (closed verdict enum
+  PASS/REJECT/REPLAN/ESCALATE/NEEDS_INPUT, rubric ratchet with strict-no-averaging,
+  engine-computed overall, forbidden-mode denylist, N-sample median aggregation),
+  `judge_pretier.py` (the free rule tier that runs before any judge model call — never issues a
+  PASS — plus the tristate `fallback_check`), `judge_actors.py` (the actor-transition invariant:
+  a worker may never reach `done`; judge isolation incl. cross-family refusal; provenance
+  blinding; narration-excluding evidence assembly). `runtime_hints` added to `WorkflowDef`
+  (opaque to the core, parsed leniently to the STRICT default by `hints_from_dict`). 11379 tests.
+
+- **DISCOVERY — the forbidden-mode denylist shipped inert in its first form.** Requiring every
+  long word of a mode phrase to be present missed the phrasing a judge actually produces
+  ("test deleted or skipped" lists alternatives). Two-of-N stemmed-signal matching + two-signal
+  default phrasings; verified 6/6 real admissions caught, 4/4 innocent clean.
+
+- **DEVIATION — `loop/judge.py` is not unified.** LOOPS-EVOLUTION converges loops onto v2 in its
+  own slices; unifying the existing loop judge pre-emptively would be wasted motion. This session
+  builds the template-world contract that must MEET OR EXCEED the loop judge's bar (which it does:
+  isolation, independent proof re-run, dual/median adjudication, verify-command tier).
+
+- **NOT DONE (queue split):** the engine loop-node middleware (breaker, fingerprinting, escalation
+  ladder, failure-class routing, fresh-session protocol, interrupt queue) is session 30; the 8
+  template specs are session 31. This session is the enforcement primitives they consume.
+
+- **Real-model validated** through the live dev gateway (Bedrock, claude-sonnet-5): a real verdict
+  came back correctly shaped and REJECTED thin evidence unprompted; the contract then caught both
+  a rubber-stamp (same zero scores flipped to PASS) and a deterministic contradiction (PASS vs
+  failed check → escalate).
+
+- **2026-08-01 — CODE DONE (push blocked) — Engine loop-node middleware (session 30 of the WF2 queue).**
+  Branch `feature-wf2-loops-middleware`. `workflows/loop_middleware.py`: 7-way failure
+  classification, tool-argument fingerprinting, the Continue→Nudge→Escalate→Halt ladder with
+  per-class entry rungs, recoverable-class headroom (no rung burned on a 429), the structured
+  never-silence brief, and the atomic interrupt queue. 4 new ledger kinds registered in the FE
+  `RUN_LIFECYCLE` union with a bidirectional drift test. 11442 tests, full FE gate green.
+
+- **DISCOVERY — two dead-configuration bugs in my own first cut, both caught by measuring the walk.**
+  (1) Every non-classified-retry rung mapped to HALT, making the ladder's middle unreachable — fixed
+  with a distinct ESCALATE action. (2) `attempt_cap` applied as a ladder-POSITION cap made
+  `restart_from_scratch` unreachable under the plan's own values — fixed by counting attempts within
+  a rung. A rung that can never be selected reads as a working feature; only walking the whole ladder
+  exposes it.
+
+- **DEVIATION — built on top of `resilience.check_breaker`, not replacing it.** The Slice-2c breaker
+  already catches four stalls; this adds only the tiers needing more than counters.
+
+- **NOT DONE — the middleware is a pure decision layer, not yet wired into the `RunController` tick.**
+  That wiring (plus the R7 fresh-session lifecycle protocol and R13 reactive compaction, which needs
+  the absent summarizer seam) is the live-engine integration those consume. Validated in isolation on
+  a full simulated stall sequence.
