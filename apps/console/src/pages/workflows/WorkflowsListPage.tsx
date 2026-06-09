@@ -5,11 +5,12 @@ import { EmptyState, ListRow, Loading } from '../../ui/ListScaffold'
 import { SearchField } from '../../ui/SearchField'
 import { Segmented } from '../../ui/Segmented'
 import { QuietButton } from '../../ui/QuietButton'
-import { api, type WorkflowDefSummary, type WorkflowRunSummary } from '../../lib/api'
+import { api, type WorkflowDef, type WorkflowDefSummary, type WorkflowRunSummary } from '../../lib/api'
 import { useQueryParam, type RouteProps } from '../../app/useQueryState'
-import { confirmDelete } from '../../ui/dialog'
+import { confirmDelete, promptForm } from '../../ui/dialog'
 import { notify } from '../../app/appSdk'
-import { fmtElapsed, runLook } from './workflowMeta'
+import { fmtElapsed, isTerminal, runLook } from './workflowMeta'
+import { coerceInputs, inputFields, startsWithoutInput } from './templateStart'
 
 const TABS = [
   { key: 'runs', label: 'Runs' },
@@ -65,8 +66,37 @@ export function WorkflowsListPage({ navigate, query: routeQuery, setQuery }: Rou
   }, [defs, q])
 
   const start = useCallback(async (name: string) => {
+    // Every bundled template declares a required input, and starting with none is refused by the
+    // engine (`WF_RUN_MISSING_INPUTS`) — so before this, every shipped template was unstartable
+    // from the UI. Fetch the definition, ask for what it declares, then start.
+    let def: WorkflowDef | null = null
     try {
-      const res = await api.startWorkflowRun({ name })
+      def = (await api.workflowDef(name)).definition
+    } catch {
+      // A definition that cannot be read still gets a start attempt: the engine's own error is
+      // more informative than one this page could invent, and a transient read failure should not
+      // block a run the user asked for.
+    }
+
+    let inputs: Record<string, unknown> | undefined
+    if (def && !startsWithoutInput(def.inputs)) {
+      const fields = inputFields(def.inputs)
+      const example = def.metadata?.steering_examples?.find((e) => e.event === 'kickoff')
+      const answers = await promptForm({
+        title: `Run ${name}`,
+        // The template's own kickoff example, shown as the body: it is a concrete instance of
+        // what this workflow is for, which is far more use than the description at the moment of
+        // filling the form in.
+        body: example?.description ? `For example: ${example.description}` : def.description,
+        fields,
+        confirmLabel: 'Run',
+      })
+      if (answers === null) return  // cancelled
+      inputs = coerceInputs(answers, def.inputs)
+    }
+
+    try {
+      const res = await api.startWorkflowRun(inputs ? { name, inputs } : { name })
       navigate(`workflows/runs/${res.run_id}`)
     } catch (e) {
       // A preflight refusal is the common case and it is ACTIONABLE (missing credential, no
@@ -85,6 +115,31 @@ export function WorkflowsListPage({ navigate, query: routeQuery, setQuery }: Rou
       load()
     } catch (e) {
       notify(e instanceof Error ? e.message : 'Could not delete the definition')
+    }
+  }, [load])
+
+  // Two-step ARMED delete for a run, not a modal: a run row is a list item and a dialog per
+  // row is heavy, but a single click on a Trash icon in a dense list is how people delete the
+  // wrong thing. Arming makes the second click the confirmation, in place. Per-id rather than
+  // a boolean so arming one row cannot arm all of them.
+  const [armed, setArmed] = useState<string | null>(null)
+  // Disarm on any other interaction: an armed row left armed indefinitely becomes a trap the
+  // next time the user reaches for that area.
+  useEffect(() => {
+    if (!armed) return
+    const t = window.setTimeout(() => setArmed(null), 4000)
+    return () => window.clearTimeout(t)
+  }, [armed])
+
+  const removeRun = useCallback(async (id: string) => {
+    try {
+      await api.deleteWorkflowRun(id)
+      setArmed(null)
+      load()
+    } catch (e) {
+      // The 409 ("cancel it before deleting") is the informative case — a run the user thought
+      // was finished is still moving, and that is worth reading.
+      notify(e instanceof Error ? e.message : 'Could not delete the run')
     }
   }, [load])
 
@@ -163,6 +218,25 @@ export function WorkflowsListPage({ navigate, query: routeQuery, setQuery }: Rou
                     </div>
                     {elapsed && <span className="shrink-0 text-on-surface-low text-[0.75rem] tabular-nums">{elapsed}</span>}
                     <span className="shrink-0 font-mono text-on-surface-low text-[0.75rem]">{r.id}</span>
+                    {/* Terminal runs only. A live run's delete would race its own controller,
+                        so the affordance is absent rather than present-and-refusing. */}
+                    {isTerminal(r.status) && (
+                      armed === r.id ? (
+                        <QuietButton
+                          onClick={(e) => { e.stopPropagation(); removeRun(r.id) }}
+                          title="Click again to delete this run and its artifacts"
+                        >
+                          <Trash2 size={13} className="text-danger" /> Delete?
+                        </QuietButton>
+                      ) : (
+                        <QuietButton
+                          onClick={(e) => { e.stopPropagation(); setArmed(r.id) }}
+                          title={`Delete run ${r.id}`}
+                        >
+                          <Trash2 size={13} />
+                        </QuietButton>
+                      )
+                    )}
                   </div>
                 </ListRow>
               )

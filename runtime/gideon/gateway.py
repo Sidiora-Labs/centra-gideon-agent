@@ -1835,6 +1835,7 @@ class GatewayOrchestrator:
         # without this they sit in RUNNING forever, which a user reads as "still
         # working" while nothing is.
         if self._cfg.workflows.enabled:
+            from gideon.workflows.bundled_defs import register_bundled_provider
             from gideon.workflows.controller import EngineServices
             from gideon.workflows.native_defs import register_native_provider
             from gideon.workflows.tick import Limits
@@ -1845,6 +1846,10 @@ class GatewayOrchestrator:
             # registered and saving a definition fails with "no writable provider" unless
             # an app happens to contribute one.
             register_native_provider()
+            # The shipped template library (Slice 9a). Read-only, served straight from the
+            # package — no boot-time copy into the user's home, so an upgrade ships new
+            # templates with no "did the user edit it?" reconciliation.
+            register_bundled_provider()
 
             wf_cfg = self._cfg.workflows
             self.workflow_watchdog = WorkflowWatchdog(

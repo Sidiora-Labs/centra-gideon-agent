@@ -500,12 +500,23 @@ export interface WorkflowNode {
 export interface WorkflowDefSummary {
   name: string; description: string; source: string; version: number; tags: string[]; provider: string
 }
+// One declared input. Named (rather than inlined on WorkflowDef) because the run dialog builds
+// its fields from these, and a picker that could not reference the type would re-describe it.
+export interface WorkflowInputParam {
+  type?: string; required?: boolean; default?: unknown; help?: string
+}
 export interface WorkflowDef {
   name: string; description?: string; version?: number; source?: string; provenance?: string
   root: WorkflowNode
-  inputs?: Record<string, { type?: string; required?: boolean; default?: unknown; help?: string }>
+  inputs?: Record<string, WorkflowInputParam>
   tags?: string[]
-  metadata?: { risk?: string; requirements?: Record<string, string[]> }
+  metadata?: {
+    risk?: string
+    requirements?: Record<string, string[]>
+    // How the template is driven (WF2-R15) — surfaced in the picker so a user choosing a
+    // template can see a concrete example rather than inferring one from the node tree.
+    steering_examples?: Array<{ event?: string; description?: string }>
+  }
 }
 export type WorkflowRunStatus =
   'draft' | 'running' | 'paused' | 'needs_input' | 'complete' | 'failed' | 'cancelled' | 'escalated'
@@ -515,6 +526,10 @@ export interface WorkflowNodeState {
   instance_path: string; node_id: string; state: string; attempt?: number
   degraded_reason?: string
   failure?: { class?: string; cause_plain?: string; remediation?: string; terminal_reason?: string } | null
+  // Per-item foreach context (WF2-R5): what a "[3/12] auth.py" row needs. Present only on an
+  // iterated node — a fan-out of twelve otherwise renders as twelve rows distinguishable only
+  // by an index suffix, which is useless for telling which item is stuck.
+  item_index?: number; item_total?: number; item_label?: string
 }
 export interface WorkflowRunSummary {
   id: string; workflow_name: string; status: WorkflowRunStatus; spec_version: number
@@ -2611,6 +2626,9 @@ export const api = {
     post<{ ok?: boolean; queued?: boolean; preview: WorkflowCascadePreview; issues: Array<{ code: string; message: string; node_id?: string }> }>(
       `/api/workflows/runs/${encodeURIComponent(id)}/edit`, body),
   cancelWorkflowRun: (id: string) => post<{ run_id: string; cancel_requested: boolean }>(`/api/workflows/runs/${encodeURIComponent(id)}/cancel`),
+  // Refused with a 409 while the run can still move: cancel and delete are two different
+  // intents, and one button doing both would delete work a user only meant to stop.
+  deleteWorkflowRun: (id: string) => del(`/api/workflows/runs/${encodeURIComponent(id)}`),
   pauseWorkflowRun: (id: string) => post<{ run_id: string; pause_requested: boolean }>(`/api/workflows/runs/${encodeURIComponent(id)}/pause`),
   resumeWorkflowRun: (id: string, body: { answer?: unknown; resume_token?: string; always_allow?: boolean }) =>
     post<{ ok?: boolean; approved?: boolean; node_id?: string; resumed?: boolean }>(`/api/workflows/runs/${encodeURIComponent(id)}/resume`, body),

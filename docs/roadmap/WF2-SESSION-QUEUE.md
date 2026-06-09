@@ -67,9 +67,9 @@ mandatory.
 | 15 | **Slice 7b** — FE `pages/workflows/`: list page, def detail, run detail (snapshot-then-subscribe); `lib/api.ts` methods + nav entry | G6 | ✅ DONE (#152) |
 | 16 | **Slice 8a** — `WorkflowProgressCard.tsx`; event pipeline: dedup keys, deterministic ids, event-fold law, epoch-tagged supersede-drop, node-keyed patches | G7 | ✅ DONE (#153) |
 | 17 | **Slice 8b** — per-observer debounced coalescing (~25ms), schema-validated snapshot projection, `result_omitted` spill boundary; FE lifecycle-union registration + backend⊆FE test | G7 | ✅ DONE (#154) |
-| 18 | **Slice 8c** — typed ask renderer (approval/choice/text/form) in the attention banner + needs-input inbox projection; blocking-mode rendering; two-step delete; foreach progress rows; degraded rendering | G7 | TODO |
-| 19 | **Slice 9a** — author 6 bundled templates incl. `produce-and-audit`; macros (`judge_panel`, `verify_panel`, `route`, `research_sweep`) | G8 | TODO |
-| 20 | **Slice 9b** — conventions pack (triage-first, Finding record, baseline capture, `bundled/shared/`, template-lint, steering_examples); `artifact_update` provider; bundled-sync; FE template picker | G8 | TODO |
+| 18 | **Slice 8c** — typed ask renderer (approval/choice/text/form) in the attention banner + needs-input inbox projection; blocking-mode rendering; two-step delete; foreach progress rows; degraded rendering | G7 | ✅ DONE (#155) |
+| 19 | **Slice 9a** — author 6 bundled templates incl. `produce-and-audit`; macros (`judge_panel`, `verify_panel`, `route`, `research_sweep`) | G8 | ✅ DONE (#156) |
+| 20 | **Slice 9b** — conventions pack (triage-first, Finding record, baseline capture, `bundled/shared/`, template-lint, steering_examples); `artifact_update` provider; bundled-sync; FE template picker | G8 | ✅ DONE (#157) |
 | 21 | **Slice 10a** — `foreach pipeline=true` streaming handoff; `loop until_dry`; `subworkflow` nesting (depth ≤3, namespaced, `child_run_attach`) | G9 | TODO |
 | 22 | **Slice 10b** — context lifecycle: `session: fresh` resets + journaled handoffs, typed carryover buckets, decision records, output offloading, two-layer compaction; run-level budget end-to-end; FE collapsible containers | G9 | TODO |
 | 23 | **Slice 11a** — end-to-end lifecycle test (create→run→edit→rewind→run_from→fork→complete); adversarial property tests (concurrent mutations, crash-during-execution, deep nesting, double-resume) | G10 | TODO |
@@ -470,3 +470,93 @@ mandatory.
   (f) `workflow_node_progress` was NOT added to the FE union or the allowlist: no call site
   publishes it yet (it arrives with Slice 8c's foreach progress rows), and registering it now
   would be a dead path.
+- 2026-08-01 — session 18 (Slice 8c) DONE → **PR #155** (stack #152→#153→#154→#155). New
+  `attention.py` (a waiting gate raises a durable inbox row + ONE notification via
+  `emit_attention_item`, deduped per run/path/EPOCH, resolved on answer scoped to the node, and
+  cleared when a run ends); `WorkflowGateActions` answering the gate IN the inbox through the
+  same `WorkflowAsk` the run view uses; `service.delete_run` + `DELETE /api/workflows/runs/{id}`
+  + two-step armed delete in the run list; per-item foreach rows (`[3/12] auth.py`) with the
+  label persisted on the instance. 10669 py · 387 web · typecheck + build clean.
+  Validated live: a gate raised a `pending` row carrying the real question; approving FROM THE
+  INBOX completed the run and flipped the row to `handled`; the two-step delete 404'd the run and
+  removed its directory; deleting a `needs_input` run was refused 409 naming the fix; a named
+  fan-out rendered `[1/3] auth.py` … `[3/3] handlers.py`.
+  DEVIATIONS/DISCOVERIES:
+  (a) **The plan's "typed ask renderer" and "degraded rendering" were already done** in Session
+  15 (`WorkflowAsk.tsx`, `nodeLook`'s degraded-as-success-adjacent tone). This session built what
+  was genuinely missing — and the watchdog's comment claiming user-facing moments "go through
+  notify separately" described work that had NEVER been done: a gate reached nobody who wasn't
+  already watching the run view.
+  (b) **EVERY attention row was written to a detached store.** `emit_attention_item` built a
+  fresh `InboxStore()`, but the running service holds items in MEMORY and never re-reads the
+  file — so the row hit disk and `/api/inbox` (which serves the service's instance) stayed empty,
+  and the service's next save would overwrite it. Affected every attention kind (loop gates,
+  proposals, mirrored approvals), not just workflows. Fixed with a shared `inbox.live_store(state)`,
+  **isinstance-checked** because a test's `MagicMock` answers every getattr and would swallow real
+  writes silently.
+  (c) **`message=body or title` discarded the title** whenever a body existed — a gate's row read
+  "Waiting for your approval." and LOST the actual question. Now joined title-then-body.
+  (d) **The resolve side had (b) all over again**: closing a row in a detached copy left it open
+  after its gate was answered. Found by clicking Approve in a REAL BROWSER and watching the row
+  survive. `resolve_gate_item`/`resolve_run_items` now take the state.
+  (e) `NodeInstance.item_label` added (persisted): the items list is re-resolved from a binding,
+  so after an upstream output changes the label would be unrecoverable, and a retry must show the
+  item it originally got rather than whatever now sits at that index.
+  (f) `WorkflowWatchdog.forget(run_id)` added — nothing may hold a controller handle to a run whose
+  row is about to disappear.
+  (g) The offline reference needed regenerating for the new DELETE route (its drift guard caught it).
+- 2026-08-01 — session 19 (Slice 9a) DONE → **PR #156** (stack #152→#153→#154→#155→#156).
+  New `macros.py` (4 macros expanding at DEFINITION time in `author_def`, before validation and
+  before the write — so the journal/resume-cache/rewind never learn macros exist and a user can
+  hand-edit an expansion); new `bundled/` with all six templates + `bundled_defs.py` (read-only
+  provider served straight from the package, registered at gateway boot). 10796 py · 387 web.
+  Validated live: all six served as `source=bundled`; `produce-and-audit` triaged `standard`,
+  took the `look_around` leg and SKIPPED the two untaken entry subgraphs with macro-expanded nodes
+  rendering as ordinary rows; two templates parked correctly on approval gates.
+  DEVIATIONS/DISCOVERIES:
+  (a) **Flat action arguments deadlock a run.** `code-implementation` wrote bash args flat beside
+  `provider`, but the engine reads them from `config.with` (`dispatch_action`). Bash got an EMPTY
+  config and reported "missing 'command' field" for a command visibly in the spec — then every
+  downstream binding failed and the run died as "deadlocked". Three cascading symptoms, none
+  naming the cause. Fixed + the validator now refuses the shape at authoring time
+  (`WF_ACTION_ARGS_NOT_NESTED`, naming which keys to move; argument-less = warning only). One
+  existing validator test's fixture used the broken shape and was corrected.
+  (b) **The wheel would have shipped an EMPTY template library.** `pyproject.toml` declared
+  `workflows/bundled/*/WORKFLOW.md` — a filename nothing has ever produced. Editable installs
+  looked perfect; only a real `pip install` would have shown it. Corrected to `workflow.json` and
+  pinned by a test, since `pyproject.toml` is the only place it is observable.
+  (c) A boolean `branch` enum does NOT work: `[true,false]` stringifies to Python's `True`/`False`
+  and will never match `"true"`/`"false"` case keys. `audit-sweep`'s fix toggle uses an expression
+  GATE instead, which is the honest construct for a boolean.
+  (d) No `bundled/shared/` prompt-block library yet and no template-lint — both are Slice 9b's
+  explicit scope, so they were left rather than half-built here.
+- 2026-08-01 — session 20 (Slice 9b) DONE → **PR #157** (stack #152→…→#156→#157). New
+  `bundled/shared/` (3 conventions blocks) + `blocks.py` (resolved at definition time, AFTER macros
+  since a macro emits references); `template_lint.py` (advises on a user's spec via `author_def`,
+  GATES the shipped library at zero findings incl. warnings); `artifact_update_provider.py`
+  (zero-token upsert, registered in registry AND `ALLOWED_HOOK_PROVIDERS` in one commit); the FE run
+  dialog (`templateStart.ts`); `workflow_plan` now honours its `template` arg. 10862 py · 406 web.
+  DEVIATIONS/DISCOVERIES:
+  (a) **Declared input defaults were validated and then NEVER APPLIED.** A template declaring
+  `acceptance` with a default, run without it, failed three nodes deep on `binding failed:
+  unresolved reference at 'acceptance'` — so every optional input was a landmine and a template
+  could only run if the caller passed every key it declared. Found by starting a bundled template
+  from the UI with the optional field blank. Now `_with_declared_defaults` at run start, recorded on
+  the run so the record explains its own behaviour.
+  (b) **`event_type` is a fixed enum** (`ALLOWED_EVENT_TYPES`): the invented `workflow_refresh` made
+  every artifact UPDATE fail while creates succeeded. Now `iterated`.
+  (c) A stray `{{block:…}}` surfaced as `WF_UNKNOWN_BINDING_ROOT`, sending an author after a node
+  that was never the problem. Own code now (`WF_UNRESOLVED_BLOCK`) — blocks and bindings resolve at
+  different TIMES.
+  (d) **`workflow_plan`'s `template` arg was accepted and IGNORED** — a model passing it got a
+  generic scaffold and no signal its request was dropped, which makes the library look useless.
+  (e) The FE picker was the real "template picker" work: every bundled template declares a required
+  input and the Run button passed none, so all six were unstartable from the UI.
+  (f) No mtime bundled-SYNC was built, deliberately: serving read-only from the package means an
+  upgrade ships new templates with no "did the user edit it?" reconciliation. The plan's "bundled-sync
+  (mtime, no-overwrite)" is satisfied by not needing one. DEVIATION recorded.
+  (g) **CI FIX amended onto #156**: Slice 9a's tests registered the bundled provider into the
+  process-global `defs._providers` and never unregistered, so `test_workflows_tools.py` saw 7 defs
+  where it asserts 1 — three failures visible only in a full-suite run. Both template test modules
+  now snapshot-and-restore the registry. (`test_workflows_scope.py`'s failure was the same shard's
+  collateral.) The 2 `test_subagent.py` timeouts in that run are the PRE-EXISTING flake.
