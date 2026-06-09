@@ -5,10 +5,10 @@ import logging
 from aiohttp import web
 
 from gideon.config.loader import config_dir
-from gideon.context_management import extract_plan_metadata, rephrase_plan
 from gideon.dashboard.chat_utils import _history_key_for
 from gideon.dashboard.state import DashboardState, _ChatSession
 from gideon.llm.base import EVENT_COMPLETE, EVENT_PERMISSION_REQUEST, EVENT_TEXT_CHUNK
+from gideon.plan_memory import extract_plan_metadata, rephrase_plan
 from gideon.security import redact_credentials, redact_exfiltration_urls
 from gideon.sel import sel
 from gideon.session import BACKGROUND_KEY
