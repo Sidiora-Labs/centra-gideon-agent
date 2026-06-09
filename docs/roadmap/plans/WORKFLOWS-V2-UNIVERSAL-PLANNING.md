@@ -663,3 +663,106 @@ Where each new piece plugs into the pluggable-provider architecture (nothing her
   but not wired to a live embedder or model in `workflow_plan` — both need plumbing that lands with
   session 41's grounding work. Hybrid composition returns the names to compose without building the
   subworkflow spec; `presets`/`lighter_path` are surfaced but not yet acted on.
+
+- **2026-08-02 — DONE (#179) — Grounded generation (session 41 of the WF2 queue).**
+  Branch `feature-wf2-planning-grounding`. `workflows/grounding.py` (the bundle, three signature
+  discovery tiers, orient-then-drill), `workflows/patterns.py` (seven proven shapes with slots,
+  `when_not`, and a deterministic pick), `workflows/generation.py` (generated prompt, mechanical
+  self-check, repair-not-regenerate, the decline path, `oneOf` emission schema), all wired into
+  `workflow_plan`. 12320 tests (+69), lint clean at 624 files.
+
+- **DISCOVERY — provider argument shapes are only partly discoverable, and the first two tiers
+  covered 7 of 16.** `MCP_CORE_SCHEMAS` has typed fields for the tool-backed providers and some
+  providers document `action_config` in a docstring, but NINE had neither — including `bash`,
+  `create-task` and `run-workflow`, the ones a generated plan reaches for most. A bundle naming a
+  provider it cannot describe calling is the ungrounded failure with extra steps. Added a third
+  tier that scrapes what the provider's own code reads, taking coverage to 15/16; the one remainder
+  (`notification-digest`) genuinely reads no config. The scraper's first pattern also missed the
+  `(action_config or {}).get(...)` idiom and reported `run-workflow` as taking NO arguments — a
+  pattern miss that produces a confident "takes no arguments" is worse than one producing silence,
+  so requiredness is never inferred from a scan and the source tier is labelled.
+
+- **DISCOVERY — three of my own "proven" shapes had no stopping condition.** The A/B harness caught
+  it: `convergent-research`, `fan-out-synthesis` and `creative-exploration` ended on a synthesis or
+  selection stage, which passes the engine's structural validator and fails the plan's minimal
+  goal/verification/stopping triple. Grounded first-try-valid measured **3/5** against the plan's
+  ≥4 bar until each gained a gate. A skeleton that teaches the planner to omit the thing the hard
+  requirements demand is not a proven shape.
+
+- **DEVIATION — `capabilities_for` does not exist.** The real accessor is
+  `get_default_registry().capability_of(type)`, and an unbootstrapped process legitimately cannot
+  answer — which must read as UNKNOWN. The wrong call silently produced `structured_output: False`,
+  which would have sent every plan down the prose-with-repair path even on a model that handles
+  schemas.
+
+- **DEVIATION — MCP tools are surfaced as SERVERS, not tool names.** `mcp_client.list_tools` is
+  async and requires live connections; enumerating tools on the planning hot path would block on a
+  user's remote endpoint. The bundle names the configured servers and tells the planner to discover
+  tool names rather than guess them. A missing `mcp.json` is "none configured" — distinct from
+  "unreadable", which is stated.
+
+- **A/B harness (UP-R13.2)** ships as the acceptance test, scored on first-try-valid: ungrounded
+  specs must score 0/5 and grounded ≥4/5, with validation failures and silent misses asserted as
+  SEPARATE modes. It runs without a model — it measures the mechanism this session builds; a
+  model-scored end-to-end A/B belongs with the eval substrate that owns scoring.
+
+- **Validated in the real runtime:** a monitor intent no template serves falls to grounded
+  generation with the `iterative-refinement` shape and a 4753-char grounded prompt, and that
+  skeleton — slot-filled — passes BOTH the self-check and the engine validator clean.
+
+- **NOT DONE:** the brownfield context pass (UP-R17) is a `codebase_context` parameter the prompt
+  accepts and nothing yet populates — building the depth-filtered tree + README head + `(project_id,
+  tree-hash)` cache is its own scope and reads the filesystem, which the rest of this session does
+  not. The entity/topic grounding preamble (UP-R14) likewise: `brief` threads through from session
+  38's Session Brief, but entity resolution needs a lookup provider that does not exist. Repair
+  execution is built (`repair_prompt`, `MAX_REPAIR_ATTEMPTS`) but not driven — the loop that calls a
+  model, self-checks, and re-prompts needs the model plumbing that lands with session 43's review
+  cycle.
+
+- **2026-08-02 — DONE (#181) — Contracts + parameterization (session 42 of the WF2 queue).**
+  Branch `feature-wf2-planning-contracts`. `workflows/contracts.py`: `resolve_unfilled_inputs()` +
+  `template_types()` + the extraction contract (UP-R8), per-stage done-means contracts with their
+  lint (UP-R3), and blocking-vs-open decision typing (UP-R16). Wired into `workflow_plan`'s template
+  path as the review surface. 12417 tests (+97), lint clean at 625 files.
+
+- **DISCOVERY — THREE of eighteen shipped templates declared an input nothing read.** The derived
+  schema found them immediately, which is the whole point of deriving it. `knowledge-lint` offered
+  `apply` while its node hardcoded `false` — a user could set it, see no effect, and get no error;
+  now wired through. `design-project` and `general-project` offered loop caps nothing consulted.
+
+- **DEVIATION — the phantom loop-cap inputs were DELETED, not wired.** Wiring them to the loops'
+  `max_iterations` looked like the obvious fix and broke a real invariant:
+  `test_every_loop_has_a_real_exit_and_a_hard_cap` requires the cap to be a statically verifiable
+  literal, and a binding makes it a string at spec time. A user-supplied cap can also be a value
+  that never fires — so offering it would be offering to weaken a safety invariant. An input nothing
+  reads is a control that lies; the honest fix is removing it.
+
+- **DISCOVERY — the contract lint found SIX templates ending on a write with nothing establishing
+  the work was right.** Five are this program's own and now carry a machine check:
+  `knowledge-synthesis` (is the synthesis grounded in its sources?), `thesis-tracker` (is the thesis
+  still falsifiable?), `rich-ingest` (did the lenses stay inside the transcript?), `gap-healing` (are
+  the drafts supported by the excerpts?), and `knowledge-lint` (did the merge keep every distinct
+  detail — checked per cluster, where the loss would happen). `publish-article` had only a human
+  APPROVAL: nobody verified the revision addressed the accuracy findings before it was stored as
+  reference, so a judge now runs before the gate. **Recorded not fixed:** `design-review`,
+  `diagnose-run` and `project-planning` (Slice 9a) have the same gap — retrofitting templates this
+  session did not author, blind, is how an unvalidated gate lands.
+
+- **The lint was TOO STRICT twice, and both exemptions are measured.** A stage whose output a
+  verified stage consumes is checked THROUGH it (the reviewer's findings are what the judge reads),
+  so demanding a gate per stage would turn a three-stage plan into a six-node ceremony. And an
+  ALL-DETERMINISTIC plan is exempt entirely — `knowledge-health` is every-node-zero-token, so its
+  output already IS the check, and paying a model to form an opinion about arithmetic is the kind of
+  finding that gets a rule suppressed wholesale, taking the real findings with it.
+
+- **Decision typing is mechanical, with two safe-direction overrides.** A gate whose output feeds a
+  downstream binding is blocking; ambiguity that changes no execution path lands as an Open Decision
+  on the finished summary. Destructive-risk and approval gates are ALWAYS blocking whatever the
+  bindings say — auto-proceeding past "may I delete this?" because nothing consumed the answer is
+  the one classification error with an unrecoverable cost.
+
+- **NOT DONE:** the triage-first convention (UP-R11) and `escalate-and-reclassify` as a named
+  mutation — the convention is encodable in the pattern registry, but the mutation is an engine op
+  and belongs with the review/revision cycle in session 43. The preflight step the planner should
+  emit (aggregating requirements one hop from referenced providers) needs the provider-requirement
+  data the grounding bundle does not yet carry.
