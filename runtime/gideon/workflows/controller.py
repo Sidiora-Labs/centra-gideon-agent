@@ -38,6 +38,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from gideon.knowledge import session_brief
@@ -199,6 +200,14 @@ class RunController:
         self.root: Node = Node.from_dict(spec.get("root") or {"kind": "sequence"})
         self.instances: dict[str, NodeInstance] = store.read_state(run.id)
         self.journal = Journal(run.id)
+        #: Bindings this run has already projected into Tasks (TASKS-SOPS §1, S61f). The
+        #: controller is the single writer for its own run, so this is the dedup set
+        #: `plan_materialization` compares against — a per-node read of the per-entity JSON
+        #: store would be one file scan per settled node.
+        self._projected: list[Any] = []
+        #: In-flight projection writes, so teardown does not orphan them and a test can await
+        #: settlement instead of sleeping.
+        self._projection_writes: set[Any] = set()
         self._lock = asyncio.Lock()
         self._task: asyncio.Task | None = None
         self._inflight: dict[str, _InFlight] = {}
@@ -296,14 +305,46 @@ class RunController:
         self._task = asyncio.create_task(self._tick_loop())
 
     async def run_to_completion(self, *, timeout: float = 0.0) -> RunStatus:
-        """Blocking mode: drive to terminal and return the status."""
+        """Blocking mode: drive to terminal, drain the projection writes, return the status.
+
+        The drain is load-bearing, not tidiness. Measured (S61g): a projected Task write is
+        scheduled
+        on the loop from the SYNC settle path, and returning at terminal left it pending — so a
+        caller that awaited this and then closed its loop lost the board row entirely, with the run
+        reporting
+        `complete` and the ledger showing no `task_materialized`. The row is the user-
+        visible half of
+        running a workflow; dropping it silently is the worst available outcome.
+        """
         await self.start()
         if timeout > 0:
             with contextlib.suppress(asyncio.TimeoutError):
                 await asyncio.wait_for(self._terminal.wait(), timeout=timeout)
         else:
             await self._terminal.wait()
+        await self.drain_projection_writes()
         return self.run.status
+
+    async def drain_projection_writes(self, *, timeout: float = 10.0) -> None:
+        """Await the in-flight projected-Task writes.
+
+        Bounded: a hung task store must not hold a finished run open forever.
+
+        The pending writes are NOT cancelled on timeout. Measured (S61g): `asyncio.wait_for` cancels
+        the awaitable it wraps, so the obvious `wait_for(gather(...))` spelling silently kills the
+        very writes it was waiting for — and a cancelled write may ALREADY have created the task,
+        which loses the id without undoing the row. Waiting on SHIELDED handles leaves the
+        real tasks
+        running, so the next projection rebuild (§1's normal path) still recovers them.
+        """
+        pending = [h for h in list(self._projection_writes) if not h.done()]
+        if not pending:
+            return
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(
+                asyncio.gather(*(asyncio.shield(h) for h in pending), return_exceptions=True),
+                timeout=timeout,
+            )
 
     async def wait_for_terminal(
         self,
@@ -1717,6 +1758,7 @@ class RunController:
                 resolved_prompt_ref=self._store_prompt(item.path, result.resolved_prompt),
                 output_ref=ref,
             )
+            self._project_task(item, inst, result)
         else:
             if result.output is not None:
                 # A FAILED node's output is normally nothing worth keeping — but some failures
@@ -2447,6 +2489,356 @@ class RunController:
         if label:
             out["item_label"] = label
         return out
+
+    # ── TASKS-SOPS task projection (S61f) ──
+
+    def _projected_tasks(self) -> list[Any]:
+        """What this run has already projected, for `plan_materialization`'s dedup.
+
+        Held in memory on the controller rather than read from the task store per node: the store is
+        per-entity JSON, so a read per settled node is one file scan per node, and the controller is
+        the single writer for its own run. A restart re-reads from the store via the projection
+        rebuild (§1 makes full recompute the normal path), so nothing is lost by not persisting the
+        cache itself.
+        """
+        return [type("_T", (), {"workflow_binding": b})() for b in self._projected]
+
+    def _schedule_verification(self, spec: Any, path: str, node_id: str) -> None:
+        """Run a projected node's done-criterion and emit `task_verified`.
+
+        Scheduled, not inline: a criterion is a shell command or a file read (`pytest -q` is the
+        canonical authoring shape), and running it inside the sync settle path would block the whole
+        tick on someone else's test suite.
+
+        A node with NO criterion schedules nothing. `Task.can_mark_complete`'s rule is that a task
+        with no exit criteria is freely completable, and emitting a `task_verified(passed=True)` for
+        a node nobody wrote a check for would manufacture evidence that does not exist.
+
+        The emptiness test asks the PARSER, not truthiness. Measured (S61h): `"   "` is truthy, so a
+        whitespace-only criterion passed a `if not criterion` guard and then parsed to zero checks —
+        which the evaluator correctly reports as UNRUNNABLE, so the node showed a scary "could not
+        verify" for a field its author had effectively left blank.
+        """
+        criterion = getattr(spec, "done_criterion", "")
+        from gideon.workflows import verified_done as _vd
+
+        checks, problems = _vd.parse_criterion(criterion)
+        if not checks and not problems:
+            return
+
+        async def _verify_and_emit() -> None:
+            passed = await self._run_criterion(spec.done_criterion)
+            self.publish_task_verified(
+                path,
+                node_id,
+                task_id="",
+                # NOT `bool(passed)`: `None` means the check could not run, and collapsing it to
+                # False reports a failure that never happened.
+                passed=passed,
+                criterion=str(spec.done_criterion)[:200],
+            )
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            asyncio.run(_verify_and_emit())
+            return
+        handle = loop.create_task(_verify_and_emit())
+        self._projection_writes.add(handle)
+        handle.add_done_callback(self._projection_writes.discard)
+
+    async def _run_criterion(self, raw: Any) -> bool | None:
+        """Evaluate a done-criterion to the TRISTATE `verified_done` expects.
+
+        `None` (could not run) is preserved all the way out, never collapsed to False. The whole
+        point of the tristate is that a missing binary is not a failing test: reporting "the check
+        failed" for a criterion that never executed sends the user to debug their code when the
+        problem is their environment, and §1 projects the two to different blocked kinds for exactly
+        that reason.
+        """
+        from gideon.workflows import verified_done as _vd
+
+        checks, problems = _vd.parse_criterion(raw)
+        if problems or not checks:
+            # An unparseable criterion is UNRUNNABLE, not failed. The author wrote something the
+            # engine could not read, which is a different problem from the work being wrong.
+            return None
+        verdict = _vd.Verdict()
+        for check in checks:
+            if check.kind is _vd.CheckKind.COMMAND:
+                from gideon.loop.gates import run_verify_command
+
+                outcome = await run_verify_command(
+                    check.command, None, label=f"criterion:{self.run.id}"
+                )
+                verdict.results.append(
+                    _vd.CheckResult(
+                        kind=check.kind.value,
+                        passed=outcome,
+                        weight=check.weight,
+                        detail=check.command[:120],
+                    )
+                )
+            else:
+                verdict.results.append(_vd.evaluate_file_phrase(check, self._read_criterion_file))
+        return verdict.passed
+
+    @staticmethod
+    def _read_criterion_file(path: str) -> str | None:
+        """Read a file for a `file_phrase` check, or None when it cannot be read.
+
+        None rather than "" — `evaluate_file_phrase` treats an unreadable file as UNRUNNABLE, and an
+        empty string would read as "the file exists and the phrase is absent", which is a
+        claim about
+        content nobody read.
+        """
+        try:
+            return Path(path).read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            return None
+
+    def _schedule_task_write(self, spec: Any, path: str, node_id: str) -> None:
+        """Schedule the projected Task write on the running loop, then emit the event.
+
+        The settle path (`_apply`) is SYNC but runs inside the async tick, and the task provider's
+        `create_task` is async — so this follows the controller's established idiom for that shape
+        (`asyncio.create_task`, as the tick loop and node dispatch already do) rather than blocking
+        the tick on a filesystem write.
+
+        The EVENT fires from the write's completion, not before it, so `task_id` is the real id. An
+        event with an empty id would tell a board to render a row it cannot open.
+
+        No running loop (a synchronous unit test, a replay) still projects: the write runs
+        inline via
+        `asyncio.run`, because a projection that only worked inside a live gateway would be
+        untestable exactly where it matters.
+        """
+
+        async def _write_and_emit() -> None:
+            task_id = await self._write_projected_task(spec)
+            self.publish_task_materialized(
+                path,
+                node_id,
+                task_id=task_id,
+                fingerprint=spec.binding.fingerprint,
+                refreshed=False,
+            )
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            asyncio.run(_write_and_emit())
+            return
+        handle = loop.create_task(_write_and_emit())
+        # Tracked so a controller teardown does not leave the write as an orphaned task warning, and
+        # so a test can await settlement rather than sleeping.
+        self._projection_writes.add(handle)
+        handle.add_done_callback(self._projection_writes.discard)
+
+    async def _write_projected_task(self, spec: Any) -> str:
+        """Write one projected Task through the task provider. Returns its id, or "" on failure.
+
+        The engine is the ENGINE actor in §1's three-actor matrix, so the write carries
+        `managed=True` on the binding and sets the engine-owned fields directly — which is exactly
+        what `materialize.reject_write` refuses when anyone ELSE attempts it. The asymmetry is the
+        point: one writer for a managed task's status, and a refusal (naming the alternative) for
+        every other path.
+
+        Failures return "" rather than raising: the event still fires with an empty task id, which
+        is honest (the projection was attempted and did not land) and leaves the next rebuild to
+        recover. Raising would fail a node whose work already succeeded.
+        """
+        try:
+            from gideon.tasks.registry import create_task
+
+            fields: dict[str, Any] = {
+                "title": spec.title or "Untitled step",
+                "description": spec.body or "",
+                "workflow_binding": {
+                    "run_id": spec.binding.run_id,
+                    "node_id": spec.binding.node_id,
+                    "node_path": spec.binding.node_path,
+                    "managed": True,
+                    "fingerprint": spec.binding.fingerprint,
+                },
+            }
+            if spec.status:
+                fields["status"] = spec.status
+            if spec.done_criterion:
+                fields["done_criterion"] = spec.done_criterion
+            if spec.blocked_kind:
+                fields["blocked_kind"] = spec.blocked_kind
+            if spec.preview:
+                fields["preview"] = spec.preview
+            task = await create_task("native", **fields)
+            return str(getattr(task, "id", "") or "")
+        except Exception:  # noqa: BLE001 - a board row must never fail a successful node
+            logger.debug("workflow %s: projected task write failed", self.run.id, exc_info=True)
+            return ""
+
+    def _project_task(self, item: Any, inst: Any, result: Any) -> None:
+        """Project a settled leaf node into a Task, and emit the event.
+
+        THE call site the projection modules were built for. `materialize` owns every decision here
+        — which nodes earn a task, the dedup keys, the fan-out cap — so this method is the plumbing
+        and nothing else: it assembles the node dict, asks, and writes.
+
+        Swallows everything. A projection failure must not fail the RUN: the node has already
+        succeeded and its output is already journaled, so turning a board-row problem into a run
+        failure would lose real work over a presentation concern. The projection is idempotent by
+        construction (fingerprint dedup), so the next tick or a rebuild recovers it.
+        """
+        try:
+            from gideon.workflows import materialize as _materialize
+
+            # The keys `should_materialize`/`plan_materialization` actually read are `id`, `kind`,
+            # `path` and `config` — measured against their source. A `node_id` key (the name the
+            # BINDING uses) is silently ignored by both, which would make every node fail the
+            # has-an-id refusal and project nothing at all.
+            node_dict = {
+                "id": item.node.id,
+                "path": item.path,
+                "kind": item.node.kind.value,
+                "config": dict(item.node.config or {}),
+            }
+            wanted, _why = _materialize.should_materialize(node_dict)
+            if not wanted:
+                return
+            plan = _materialize.plan_materialization(
+                self.run.id, [node_dict], existing_tasks=self._projected_tasks()
+            )
+            for spec in plan.create:
+                # Recorded BEFORE the write is scheduled: the dedup set must reflect the intent
+                # immediately, or a second settle in the same tick would plan the same task again
+                # while the first write is still in flight.
+                self._projected.append(spec.binding)
+                self._schedule_task_write(spec, item.path, item.node.id)
+                # Verification rides the same scheduled path: a criterion is a command or a file
+                # read, and running it inline would block the tick on someone else's test suite.
+                self._schedule_verification(spec, item.path, item.node.id)
+            if plan.existing:
+                # A rewind's dedup-merge. Emitted as a REFRESH rather than skipped silently:
+                # "did my rewind re-create the board" is a question only the event answers.
+                self.publish_task_materialized(
+                    item.path,
+                    item.node.id,
+                    task_id="",
+                    fingerprint=_materialize.fingerprint(
+                        source_ref="", title=item.node.id, body=""
+                    ),
+                    refreshed=True,
+                )
+        except Exception:  # noqa: BLE001 - a board row must never fail a successful node
+            logger.debug("workflow %s: task projection failed", self.run.id, exc_info=True)
+
+    # ── TASKS-SOPS projection events (S61e) ──
+    #
+    # Thin wrappers over `_publish` + the matching journal kind, so the LIVE stream and the
+    # REPLAYABLE ledger carry the same fact under the same name. A consumer folding the stream and
+    # one reconstructing from history would otherwise need two vocabularies for one event — and the
+    # second one always drifts.
+
+    def publish_task_materialized(
+        self,
+        path: str,
+        node_id: str,
+        *,
+        task_id: str,
+        fingerprint: str = "",
+        refreshed: bool = False,
+    ) -> None:
+        self.journal.task_materialized(
+            path, node_id, task_id=task_id, fingerprint=fingerprint, refreshed=refreshed
+        )
+        self._publish(
+            "workflow_task_materialized",
+            {
+                "instance_path": path,
+                "node_id": node_id,
+                "task_id": task_id,
+                "refreshed": bool(refreshed),
+            },
+        )
+
+    def publish_confirmation_pending(
+        self, path: str, node_id: str, *, confirmation_id: str, kind: str = "approval"
+    ) -> None:
+        self.journal.confirmation_pending(path, node_id, confirmation_id=confirmation_id, kind=kind)
+        self._publish(
+            "workflow_confirmation_pending",
+            {
+                "instance_path": path,
+                "node_id": node_id,
+                "confirmation_id": confirmation_id,
+                "confirmation_kind": kind,
+            },
+        )
+
+    def publish_confirmation_resolved(
+        self,
+        path: str,
+        node_id: str,
+        *,
+        confirmation_id: str,
+        verb: str,
+        approved: bool,
+        resolved_by: str = "",
+    ) -> None:
+        self.journal.confirmation_resolved(
+            path,
+            node_id,
+            confirmation_id=confirmation_id,
+            verb=verb,
+            approved=approved,
+            resolved_by=resolved_by,
+        )
+        self._publish(
+            "workflow_confirmation_resolved",
+            {
+                "instance_path": path,
+                "node_id": node_id,
+                "confirmation_id": confirmation_id,
+                "verb": verb,
+                "approved": bool(approved),
+            },
+        )
+
+    def publish_task_verified(
+        self, path: str, node_id: str, *, task_id: str, passed: bool | None, criterion: str = ""
+    ) -> None:
+        """Emit a verification outcome. `passed` is the TRISTATE — see `journal.task_verified`."""
+        self.journal.task_verified(
+            path, node_id, task_id=task_id, passed=passed, criterion=criterion
+        )
+        self._publish(
+            "workflow_task_verified",
+            {
+                "instance_path": path,
+                "node_id": node_id,
+                "task_id": task_id,
+                "passed": passed is True,
+                "unrunnable": passed is None,
+            },
+        )
+
+    def publish_cascade_blocked(
+        self, path: str, node_id: str, *, blocked_task_ids: list[str], cause: str
+    ) -> None:
+        """ONE event for the whole cascade, matching §1's debounce.
+
+        N events for one upstream failure would make the run look like it failed N times, and the
+        notification layer already collapses them — two different collapse points would disagree.
+        """
+        self.journal.cascade_blocked(path, node_id, blocked_task_ids=blocked_task_ids, cause=cause)
+        self._publish(
+            "workflow_cascade_blocked",
+            {
+                "instance_path": path,
+                "node_id": node_id,
+                "blocked_task_ids": list(blocked_task_ids),
+                "cause": cause,
+            },
+        )
 
     def _publish(self, event: str, payload: dict[str, Any]) -> None:
         """Publish one event, stamped with the identity a consumer needs to fold safely.
