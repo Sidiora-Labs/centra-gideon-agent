@@ -1226,3 +1226,115 @@ program's protocol forbids.
 So this session ships the runtime with its dedup and delta semantics settled and tested, and records the
 store as the blocking prerequisite. The runtime is what a store-and-service session would otherwise have
 to invent under time pressure.
+
+### S84 — One run-history feed across all three kinds (37 tests) — DONE
+
+**This closes criterion 4**: "a hook, an event trigger, and a cron all show run history in the same feed
+with the same record shape and typed outcomes."
+
+**🔴 THE CROSS-KIND FEED WAS SCHEDULE-ONLY, AND SAID SO.** `GET /api/triggers/history` — the route a user
+opens to answer "what did my machine do" — carried the docstring "cross-trigger run index (schedule
+runs)". Hooks and event triggers were silently absent. The per-trigger route answered `supported: false`
+for both, which was honest in S67 when only schedules had rows, and became the thing standing between
+this criterion and done.
+
+**🔴 AND `FireRecord` — the typed row S62 built for exactly this — WAS NEVER CONSTRUCTED.** `grep
+'FireRecord('` outside its own module returned nothing. The shared shape the criterion asks for already
+existed on paper, exported from `triggers/__init__`, produced by nobody. `FIRE_OUTCOMES` likewise.
+
+Three incompatible sources, measured before writing:
+
+| Kind | What it keeps |
+|---|---|
+| `schedule` | real `ScheduleRun` rows: status ∈ `{success, failure, timeout, launched}`, duration, trace |
+| `lifecycle` | NO run store — `last_run`/`last_status`/`run_count` on the hook, and a transient result |
+| `event` | a COUNTER: `fire_count` + `last_fired_at`, no per-fire rows at all |
+
+`triggers/history.py` projects each onto `FireRecord`. It does **not** migrate: the unified store is the
+program S83 recorded as unbuilt, and a projection is what makes the feed honest meanwhile.
+
+**Two honesty rules, both load-bearing:**
+
+1. **A counter is not a run.** An event trigger's `fire_count=5` becomes ONE synthetic row with
+   `incomplete=True`, `weight=ledger`, and the count in `counters` — never five fabricated rows with
+   invented timestamps. `FireRecord.incomplete` documents itself for exactly this case.
+2. **`launched` is not `ran`.** The schedule store's honest T7 status maps to `deferred`. Calling it
+   `ran` would report success for a background turn nobody has seen — the distinction T7 was introduced
+   to keep. It also stays `LEDGER` weight, since it has not earned a run record yet.
+
+Also: a hook or event trigger that NEVER fired projects `None`, not a zero row. A synthetic row for
+something that never ran reads as "it ran and recorded nothing" — the same lie `supported: false` was
+written to avoid. And `timeout` folds into `failed` because `FIRE_OUTCOMES` has no timeout member;
+adding one would change a vocabulary five modules switch on, so the REASON carries it.
+
+**Three of my own errors, each caught by measuring rather than reading.**
+
+- `RunWeight` has `LEDGER`/`FULL`, not the `RUN` I assumed. The semantic is "did this earn a run
+  directory", which is why a `deferred` fire is `LEDGER`.
+- I wrote `store.list_hooks()`; the method is `list_all()`. The `except` around it would have swallowed
+  the `AttributeError` and the feed would have quietly contained zero hooks — the exact defect being
+  fixed, reintroduced invisibly.
+- My first app fixture wrote events to `tmp_path` while the handler's `_event_store()` resolves through
+  `config_dir()`. The event rows vanished from the feed while every other assertion passed.
+
+`?shape=legacy` preserves the raw dicts for the existing cron-history UI, which renders `trace`/`summary`
+that the typed row does not carry. The default is the unified shape — leaving legacy as the default would
+mean the criterion is met only by a flag nobody sets.
+
+**🔴 A LEAK IN THIS SESSION'S OWN CODE, found while auditing criterion 11 an hour later.** `reason`
+carries a schedule run's raw `error`/`summary`, so a run that failed while printing a token put that
+token straight into the unified feed. The live endpoint happens to pre-redact via `_redact_run`, so the
+SHIPPED path was safe — but these projections are public functions, and a second caller passing raw store
+rows would leak. Redaction now happens at this boundary (3 sites), delegating to the platform redactors
+rather than a private pattern copy. `test_no_projected_row_leaks_a_credential_into_the_feed` greps the
+whole serialized feed, so a NEW field that forgets to redact fails even before its own test exists.
+
+Worth stating as a rule: "the caller happens to redact" is not a security property. The projection is
+the boundary, and boundaries defend themselves.
+
+### S85 — The outbound delivery contract: statusUrl, stable event ids, formatting (36 tests) — DONE
+
+**This closes criterion 10**: "a completed-run notification deep-links (statusUrl) to the exact run
+journal row; a retried delivery does not double-ping."
+
+**🔴 `statusUrl` DID NOT EXIST ANYWHERE.** A grep for `statusUrl` or `status_url` across
+`src/gideon` returned nothing. A completed-run notification carried a title and a body, so a user
+reading "Nightly digest finished" had no route to the run that produced it — R18's own words: "the
+notification→journal dead end".
+
+`triggers/delivery.py` owns R18's three pieces:
+
+- **`statusUrl`** — `#/workflows/runs/<run_id>`, verified against the live route (`WorkflowsSection`
+  documents it) rather than invented. A fire with no run behind it (a `LEDGER`-weight suppressed or noop
+  fire) falls back to `#/triggers?open=<id>`, because pointing at a nonexistent run would 404. Neither
+  known → `""`, not a bare `#/` that costs the user a click to discover it goes nowhere.
+- **A stable event id, DERIVED not random.** `sha256(trigger|run|attempt)`. A `uuid4()` or a timestamp
+  would be a DIFFERENT id on the retry, which is exactly the double-ping the criterion forbids.
+  `attempt_key` distinguishes a genuine re-fire (which should ping) from a transport retry (which must
+  not).
+- **Destination-aware formatting.** Prefix-matched on `channel:` — the id carries a workspace suffix in
+  practice (`channel:slack:T0123`), so an exact `== "channel:slack"` would send rich blocks to every
+  real Slack destination and render `[object Object]`.
+
+**No second notification path**, as R18 requires. Every function here produces the ARGUMENTS for
+`DashboardState.notify`, which already applies `notification_allowed()` and the per-(source, kind) rule.
+`statusUrl` rides `meta` — the dict `notify` already merges into the note — so it reaches every surface
+without `InboxItem` or the note schema gaining a field, the same seam S51's structured card uses.
+
+Two decisions worth keeping: the event TYPE is two names (`automation.run.succeeded|failed`) rather than
+one with a boolean, because a channel consumer routes on the name and `{"ok": false}` would make "only
+tell me about failures" a body inspection. And the notification KIND is chosen per OUTCOME (`INFO` vs
+`ERROR`) so a failure can escalate past a digest rule while a success cannot — both drawn from
+`notification_kinds` so the user's existing rules apply, since an invented kind matches no rule and
+silently resolves to `immediate`.
+
+**A defect found by RUNNING the module, not reading it.** The first docstring quoted its own grep pattern
+literally — a backslash-pipe alternation inside a non-raw docstring is an invalid escape sequence, and
+Python emitted a `SyntaxWarning` on import. My explanatory note then reintroduced the same escape, which
+turned it into a hard `SyntaxError` under `-W error`. Now stated as prose, with
+`test_the_module_imports_without_a_syntax_warning` as the regression.
+
+**A probe result I nearly mis-read as a defect:** my first redaction check used a fake `sk-ABCDEF…`
+string and reported no redaction. The redactors are correct — that string matches no real credential
+pattern. Verified against `sk-ant-api03-…`, which redacts. Worth recording because "the security control
+did nothing" is exactly the conclusion a bad fixture invites.
