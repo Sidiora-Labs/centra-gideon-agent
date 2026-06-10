@@ -678,3 +678,151 @@ before the machine slept.
 - **NOT DONE (by scope):** the review card's FE surface, the boot sequence that calls these (the
   service), foreground yield and resource slots (§3.5), budgets and triage (§3.6), and the migration
   (66 — which must use S62's `LEGACY_FIELD_MAP`).
+
+### S66 — The lossless cron migration (35 tests, driven against a real store) — DONE
+
+The step that cannot be redone cheaply, so it is written against S62's `LEGACY_FIELD_MAP` rather than
+against the dataclass, and `unconverted_fields()` proves PER JOB that every field a row carried was
+either translated or explicitly dropped-with-a-reason. "Looks right" is not the bar; the bar is that
+nothing left the building unaccounted for. Measured result on a store the real service wrote:
+**lossless, zero unaccounted fields.**
+
+**Driven against a real file, not a fixture I wrote.** The tests build jobs with the actual shipped
+`ScheduleService` and let IT write `crons.json`, then migrate what is on disk. A hand-written fixture
+encodes my belief about the format; `_save`'s own projection encodes the format. (Two smaller findings
+fell out of that: the file has 31 keys per row, and on macOS `tmp_path / "crons.json"` misses it
+because the temp dir resolves through a `/var` → `/private/var` symlink — the fixture reads
+`service._path`.)
+
+**Two measurements that changed the implementation.**
+
+1. **`ScheduleService._save` persists 33 of the dataclass's 35 fields — `dry_run` and `last_outcome`
+   never reach disk.** They are runtime-only, so the migration cannot read them and must not claim to;
+   a converter that mapped them would be translating a value that is always the default.
+   `NEVER_PERSISTED` records it, and a test re-derives the set from `_save`'s source so a future edit
+   that starts persisting them fails here rather than silently making the exclusion wrong.
+2. **The three legacy schedule kinds do NOT line up with the trigger clock's three.** Legacy `every`
+   has no equivalent, and mapping it onto `at` — the tempting shape match, since both carry one
+   number — would turn every recurring interval job into a **one-shot that fires once and dies**. It
+   converts to an explicit interval spec with a note instead.
+
+Conversion decisions, each with the user-visible failure it avoids:
+
+- **`timezone`, `skip_dates`, `strict_schedule` ride the spec verbatim** for every kind. These are the
+  quietly-losable ones: a dropped `skip_dates` fires on Christmas, a dropped `strict` catches up when
+  the author said not to, a dropped `timezone` runs at the wrong hour for half the year. None of those
+  failures names itself.
+- **`delete_after_run` carries the ROW's choice, not §1.2's default.** A one-shot the user marked to
+  keep must not be deleted because the new default says otherwise.
+- **`silent` beats a channel.** The legacy flag means the agent sends via `send_message` itself, so a
+  trigger that ALSO auto-delivered would double-post — the user-visible symptom that would make
+  someone distrust the whole migration.
+- **`persistent_session` + a key becomes `pinned:`; a key WITHOUT the flag stays `fresh`.** Pinning the
+  stateless per-fire convention would silently make every fire share one growing session, and the
+  drift shows up as an automation that gets slower and stranger over weeks.
+- **An `agent_sequence` is NOT flattened to its first step.** §2 says a sequence becomes a def, which
+  is authoring work; silently inlining step one would leave the user with a "successful" automation
+  doing a third of the job. The steps are preserved in the note and the trigger is left disabled.
+- **A row the migration could not fully interpret loads DISABLED and paused, even if it was enabled.**
+  The opposite default runs a half-understood automation unattended. A CLEAN row stays enabled —
+  pausing everything out of caution is its own kind of breakage.
+- **A row with no id is REFUSED, not given one.** A generated id would be un-recognizable against the
+  user's own file, and "which of my jobs is this" is the first question they would ask.
+- **A never-run job is `ok`, not unhealthy, and gets NO fabricated timestamps.** Rendering epoch 0 as
+  1970-01-01 puts a date on screen that reads as a real event.
+- **`dropped` is reported separately from `unaccounted`.** A dropped field was a decision the map
+  records; an unaccounted one is a bug in the migration. Collapsing them would hide the second behind
+  the first.
+- **The whole thing returns a REPORT and writes nothing.** A migration whose only output is a
+  rewritten store is one nobody can check until it is too late; this one can be run as a dry run and
+  diffed.
+
+- **NOT DONE (by scope):** the store write itself and the cutover sequence (the service owns
+  `triggers.json` and its lock), the `hooks.json` / `event_triggers.json` conversions (the
+  `EventTrigger` half of the map is written and tested, but its converter is the event-kind session),
+  and the API re-pointing (session 67).
+
+### S67 — Event-kind API parity + the dormant lifecycle events (61 tests) — DONE
+
+Two ways a user configures something the code never delivers. Both are made QUERYABLE rather than
+papered over, because the missing fire sites belong to the subsystems that would own them, not here.
+
+**DEVIATION — the plan says 8 dormant events; measurement says 7.** `TaskComplete` was one of the 8
+when this plan was written, and S60 wired it (`tasks/native._fire_task_complete`, via
+`pool.lifecycle_payload`). The remaining seven are `ApprovalRequest`, `ContextCompact`, `MemoryWrite`,
+`PostResponse`, `PreResponse`, `SessionEnd`, `SubagentSpawn`. Pinned as a count AND a name in
+`test_seven_events_are_dormant_not_the_plan_s_eight`, so the next session to wire one gets a failure
+that forces the same explicit re-count instead of the number quietly drifting.
+
+**DISCOVERY — measuring dormancy by scanning is wrong in three ways, and I shipped the wrong version
+first.** Counting `HOOK_EVENT_*` text hits calls `Stop` live off `autonudge.py`'s **docstring**, calls
+seven events live off `chat_runner.py`'s **import block**, and — worst — calls `TaskComplete` DORMANT,
+because the real fire passes `payload["event"]` and contains no constant reference at all. The last
+one fails in the direction that actively misleads: telling a user their working hook is dead. So
+`DORMANT_EVENTS` is a reviewed constant with `verify_dormancy()` reconciling it against
+`hooks.HOOK_EVENTS`, which is what makes a hand-maintained list safe.
+
+**DISCOVERY — the event-kind parity gap is worse than "uneven", and it was measured by driving the
+handlers, not by reading them.** `event` was handled in `list`/`create`/`DELETE` only;
+`toggle`/`run`/`PUT` fell through to the SCHEDULE branch, which looked the id up among cron jobs,
+missed, and answered **404 `{"error": "not found"}`** — the API telling a user that a trigger sitting
+in their store does not exist, while it kept firing. Probed as shipped:
+
+| op | before | after |
+|---|---|---|
+| `toggle` | 404 not found | 200, persists |
+| `run` | 404 not found | 200, fires |
+| `test` | 400 "use /run" | 200, fires |
+| `PUT` | 400 / 404, **wrote nothing** for every field | 200, persists |
+| `history` | bare `{runs: [], total: 0}` | `supported: false` + reason + fire count |
+
+`/test` said "use /run" and `/run` said 404 — a **circular dead end** with no way to fire an event
+trigger by hand at all. And every PUT field (`enabled`, `pattern`, `max_fires`, `action`) silently
+failed, so toggling a trigger off reported that it did not exist.
+
+Decisions, each with the failure it prevents:
+
+- **`execute_event_action` is extracted so `/test` and the live fire share ONE path.** A test button
+  with its own dispatch would eventually pass while the real fire failed — worse than no test button,
+  because it certifies a broken trigger.
+- **Both guardrail gates hold for a test fire.** A `/test` that skipped the denylist would run exactly
+  the action an operator blocked, from a UI button, and report success; one that skipped incident mode
+  would run unattended work during the incident the kill switch was thrown for. Adversarially probed:
+  the provider is never invoked in either case. `test` only tags the payload.
+- **A typed `FireOutcome` replaces `None`.** Before, incident mode, an unregistered provider and a
+  denylist block were indistinguishable from success, so a test surface could only ever report "ok".
+- **`ran` and `success` stay separate.** `ran` is "reached its provider"; `success` is the provider's
+  verdict. Live validation surfaced a real misconfigured `notify` action (missing `title_template`) as
+  `ran: true / success: false` — collapsing them would report that as "never fired" and point the user
+  at the wrong thing.
+- **A refused fire answers 200, not 4xx.** A guardrail decision is not a malformed request.
+- **A manual fire does NOT spend `max_fires`, and skips debounce.** The budget bounds UNATTENDED
+  firing; spending it from a Run button would let a user exhaust and self-retire their own trigger by
+  testing it. Same asymmetry as S65's `within_rate_window(manual=True)`. Verified live: two fires,
+  `fire_count` still 0.
+- **Re-enabling an exhausted trigger resets `fire_count`.** Otherwise `record_fire` disables it again
+  on the next fire — the off switch working and the ON switch not.
+- **`history` says `supported: false` and returns the fire counter.** A bare empty list renders as
+  "this ran and kept no records", so an unrecorded trigger reads as an idle one.
+- **A rejected PUT writes NOTHING.** An unknown `pattern` matches nothing, so accepting a typo would
+  silently retire a working trigger.
+- **Refusals are 400-with-a-reason, never 404.** 404 for a row the user is looking at reads as data
+  loss. `PARITY_EXEMPTIONS` declares the two genuine cases (lifecycle has no standalone `/run`;
+  schedule's action IS its run) so every other kind's gap stays a real finding.
+- **Dormancy rides `/api/triggers/variables`** — the one server-sourced catalog both UIs read — and is
+  warned at the point of CHOICE (event picker + option labels), with a chip and a "zero runs is
+  expected" note on an already-saved trigger. A hard-coded FE list would eventually badge a working
+  hook as dead, so every helper returns "fires" for anything it was not explicitly told is dormant
+  (including a still-loading catalog).
+- **The `event` kind had NO frontend client methods at all**, so the fixed operations were unreachable
+  from the UI; added with the `ran`/`success` distinction in the type.
+
+Validated live against an isolated dev home (`GIDEON_HOME=./.dev-home`, auth `none`): the
+catalog serves 7 dormant events with reasons, and create → toggle ×2 → PUT(5 fields) → run → test →
+history → delete all behave as the table above says.
+
+- **NOT DONE (by scope):** the seven dormant fire sites themselves. Each is a per-subsystem edit
+  (session teardown, compaction, the approval path, the subagent `on_event` bus) that belongs with its
+  owner, not in an API-parity session; wiring them from here would mean seven speculative touches
+  across unrelated modules. `DORMANCY_NOTES` names the owning subsystem for each so the work is
+  findable, and `verify_dormancy()` fails if one is wired without updating the list.
