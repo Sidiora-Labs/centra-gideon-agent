@@ -1812,6 +1812,46 @@ returns the names to compose but does not yet build the subworkflow spec. `prese
 
 ---
 
+## POST-QUEUE WORK (criteria + acceptance bars the 91 rows did not cover)
+
+The 91 rows are `✅ DONE`. Four sessions since then closed **acceptance criteria of plans already in
+the queue** — declared work, not new scope (see the ruling in the exhausted record below).
+
+| Session | What was unmet | Plan / bar | PR |
+|---|---|---|---|
+| S78 | One Proposal Inbox showing six kinds; the model cannot accept its own proposals | LEARNING-FLYWHEEL crit 1 | ✅ DONE (#234) |
+| S79 | The adversarial test must cover the REFINER path | LEARNING-FLYWHEEL crit 4 | ✅ DONE (#235) |
+| S80 | The named ambient blocks must fit ONE slot-allocated budget | LEARNING-FLYWHEEL crit 5 | ✅ DONE (#236) |
+| S81 | The Automations **Week tab** (the endpoint's other half) | AUTOMATION-SUBSTRATE AUTO-A3 | ✅ DONE (#240) |
+| S82 | The 7 **dormant lifecycle events** never fired (configurable + dead) | AUTOMATION-SUBSTRATE crit 5, clause 2 | ✅ DONE (#241) |
+| S83 | The `file` kind's **watch runtime** — declared, and nothing watched a filesystem | AUTOMATION-SUBSTRATE crit 2 (partial) | 🟡 PARTIAL (#242) |
+
+**BLOCKED — the unified trigger store does not exist, and no queue row owns it.** Criterion 2's chat
+half (`automation_create`, §4) needs somewhere to persist a `file` trigger. The handler is a FACADE
+over three legacy stores (`crons.json`, `event_triggers.json`, the hook config) routing exactly three
+kinds; `file`/`webhook`/`idle`/`view`/`web_watch`/`run_completed` have **no persistence at all**. Rows
+62-70 built the entity, disposition table, dispatch, cron migration and event parity — the store itself
+was never a row. Building it + the eight-tool `automation_*` namespace + the `schedule_*` alias
+retirement is a multi-session program, and writing the chat tool against a store a later session defines
+is what EXECUTION-PROTOCOL forbids. S83 ships the runtime that program would otherwise invent under
+pressure; the store is the next owner's first task.
+
+### 🔴 The stacked-merge incident (2026-08-03) — resolved by #239
+
+Every PR from #223–#236 went green and reported **merged** — into its own **stacked base branch**, not
+into `main`. `origin/main` stayed at #222 (S68) while twelve sessions (S69–S80) sat only on those base
+branches. The bases were then deleted as "merged" (true of the PR, false of `main`), leaving the work
+only in the local object store.
+
+**Nothing was lost.** PR #239 replays the 13 commits `main` lacked, cherry-picked in lineage order onto
+current `main`; the resulting tree is **byte-identical** to the original stack tip (`da423978460c`),
+proving a faithful replay. The eleven commits already on `main` as squashes (S61h–S68) were skipped —
+which is why a naive `merge-tree` of the old tip reported nine conflicts and #239 reports none. `main`
+was NOT force-pushed; the recovery lands as an ordinary fast-forward.
+
+**The check that would have caught it** is `git merge-base --is-ancestor <branch> origin/main`, not the
+PR's merged flag or `mergeStateStatus: CLEAN`. Branch cleanup is now gated on the former.
+
 ## QUEUE EXHAUSTED — 2026-08-03 (three criteria since closed; see below)
 
 All **77 of 77** rows are `✅ DONE` with real PR numbers (sections A–I). The autonomous nudge asks for
