@@ -1048,3 +1048,181 @@ EMPTY value counts as a setting — someone who cleared their quiet hours meant 
   page)", and this session built the endpoint + projection it consumes; the tab itself is that
   session's work. The gates are also not yet called from the fire path — that is the scheduler's
   `is_due` seam, and `evaluate_quiet`/`evaluate_duty` are written as the pure decisions it will apply.
+
+### S81 — AUTO-A3's Week tab, and the two halves of skip_dates it needed (28 FE + 11 BE tests) — DONE
+
+**This closes AUTO-A3**, whose acceptance bar names both halves: "`GET /api/triggers/week` (computed
+occurrences incl. quiet-window/skip-date/duty annotations) **+ the Automations Week tab** (7x24 grid,
+shaded quiet bands, click-through)". S70 shipped the endpoint and recorded the tab as NOT DONE
+("extends Session 8"); this is that session.
+
+**The endpoint had ZERO frontend consumers.** Grepped `web/src` for `triggersWeek` and
+`triggers/week` — nothing. The projection has been computing a week of fires that no surface rendered
+since S70.
+
+**Two coupled BACKEND defects, found by probing before any UI existed.**
+
+1. **`project_occurrences` did not read `skip_dates` AT ALL.** AUTO-A3 requires them as struck columns.
+   Driven with a daily trigger and one day declared a skip date, the projection returned that fire
+   completely UNANNOTATED while `SchedulerService._should_run` refuses it — a grid confidently showing
+   a fire that will not happen. Worse than the silence it replaced.
+2. **The date had to be resolved in the JOB's timezone, not the server's.** The scheduler compares
+   `skip_dates` against `datetime.fromtimestamp(now, _job_tz(job))`; the projection used
+   `.astimezone()` (server-local). For an `Asia/Tokyo` job on a UTC host the same instant is a
+   different calendar date, so honouring `skip_dates` against server time would have struck the WRONG
+   column. Fixing (1) without (2) would have shipped a confidently-wrong grid. A test asserts
+   grid/scheduler agreement across UTC, Tokyo and Los Angeles, and a second pins the pre-fix miss.
+
+`GateOutcome.SKIPPED` is a NEW outcome rather than reusing `QUIET`, because the two are different
+promises: a quiet window defers a time of day and may catch up, while a skip date removes a whole day
+and never does. Rendering a struck column as a shaded band would read as "delayed" rather than
+"cancelled". SKIP also wins over QUIET on a cell where both apply — reporting quiet hours for a date
+that is struck anyway sends the user to change the wrong setting.
+
+**`gates.skip_dates` AND the top-level field are both accepted.** §1.1 reserves the key on the unified
+Trigger entity while a legacy `ScheduleJob` carries the list as a field; accepting one would have
+quietly ignored half the triggers. The explicit argument wins when both are present.
+
+**The FE half.** A pure `weekGrid.ts` (placement, folding, labels) + a `WeekGridView.tsx` that draws
+it — the same decision/render split `runDag.ts` uses, so the arithmetic is testable without a DOM.
+Design notes worth keeping:
+
+- **Cells COUNT their fires.** A minutely trigger returns 200 rows (its own cap) that collapse into a
+  few cells; one mark per row would paint 200 identical squares in one hour.
+- **Empty HOURS collapse, empty WEEKS do not.** A 24-row grid where 17 rows are dead makes the user
+  scroll past nothing; but a grid with zero rows reads as broken, so an empty week renders all 24 and
+  the caller shows its own empty state.
+- **Placement compares CALENDAR DATES, not epoch arithmetic.** Adding `i * 86400` drifts an hour across
+  a DST transition and lands a 00:30 fire on the previous day.
+- **Local time is the display contract, with the server's zone captioned when they differ.** The person
+  reading the grid wants to know when THEIR machine sees the fire; a silently renumbered grid would be
+  the worst version of this.
+- **The cap is reported.** `truncated` names the triggers, because a silently partial week reads as an
+  accurate forecast (S65's rule, new surface).
+
+**Three of my own errors, all caught by tooling rather than by reading.** (a) I referenced
+`cell.triggerIds` before it existed on the type — and fixing it properly meant deduping cells on the
+trigger ID rather than the NAME, since nothing forbids two triggers sharing a name. (b) `Button` takes
+children, not an `icon` prop. (c) **The design ratchet (`primitiveAdoption.test.ts`) rejected 168 raw
+button elements as new bespoke chrome.** The `Button` primitive is a sheen-animated pill with no
+`aria-label` — wrong for a 24px heat cell, and 168 would animate on hover. Resolved by making the cell
+a `td` carrying `role="button"` + `tabIndex` + a keyboard handler, so the semantics survive without
+minting chrome; the baseline was NOT raised. Note the scanner is a regex over source text, so a literal
+button tag in a COMMENT also counts.
+
+- **NOT DONE (by scope):** cron-expression triggers are still omitted from the projection (they need
+  the shipped one-fire-at-a-time evaluator; a wrong band is worse than a missing one), and the duty gate
+  is still deliberately unevaluated — it is async and provider-backed, and a calendar's answer for next
+  Thursday is not knowable now. Both are stated in the empty state so the omission is legible.
+
+### S82 — The seven dormant lifecycle events, actually firing (44 tests) — DONE
+
+**This closes criterion 5's second clause**: "the event kind has full API parity … **and the 8 dormant
+lifecycle events actually fire**". S67 closed the first clause and left this one measured but open.
+
+**🔴 SEVEN EVENTS WERE CONFIGURABLE AND DEAD.** `configurable_but_dead()` returned
+`ApprovalRequest`, `ContextCompact`, `MemoryWrite`, `PostResponse`, `PreResponse`, `SessionEnd`,
+`SubagentSpawn`, and a grep for each name outside its own declaration found exactly ONE hit: the
+`validation.py` allowlist. Selectable in the hook UI, validating, saving, and fired by nothing — a user
+could configure one and wait forever. (The plan says 8; `TaskComplete` was the eighth and S60/S61e
+wired it, which S67 had already recorded.)
+
+`triggers/lifecycle_fire.py` owns the contract; each event fires from the moment its catalog row
+describes:
+
+| Event | Fire site | Gate |
+|---|---|---|
+| `MemoryWrite` | `MemoryService.write_lesson` | only a SUCCESSFUL, non-blocked write |
+| `SubagentSpawn` | `SubagentManager.spawn` | only `not info.done` — a rejected spawn announces nothing |
+| `ApprovalRequest` | `DashboardState.request_approval` | alongside the WS broadcast, observational only |
+| `ContextCompact` | `compress_thread_history` | only the REAL compaction, not the under-cap passthrough |
+| `PreResponse` | `chat_runner` | before `client.stream(...)` is created |
+| `PostResponse` | `chat_runner` | beside `Stop`, carrying SHAPE where `Stop` carries text |
+| `SessionEnd` | `remove` / `destroy` / `close_all` | with `reason` distinguishing the three endings |
+
+**Decisions worth keeping:**
+
+- **The payload shape is `pool.lifecycle_payload`'s, not a new one.** `event` + a `context` string,
+  because the hook UI renders a FIXED `vars` tuple per event and a variable the UI does not list is one
+  no user can discover. A test asserts every builder's event name is one the catalog declares.
+- **Every payload withholds content.** `PostResponse` carries `reply_chars`, never the reply;
+  `MemoryWrite` carries the category, never the lesson body; `ApprovalRequest` carries the tool name,
+  never its input. Hook context reaches a shell script's environment — unbounded text is `E2BIG` on
+  exec (which reads as "the hook mysteriously stopped"), and an approval prompt is precisely where a
+  hook must not receive attacker-influenced arguments. `FIELD_CAP` bounds every field.
+- **`ApprovalRequest` cannot answer the gate.** Its result is not awaited into the decision and cannot
+  resolve the future; a hook that could would be an unreviewed remote-approval channel.
+- **`PostResponse` is not a duplicate of `Stop`.** Both fire at turn end: `Stop` carries the reply text
+  for a content hook, `PostResponse` the turn's shape for a metering hook. That is the catalog's own
+  distinction, and collapsing them would silently retire an event the UI still offers.
+- **`SessionEnd` fires on all three endings** with `reason=removed|destroyed|shutdown`, because a
+  cleanup hook that cannot tell a tab close from a permanent delete either over-runs or misses its
+  case. On the shutdown path it fires AFTER the bounded provider gather — a missed hook is recoverable,
+  an orphaned agent process is what that 5s timeout exists to prevent.
+- **`fire_sync` bridges two SYNC call sites.** Measured: `asyncio.run()` from inside a running loop
+  raises, and both sites are reachable from the dashboard loop, so it schedules a task when a loop is
+  running and SKIPS when none is — the honest answer for a CLI write, where blocking a sync write to
+  start a loop would make every `write_lesson` pay for a feature most users never configure.
+
+**Two of my own errors, both caught by measuring rather than reading.** (a) I passed `depth=` into the
+`SubagentSpawn` payload; `SubagentInfo` carries no `depth` field, so every fire would have reported
+depth 0 — the recursion bound lives on the action's `__hook_depth`, so the field was dropped instead of
+faked. (b) `_fire_session_end` first read `session.messages`, which `_Session` does not have (that is
+the dashboard's session object) — every fire would have reported `turns=0`, a plausible number that is
+always wrong. `prompt_count` is the field that exists, and a test pins `turns=12`.
+
+**`DORMANT_EVENTS` is now EMPTY, and the machinery is kept.** S67's own test said "if a later session
+wires another event, this fails and the deviation gets recorded again instead of the number quietly
+drifting" — so the assertion inverted rather than the number being edited. `verify_dormancy()` still
+re-derives the live set, so a future event declared ahead of its subsystem is still caught.
+
+### S83 — The `file` kind's watch runtime, and the store gap it exposed (35 tests) — PARTIAL
+
+**Toward criterion 2**: "*When a file in ~/notes changes, summarize it into my knowledge base*" is
+creatable in chat in one message.
+
+**🔴 THE `file` KIND WAS FULLY DECLARED AND ENTIRELY INERT.** It is in `models.KINDS`, its spec keys are
+`{paths, dedup}`, and a `file` trigger parses and stays `enabled=True` — measured, before writing any
+code. What does not exist: any filesystem watcher on its behalf, any `file` branch in the trigger
+handler (grepped: zero), and any chat tool that can express it (all nine `schedule_*` tools are
+clock-only; `schedule_natural` converts a cadence to cron). A user could author one through the API and
+wait forever.
+
+`triggers/file_watch.py` is the runtime. It reuses `fs_watch.ConfigFsWatcher`'s mechanism rather than
+adding a dependency — that module already solved poll + signature + seeded-first-pass + deletions for
+the config tree, and `watchdog` would put a platform-specific runtime (inotify/FSEvents/kqueue) into a
+package that currently runs anywhere. What this adds, each because the plan's §2 table requires it:
+
+- **Glob roots with `~` expansion.** A chat-authored trigger contains a tilde; a literal `~` directory
+  watches nothing, silently.
+- **CONTENT-HASH dedup keyed on `(path, content_hash)`** — the plan says "not path-only (R12)".
+  Verified against a real directory: an identical rewrite (editor double-save, `touch`) moves `mtime`
+  and does NOT fire. A path-only or mtime key re-fires on a no-op save.
+- **A three-way delta** (`added`/`modified`/`removed`), so "fired workflows foreach only over new
+  items". A summarize automation wants added+modified; a cleanup automation wants removed.
+- **The `vcs` preset**, `.git/refs/heads/*` + `.git/HEAD`. HEAD is included because a branch SWITCH
+  moves it without touching any ref. Tested by driving two real `git commit`s.
+- **A reported cap** (`MAX_WATCHED_FILES`, `truncated`). A `~/**` glob is hundreds of thousands of
+  paths; hashing them per poll is the `broad_watch_glob` failure `automation doctor` already flags.
+  Truncation is deterministic (sorted) so files do not appear and vanish between polls.
+
+**A defect my own test caught:** `WatchState.from_dict` put the `isinstance` guard inside the
+comprehension, so `.items()` was called on a string before the check and raised. A corrupt state record
+must degrade to "unseeded" — which seeds and fires nothing — not crash the poll loop serving every
+other trigger.
+
+**🛑 SCOPE BOUNDARY — the chat tool cannot be built yet, and this is a real finding, not a deferral.**
+Criterion 2 needs `automation_create` (§4), which needs somewhere to PUT a `file` trigger. Measured:
+**there is no unified trigger store.** `docs`' own words — the handler is "a facade: there is no
+`triggers.json` and no migration" — and it routes exactly three kinds (`schedule`/`lifecycle`/`event`)
+onto three legacy stores (`crons.json`, `event_triggers.json`, the hook config). The `file`, `webhook`,
+`idle`, `view`, `web_watch` and `run_completed` kinds have no persistence at all. Queue rows 62-70 built
+the entity, disposition table, dispatch, cron migration and event parity; **the unified store was never
+a row**. Building it plus `automation_create`'s eight-tool namespace plus the `schedule_*` alias
+retirement is a multi-session program, not a tail on this one, and writing a chat tool against a store
+that does not exist would be writing against a contract a later session defines — the exact failure this
+program's protocol forbids.
+
+So this session ships the runtime with its dedup and delta semantics settled and tested, and records the
+store as the blocking prerequisite. The runtime is what a store-and-service session would otherwise have
+to invent under time pressure.
