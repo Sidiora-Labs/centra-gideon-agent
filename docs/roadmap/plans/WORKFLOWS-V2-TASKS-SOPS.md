@@ -1387,3 +1387,152 @@ scheduling, not code. On a shared xdist worker the spike can exceed the suite's 
 an unrelated job. It flaked CI on this stack twice. Worth an owner decision: either give that one test
 a longer `@pytest.mark.timeout`, or drop its real-`TestServer` round trip for a direct handler call
 like the rest of the file uses.
+
+### S61i — The confirmation-gate emission, and a real fd bug behind a "flaky" test (18 tests) — DONE
+
+S57 built the `ConfirmationRequest` record and its verbs; S61e gave the events a channel. Neither was
+emitted by a running gate, so a run could park on an approval and its own history would show
+`workflow_needs_input` and nothing typed — "how long did this gate wait" and "who answered it" had no
+answer in the ledger.
+
+**Placement is the design.** The PENDING half rides `_ensure_continuation`, which already dedups on
+`(path, epoch)` — the watchdog polls a waiting run repeatedly, and a second emission site would have
+had to re-derive that idempotency and would have got it wrong. Measured: a re-poll leaves the count at
+1. The RESOLVED half fires AFTER the claim is won and the epoch checked; emitting earlier would log an
+approval for a race the caller LOST, and the audit would show two people approving one gate. Measured:
+a lost race emits nothing, and the ledger holds exactly one resolution.
+
+**The id is derived from `(run, gate, epoch)` via the shipped `confirmation.request_id`, never from
+the resume token.** A token is single-use and rotates per poll, so a token-derived id would give the
+two halves different values and they would never pair up — a defect that stays invisible until someone
+asks how long a gate waited. Verified on real runs: both halves carry the same `cr-…` id, and the
+epoch is in the key so a rewind asks a new question.
+
+**Gate classification reads the AUTHOR's declaration** (`risk_category`, then `kind`), not the prompt
+text. §4 gives a destructive confirmation a different expiry policy (auto-reject) and forbids muting
+it, so misclassifying a deletion as a plain approval would make it auto-APPROVE on timeout — the worst
+behaviour available in this module. An unknown risk word falls back to APPROVAL, whose policy is HOLD.
+
+**A REAL bug behind the "environmental" flake.** `test_terminal_handler.py`'s `_make_session` fixture
+hardcoded `master_fd=99`, and `_kill_session` does `os.close(sess.master_fd)` for any fd >= 0. Fd 99 is
+not the test's fd — it is whatever the process happens to have there. In a bare interpreter it is
+closed (hence the intermittent `OSError: Bad file descriptor`); under xdist with aiohttp, coverage and
+a live `TestServer`, a process can hold fd 99, and then the test **closes someone else's socket**. That
+is the mechanism behind `test_rest_create_list_delete` swinging 0.25s → ~11s and blocking CI twice on
+this program. The fixture now defaults to `-1` (the value `_kill_session` itself writes back after
+closing, so the guard is exercised rather than bypassed) and offers `_owned_fd()` — one end of a pipe —
+for a test that genuinely needs a closable fd. Three consecutive full suites are clean at 14083 passed;
+the earlier owner note in #210 is superseded by this finding, and it was NOT environmental.
+
+- **NOT DONE:** DagView-in-run-detail composition (`WorkflowRunDetail` still renders no DAG — a view
+  composition change), checklist drag-reorder edit UX, config four-point wiring.
+
+### S61j — The DagView composition, and two defects only a live run exposed (22 FE tests) — DONE
+
+`DagView`'s `onApprove`/`onDeny` had been a declared-but-unwired extension point since it was written,
+and `WorkflowRunDetail` rendered no graph at all. Both are now real: a `List | Graph` toggle, a pure
+`runDag.ts` layout module, and the gate verbs bound to `POST /runs/{id}/confirm` (S61d).
+
+**Two defects that unit tests could not have found — both needed a real projected run.**
+
+1. **The projection contains NO container rows.** A live gated run projected `root.children[0]`,
+   `root.children[1].children[0..1]` and `root.children[2]` — no `root`, no `root.children[1]`. The
+   first layout derived column depth by counting PLACED ancestors, so every node had none, landed in
+   column 0, and the graph drew one column and zero edges. Depth now comes from the path's own
+   nesting (counting `[`, which appears once per container level in every shape the engine emits),
+   normalized so the shallowest row starts at the left edge. Edges fall back to the nearest path
+   PREFIX among placed nodes, so a nested leaf still links to the step containing it.
+2. **The gate overlay was clipped.** `DagView` draws Approve/Deny in a `foreignObject` at `y + h`, so
+   a height computed from the node boxes alone rendered the buttons INTO the SVG and below its edge —
+   invisible, which looks exactly like the seam still being unwired. The layout now reserves
+   `GATE_OVERLAY_H` when any node is awaiting.
+
+A third finding, from `buildTree`: its `TreeRow.depth` counts `.children[...]` SEGMENTS and reports 0
+for both `root` and `root.children[0]` — correct for the list's indentation model (a top-level step is
+not indented under the root container) and wrong for columns, where it would draw a parent on top of
+its own child. The module comment records all three so a later "simplification" cannot reintroduce any
+of them.
+
+Decisions:
+
+- **The LIST stays the default.** It carries failure text, remediation and per-item labels a 168px
+  node box cannot, and it is what a user reads when something broke. The graph answers a different
+  question — where in the shape am I — so it is a mode, not a replacement.
+- **The state map is lossy BY DESIGN.** `degraded` and `no_change` are in the engine's
+  `SUCCESS_STATES`, so painting them as errors would tell the user work failed when it did not;
+  `scope_violation`/`escalated` are errors; anything unrecognized is `todo`, the state that claims
+  least, so an older frontend cannot paint a new engine state as a failure.
+- **Answerability asks the CONTINUATION list, not the state.** `waiting` also covers a `wait` node
+  parked on the clock, and offering Approve on one would ask the user to answer something nobody
+  asked them. An expired continuation is not answerable either — the token is gone, and a button that
+  always fails teaches the user the UI lies.
+- **The verbs are withheld on a terminal run** for the same reason.
+- **The graph reuses the continuations this view already fetches** — no second request.
+
+**Validated as a user** (live gateway, isolated dev home): authored a def with a nested `parallel` and
+a gated step, ran it, and drove the browser. The graph renders two columns with the parallel's children
+to the right, the awaiting gate carries the warn ring, and **clicking Approve on the node resolved the
+gate and the run resumed** (`needs_input` → `running`). Zero console errors.
+
+- **NOT DONE:** checklist drag-reorder edit UX, config four-point wiring.
+
+### S61k — The config four-point wiring + checklist edit UX (49 tests) — DONE
+
+Two halves, and both turned out to hinge on something the plan does not mention.
+
+**The config four points — plus the fifth nobody writes down.** §8 names four `WorkflowsConfig`
+fields and four wiring points (dataclass + `_meta`, `load()` mapping, `to_dict()`, PATCH allowlist).
+All four are wired. But `materialize`, `confirmation` and `pool` each carry their own module constant,
+so every field could have been set, persisted, echoed by `to_dict`, rendered in Settings and
+**completely ignored** — the present-and-inert control this program keeps finding. So there is a fifth
+point: `workflows/settings.py`, one resolver per knob, module constant as the fallback, and the call
+sites bound to it. Three tests read the SOURCE of `plan_materialization`/`build_request`/`claim_task`
+to assert they resolve from config, because a behavioural test alone would pass again the next time
+someone "simplified" it back to the constant.
+
+**DEVIATION — `match_threshold` was NOT re-added.** §8's recon (correction #1) states it exists at
+`workflows.match_threshold`. Measured: it does not. `WorkflowsConfig`'s own docstring records why — it
+was DELETED with the old SOP feature under the namespace-reuse clean break, and a repo-wide grep finds
+the name only in that docstring. The new semantic channel is session-59 scope and its threshold is not
+user-tunable yet, so adding the knob now would ship exactly the inert control the rest of this session
+exists to prevent. Recorded rather than silently satisfied.
+
+Design calls, each with the failure it avoids:
+
+- **The resolvers are deliberately UNCACHED.** All four are in the live-editable PATCH set; a cached
+  read would keep applying the old number until the gateway restarted, which is the difference
+  between live-editable and restart-required.
+- **An explicit argument still beats config.** The config is the DEFAULT — a template declaring its
+  own gate lifetime must not be silently rewritten by a global preference.
+- **The PATCH bounds restate what the code enforces** (`lease_ttl_secs` max = `MAX_LEASE_SECS`,
+  `max_materialized_per_foreach` min = 1). A stored value the runtime silently clamps is worse than a
+  rejection, because the user reads the stored one. `confirmation_ttl_secs` min is 0, because
+  `expires_at` reads `<= 0` as "never expires" and refusing 0 would make an intent the record
+  supports unreachable through the API.
+- **An unreadable `config.json` degrades to the shipped constants.** A malformed file must not stop a
+  run from materializing its tasks.
+
+**The checklist UX, and a cosmetic-fix trap.** Drag-reorder already shipped; the plan's two rules did
+not. Two-stage destructive reveal now matches the shipped armed-delete pattern (arm, confirm,
+4s timeout) rather than inventing a second one — a checklist row is text the user typed and there is
+nothing to undo it with.
+
+Checked-locks-drag was the interesting one: **styling the grip as disabled is cosmetic.**
+`Reorderable` wraps every item in a `Reorder.Item`, which makes the whole ROW draggable, so a
+"locked" row still picked up and reordered. The lock had to move into the primitive — a locked item
+now renders as a plain `div`, outside the reorder group — which is what the new `canDrag` prop does.
+A completed step's position is the record of what happened in what order, which is the one thing a
+checklist is FOR.
+
+**Two guards earned their keep, and one false positive worth knowing.** The design-system
+primitive-adoption ratchet caught a raw button (278 > 277) — fixed by using the shared `Button`, not
+by raising the baseline. Then it failed AGAIN at the same count: the scanner counts the literal
+string, and my *comment* contained the tag name. The comment is now worded around it, with a note
+saying why. Separately, `test_config_roundtrip` correctly rejected the new enum field (its generic
+rule appends `-x`); the fix is a `_SPECIAL` entry declaring a real member, exactly as
+`dashboard.stream_reveal` already does.
+
+**Validated as a user** against a live gateway: `GET /api/config/gideon` serves all four fields;
+PATCH accepts `lease_ttl_secs=120` and `surface_mode_default=passive`; refuses `99999` ("must be
+between 30 and 3600"), `vibes` ("must be one of ['off','passive','suggest']") and `cap=0`; accepts
+`ttl=0`. The resolvers then read the patched values with **no restart**.
