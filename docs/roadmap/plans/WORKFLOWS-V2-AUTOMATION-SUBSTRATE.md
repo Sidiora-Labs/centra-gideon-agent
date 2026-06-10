@@ -457,3 +457,114 @@ Fits the round-1 amendment cleanly: `duty_gate` (AUTO-A2) already establishes th
 | ID | Task | Files | Done when |
 |---|---|---|---|
 | AUTO-A4 | `trigger_source` provider seam: `PROVIDER_TYPES` + `_TypeHandler` (same commit), manifest declaration + install-consent surfacing, namespaced `app:<name>:<event>` bus sources with mandatory fencing + provenance at ingestion; app disable → bound triggers park typed; SDK re-export | `apps/manifest.py`, `providers/registry.py`, event-bus ingestion, `sdk/` facade, `tests/` (`test_manifest_types_match_handlers`) | a fixture app's source fires an `event` trigger end-to-end (fenced payload, frozen capabilities honored); disabling the app parks its triggers with a reason row; #47 guard green; core contains no vendor names |
+
+## Execution log
+
+### S62 — The Trigger entity, per-kind specs, and typed fire records (72 tests) — DONE
+
+Entity layer only, deliberately. The scheduler is 63, dispatch is 64, migration is 66 — and the shape
+has to be settled first because the migration is the step that cannot be redone cheaply.
+
+**The measurement that shaped the session.** `ScheduleJob` has 33 fields and `EventTrigger` 11.
+Checked against the new dataclass: **31 of those 44 have no same-named home on `Trigger`.** A
+migration written against the dataclass alone would silently drop `skip_dates` (the trigger keeps
+firing on a holiday), `strict_schedule` (a missed slot catches up when the author said not to),
+`content_re` (an event trigger fires on everything) and the delivery/session fields. So
+`LEGACY_FIELD_MAP` lands in THIS session rather than in 66, mapping every one of the 44 to a
+destination — with `None` plus a reason for the deliberate drops, because an unexplained omission
+is indistinguishable from an oversight when someone reads it in six months.
+`unmapped_legacy_fields()` runs the check against the REAL dataclasses, so a field added to
+`ScheduleJob` next month fails a test here instead of vanishing during the migration.
+
+Contracts made checkable rather than trusted:
+
+- **Never-throw structural validation (R15).** `parse_trigger` returns `(trigger, issues)` and never
+  raises — verified against `None`, `[]`, a string, an int and `{}`. A near-miss key yields a warning
+  naming the closest known field (`debounce_seconds` → `debounce_secs`), and a far-off name suggests
+  NOTHING: suggesting `timezone` for `xyzzy` is worse than silence, because the reader trusts it. A
+  structurally broken trigger loads DISABLED — visible and editable, which is what makes the warning
+  actionable, but never dispatched.
+- **Silent drops are banned (R2).** `Outcome` is closed (12 members) and `fire_issues` asserts that
+  every non-clean outcome carries a one-line reason — the rule is only real if something checks it,
+  since a suppression written without a reason satisfies the type and defeats the purpose. A
+  parameterized test walks all 12 outcomes rather than spot-checking three.
+- **Only a TRUE failure counts toward autopause.** Five skipped fires because quiet hours held is the
+  configuration working; autopausing for that would punish the user for saying "not at night".
+- **Productivity is the materiality predicate, not the outcome.** A run can end `ran` and have touched
+  nothing, so the runs-inbox view keys on `mutated` — an outcome-based view would show a page of runs
+  that changed nothing.
+- **Gate failure modes are classified per gate**, and an UNCLASSIFIED gate fails CLOSED. Budget and
+  storm guards fail open (a hung budget probe must not stop every automation); security fences do not.
+  The default for a gate nobody classified is refusal, because that is the safe direction for a
+  control whose semantics are unknown.
+- **Phase-2 kinds (`pulse`, `observe`) are NOT accepted yet.** A kind the service cannot dispatch
+  would let a user author a trigger that never fires — the exact failure the never-throw validation
+  exists to prevent.
+- **A webhook with no `token_ref` is refused, not defaulted.** A generated default would be a secret
+  nobody chose.
+
+Notes for the sessions that follow: `fires_automatically` asks `enabled` AND `state` AND `kind` in one
+place, because checking `enabled` alone is how an autopaused trigger keeps firing. `classify_weight`
+is the ledger-vs-full rule (≥2 nodes, any LLM, or resumable ⇒ full) that keeps a minutely trigger from
+producing 1440 run directories a day.
+
+- **NOT DONE (by scope):** `TriggerService`, the disposition table, dispatch, the cron migration, and
+  the API surface. No store either — `triggers.json` arrives with the service that owns its lock.
+
+### S63 — The disposition table as code + crash-safe scheduling discipline (52 tests) — DONE
+
+§2 is explicit that `schedule.py` is ABSORBED by **rename, not rewrite**, so this session layers the
+discipline onto the shipped mechanism instead of replacing it. Everything is a pure decision the
+service applies, which is what makes it assertable without a running gateway.
+
+**The property measured first, because getting it wrong breaks migration day.** The shipped
+`ScheduleService._jitter_offset` spreads jobs into stable id-derived slots via BLAKE2b. If the trigger
+service used a different algorithm, every migrated schedule would land in a different sub-minute slot
+than the job it came from — a silent re-phasing of every automation on the machine. `jitter_offset` is
+now asserted **bit-identical** against the real shipped function for four ids including the empty one.
+It is deliberately re-implemented rather than imported (the dependency would point the wrong way for
+§2's absorb order), which is exactly why the parity test exists.
+
+Each rule ships with the bug it prevents, because a scheduling rule with no named failure is one
+nobody can review:
+
+- **persist-before-execute** → a crash between "decided to fire" and "fired" double-fires. `is_due`
+  reads the PERSISTED `next_fire_at` rather than re-deriving. Measured: the shipped `_is_due` guards a
+  same-minute refire with `last_run_ts // 60 == now // 60`, which is correct for a live process and
+  useless across a restart that loses the in-memory clock.
+- **recompute-from-completion, anchored to the created-at grid** → two distinct bugs in one function.
+  From completion, or a 90s run on a 60s interval is due the instant it finishes, forever, and the
+  machine never idles. Anchored, or that recompute re-phases the schedule to whenever the overrun
+  happened: a job created to run on the hour drifts to :07 after one slow day and stays there. A test
+  walks four consecutive overruns and asserts every result lands back on the grid.
+- **boot stagger** → a restart fires every automation at once. Overdue fires are pushed +60s and
+  spread by the same id-derived jitter; the push is deterministic, so a crash-loop does not reshuffle
+  every schedule on each restart. `catch_up` is RECORDED but still staggered — the plan's catch_up is
+  "fire once at boot/wake", and doing it inline would run before the gateway finished starting
+  (session 65 owns the exactly-once bookkeeping).
+- **claim self-expiry** → a killed process wedges a trigger permanently. `CLAIM_MAX_DURATION_SECS`
+  equals `workflows.pool.MAX_LEASE_SECS`, asserted: the same question (how long may one holder hold?)
+  should not have two answers on one machine.
+- **revalidate-on-fire** → a trigger disabled while the timer slept still fires once, which reads as
+  the off switch not working — the single most damaging bug an automation surface can have. Also
+  refuses a fire whose schedule moved mid-wait.
+- **coalescing** → N triggers replacing one 60s heartbeat wake the laptop N times. The batch order is
+  STABLE (fire time, then id), because an unstable order makes two runs of one batch interleave
+  differently and any bug in one of them intermittent.
+
+`claim_fire` takes the trigger's own `overlap` policy, so it is not a generic lock: `parallel` does not
+refuse (the trigger opted in), while `skip` and `queue` both refuse and the *outcome the caller
+records* carries the difference — this function's only job is whether THIS fire may proceed.
+
+**The disposition table now lives as code** (`triggers/disposition.py`), 14 rows with a
+`missing_surfaces()` check that imports every module it names. A markdown table cannot be verified
+against the tree; this one fails a test if the migration renames something out from under it — the same
+reasoning as S62's `LEGACY_FIELD_MAP`. `KEPT_WITH_DUTY` is a distinct verdict from `KEPT` because the
+two produce different work: collapsing them would let a required emission (fs_watch publishing
+`FileChanged`, the inbox emitting `InboxItemIngested`) read as "nothing to do here", and then the bus
+has no publishers. Each ABSORBED row names what is preserved verbatim — "absorbed" without that list
+is how a rewrite loses the semantics a rename would have kept.
+
+- **NOT DONE (by scope):** the service loop itself, the store (`triggers.json` arrives with the service
+  that owns its lock), dispatch/inbox+wakeup (§3.2, session 64), the event-bus contract (§3.3), and the
+  cron migration (session 66) — which must use S62's `LEGACY_FIELD_MAP`.
