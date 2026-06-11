@@ -19,7 +19,6 @@ Configuration files (edit these, then ``gideon setup --agent-only``):
 
 Dynamic fields resolved at install time:
   - ``prompt`` — ``file://`` URI pointing to the prompt file
-  - ``mcpServers.gideon-schedule.command`` — absolute path to ``gideon`` binary
 """
 
 import json
@@ -170,7 +169,7 @@ def _resolve_gideon_bin() -> str:
        one when the venv lives OUTSIDE the source tree (e.g. a repo-root ``.venv``
        with the package under ``Gideon/src/``: the step-1 walk from
        ``src/gideon`` never crosses the sibling ``.venv/bin``). This gap
-       dropped the ``gideon-schedule``/``-core`` MCP servers on every boot.
+       dropped the ``gideon-core`` MCP server on every boot.
     3. ``shutil.which('gideon')`` — respects PATH order (when the venv bin
        IS on PATH).
     4. Bare ``"gideon"`` — last resort, may fail but surfaces the problem
@@ -252,7 +251,6 @@ def _resolve_gideon_bin() -> str:
 # one entry here.
 # ---------------------------------------------------------------------------
 _MANAGED_MCP_SERVERS: dict[str, dict] = {
-    "gideon-schedule": {"command_fn": _resolve_gideon_bin, "args": ["mcp-schedule"]},
     "gideon-core": {"command_fn": _resolve_gideon_bin, "args": ["mcp-core"]},
 }
 

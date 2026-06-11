@@ -462,9 +462,9 @@ async def api_mcp_active(request: web.Request) -> web.Response:
         spec = global_mcps.get(s.name, {})
         enabled = not (isinstance(spec, dict) and spec.get("disabled"))
         result.append({"name": s.name, "enabled": enabled})
-    # Also include gideon-schedule and gideon-core (always enabled)
+    # Also include gideon-core (always enabled)
     names = {r["name"] for r in result}
-    for builtin in ("gideon-schedule", "gideon-core"):
+    for builtin in ("gideon-core",):
         if builtin not in names:
             result.insert(0, {"name": builtin, "enabled": True})
     return web.json_response(result)
