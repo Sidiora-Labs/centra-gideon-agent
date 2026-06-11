@@ -1835,6 +1835,23 @@ the queue** — declared work, not new scope (see the ruling in the exhausted re
 | S91 | **`automation verify-migration`** — §7 step 2's named cutover prerequisite; found `lossless: true` beside two silently-paused real automations | AUTOMATION-SUBSTRATE §7 step 2 + §8 | ✅ DONE (#250) |
 | S92 | **`automation_*` chat-tool namespace** — closes criterion 2 (a file-watch automation creatable in one message); S83's recorded blocker is gone since S87 shipped the store | AUTOMATION-SUBSTRATE §4 + crit 2 (S83 unblock) | ✅ DONE (#253) |
 | S93 | **file-watch poll runtime, wired into gateway boot** — makes S92's file automations actually FIRE; disjoint from `ScheduleService` so no double-fire (the additive cutover, not the deferred clock switch-over) | AUTOMATION-SUBSTRATE §3 + crit 2 (S83 runtime) | ✅ DONE (#255) |
+| S94 | **`/api/triggers` surfaces store-only kinds** (file/web_watch/idle/…) via a `store` namespace — closes the present-and-inert gap S92/S93 opened (created + fired but unlistable on the Automations page). List + toggle + run + delete route through S92's `tools.py`; legacy backends untouched | AUTOMATION-SUBSTRATE §6 (additive slice) | ✅ DONE (#256) |
+| S95 | **Automations page shows store triggers** — the FE half of S94: an "Automations" filter tab lists file/web_watch/idle/… triggers, with a `StoreTriggerDetail` inspector for pause/run/dry-run/delete. Closes "implementation owns product too" for S92-S94 — the automation is now visible AND manageable in the UI, not just in chat + the API | AUTOMATION-SUBSTRATE §5 (FE) + crit 2 | ✅ DONE (#257) |
+
+**Criterion 2 is now closed create → fire → SEE → manage.** S92 create (chat), S93 fire (poll loop),
+S94 API surface, S95 the Automations page. A user can create "when a file in ~/notes changes…" in
+chat, watch it fire, and find/pause/run/delete it on the Triggers page under the Automations tab —
+the full "implementation owns product too" loop. Read-only inspector by design: these are authored
+in chat, so the page owns management (pause/run/delete), not a second create form.
+
+**§6 partial — the ADDITIVE half, not the class-B re-point.** The full §6 ("re-point `/api/triggers`'
+three backends at one store") is the deferred class-B switch-over. But S92/S93 opened a real
+present-and-inert gap: a chat-created file/web_watch/idle automation was created, fired (S93 for
+`file`), and **invisible** on the Automations page — `GET /api/triggers` read only the three legacy
+backends. S94 adds a `store` namespace that lists the six store-only kinds and routes
+toggle/run/delete through S92's `tools.py`, all read + safe-mutation with the legacy paths untouched
+(no migration, no double-write). The schedule/event backend re-point and `schedule_*`-alias
+retirement remain the deferred class-B work.
 
 **S83 now FULLY closed (create + fire).** S92 made file automations creatable; S93 makes them
 fire. The runtime `file_watch.changed_files` shipped in S83 had **zero live callers** and the tick
