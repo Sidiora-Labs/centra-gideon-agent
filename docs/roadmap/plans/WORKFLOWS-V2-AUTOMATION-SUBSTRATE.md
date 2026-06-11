@@ -1879,3 +1879,100 @@ succeeds. FE-only session — no Python changed.
 
 - **STILL deferred (class-B):** the §6 re-point of the schedule/event backends onto the store (the
   clock switch-over), and the `schedule_*` MCP-alias retirement (§4).
+
+### S96 — Arm the clock: the cutover's real blocker (§3.1 — stacked on S95)
+
+**DONE. This is the step the clock cutover was actually blocked on**, and it was not the double-fire
+risk the queue described. Measured before writing a line, against a REAL migrated store:
+
+    store.migrate_from_crons()   # lossless: true, enabled: true
+    SVC.boot(store, now=NOW)     # {'rearmed': [], 'total': 1}
+    # next_fire_at after boot:   '(none)'  →  due_ids() == []   forever
+
+- **🔴 A migrated cron was PERMANENTLY INERT.** `due_ids` only surfaces triggers that HAVE a
+  `next_fire_at`, and nothing computed a FIRST one: `scheduling.recompute_from_completion` handled
+  intervals only, `boot_recovery` can only RECOVER an existing fire (handed 0.0 it returns 0.0), and
+  `service.next_after_completion` returned 0.0 for every non-interval kind on the stated premise that
+  "the recurrence engine" owned them — **there was no recurrence engine**. So the entire clock half of
+  the unified store reported migrated-and-enabled and could never fire. Retiring `ScheduleService` in
+  that state would have silently stopped every cron on the machine.
+- **🔴 FIXING THAT EXPOSED A WORSE SECOND DEFECT: a fire STORM.** With boot arming added, a cron
+  fired once and then kept `next_fire_at` at its **elapsed** slot — so every later tick read it as
+  still-due and re-fired the same past slot. Not merely inert. Pinned by
+  `test_a_second_tick_at_the_same_instant_fires_nothing`, which is the assertion that would have
+  caught both defects.
+- **`triggers/arm.py` is now the ONE recurrence computation** (spec → next fire) and owns all four
+  `CLOCK_KINDS`, so there is no second path to disagree with it. `next_after_completion` delegates to
+  it for cron/at; intervals keep §3.1's completion-anchored rule.
+- **Semantics inherited, not invented.** `schedule.compute_next_run_ts` is the shipped live answer to
+  the same question, and its two subtle rules are preserved verbatim: a cron is evaluated in the
+  trigger's OWN timezone (croniter interprets the expression in the base's tz; evaluating in UTC
+  silently shifts every tz-bearing job by the offset, and on a DST boundary that is a moving target),
+  and **an elapsed one-shot returns 0.0, never `now`** — re-arming a missed appointment turns it into
+  an immediate surprise fire. Verified: `0 9 * * *` → 09:00Z / 14:00Z (NY) / 03:30Z+1d (Kolkata).
+- **`delete_after_run` was declared and consumed by NOTHING.** It is in the clock spec, the migration
+  defaults it True for an `at`, and no code read it. The tick now retires a trigger with no next
+  fire: delete the row, or (when False) clear the fire and disable so it stays visible in the UI.
+  Either way it never keeps an elapsed timestamp. `TickResult.retired` names it — "it stopped
+  existing" is the state change a user most needs explained.
+- **An UNARMABLE trigger is skipped, never armed to `now`** (invalid cron, elapsed one-shot,
+  non-clock kind). Firing on a guessed cadence is worse than not firing, and the row is already
+  visible as broken in the store and the doctor.
+- **DEVIATION — an existing test asserted the bug.**
+  `test_a_non_interval_trigger_yields_no_recompute` pinned `next_after_completion(cron) == 0.0` on
+  the "recurrence engine owns it" premise. That premise was false and the 0.0 WAS the storm, so the
+  test is replaced by `test_a_cron_recomputes_from_its_own_expression` (which also pins that a
+  30-min-late completion does not push the 9am slot) plus
+  `test_an_elapsed_one_shot_yields_no_recompute` for the case where 0.0 is genuinely right.
+- Verified identical on **Python 3.12 and 3.13** — the cross-version check S93's glob bug taught.
+
+26 new tests. Gate: `make lint` clean.
+
+- **NEXT in the cutover (now unblocked, each a clean break):** retire `ScheduleService` for the tick
+  loop; re-point `/api/triggers`' schedule + event backends at the store (§6); retire the
+  `schedule_*` MCP aliases (§4). `ScheduleRunStore` survives all three unchanged — it is keyed by a
+  plain id string, so any trigger id can use it (measured).
+
+### S97 — The claim store: `overlap` was decorative (§3.1 — stacked on S96)
+
+**DONE. Three defects in one chain, all measured by driving rather than reading.**
+`scheduling.claim_fire` decides overlap from an `existing` claim the caller supplies, and
+`firepath.evaluate` returns the claim it granted with the note "the caller must release it". Nobody
+did either.
+
+- **🔴 1. `overlap: skip` was INERT.** `tick()` never passed `existing_claim`, so every fire was
+  evaluated against `existing=None` and the claim gate ALWAYS granted. Driven: a trigger with
+  `overlap: skip` fired a second time while its first run was still in flight — the precise failure
+  the setting exists to prevent. Present, reviewed, enforcing nothing.
+- **🔴 2. `is_running` was unanswerable from the store.** `ScheduleService` answers it from
+  `self._executing`, a PROCESS-LOCAL dict — wrong after a restart (an in-flight run reads as idle)
+  and invisible to the MCP process writing the same store. The API facade needs this to re-point off
+  `ScheduleService`, and a process-local set cannot serve it. Now a sidecar
+  (`<store dir>/trigger-claims/<safe-id>.json`, atomic tmp→rename), the same convention as
+  `trigger-watch/` (S93) and `task_leases/` (S61d).
+- **🔴 3. The executor never RELEASED one — and fixing (1)+(2) without this would have been WORSE
+  than the original bug.** Every `overlap: skip` trigger would block ITSELF after one run until the
+  1h expiry, turning the overlap guard into a one-shot. Released in a `finally`, because a run that
+  RAISED still finished occupying the trigger; releasing only on success would strand it on every
+  failure — the worst case, since a failing automation is the one a user retries. Caught by driving
+  the whole cycle (fire → claim → run → release → next slot fires), not by reading.
+- **🔴 A DEFECT I INTRODUCED AND CAUGHT BY RUNNING THE SUITE.** The first version defaulted the claim
+  root to the active home, so a tick over a `tmp_path` store wrote claims into the REAL
+  `~/.gideon/trigger-claims` — **7 files landed there** and leftovers then blocked unrelated
+  tests' fires (4 reds in `test_triggers_service`/`test_triggers_arm`). Fixed structurally rather
+  than by patching tests: the claim root is DERIVED FROM THE STORE (new `TriggerStore.base_dir`), and
+  `run_one`'s release is a **no-op without an explicit root** — the caller that persisted the claim
+  knows where it lives. Two regression tests pin both directions.
+- **Expiry is read-time, not swept:** a claim older than `max_duration_secs` reads as absent, so a
+  crashed run cannot hold its trigger hostage until a janitor notices (the same fail-open direction
+  `pool`'s leases take). A malformed claim also reads as idle — one that blocked every future fire
+  would be worse than one ignored, and the file is on disk for a human either way.
+- **`parallel` still allows concurrency** (asserted): over-blocking would be the same class of bug in
+  reverse. `skip`/`queue` block, and a blocked fire writes a typed `skipped_overlap` ledger row —
+  §7 crit 8's zero-silent-drops.
+
+25 tests. Gate: `make lint` clean, **15611 passed**, and the suite leaves the real home untouched.
+
+- **NEXT in the cutover:** with `is_running`/`running_since` now answerable from the store, re-point
+  `/api/triggers`' schedule backend (23 of the 46 `state.crons.*` call sites live in that one file),
+  then retire `ScheduleService`, then the `schedule_*` aliases. `ScheduleRunStore` survives unchanged.
