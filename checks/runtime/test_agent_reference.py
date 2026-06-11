@@ -64,7 +64,9 @@ def test_tools_reference_lists_every_provider():
     tools_md = render_reference()["tools.md"]
     providers = {
         "gideon-core",
-        "gideon-schedule",
+        # `gideon-automation` replaces the retired `gideon-schedule` (S109) — the
+        # `automation_*` namespace over the unified trigger store.
+        "gideon-automation",
         "gideon-artifacts",
         "gideon-memory",
         "gideon-knowledge-tools",

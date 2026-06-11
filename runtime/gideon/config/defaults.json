@@ -1,12 +1,10 @@
 {
   "name": "gideon",
-  "description": "Autonomous personal AI agent — schedules recurring tasks, spawns parallel workers, learns from corrections, and operates independently across your connected channels",
+  "description": "Autonomous personal AI agent \u2014 schedules recurring tasks, spawns parallel workers, learns from corrections, and operates independently across your connected channels",
   "tools": [
-    "@gideon-schedule",
     "@gideon-core"
   ],
   "allowedTools": [
-    "@gideon-schedule",
     "@gideon-core"
   ],
   "hooks": {

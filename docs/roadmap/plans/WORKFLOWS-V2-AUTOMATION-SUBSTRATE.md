@@ -2518,3 +2518,139 @@ an anchor that moves when unrelated code is reordered tests the layout rather th
   writer — `automation_*` already covers all nine of them), then the facade's CRUD fallbacks, which
   are only safe to delete once those are gone. Then `suggestions.py` / `messaging.py` / `discover.py`
   (reads), then the class. `ScheduleRunStore` survives.
+
+### S109 — The `schedule_*` MCP aliases retire (§4)
+
+**DONE.** Nine aliases gone, and with them the last legacy writer. Measured coverage before deleting
+anything: every `schedule_*` capability exists in `automation_*` **except one**, and that exception
+turned out to be an access control rather than a convenience.
+
+**🔴 `schedule_remove_all` was enforcing an access control nothing else had.** Its handler filtered
+`jobs = [j for j in jobs if j.session_key == session_key]` and REFUSED outright when no session key
+was set, so an agent could only mass-delete automations it had created. Retiring the alias without
+carrying that forward would have either lost the bulk operation or left a future author to re-add it
+unscoped. So `automation_delete_all` lands with it.
+
+**The scope had to CHANGE to stay real.** `mcp_schedule` set `job.session_key` on add, but a row
+created through `tools.create` carries `session="fresh"` (the default) and `created_by="agent"` —
+measured. A session-keyed filter would therefore have matched **nothing** for exactly the rows an
+agent can create: identical in a diff, enforcing nothing. `created_by` is the ownership the store
+records, and the MCP dispatcher **hard-codes** it rather than reading it from args (an agent that
+could pass `created_by="user"` would be able to delete every automation the human built). The
+validation schema deliberately has no field for it, and a test asserts that absence.
+
+**🔴 A SECOND control was about to disappear silently: the R1 interval floor.**
+`MIN_CLOCK_INTERVAL_SECS = 900` has existed since S87 and was read by **no code at all** — its only
+test asserted the constant equals 900. The one live floor was the retired `schedule_add` schema's
+`min_val=60`. Driven: `automation_create(spec={"kind":"interval","interval_secs":5})` persisted a
+**5-second LLM poll** with `ok: True` and zero issues. So retiring the alias would have removed the
+last thing standing between a typo and an every-5-seconds model call. `validate_spec` now enforces it
+as a WARNING (not an error) because R1 makes the floor overridable — "a 5-minute local-model poll is a
+legitimate choice, it just should not be the accident you get from typing `* * * * *`". It fires, and
+it is visibly flagged.
+
+**Retirement was safe because `@gideon-core` already carries the namespace.** Verified on both
+paths before cutting: the aggregated ACP surface (`mcp_core._aggregated_list_tools`) and the native
+in-process provider both offer all nine `automation_*` tools, and `defaults.json` grants
+`@gideon-core`. So dropping `@gideon-schedule` removes only the aliases.
+
+**What came out** — the surface was much wider than the module: `mcp_schedule.py` (716 lines), the
+`gideon-schedule-tools` bundled app, four validation schemas + `MCP_SCHEDULE_SCHEMAS`, nine
+`TOOL_META` entries, `create_schedule_provider`, the `mcp-schedule` CLI subcommand, the
+`_MANAGED_MCP_SERVERS` + `_MANAGED_SERVER_NAMES` entries, the `defaults.json` grant, the doctor's
+repair loop, the dashboard's always-enabled builtin list, and the `tool_groups` mapping row.
+
+- **🔴 The highest-impact reference was the shipped PROMPTS.** `chat.md` and `background.md` both told
+  the model to call `schedule_add`/`schedule_list`/`schedule_remove`/`schedule_pause`/
+  `schedule_resume`. A prompt naming a retired tool teaches the model to invoke something that does
+  not exist, and the failure surfaces as the assistant apologizing rather than as anything a
+  developer would see. Both now name `automation_*`, and a test asserts no shipped prompt mentions
+  `schedule_add`.
+
+**DEVIATION — 6 test files deleted, 6 re-pointed.** `test_mcp_cron.py`,
+`test_mcp_cron_channel.py`, `test_mcp_cron_persistent_session.py`, `test_mcp_cron_thread_ts.py`,
+`test_cron_session_scope.py` and `test_parse_time_string_tz.py` existed only to drive the aliases.
+`test_cron_session_scope.py`'s security contracts are ported to `test_automation_delete_all.py`
+(10 tests) — deleted-scope, confirm-gate, empty-scope, idempotence, partial-failure reporting, plus
+the hard-coded-scope assertion. `_parse_time_string` retires with its only caller; its real contract
+(human times resolve in the CONFIG timezone) is enforced by `arm._trigger_tz` from S96, verified
+against both Pacific and Eastern before deleting the tests.
+
+Re-pointed rather than deleted: `test_validation.py`'s generic-validator cases (the alias schema was
+only the vehicle), `test_nl_to_cron.py`'s dispatch tests (the NL→cron bridge moved to `tools.create`'s
+injected `cadence_to_cron` seam), `test_schedule_trigger.py`'s two MCP tests (`automation_run` is the
+successor; strengthened to assert an unknown id is refused BEFORE any HTTP post, which the originals
+never checked), `test_mcp_discovery.py`'s two samples (they used `gideon-schedule` as a managed
+name, so after retirement they asserted against a no-op), and `test_agent_reference.py`'s provider
+list. `test_validation_user_actions.py`'s interval-floor test moved to the store-level floor above.
+
+- **The four-registration-point landmine held again.** `TOOL_NAMES`, the handler mirror-list in
+  `test_triggers_tools.py`, and the §4-table count all had to gain `automation_delete_all` — and the
+  handler mirror caught the omission on the first run, which is exactly what S92 built it for.
+
+- **REMAINING on the `ScheduleService` retirement:** the facade's CRUD fallbacks (now safe to delete —
+  nothing writes `crons.json`), then the read-only callers (`suggestions.py`, `messaging.py`,
+  `discover.py`), then the class itself. `ScheduleRunStore` survives.
+
+### S110 — The facade's legacy CRUD fallbacks retire (§6)
+
+**DONE.** `state.crons.*` in `dashboard/handlers/triggers.py`: **15 → 0**. The facade is store-only,
+proven by driving every surface with `state.crons = object()` — a bare object with no methods at all:
+list, week, doctor, history, toggle, delete and the 404 path all answered correctly. 167 net lines
+gone.
+
+**🔴 THE FINDING, and why this session could not be a pure deletion.** Before removing anything I
+asked the only question that matters: is there a job the LEGACY service can load that the store does
+NOT have? Enumerated every clock shape a real `crons.json` can hold:
+
+| shape | legacy loads | migration writes | gap |
+|---|---|---|---|
+| `every` / `cron` / `at` / no-secs / bad-cron | 1 | 1 | no |
+| **empty `kind`** | **1** | **0** | **🔴 yes** |
+| **unknown `kind`** | **1** | **0** | **🔴 yes** |
+
+A `crons.json` row with an empty or unknown `schedule.kind` loads happily in `ScheduleService`, and
+`migrate_from_crons` **`continue`d** it — recorded in `unparseable`, never written. So it existed only
+in the legacy file, the fallbacks were its ONLY representation, and deleting them (the whole point of
+the cutover) would have made the user's job **vanish from the list with no error anywhere**. Reachable
+only from a hand-edited file — `add_job` writes only `cron`/`every`/`at` — but "narrow" is not "never",
+and silent disappearance is the worst possible failure for this surface.
+
+Fixed at the source rather than by keeping the fallbacks: a refused row is now **imported disabled**.
+`enabled=False` because `set_enabled` already refuses to enable a row that fails validation (S87), so
+it cannot become a live trigger by accident, and the store's own `ok=False` + `errors` are what the UI
+renders. That is strictly better than both alternatives: the job is VISIBLE and says why it is broken,
+instead of being invisible (post-deletion) or shown by a parallel code path (pre-deletion).
+
+**What came out:** the `_job_shim_for` fallback, the `_trigger_names` legacy merge, 48 lines of
+week-grid legacy translation, the list/update/toggle/delete/manual-run fallbacks, the 47-line
+`_serialize_schedule` projection (zero callers once they were gone), and the
+`POST /api/triggers/{id}/ack` route — verified dead: zero frontend callers, no MCP tool, and S98
+already recorded `acked_items` mapping to `None` with an empty real store. Two more handlers now read
+no `state` at all, which flake8's unused-local flags — the same signal S105 used.
+
+**A false alarm I chased and corrected.** Mid-probe I read "every migrated cron imports disabled" off
+the owner's real store (2 of 4 enabled jobs land disabled). That is **deliberate**: a row that gains a
+migration NOTE loads disabled so nothing fires on a schedule the conversion could not fully interpret,
+and both notes were legitimate (`legacy every → interval`, `agent_sequence needs authoring`). `enabled`
+round-trips correctly whenever there is no note. Recorded because the same reading would look like a
+bug to the next author.
+
+**DEVIATION — 16 tests across 5 files, all asserting the removed path.** Three in
+`test_triggers_facade_store.py` asserted the fallback contract directly (empty-store fallback, shim
+fallback, name-map merge) and are rewritten to assert the new one — the MIGRATION is what makes the
+store complete — plus a new test for the refused-row import. `test_triggers_facade.py`'s fixture built
+a `ScheduleJob` for `crons.list_jobs`; it now seeds a real store row, and `_every_job` became
+`_seed_interval`. That conversion found my own error: the doctor reads `workflow["def"]` and
+`gates["duty_gate"]`, not the `ref`/`duty` I first wrote — caught because a wrong address yields an
+empty finding rather than an exception.
+
+`test_dashboard_cron_update_agent.py` asserted `crons.update_job`'s CALL SHAPE on a MagicMock, and
+`test_dashboard_cron_approval.py` built a 20-attribute mock job. Both now drive the store and read the
+row back: a mock that answers every attribute cannot tell you whether the projection reads the right
+ones, and the store row can, because a wrong address yields an empty field. `test_api_server.py`'s
+route list drops the retired `/ack` entry.
+
+- **REMAINING on the `ScheduleService` retirement:** the read-only non-facade callers
+  (`suggestions.py`, `messaging.py`, `discover.py`), then the class itself. `ScheduleRunStore`
+  survives.

@@ -142,7 +142,6 @@ def group_name_for_provider(provider: str) -> str:
 
         gideon-core            → core       (a core provider)
         gideon-filesystem      → core       (a core provider)
-        gideon-schedule        → schedule
         gideon-knowledge-tools → knowledge
         mcp-tools:github             → mcp:github
         openai-tools:work            → openai:work

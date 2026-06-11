@@ -44,7 +44,6 @@ The extension-provider taxonomy (the capability types an app can contribute) and
 - **gideon-memory** — type `tool` / `` (enabled); capabilities: memory
 - **gideon-project-tools** — type `tool` / `` (enabled); capabilities: projects
 - **gideon-prompts** — type `tool` / `` (enabled); capabilities: prompts
-- **gideon-schedule-tools** — type `tool` / `` (enabled); capabilities: schedule_management
 - **gideon-subagents** — type `tool` / `` (enabled); capabilities: subagents
 - **gideon-tasks-tools** — type `tool` / `` (enabled); capabilities: task
 - **gideon-tools** — type `tool` / `` (enabled); capabilities: skills, notification, system

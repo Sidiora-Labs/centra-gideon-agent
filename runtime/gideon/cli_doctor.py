@@ -247,7 +247,7 @@ def _doctor() -> None:
         mcps = agent_data.get("mcpServers", {})
         mcp_fixed = False
         mcp_cmd_fixed = False
-        for ref in ("@gideon-schedule", "@gideon-core"):
+        for ref in ("@gideon-core",):
             name = ref[1:]
             in_tools = ref in tools
             in_allowed = ref in allowed

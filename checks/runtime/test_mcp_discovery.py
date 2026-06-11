@@ -1241,11 +1241,14 @@ class TestFixStaleManagedCommand:
 
         real = tmp_path / "gideon"
         real.write_text("#!/bin/sh")
-        spec = {"command": str(real), "args": ["mcp-schedule"]}
+        # `gideon-core` because `gideon-schedule` is no longer a MANAGED server (S109
+        # retired it) — and this function is scoped to managed names, so the old sample made the
+        # test assert against a no-op.
+        spec = {"command": str(real), "args": ["mcp-core"]}
         with patch(
             "gideon.mcp_discovery.shutil.which", return_value="/new/path/gideon"
         ):
-            _fix_stale_managed_command("gideon-schedule", spec)
+            _fix_stale_managed_command("gideon-core", spec)
         assert spec["command"] == "/new/path/gideon"
 
     def test_no_change_when_already_correct(self):
@@ -1262,13 +1265,16 @@ class TestFixStaleManagedCommand:
         """The resolved binary is cached so later managed servers reuse it."""
         from gideon.mcp_discovery import _fix_stale_managed_command
 
+        # Two calls for the SAME managed server rather than two different ones: `gideon-core`
+        # is the only managed server left (S109), and the property under test is that the resolved
+        # binary is cached across calls — not that two particular names exist.
         spec1 = {"command": "/old/gideon", "args": ["mcp-core"]}
-        spec2 = {"command": "/old/gideon", "args": ["mcp-schedule"]}
+        spec2 = {"command": "/old/gideon", "args": ["mcp-core"]}
         with patch(
             "gideon.mcp_discovery.shutil.which", return_value="/resolved/gideon"
         ) as mock_which:
             _fix_stale_managed_command("gideon-core", spec1)
-            _fix_stale_managed_command("gideon-schedule", spec2)
+            _fix_stale_managed_command("gideon-core", spec2)
         assert spec1["command"] == "/resolved/gideon"
         assert spec2["command"] == "/resolved/gideon"
         # Second call uses the cache — which() is only invoked once.
