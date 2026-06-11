@@ -2066,3 +2066,115 @@ backends at one store". The schedule LIST is now read from `triggers.json` throu
 
 - **NEXT:** re-point the schedule WRITE paths (create/update/toggle/delete/run) onto `tools.py`, then
   retire `ScheduleService`, then the `schedule_*` MCP aliases. `ScheduleRunStore` survives unchanged.
+
+### S100 — THE CLOCK CUTOVER: one clock engine (§3 / §6 — stacked on S99)
+
+**DONE. The tick loop is now the sole thing that fires a clock trigger**, and `ScheduleService`'s
+timer is no longer armed. Two measurements decided both the scope and the order.
+
+- **🔴 A STORE-ONLY TRIGGER HAD NO FIRING PATH.** S88 shipped `service.tick()`, S96 taught it to arm,
+  S97 made `overlap` enforce, S98 imported the crons, S99 re-pointed the API's read — and nothing ever
+  CALLED the tick. Measured on the boot path: `boot starts ScheduleService: True` /
+  `boot starts a TICK loop: False`. So a trigger created the new way (store only, as `tools.create`
+  writes it) was invisible to the legacy service and unreachable by the engine that could fire it.
+  **This inverted the planned order:** re-pointing the API's WRITES first — what the queue implied —
+  would have produced silently dead automations, so the loop had to land before the writes.
+- **🔴 RUNNING BOTH LOOPS WOULD DOUBLE-FIRE.** Measured against the owner's real store after the boot
+  migration: the legacy timer would fire `['j-at','j-cron','j-every','j-seq']` and the tick would fire
+  `['j-at','j-cron']` — a real overlap of two live automations. So this is a switch-over, not an
+  addition, exactly as the queue warned; the owner's clean-break directive settles which side wins.
+- **The seam is `_arm_timer`, and only that.** `ScheduleService.load_without_timer()` loads the jobs
+  and rotates run history while leaving `_running` False — verified: 4 jobs loaded, `_timer_task is
+  None`, `list_runs` still readable. `_running` staying False also stops `_load`'s own "restore timers
+  from disk" branch from arming the legacy loop behind the cutover's back. The rest of the class is
+  still the CRUD surface + run store the facade reads, so it retires when the writes re-point, not
+  here.
+- **`triggers/loop.py` owns no policy.** It sleeps on `TickResult.next_sleep`, hands each fire to
+  S89's dispatcher and S90's executor, and bounds one iteration's sleep. `CancelledError` propagates
+  so `_shutdown` can stop it; every other exception is logged and the loop continues — a clock loop
+  that died on one bad tick would silently retire every automation on the machine.
+- **🔴 FOUND WHILE WIRING: `executor.drain` took no `base_dir`**, so `run_one`'s claim release was a
+  no-op on every drained fire — which would have blocked an `overlap: skip` trigger for the full 1h
+  claim expiry after its first run. S97's release only works if the root reaches it, and the loop is
+  the only caller that knows which store a drain belongs to. Threaded and pinned by a test that fires,
+  runs, and then fires the next slot.
+- **One dispatch path, not two.** The clock loop and the file-watch loop now share
+  `_fire_store_trigger`; `_fire_file_trigger` delegates to it. The event NAME is threaded
+  (`trigger.fired` vs `file.changed`) so a provider can still tell what woke it — caught by an
+  existing S93 test when the first dedupe collapsed the label too.
+- **`now` is threaded through the loop.** The first probe of this file fired nothing because
+  `tick_once` used wall-clock while the fixture was armed for 2027; a loop only testable against the
+  real clock cannot be driven deterministically.
+
+19 tests. Gate: `make lint` clean.
+
+- **NEXT:** re-point the schedule WRITE paths (create/update/toggle/delete/run) onto `tools.py` — now
+  safe, because a store write finally has an engine that fires it. Then `ScheduleService` retires, then
+  the `schedule_*` MCP aliases. `ScheduleRunStore` survives.
+
+**S100 ADDENDUM — 32 tests went red, and every one was a superseded contract, not a bug.** The
+cutover changed a boot API, so (a) 20 cron test doubles stubbed `svc.start = AsyncMock()` and awaited
+a bare `MagicMock` for the new method (`TypeError: object MagicMock can't be used in 'await'
+expression`) — each gained a `load_without_timer` stub; and (b) two tests ASSERTED the old contract
+(`start.assert_called_once()` / `assert_awaited_once()`), i.e. that boot arms the legacy timer. That
+is exactly what the cutover retires, so both were rewritten to assert the new one —
+`load_without_timer` awaited AND `start` **not** called — with the reason recorded in the docstring.
+The reaper still starts: it reaps stuck sessions, not fires. Same lesson as S96's
+`test_a_non_interval_trigger_yields_no_recompute`: **when a deliberate contract change reddens a
+test, read whether the test or the code is wrong before touching either.**
+
+### S101 — The schedule WRITE re-point (§6 — stacked on S100)
+
+**DONE.** `POST/PUT/DELETE /api/triggers` and `/toggle` now persist to `triggers.json` through
+`tools.py`. Safe to do only after S100, because a store write finally has an engine that fires it.
+
+- **🔴 `tools.create` NEVER ARMED A CLOCK TRIGGER.** Measured before writing a line: `create`
+  persisted `next_fire_at=""`, and `service.due_ids` only surfaces rows that HAVE one. So **every
+  cron created through the chat tools since S92 — and every one the API would now create — would
+  never fire.** Fixed in `tools.create` itself rather than at the call site, because the chat path
+  has the same bug. Arming at creation rather than waiting for the next boot sweep is the difference
+  between "runs tonight" and "runs after the user restarts the gateway". An unarmable spec (invalid
+  cron, elapsed one-shot) still refuses rather than guessing a cadence, and a `file`/event trigger is
+  never armed — it fires on its source, and arming it would make it poll.
+- **🔴 A CADENCE EDIT SILENTLY DROPPED `timezone`/`skip_dates`.** Replacing the spec with
+  `{kind, expr}` wholesale loses exactly the fields §1.3 calls quietly-losable and S91's
+  `verify-migration` exists to catch. `_carried()` keeps `timezone`/`skip_dates`/`strict` across a
+  cadence change — a user moving a job from 9am to 10am must not lose their holidays.
+- **A new cadence CLEARS the armed fire, then re-arms.** Keeping the old `next_fire_at` would fire on
+  the PREVIOUS schedule after the user changed it.
+- **Re-enabling ARMS** (`_arm_if_needed`), or the row sits `enabled=True` and inert until the next
+  boot. `arm.needs_arming` selects exactly the unarmed population, so a live schedule is never
+  re-armed mid-flight (that skips or doubles a fire).
+- **Legacy addresses honoured, not re-invented:** cadence → `spec` (`expr`/`interval_secs`/`at`, the
+  store's spellings), `channel`/`silent` → `delivery`, action → `workflow.inline` (the migrated
+  shape, so an API-created row and a migrated one are indistinguishable to `schedule_view` and the
+  gateway's shared dispatch). A one-shot gets `delete_after_run` so S96's tick RETIRES it instead of
+  leaving an elapsed timestamp.
+- **Every validation is unchanged** — name, action normalization, channel format, timezone
+  membership, cadence presence all still reject before anything is persisted (asserted). The
+  re-point moves where a row is PERSISTED, never what the API accepts.
+- **`tools.update`'s allowlist still protects the health fields** §3.7 autopauses on, so the API
+  cannot rewrite a trigger's own failure record.
+- **One projection for reads and writes.** `_schedule_row_for` is factored out of `_schedule_rows` so
+  a create/update response and a list row are byte-identical in shape; two projections would drift.
+- **Run history stays in `ScheduleRunStore`** (keyed by a plain id, so it survives the cutover), so a
+  delete has two halves: drop the trigger, drop its runs.
+- Each legacy write keeps a fallback for a home whose migration has not run yet; those branches
+  retire with `ScheduleService`.
+
+19 tests (35 in the store-facade file). Gate: `make lint` clean.
+
+- **NEXT:** retire `ScheduleService` (its CRUD now has no live caller on the store path), then the
+  `schedule_*` MCP aliases.
+
+**S101 ADDENDUM — the write re-point wrote to the OWNER'S REAL HOME, the same landmine as S98 one
+seam over.** Four pre-existing dashboard tests (`test_dashboard_cron_approval`,
+`test_dashboard_cron_channel`) call the create handler with no home isolation; harmless until the
+handler started PERSISTING. Observed on a full-suite run: `clock:t`, `clock:t-2`, `clock:t-3`,
+`clock:test` in `~/.gideon/triggers.json`. Fixed structurally — `_trigger_store()` now resolves
+through the module's own `config_dir` so there is ONE redirect point, and `_isolate_trigger_store`
+covers it. Three of those tests also asserted the SUPERSEDED contract (`crons.add_job.call_args`,
+`add_job.return_value.silent`); each was rewritten to assert the STORE row, which is a stronger check
+than the old mock — a mock assertion would pass forever without the write happening.
+**Generalizable, now twice: any code path that WRITES a store built from `config_dir()` must resolve
+it through one redirectable function, and `ls ~/.gideon` after a suite run is the check.**
