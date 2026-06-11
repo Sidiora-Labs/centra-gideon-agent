@@ -2251,3 +2251,148 @@ defect that the re-point exposes rather than merely relocating.
   (the last two facade `list_jobs` reads), the run-record methods (a re-point onto `ScheduleRunStore`,
   which survives), the session reaper trio, `status`/`set_refresh_callback`, and the two non-facade
   callers (`suggestions.py`, `messaging.py`). One surface per session.
+
+### S104 — Chat-injection + history re-point (§6 — stacked on S103)
+
+**DONE.** The last two live facade `list_jobs` reads. `state.crons.list_jobs` in this file drops from
+9 sites to 7, and all 7 remaining are legacy fallbacks rather than live reads.
+
+- **The chat injection needs a THREE-FIELD surface, measured not assumed.**
+  `inject_schedule_result_to_session` reads exactly `job.id`, `job.name` and `job.agent_id` — nothing
+  else. So `_job_shim_for` projects a store row onto that tiny surface rather than reconstructing the
+  whole legacy entity. It returns None for an unknown id so the caller keeps its history-only
+  fallback: a user with conversation history for a deleted trigger should still be able to open it.
+- **The last RESULT comes from `ScheduleRunStore`, not a trigger field.** `LEGACY_FIELD_MAP` maps
+  `last_result` to None deliberately — the run record owns a run's output, and a copy on the trigger
+  was a second truth that could disagree with it. The run store is keyed by a plain id string, so it
+  serves a store-backed trigger and a legacy job identically (which is also why it survives the whole
+  cutover unchanged). A failed run's error stands in for a missing summary, because a failure that
+  rendered as "" would read as a silent run.
+- **🔴 The history name map now covers EVERY KIND.** A run row carries only a `job_id`, so the name is
+  a join — and joining against the legacy service alone would label a run of a store-created trigger
+  with a BLANK, which reads in the UI as a run of a deleted automation. The unified feed carries
+  file/web_watch/event runs too, so the map is built over the whole store and merged over the legacy
+  jobs (a home mid-migration still labels its own rows). An unreadable legacy service degrades to
+  store-only names rather than losing every label.
+
+10 tests (60 in the store-facade file). Gate: `make lint` clean, **15694 passed**, real home untouched.
+
+- **REMAINING on the `ScheduleService` retirement:** the run-record methods (a re-point onto
+  `ScheduleRunStore`, which survives), the session-reaper trio, `status`/`set_refresh_callback`, and
+  the two non-facade callers (`suggestions.py`, `messaging.py`). Then the class itself, then the
+  `schedule_*` MCP aliases.
+
+### S105 — Run-record re-point (§6 — stacked on S104)
+
+**DONE.** The facade now holds `ScheduleRunStore` directly. Every `state.crons.*` run-record call is
+gone (5 sites → 0), and **two handlers no longer touch `state` at all** — flake8's `F841` on the now-
+unused local is the clearest possible evidence the surface is decoupled.
+
+- **The coupling was pure indirection, measured not assumed.** All four run methods on
+  `ScheduleService` are ONE-LINE passthroughs (`list_runs` → `list_for_job`, `list_all_runs` →
+  `list_all`, `get_run`, `delete_runs` → `delete_for_job`), and `ScheduleRunStore(base_dir)`
+  constructs and answers standalone. So this removes a dependency without changing a single stored
+  byte — proven by DELETING the service's run methods from the test double and watching every read
+  still work.
+- **`last_run_status` came along.** It was itself a two-line read of the same store's sync path, so
+  going through the service meant a dashboard whose legacy service was a test double or absent showed
+  **no badge at all**. T7's honest `launched`-vs-`ok` distinction is preserved (asserted).
+- **🔴 A REAL SHADOWING BUG, found by driving.** This module already had
+  `async def _run_store(raw, request)` (S94's manual-fire path). Defining a second `_run_store()`
+  silently REDEFINED it, and the history endpoint raised "missing 2 required positional arguments" —
+  Python reports a same-name redefinition only at the call site, which in a 1400-line handler module
+  is a genuine hazard. Renamed to `_runs_store`, with a test pinning that S94's handler still takes
+  its two parameters.
+- **🔴 The test fixture had to redirect the handler's OWN `config_dir`.** It patched
+  `loader.config_dir` + `T._trigger_store`, but the run store resolves through the module-level
+  `config_dir` (the single redirect point S101 established) — so every run-record read returned 0
+  rows until the fixture covered it. Third time this seam has mattered; it is now the rule.
+- **DEVIATION — five of my own earlier tests mocked the SERVICE method.** S101's delete test asserted
+  `crons.delete_runs.assert_awaited_once()` and S104's last-result tests mocked
+  `crons.list_runs`. After the re-point those mocks would pass forever *without the read or delete
+  happening*. All five now write real rows and assert the real store, which is strictly stronger.
+
+11 tests (70 in the store-facade file). Gate: `make lint` clean.
+
+- **REMAINING on the `ScheduleService` retirement:** the session-reaper trio
+  (`start_reaper`/`register_active_session_key`/`clear_active_session_key`), `status`/
+  `set_refresh_callback`, the residual CRUD fallbacks (7 `list_jobs` + `ack_job`/`enable_job`/
+  `remove_job`/`update_job`/`run_job`/`is_running`/`running_since`, all legacy-fallback branches), and
+  the two non-facade callers (`suggestions.py`, `messaging.py`). Then the class, then the `schedule_*`
+  MCP aliases.
+
+### S106 — The reaper cutover: a 30-minute deadline that had been enforcing nothing (§3.1 / §8)
+
+**DONE.** Two independent defects, both found by driving rather than reading, both in the
+"present and inert" class this program keeps hitting.
+
+**🔴 DEFECT 1 — the cron reaper has been INERT SINCE S100, and said so nowhere.**
+`ScheduleService._reaper_loop` sweeps `self._job_start_times`. That dict has exactly ONE writer in
+the codebase: `_run_job_isolated`, reachable only from `_on_timer` — i.e. only from the legacy timer
+the S100 clock cutover deliberately stopped arming. Driven directly (a service holding a genuinely
+hung task in `_executing` + `_running_tasks`, interval cut to 50ms, eight sweeps):
+
+    job still in _executing : True     task still running : True
+    sessions.reset called   : []       reaped_jobs        : set()
+
+Nothing reaped; nothing *could* be. `start_reaper()` returned successfully and logged nothing wrong
+the whole time. So the 30-minute deadline the plan calls "defense-in-depth over ALL trigger-fired
+runs" (§ Unattended-LLM-turns; risk table "hung run") was a control that was present, reviewed, and
+enforcing nothing — for six sessions.
+
+Replaced by `triggers/reaper.py`, which reaps off S97's **claim** store instead of a process-local
+dict. That is what makes it correct rather than merely present: a claim is on disk, carries
+`claimed_at`, is written by the tick when a fire is granted and released by the executor's `finally`,
+so "which runs are in flight, and since when" survives a restart and is visible from every process.
+`overdue()` / `reap_one()` / `sweep_once()` / `run_forever()`, wired at boot as `_trigger_reaper_loop`
+and cancelled in `_shutdown` alongside the clock loop.
+
+- **Scope is narrower than the old reaper CLAIMED and strictly wider than it DID.** This one owns the
+  CLAIM (a stuck claim wedges `overlap: skip` until the 1h self-expiry, so releasing it is what lets
+  the trigger fire again); the *process* stays owned by `SubagentManager`'s reaper, which is live,
+  started unconditionally at boot, and uses identical 30min/60s/SIGKILL parameters over `_agents`
+  (verified: `spawn` registers the entry). Killing sessions from here too would mean two reapers
+  racing over one process. A test pins the three deadlines equal so they cannot drift apart.
+- Health is recorded as **DEGRADED** on `health_status`/`last_error_summary` — the fields a `Trigger`
+  actually has. `last_status`/`last_error` are the LEGACY names `LEGACY_FIELD_MAP` translates FROM;
+  writing those would have set two attributes nothing reads and left the dot green on a reaped run.
+  The SEL row keeps the old `reaper_force_kill`/`reaped` shape so an operator's existing query works.
+- **Clean break:** `start_reaper`, `_reaper_loop`, `_force_reap`, `_sigkill_session` and the
+  `register/clear/get_active_session_key` trio are DELETED (~180 lines), with their exclusive state
+  (`_active_session_keys`, `_reaped_jobs`, `_sessions`, `_reaper_task`), their constants
+  (`_REAPER_INTERVAL`, `_REAPER_RESET_TIMEOUT`), the four gateway dispatcher registration sites, and
+  the now-orphaned `os`/`signal`/`SessionManager`/`TYPE_CHECKING` imports. `_JOB_TIMEOUT_SECS` STAYS
+   — it is still `timeout_secs`' default and `_execute_with_timeout`'s clamp.
+
+**🔴 DEFECT 2 — every store-backed bash fire was silently capped at 30s.**
+`_fire_store_trigger` called `provider.execute(config, ctx)` with no `timeout=`, so it took the 30s
+SIGNATURE DEFAULT. The legacy dispatcher gave a command **300s** and honoured `zt_timeout` on top
+(gateway.py:820). Measured on a real migration: a `zt_timeout: 600` cron converts losslessly to
+`{"command": ..., "timeout": 600}` — and then `bash_provider` **never read `action_config["timeout"]`
+at all**, unlike `run-script`, which has always preferred it. Driven both ways: `sleep 3` under
+`{"timeout": 1}` ran the full 3s (user's bound ignored), and a 600s allowance was cut to 30.
+Fixed on both sides — the provider prefers its action's own bound (`run-script`'s exact idiom) and
+the fire path passes the legacy mode default as the floor.
+
+- **The parity meta-test earned its keep.** Teaching the executor to read `timeout` immediately
+  reddened `test_executor_reads_are_declared_in_schema[bash]`: a key an executor reads must be
+  declared in `settingsSchema` or the UI cannot configure it. Added to `bash-action/app.json`.
+
+**DEVIATION — 23 tests deleted, not ported one-for-one.** `test_cron_reaper.py` +
+`test_cron_reaper_ephemeral.py` pinned the deleted mechanism, and every one of them passed against
+the inert reaper for six sessions **because each wrote the input dict by hand before sweeping**. A
+test that constructs the state its subject is meant to observe cannot tell you whether anything real
+produces it. Replaced by `test_trigger_reaper.py` (24 tests) driving the runtime seam; every
+meaningful contract is ported (deadline honoured, in-deadline runs untouched, boundary second,
+health + reason, SEL audit, missing/unreadable/absent store, idempotent re-sweep, cancellation
+propagates, loop outlives a failing sweep) and the ones describing deleted internals are gone with
+them. One S100 docstring is corrected in place: `test_init_cron_...`'s "the reaper still starts: it
+reaps stuck sessions, not fires" was the assumption this session disproved — and its
+`start_reaper.assert_called_once()` is replaced with a check against the real class, because a
+MagicMock answers any attribute and would have passed vacuously either way.
+
+- **REMAINING on the `ScheduleService` retirement:** `status`/`set_refresh_callback`, the residual
+  CRUD fallbacks (`list_jobs` ×7 + `ack_job`/`enable_job`/`remove_job`/`update_job`/`run_job`/
+  `is_running`/`running_since`), and the non-facade callers (`suggestions.py`, `messaging.py`,
+  `discover.py`, `app_crons.py`, `digest_provider.py`, `state.py`, `handlers_system.py`). Then the
+  class, then the `schedule_*` MCP aliases. `ScheduleRunStore` survives.
