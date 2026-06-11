@@ -37,6 +37,7 @@ The extension-provider taxonomy (the capability types an app can contribute) and
 - **native-skills** — type `skills` / `` (enabled); capabilities: crud, triggers, auto_generation
 - **native-tasks** — type `task` / `` (enabled); capabilities: crud, comments, labels, dependencies
 - **gideon-artifacts** — type `tool` / `` (enabled); capabilities: artifacts
+- **gideon-automation-tools** — type `tool` / `` (enabled); capabilities: automation_management
 - **gideon-code-map** — type `tool` / `` (enabled); capabilities: code_map
 - **gideon-inbox-tools** — type `tool` / `` (enabled); capabilities: inbox
 - **gideon-knowledge-tools** — type `tool` / `` (enabled); capabilities: knowledge

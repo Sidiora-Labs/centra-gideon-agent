@@ -1833,6 +1833,27 @@ the queue** — declared work, not new scope (see the ruling in the exhausted re
 | S89 | **WakeupDispatcher** — inbox + wakeup; found `enqueue` drops idle-session payloads | AUTOMATION-SUBSTRATE §3.2 | ✅ DONE (#248) |
 | S90 | **The executor** — drain/run/classify; the substrate now runs END TO END | AUTOMATION-SUBSTRATE §3 + §1.3 | ✅ DONE (#249) |
 | S91 | **`automation verify-migration`** — §7 step 2's named cutover prerequisite; found `lossless: true` beside two silently-paused real automations | AUTOMATION-SUBSTRATE §7 step 2 + §8 | ✅ DONE (#250) |
+| S92 | **`automation_*` chat-tool namespace** — closes criterion 2 (a file-watch automation creatable in one message); S83's recorded blocker is gone since S87 shipped the store | AUTOMATION-SUBSTRATE §4 + crit 2 (S83 unblock) | ✅ DONE (#253) |
+| S93 | **file-watch poll runtime, wired into gateway boot** — makes S92's file automations actually FIRE; disjoint from `ScheduleService` so no double-fire (the additive cutover, not the deferred clock switch-over) | AUTOMATION-SUBSTRATE §3 + crit 2 (S83 runtime) | ✅ DONE (#255) |
+
+**S83 now FULLY closed (create + fire).** S92 made file automations creatable; S93 makes them
+fire. The runtime `file_watch.changed_files` shipped in S83 had **zero live callers** and the tick
+clock never surfaces a `file` trigger (no `next_fire_at`), so a chat-created file automation was
+present-and-inert. S93's `file_poll` poll loop (WatchState persisted as a per-trigger sidecar) is
+booted in `_init_cron` beside `ScheduleService` and fires through the same action-provider registry
+a cron uses. **It is DISJOINT from `ScheduleService`** — that fires clock crons, this fires `file`
+triggers, and the tick clock never surfaces either the other's kind — so booting them together
+cannot double-fire. That disjointness is what makes it the additive cutover; the CLOCK switch-over
+(retiring `ScheduleService` for the tick loop) remains deferred as the genuine class-B change.
+
+**S83 UNBLOCKED and closed by S92.** S83 was `🟡 PARTIAL` for one honest reason: "Criterion 2 needs
+`automation_create` (§4), which needs somewhere to PUT a `file` trigger. Measured: there is no
+unified trigger store." **S87 shipped that store**, and re-measuring confirmed a `file` trigger now
+round-trips with zero errors. So S92 built §4's eight-tool namespace over it and closed criterion 2:
+*"when a file in ~/notes changes, summarize it…"* is creatable in one message, verified end to end
+through the real MCP dispatch. The per-minute-poll trap the probe found (a file request reaching the
+cron-only `nl_to_cron` and a model answering `* * * * *`, which validates) is prevented by
+`nl_kind.route()` deciding the kind BEFORE the cadence converter is ever consulted.
 
 **RESOLVED (S87-S91) — the substrate is MECHANICALLY COMPLETE and runs end to end, and the
 cutover's named prerequisite now exists.** S91 shipped `gideon automation verify-migration`,
