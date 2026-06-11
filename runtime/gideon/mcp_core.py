@@ -989,6 +989,7 @@ _AGGREGATED_CATEGORY_MODULES = (
     "gideon.mcp_memory",
     "gideon.mcp_subagents",
     "gideon.mcp_workflows",
+    "gideon.mcp_automation",
 )
 
 
