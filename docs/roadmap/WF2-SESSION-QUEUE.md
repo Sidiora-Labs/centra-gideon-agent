@@ -1831,8 +1831,24 @@ the queue** — declared work, not new scope (see the ruling in the exhausted re
 | S87 | **`triggers.json`** — the one store + the cron migration; found the `interval` data-loss bug | AUTOMATION-SUBSTRATE §1 + §6 step 2 | ✅ DONE (#246) |
 | S88 | **`TriggerService.tick`** — the loop's decisions; found the ISO-vs-epoch type seam | AUTOMATION-SUBSTRATE §3 + §3.1 | ✅ DONE (#247) |
 | S89 | **WakeupDispatcher** — inbox + wakeup; found `enqueue` drops idle-session payloads | AUTOMATION-SUBSTRATE §3.2 | ✅ DONE (#248) |
+| S90 | **The executor** — drain/run/classify; the substrate now runs END TO END | AUTOMATION-SUBSTRATE §3 + §1.3 | ✅ DONE (#249) |
+| S91 | **`automation verify-migration`** — §7 step 2's named cutover prerequisite; found `lossless: true` beside two silently-paused real automations | AUTOMATION-SUBSTRATE §7 step 2 + §8 | ✅ DONE (#250) |
 
-**MOSTLY RESOLVED (S87-S89) — STORE + TICK + DISPATCH are built; only the EXECUTOR remains.** The claim below that the two are one unbuilt foundation was HALF WRONG: they are separate concerns and the service needs the store, not the reverse. S87 shipped `triggers.json` (#246) and found that the cron migration would have silently retired every interval cron. What remains is the runtime.
+**RESOLVED (S87-S91) — the substrate is MECHANICALLY COMPLETE and runs end to end, and the
+cutover's named prerequisite now exists.** S91 shipped `gideon automation verify-migration`,
+which §7 step 2 names in the same breath as the migration and §8 lists as the migration-trust
+mitigation — S87's own docstring promised it by name and it did not exist. Driving it against a copy
+of the owner's real store found the gap it exists to close: four jobs migrate `lossless: true` and
+**two come out disabled** (`j-every`, a 5-minute interval, and `j-seq`, a 3-step `agent_sequence`).
+That is deliberate on the migration's part, but `lossless` beside two silently-stopped automations is
+technically accurate and practically misleading, so `VerifyReport.ok` is FALSE where `lossless` is
+TRUE. **Cutover (a) should now be gated on this command exiting 0.**
+`test_store_to_tick_to_dispatch_to_execute` drives store → tick → dispatch → execute with the LLM turn as
+the only injected piece. What remains is not mechanism but two behaviour-visible CUTOVERS, each its own
+session: (a) wiring the chain into gateway boot beside the live `ScheduleService` — both would fire the
+same crons until the old one retires; (b) re-pointing `/api/triggers`' three backends at `triggers.json`
+(§6: "the id namespace becomes the migration map"). Both carry user-visible risk on a machine with real
+automations, so they are switch-overs rather than additions. The claim below that the two are one unbuilt foundation was HALF WRONG: they are separate concerns and the service needs the store, not the reverse. S87 shipped `triggers.json` (#246) and found that the cron migration would have silently retired every interval cron. What remains is the runtime.
 
 **Original note, kept for the record —** the STORE and the SERVICE are one unbuilt foundation.**
 S83 found there is no unified trigger store; S86 found there is no `triggers/service.py` and that **every
