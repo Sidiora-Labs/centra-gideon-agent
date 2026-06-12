@@ -3285,3 +3285,99 @@ separate concern owned by the action, not the poller.
   declared-but-unpolled state this session found for `web_watch` (measured: neither has a firing path).
   `idle` is gated on Loops Phase 4 by §7 item 9. `view` is pull-on-view and fires from a render, not a
   poll. Plus the headless tier and knowledge-store digest above.
+
+### S122 — the `run_completed` chain runtime (§7 item 8) — DONE
+
+**DISCOVERY: the third declared-but-unpolled kind in a row.** `run_completed` is in `KINDS`,
+`SPEC_KEYS` accepts `{source_trigger, source_def}`, the store persists it, `/api/triggers` lists it
+and the Automations page renders it. Nothing ever fired one. Driven with a real `clock:nightly` and a
+`run_completed:after` pointed at it:
+
+```
+clock tick considered: ['clock:nightly']    # the source fires
+file poller:           []
+web poller:            []
+→ run_completed:after is reached by NOTHING
+```
+
+So "when my nightly backup finishes, notify me" was creatable, listed, and permanently silent.
+
+**Chained from `_fire_store_trigger`, which is the point of the design.** That is the single place
+every store-backed run completes, so a chained fire inherits the same dispatch — and therefore the
+same gates, including S117's kill switch and S116's capability fence. A chain with its own dispatch
+path would be a second place for those controls to be forgotten, which is *exactly* how the
+`web_watch` gap happened. The chain also runs after `_push_trigger_refresh`, so a slow chain never
+delays the view update, and inside a `try/except` because chaining is a convenience layered on a
+completed run: letting it fail the run it followed would make chaining strictly worse than not
+chaining.
+
+**Two controls, not one.** A depth cap alone would be enough to bound the damage of A → B → A, but it
+would report an infinite loop as "too deep" — sending the user off to raise a limit that was never the
+problem. So the payload carries both a depth and the PATH of trigger ids already fired, and a repeat
+is named as a **cycle**. `MAX_CHAIN_DEPTH = 3`: A → B → C is a real workflow, deeper is almost always
+a mistake, and the cost of being wrong in the permissive direction is a fire loop.
+
+Depth and path live in the PAYLOAD, not a sidecar: a chain is a single logical cascade whose state
+lives exactly as long as it does. Persisting it would mean reconciling an abandoned chain's leftovers
+on every boot, and a chain interrupted by a restart should simply stop.
+
+**A chain with no `source_trigger` matches NOTHING.** The important direction: a chain that fired on
+every run in the system would be a fire storm authored by omission — a user leaving a field blank.
+
+**THE PATTERN EARNED A TEST.** Three kinds (`file` S93, `web_watch` S121, `run_completed` S122) shipped
+declared-and-inert, each found only by driving it. That is a pattern, not a coincidence, so
+`tests/test_triggers_chain.py` now carries `KIND_RUNTIMES`: every kind in `KINDS` must map to a live
+runtime or a stated reason, the table is checked for staleness in both directions, and each named
+runtime is asserted to actually exist. **It caught a defect on its first run** — my own entry named
+`gideon.event_triggers` (a module) rather than `execute_event_action` (the function), i.e. the
+table was already making a claim it could not back.
+
+**DEVIATION:** matching on run OUTCOME (`only_on: failed`) is not built. `SPEC_KEYS` declares only
+`{source_trigger, source_def}`, and adding a spec key the entity does not carry would be a fence
+nobody can author.
+
+- **REMAINING in §7 item 8:** `idle` (deferred to Loops Phase 4 by §7 item 9) and `webhook` (needs the
+  fire endpoint — see S119). `view` is pull-on-view and fires from a render, not a poll. Plus
+  `web_watch`'s headless tier and knowledge-store digest from S121.
+
+### S124 — the `view` kind: pull-on-view refresh (R10 / §7 item 8) — DONE
+
+**DISCOVERY: the FOURTH declared kind with no runtime.** After `file` (S93), `web_watch` (S121) and
+`run_completed` (S122). `view` is in `KINDS`, `SPEC_KEYS` accepts `{surface_binding, ttl_secs}`, the
+store persists it, `/api/triggers` lists it and the Automations page renders it. Measured:
+`surface_binding` was referenced by **exactly one line in the entire tree** — its own declaration in
+`SPEC_KEYS`. Nothing read it, so nothing could ever fire a `view` trigger.
+
+**Deliberately NOT a poll, and that is the whole design.** §3: *"Pull-on-view (R10): fires when a bound
+surface (dashboard tile, artifact open) renders past TTL; within TTL serve cache … Sidesteps the
+1440-run-dirs critique by never firing unviewed."* A minutely clock trigger produces 1440 run
+directories a day whether or not anyone looks. So the runtime is `on_render(trigger, now=…)` — a
+function a surface calls as it renders — and a test asserts the gateway does **not** import it, because
+adding a background loop here would reintroduce precisely the cost this kind exists to avoid. This is
+the one kind in the table whose correct implementation is "no loop".
+
+**The TTL is the control:** two renders inside the window serve cache and cost nothing; the first past
+it refreshes. The trigger's expense becomes proportional to attention rather than to wall-clock time.
+
+**`MIN_REFRESH_INTERVAL_SECS` floors any author-supplied TTL.** A dashboard re-renders on every
+websocket nudge, so a TTL of 1 would mean an LLM turn per keystroke elsewhere in the UI. Floored rather
+than refused, matching `web_poll.poll_interval_for`. Third session in a row applying S109's lesson: a
+declared floor that no code reads is not a floor.
+
+**`persist=False` is the subtle one.** Without it, a freshness column that merely REPORTED staleness
+would refresh the tile *by asking* — the observer changing what it observes. So a caller can ask
+without consuming the window, and the two use cases (render vs report) stay distinguishable.
+
+**Both lists returned from `renders()`** — refreshes and cache hits — because §7 criterion 8's
+zero-silent-drops rule applies to a skipped refresh exactly as to a skipped fire. One bad binding never
+blanks a render: a render is a user looking at a page.
+
+**The completeness table now names a real runtime for `view`** rather than a prose exemption. That
+matters: `KIND_RUNTIMES` asserts each named runtime EXISTS, so the entry is checkable where the old
+"fires from a render, not a poll" note was only a claim.
+
+- **REMAINING in §7 item 8:** `idle` (deferred to Loops Phase 4 by §7 item 9) and `webhook` (S123's E4
+  blocker — the fire endpoint's auth model and exposure posture are an owner decision, and the threat
+  model assigns the inbound surface to MCP-READONLY-INBOUND + EXTERNAL-ACCESS). Plus `web_watch`'s
+  headless tier and knowledge-store digest from S121. **Every kind with an unblocked runtime now has
+  one.**
