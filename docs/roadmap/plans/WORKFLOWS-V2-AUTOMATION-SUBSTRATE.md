@@ -2858,3 +2858,93 @@ so every snapshot test passed while the component backed up an empty relic. The 
 real `TriggerStore` row plus an event trigger — which is what made the assertions meaningful. Same
 shape as the mock-vs-store lesson from S108/S110: a fixture that only contains what the code already
 handles cannot tell you what the code misses.
+
+### S114 — The inventory ⇄ snapshot drift guard (§7 step 9, completing S113)
+
+**DONE.** S113 closed the automation domain's snapshot gap by hand. This session asked the obvious
+follow-up — *is the inventory the authority, and does the snapshot match it?* — by cross-checking
+`durability.inventory.INVENTORY` (57 declared state entries) against both snapshot paths.
+
+**🔴 25 of 57 declared state files travelled in NEITHER path.** Far larger than §7 item 9's recon note
+suggested. Beyond the automations S113 fixed: the knowledge store and its files, the lexicon, the loop
+DB, chat `sessions`, `subagents`, every `active_*.json` model/prompt/search binding, `mcp.json`,
+`tool_prefs.json`, the FAISS sidecar, and `security_events.jsonl`.
+
+**Scope call: guard it, do not silently fix it.** The 22 non-automation gaps belong to
+DURABILITY-AND-SYNC — that plan owns the inventory, its §1 promises "every byte of state is enumerated
+in one inventory", and its export-shard sessions own the merge strategy each entry already declares
+(`sqlite_attach_ignore`, `append_dedup`, `union_by_id`). Hand-listing 22 files across two snapshot
+paths from an automation-substrate session would have been an unreviewed scope grab into another
+plan's design, and several need a merge story rather than a copy (the audit log needs S2's dedup, the
+FAISS sidecar is rebuildable).
+
+So the gap is now **pinned and enforced** instead of latent:
+
+- `test_every_automation_state_file_is_in_a_snapshot` — the automation domain must be COMPLETE, with
+  no exemption. That is this program's own scope and it is now closed.
+- `test_the_snapshot_coverage_gap_list_can_only_shrink` — every other uncovered entry is listed with
+  its reason, and the list can only shrink. A new state file declared without snapshot coverage FAILS
+  rather than joining a backlog nobody re-measures, and a gap that gets closed must be REMOVED from
+  the list (stale entries fail too).
+
+**Verified the guard actually bites**, in both directions — because a guard that cannot fail is the
+defect class this program keeps finding. Injecting a fake inventory entry produced *"state declared in
+the inventory but carried by NO snapshot path: ['brand_new_thing']"*, and removing a listed entry
+produced *"these gaps are closed or gone — remove them"*.
+
+**`autonudge.json` is deliberately left uncovered.** §7 item 9 retires it INTO the trigger store after
+LOOPS-EVOLUTION Phase 4, so backing up its current format now would preserve a shape that is about to
+be replaced — the reason is recorded on its entry in the list.
+
+### S115 — `{{secret:KEY}}` in a trigger action (§7 item 6 / decision 11)
+
+**DONE.** §7 item 6 names `{{secret:KEY}}` templating as automation-substrate scope. Workflows have
+carried the form since WF2-R14 — the validator REFUSES an inline credential and tells the author to
+use it, and three separate surfaces repeat that advice in their error text.
+
+**🔴 A TRIGGER ACTION DID NOT RESOLVE IT.** Driven before writing a line:
+
+    bash action, command "echo tok={{secret:MY_KEY}}"
+      → stdout: tok={{secret:MY_KEY}}        # the literal placeholder reached the shell
+
+So a user following the product's own documented pattern got a broken command, and the only way to
+make a trigger authenticate was to paste the credential into `triggers.json` — a file that is copied
+into every snapshot (S113 just guaranteed that), echoed into run records, and rendered in the UI. The
+guidance and the mechanism disagreed, and the mechanism won.
+
+`triggers/secrets.py` resolves it at DISPATCH, in `_fire_store_trigger`, which is the one seam every
+kind's fire passes through (clock, file, event). Three disciplines, each for a measured reason:
+
+- **At dispatch, never at save** — the stored config keeps the placeholder, so the secret is not on
+  disk, not in a snapshot, and not in a run record. Asserted: the trigger's own config still holds
+  `{{secret:MY_KEY}}` after a fire that resolved it.
+- **An unresolved key REFUSES rather than substituting `""`** — an empty `Authorization: Bearer `
+  produces a remote 401 the user cannot trace back to a missing credential. The error names the key
+  AND the fix (`gideon auth`). Asserted that the provider is never called.
+- **One missing key refuses the WHOLE config** — a partially-resolved action would dispatch with a
+  live token in one field and a placeholder in another, which is worse than not firing because it
+  half-works.
+
+**Not reusing `workflows/secrets.py`'s resolution, and why.** That path lives inside the workflow
+engine's binding context (`BindingContext.secret_resolver`, reached through `_walk_path` and the pipe
+grammar); a trigger action config is a flat dict with no binding tree, so reuse would mean building a
+fake context around two lines of substitution. What IS shared is what matters: both resolve against
+the same `CredentialStore` with the same empty-on-missing contract, asserted by a test that reads both
+functions' source — so one key means one thing product-wide.
+
+**🔴 A SECOND GAP, found by asking the obvious follow-up.** The workflow lint flags
+`curl -H 'Authorization: Bearer sk-ant-api03-…'` as an inline secret; the trigger store accepted the
+same string with `ok: True` and **zero issues**. So the advice was unenforced on the automation half
+too. `parse_trigger` now runs the SAME `find_inline_secrets` lint (reusing it rather than re-deriving
+credential shapes, which would drift — and it already skips the sanctioned form, so the fix for a
+finding never trips the finding again).
+
+A WARNING, not an error: refusing would break every automation a user already has with a token pasted
+in, which is exactly the population that most needs to keep working while they migrate. The row is
+visibly flagged in the store, the doctor and the UI, and it keeps firing. Both leak signals are
+covered — a credential-shaped literal anywhere, and a secret-NAMED field holding a literal value.
+
+- **REMAINING in §7 item 6:** the decision-7 enforcement chain (frozen action sets, PathGuard, kill
+  switch, provider chokepoint tests) and scoped webhook tokens (decision 12). PathGuard does not exist
+  in the tree at all, and the `webhook` kind's `token_ref` is validated but has no fire endpoint yet —
+  both are larger than a templating session and belong with the webhook runtime.
