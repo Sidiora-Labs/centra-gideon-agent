@@ -25,7 +25,6 @@ if TYPE_CHECKING:
     from gideon.context import ContextBuilder
     from gideon.dashboard.state import DashboardState
     from gideon.history import ConversationLog, HistoryConsolidator
-    from gideon.schedule import ScheduleService
     from gideon.session import SessionManager
     from gideon.subagent import SubagentManager
 
@@ -44,7 +43,6 @@ class GatewayServices(Protocol):
     ctx_builder: "ContextBuilder | None"
     conv_log: "ConversationLog | None"
     consolidator: "HistoryConsolidator | None"
-    cron_svc: "ScheduleService | None"
     subagent_mgr: "SubagentManager | None"
     channel_history: "ChannelHistory | None"
     dashboard_state: "DashboardState | None"

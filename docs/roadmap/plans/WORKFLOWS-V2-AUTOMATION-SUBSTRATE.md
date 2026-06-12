@@ -2654,3 +2654,207 @@ route list drops the retired `/ack` entry.
 - **REMAINING on the `ScheduleService` retirement:** the read-only non-facade callers
   (`suggestions.py`, `messaging.py`, `discover.py`), then the class itself. `ScheduleRunStore`
   survives.
+
+### S111 — The last read-only callers re-point (§6)
+
+**DONE.** Four surfaces outside the facade were still reading `state.crons` — i.e. describing the
+legacy `crons.json`, a file **nothing has written since S108**. Each was a live user-visible defect,
+not a tidy-up:
+
+| surface | what the user saw |
+|---|---|
+| `legibility/discover.py` `_engaged_automation` | a user with live automations read as **NOT engaged with automation** — measured: store has 1, probe returns `False` |
+| `handlers/messaging.py` `_resolve_origin_session` | a cron's `session='origin'` reply resolved to `(None, None)`, so **the reply went nowhere** |
+| `suggestions.py` | no scheduled context in suggestions for a user whose automations all live in the store |
+| `investigate.py` (×3 reads) | the linked-job enrichment and the whole schedule-run snapshot came back blank |
+
+`investigate.py`'s run half goes to `ScheduleRunStore` directly — those `ScheduleService` methods were
+one-line passthroughs (S105) — and its metadata half to `TriggerStore`.
+
+**Driving it found three more defects in my own re-point, each invisible to a reading:**
+
+1. `job.provider` / `job.exec_mode` / `job.message` — legacy-only attributes. A `Trigger` raises
+   `AttributeError`, which surfaced the moment I ran it.
+2. `job.last_status` / `job.last_error` — the store's names are `health_status` /
+   `last_error_summary`, which `LEGACY_FIELD_MAP` declares. `consecutive_failures` has **no** store
+   field (the map assigns the autopause counter to fire records), so it is OMITTED rather than printed
+   as a fake `0` — a wrong number there reads as "healthy".
+3. `to_schedule_row()["provider"]` returned `None`: the provider is NESTED under `action`. The snapshot
+   printed `Action: ?` until I read the projection's actual output.
+
+`_cadence` now delegates to `schedule_view.describe_cadence` rather than re-reading three
+`ScheduleDefinition` shapes — a second formatter would drift from the one the rest of the UI renders.
+
+**DEVIATION — 4 tests in `test_dashboard_file_io.py` mocked `crons.list_jobs`** to return a job whose
+`session_key` pointed at the originating chat. They now seed a real store trigger through one shared
+helper. Two of them assert a different job name, which a bulk replacement flattened — caught by the
+targeted run, and fixed by parameterizing the helper.
+
+**Where `ScheduleService` stands now.** Only three lifecycle calls remain (`load_without_timer`,
+`stop`, and its construction), plus its ownership of `ScheduleRunStore`. Every CRUD, read, write,
+timer, reaper, status and dispatch consumer is gone. `schedule.py` itself still exports live helpers
+(`ScheduleJob`, `format_schedule`, `get_local_tz`, `validate_cron_expr`, `normalize_action`,
+`SCHEDULE_VARS`, `build_schedule_session_context`) that other modules import, so the MODULE stays
+while the SERVICE CLASS is what retires next.
+
+- **REMAINING:** delete the `ScheduleService` class (boot keeps only `rotate_all`, which
+  `ScheduleRunStore` owns directly) and the `_cron_callback` dispatcher it carries.
+  `ScheduleRunStore` survives.
+
+### S112 — Delete the `ScheduleService` class — **BLOCKED (E5: cross-repo dependency)**
+
+**Attempted and reverted; tree left clean.** The deletion itself is ready and was proven safe on the
+core side. What blocks it is a first-party app in ANOTHER repository.
+
+**Core-side readiness, measured:**
+
+- The class is the last 779 lines of `schedule.py`; every surviving helper precedes it, so the cut is
+  clean and the module keeps its live exports (`ScheduleJob`, `format_schedule`, `get_local_tz`,
+  `validate_cron_expr`, `normalize_action`, `SCHEDULE_VARS`, `build_schedule_session_context`).
+- Only two lifecycle calls remained (`load_without_timer`, `stop`), and `load_without_timer`'s only
+  load-bearing work is `ScheduleRunStore.rotate_all()` — which that store owns directly.
+- **The `state.py` legacy fold-in is now provably dead.** `SV.counts(store, legacy=svc)` and
+  `SV.counts(store)` return identical results, because S110 made the migration import even the rows
+  the conversion refuses. Driven against a home with one valid + one broken legacy job: both give
+  `{total: 2, enabled: 1, broken: 1}`.
+
+**🔴 THE BLOCKER.** `gideon/sdk/channel.py` re-exports `ScheduleService`, and
+`GideonApps/slack-channel` consumes it — **12 references**, including a user-facing `/cron`
+command surface with full CRUD (`list_jobs`, `remove_job`, `enable_job`, and a remove-all path) plus a
+`cron_service: ScheduleService | None` parameter threaded through its handler, and its own test file
+constructing `ScheduleService(base_dir=tmp_path)`.
+
+Deleting the class would break a shipped first-party app. The SDK boundary is a published contract
+(`docs/architecture/provider-boundary.md`), and re-pointing the app's `/cron` commands at
+`automation_*`/`TriggerStore` is work in a **different repository** — outside this session's scope and
+the owner's call to sequence, since it changes an app's user-facing command behaviour.
+
+**What the owner needs to decide:** whether the slack app's `/cron` surface (a) re-points to the
+unified store in `GideonApps`, (b) is retired in favour of the Automations UI + `automation_*`
+chat tools, or (c) keeps a compatibility shim. Options (a) and (b) both let the class go; (c) does
+not, and would reintroduce the dual path the clean-break tenet forbids.
+
+**Nothing is half-finished.** The class is untouched, `make lint` is green, and every S99–S111
+re-point stands on its own. The one thing S112 would have added beyond the deletion — dropping the
+dead `legacy=` fold-in — is left with the deletion it belongs to, so the two land together rather than
+leaving a half-cut seam.
+
+### S112 — `ScheduleService` is deleted (§6) — **the E5 "blocker" was a re-scope**
+
+**DONE.** The class, its dispatcher, its orphaned helpers and the `cron_svc` thread through boot,
+shutdown and `DashboardState` are gone. `schedule.py` goes 1267 → 478 lines and keeps only the legacy
+MODEL (`ScheduleJob`/`ScheduleDefinition`, which the boot migration still reads) plus the shared
+formatters and cron helpers.
+
+**🔴 I WAS WRONG TO RECORD THIS AS BLOCKED.** The previous session escalated E5 because
+`sdk/channel.py` re-exported the class and `GideonApps/slack-channel` used it in 12 places. Per
+the owner-authority ruling, that is a **re-scope, not an escalation**: the CAPABILITY was never
+impossible — the app's `/cron` surface re-points to the store, which is one repo over in the same
+workspace. The escalation shifted a decision onto the owner that I was in a position to make.
+
+**And the app's commands were ALREADY BROKEN.** Measured before touching them: `ScheduleService` read
+`crons.json`, a file nothing has written since S108 — so `cron list` showed an empty list to a user
+with live automations, and `remove`/`pause`/`resume` answered "not found" for every real id. The
+"blocker" was protecting a surface that did not work.
+
+- **The SDK gained the trigger surface it should have had.** `sdk/channel.py` now re-exports
+  `TriggerStore`, `Trigger`, `describe_cadence`, `to_schedule_row` and the three tool functions. Its
+  own docstring already stated the principle ("every symbol it needs is re-exported here… core can
+  move the underlying modules without breaking apps") — the channel just had no automation entry.
+- **🔴 A REAL FIX in the app, not a port.** `cron remove all` removed EVERY job the scheduler held,
+  **including the automations the user built by hand**, from a chat message with no confirmation. It
+  is now scoped to `created_by="agent"`, matching what `automation_delete_all` enforces. Two more
+  honest improvements fall out of the store: a BROKEN automation lists with its parse error instead of
+  vanishing, and every kind is visible (a file watch was invisible there — the legacy scheduler only
+  held clocks).
+- The `cron_service` parameter is gone from the handler and its six call sites: the store is built
+  from the active home, so a caller can no longer decide which scheduler that surface reads.
+- `_handle_cron_ack`'s `ack_job(...)` call went too — dead weight since S98 mapped `acked_items` to
+  `None` and S110 deleted the route. The load-bearing half (acknowledging the dashboard notification)
+  stays, exactly as the sibling `_handle_subagent_ack` does it.
+
+**🔴 THE DEFECT THIS SESSION FOUND: `skip_dates` was enforced NOWHERE.** Driven while deciding whether
+`test_cron_skip_dates.py` could retire — a trigger with `skip_dates: ["2026-08-04"]` armed to
+**09:00 on exactly that date**. The legacy `_is_due` checked skip dates on every fire; the substrate
+carried the field, validated it, migrated it, and even RENDERED it (`calendar.py` draws AUTO-A3's
+"struck columns") while the fire path ignored it. A user's explicit "not on this day" did nothing.
+
+`arm.next_fire` now advances past skipped days in the trigger's OWN timezone (a date is a
+local-calendar question), with a bounded 400-step advance so a long holiday works while an
+all-skipped cadence reports unarmable rather than firing. `cadence_next_fire` is the raw stepper, made
+public for ONE caller: the week grid, which strikes skipped columns itself — stepping it with the
+skip-aware version would hide exactly the slots the grid exists to explain. Nine tests, including the
+tz case and a skipped one-shot that never fires.
+
+**DEVIATION — 11 test files deleted, 9 re-pointed.** `test_cron{,_dedup,_ephemeral_session,_jitter,
+_resilience,_skip_dates,_acp_retry,_thread_routing,_action_dispatch,_channel_delivery,_approval_mode}`
+tested the deleted service and dispatcher; their live contracts are covered by the substrate's own
+suites, and where they were not, they landed here first (skip_dates). Two captures were needed before
+the reference disappeared: the **jitter values** are now pinned BY VALUE (a parity test whose
+reference no longer exists cannot fail), and `_save`'s **key list** is pinned as `_SAVED_KEYS` so
+`test_triggers_migrate` still builds its fixture from the real on-disk format rather than from belief.
+
+A mechanical sweep removed `crons=` from 21 test files (36 sites) — one root cause behind 613 of the
+first run's 630 failures, which is why the number looked alarming and was not.
+
+- **What survives on purpose:** `ScheduleRunStore` (unchanged), `ScheduleJob`/`ScheduleDefinition`
+  (the format the migration reads), and `crons.json` on disk read-only per §6 so
+  `automation verify-migration` can still diff both sides.
+
+### S113 — Snapshot carries the automations (§7 step 9)
+
+**DONE.** §7 item 9 names this explicitly — "update `snapshot.py`/`portability.py` to carry
+`triggers.json` + the ledger" — with its own recon note: "today snapshot covers crons.json/hooks.json
+but NOT event_triggers.json". Declared work, and the last §7 item that was not blocked on
+LOOPS-EVOLUTION Phase 4.
+
+**🔴 THE DEFECT, measured before writing anything.** Driven against a home holding two automations, an
+event trigger and run history:
+
+    home holds: config.json, triggers.json, event_triggers.json, cron-history/
+    snapshot captured: MANIFEST.json, config.json          ← that is ALL
+
+`gideon snapshot` **silently lost every automation the user had**. It backed up `crons.json` —
+the legacy file nothing has written since S108, and a read-only migration source since S112 — while
+`triggers.json`, the sole source of automations since S101, never travelled. The release notes advise
+taking a snapshot before a breaking upgrade, which is the one moment it must not lose anything.
+
+Both snapshot paths had the gap independently: `portability.create_export_zip` (the zip export the
+dashboard uses) and `snapshot.py`'s `CORE_FILES["crons"]` (the CLI tar path). Both now carry
+`triggers.json`, `event_triggers.json` and the `cron-history/` run ledger, and `crons.json` stays
+because §6 keeps it read-only for `automation verify-migration` to diff.
+
+**Two more defects the round trip found:**
+
+1. **Export carried the run ledger; import IGNORED it.** A restored home showed its automations with
+   an EMPTY history — "never ran" for automations that have run for months, which is
+   indistinguishable from a broken fire path. `cron-history` joined the no-overwrite merged trees.
+   NO-OVERWRITE rather than append is deliberate: each file is one job's JSONL, and concatenating two
+   homes' rows would double-count runs that `_last_run_status` and the autopause counters read.
+2. **The lock files travelled.** `cron-history/.history.lock` shipped in the zip; a restored advisory
+   lock is one held by a process that does not exist on this machine. `.history.lock`,
+   `.triggers.lock` and `.crons.lock` joined `EXPORT_EXCLUDE`.
+
+**The merge semantics, and why.** Skip-by-NAME with a fresh id, mirroring the shipped `_merge_crons`:
+an id collision between two homes is meaningless (ids are slugs), while a name collision means the
+user already has that automation and a second copy would fire the same work twice. Event triggers key
+on PATTERN, which is their identity — they have no name.
+
+**🔴 An imported automation arrives PAUSED with runtime state stripped.** `next_fire_at` from another
+machine is a fire already scheduled elsewhere, and `run_count`/`last_success_at`/health describe runs
+this home never performed — so `RUNTIME_FIELDS` is dropped and `enabled` is forced False. The user
+chooses when a restored automation starts firing here, and importing cannot resurrect a fire that
+should have happened mid-move. Asserted from both directions: the imported row is paused and unarmed,
+and the home's OWN automations keep firing with their armed fire intact.
+
+**DEVIATION — the CLI component is renamed in its user-facing text, not its key.** `--components
+crons` still selects it (a rename would break a documented flag), but its description now reads
+"triggers.json + event_triggers.json + crons.json (automations)" and the restore prints
+`✅ automations`, because "crons" now names the legacy relic rather than the thing the user cares
+about. The size report sums all three.
+
+**A test-fixture finding worth recording.** `test_snapshot.py`'s fake home carried `crons.json` alone,
+so every snapshot test passed while the component backed up an empty relic. The fixture now seeds a
+real `TriggerStore` row plus an event trigger — which is what made the assertions meaningful. Same
+shape as the mock-vs-store lesson from S108/S110: a fixture that only contains what the code already
+handles cannot tell you what the code misses.
