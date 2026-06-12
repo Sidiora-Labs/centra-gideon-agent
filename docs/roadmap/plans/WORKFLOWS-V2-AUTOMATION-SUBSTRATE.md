@@ -3181,3 +3181,107 @@ not a gap-fill, and building an endpoint to justify a token would invert the dep
 - **REMAINING in decision 12:** the webhook fire endpoint + scoped token verification, as above. With
   this, decision 7's enforcement chain (frozen action sets S116, kill switch S117, PathGuard S118)
   and decision 12's at-rest discipline are complete.
+
+### S120 — the provider-registration invariant (§7 item 6 / R3 am.5) — DONE
+
+The plan asks for "a provider-registration invariant (every action provider declares its enforcement
+chokepoint, with a test asserting no execution without a policy check)". Measured all five
+`get_action_provider(` call sites in `src/` before writing anything:
+
+| site | policy check |
+|---|---|
+| `hooks._run_provider` (lifecycle) | `incident_active` |
+| `gateway._fire_store_trigger` (clock/file/event) | `incident_active` |
+| `event_triggers.execute_event_action` | `incident_active` |
+| `handlers/triggers._dispatch_store_action` (manual) | `manual_refusal` |
+| `handlers/hooks` | — reads `display_name`/`supports_blocking` for the catalog; **never executes** |
+
+**FINDING: the invariant already HOLDS.** This is the first session in this stretch that did not find
+a defect, and saying so plainly matters — three of the four checks arrived in S117, so the honest
+account is that S117 closed this hole and this session pins it. Reporting a fix here would be
+inventing one.
+
+**A SOURCE-level test, deliberately.** The property is structural: *every site that reaches a provider
+passes a policy check first*. A behavioural test can only exercise the sites it already knows about,
+so it cannot fail when someone adds a fifth — which is the exact regression this invariant exists to
+catch. The failure mode being prevented is not "the check is wrong", it is "a new call path skipped
+the check entirely", and that is a property of the call graph, not of any one execution.
+
+**The staleness guard is the load-bearing part.** A hardcoded list of call sites rots the moment
+someone adds one, and a rotted list reads as "all sites are checked" while covering fewer — the same
+false-assurance shape as the inert plan S117 found. So `test_the_site_list_is_not_STALE` greps the
+tree for `get_action_provider(` callers and asserts every one is either a listed execution site or the
+documented catalog exemption. Verified by mutation: deleting `gateway` from the list turns it red.
+
+**DEVIATION: the per-provider `chokepoint` ATTRIBUTE is deliberately NOT added.** Measured: none of the
+16 shipped providers declares one. Adding an attribute with no consumer would be the precise
+inert-control defect this program keeps finding — and a security-shaped inert control is worse than
+none, because it reads as protection. Enforcement lives at the call sites; the test guards the call
+sites. A test pins the attribute's ABSENCE, so if a future author adds one they must also wire
+something that reads it, or drop it.
+
+- **§7 item 6 is now COMPLETE** apart from the webhook fire endpoint + scoped token verification
+  (decision 12's verification half, genuinely unbuilt — see S119). Frozen action sets (S116), the kill
+  switch (S117), PathGuard (S118), the at-rest token discipline (S119) and the chokepoint invariant
+  (S120) are all in place.
+
+### S121 — the `web_watch` runtime (§7 item 8, new kinds wave 1) — DONE
+
+**DISCOVERY: `web_watch` was a fully declared kind with no firing path.** Every surface said it
+worked. It is in `KINDS`, `SPEC_KEYS` accepts `{url, poll_interval, extraction, novelty_key}`,
+`nl_kind.route()` routes any URL to it, the store persists it, `/api/triggers` lists it (S94) and the
+Automations page renders it (S95). Nothing polled it. Driven before writing a line:
+
+```
+T.create(store, name="watch pypi", when="watch https://pypi.org/... for changes")
+  → ok: True   "Created automation 'watch pypi' (web_watch:watch-pypi), kind web_watch."
+
+tick()                     → considered: none    (no next_fire_at; not a clock kind)
+file_poll.file_triggers()  → ['file:t']          (only `file`)
+```
+
+So a user could ask for exactly what the plan advertises, be told it worked, see it listed in the UI,
+and never receive a fire. Precisely S93's file-watch gap one kind over — which is why this session
+mirrors `file_poll`'s shape rather than inventing a second one.
+
+**The seen-set IS the storm guard, and that decided the design.** Novelty is keyed on EXTRACTED ITEMS,
+never on the raw body. A body hash treats a timestamp, a rotating ad or a CSRF token as news, which
+turns one watch into a notification every poll. Measured: a page whose content changes on **every**
+fetch produces **0 fires** across 6 polls.
+
+**Every control here exists because its absence has a name:**
+
+* **A seeding pass that never fires.** The first poll records the page without firing; otherwise a new
+  watch delivers the entire current front page as "new" on day one.
+* **An enforced 5-minute rate floor.** This is the one kind that makes requests to *someone else's*
+  server, where a 5-second watch is abusive and indistinguishable from a scraper. Clamped, not refused
+  — refusing leaves the automation dead over a number the user can barely see. S109 recorded the R1
+  floor being declared but read by no code; this one is enforced at the point of use.
+* **A daily request budget**, counted in the sidecar, refusing with a ledger-visible reason. A failed
+  fetch still SPENDS its request, deliberately: a failing url that cost nothing would retry forever at
+  full rate, which is how a user's IP gets blocked.
+* **Fetching ONLY through `net.fetch`.** A watch pointed at `http://169.254.169.254/` is an SSRF
+  against the machine's own metadata service, and the egress chokepoint is where host classification,
+  private-IP denial, redirect-hop re-checks, the byte cap and the timeout already live. Asserted by
+  parsing the module's AST for forbidden imports — a substring check tripped on the docstring that
+  names `urllib` as the thing not to use, which is a small lesson in asserting on structure.
+* **The seen-set stores HASHES.** Raw urls would make the sidecar a plaintext browsing history that
+  snapshots (S113) carry off the machine. The control needs identity, not the value.
+* **Bounded seen-set and capped payload.** Unbounded, the sidecar grows forever on a busy feed; a
+  payload carrying 200 urls is a prompt nobody can afford. The `new_count` stays honest when the item
+  list is capped.
+
+**DEVIATION: the headless-browser escalation tier is NOT built.** §3 describes "plain fetch → optional
+headless tier" with an escalation budget. That needs a browser runtime this repo does not have, and a
+stub would be exactly the inert control this program keeps finding. Recorded as remaining rather than
+half-shipped.
+
+**DEVIATION: digest output does not land in the knowledge store.** §3 says a web_watch digest should.
+The fire hands its payload to the trigger's declared action through the shared dispatch, which is what
+makes this additive and disjoint (no double-fire); routing output into the knowledge store is a
+separate concern owned by the action, not the poller.
+
+- **REMAINING in §7 item 8:** the `run_completed` and `idle` runtimes are in the same
+  declared-but-unpolled state this session found for `web_watch` (measured: neither has a firing path).
+  `idle` is gated on Loops Phase 4 by §7 item 9. `view` is pull-on-view and fires from a render, not a
+  poll. Plus the headless tier and knowledge-store digest above.
