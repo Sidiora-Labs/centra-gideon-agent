@@ -4501,3 +4501,139 @@ Verified load-bearing: removing the gate call turns 3 tests red. Gate: `make lin
   `max_cost_usd_per_run` need a `run_key` threaded through `SpendMeter.charge` (the machinery exists;
   its one production caller never passes one), and `idempotency` / `threshold` need R12 to pin their
   semantics before anything can enforce them.
+
+### S153 — per-run spend attribution, and the live reader of a total nothing wrote (§3.6)
+
+**DONE.** `SpendMeter.charge` has accepted `run_key=` since the guardrails landed, and its **one**
+production caller — `ModelCallGuard` — never passed it. So `run_totals` was structurally empty and
+every run-scoped cap read zero. That is why `cost_cap`/`max_cost_usd_per_run` have sat in
+`UNMETERED_CAPS` since S133.
+
+**🔴 And it had a LIVE READER all along.** `resilience.remediation` caps its judgment lane with
+`meter.run_totals("doctor").dollars >= max_cost_usd`, and `run_remediation`'s own docstring states it
+*"charges the guardrails SpendMeter under run_key `doctor`"*. Nothing ever charged it. Measured:
+`run_totals("doctor").dollars` is `0.0` on a fresh meter and stays `0.0` after any number of model
+calls — so the Doctor's cost cap has **never bound**, on a path that runs unattended. This is the
+worst inert shape this program keeps finding: not dead code, but a control that runs, reads, and
+always answers "plenty of budget left".
+
+**A ContextVar, not a parameter, and the reason is arithmetic.** The guard is constructed by
+`provider_bridge` from provider config alone and has no run identity; threading one in would touch all
+**33** call sites that reach the bridge. `mcp_core._CURRENT_SESSION_KEY` and
+`builtin_tools._CURRENT_AGENT` are the same pattern for the same ambient-identity problem, so one seam
+sets the scope and one seam reads it. Token-scoped, so a nested run (a trigger fire that spawns a
+subagent) restores its parent rather than losing it.
+
+**Two setters, each at a single point:**
+
+* **The trigger fire seam** (`_fire_store_trigger`), keyed **per FIRE** — `max_cost_usd_per_run` is a
+  per-run cap, and a trigger-scoped key would accumulate across fires and make the second fire of a
+  perfectly healthy automation look over budget. Reset in a `finally` so a raising provider cannot
+  leak the scope into the next fire on the same task.
+* **Each remediation job**, under `"doctor"` — the key its own cap has always read.
+
+**🔴 DISCOVERY — my own bug, caught by my own test.** `reset_current_run_key` first listed
+`(ValueError, LookupError)`; a reused token raises **`RuntimeError`** ("Token has already been used").
+That runs in a `finally` on the fire path, so it would have replaced a real provider error with a
+bookkeeping one — the caller sees the wrong exception for the wrong reason. Now catches `Exception`
+with the reasoning written down, because the narrow tuple looked more careful and was worse.
+
+**A second self-inflicted lesson:** my first test asserted `day_totals().dollars == 0.50` and read
+`8.0`. The day scope is **persisted**, so it carries whatever earlier tests in the process charged —
+the assertion had been passing on test-ordering luck. Now asserts the delta.
+
+**HONEST SCOPE — this ships attribution, not enforcement.** A fire's model spend now accrues to a run
+scope and `check_run` returns a real verdict (measured: `$2.75` against a `$1` cap → `EXCEEDED`). But
+no gate on the fire path yet compares a run's accrued dollars against `cost_cap`, so **both keys stay
+in `UNMETERED_CAPS`**, with that distinction spelled out in the constant. Attribution without
+enforcement is exactly the "user believes their automation is bounded" failure that list exists for,
+and quietly removing them would have been the same lie one layer up.
+
+Verified load-bearing: removing the `run_key=` argument turns a test red. Gate: `make lint`
+(black+isort+flake8+mypy, 691 files) green; `pytest -n 4 --dist worksteal` **16181 passed, 29 skipped,
+13 xfailed**. No `web/` change.
+
+- **The enforcement read is now the only thing between these two caps and closure**, and it is a
+  small session: the fire path already has the run key it bound, so a `cost` gate can ask
+  `check_run(key, budget_from_gates(trigger))`. `idempotency`/`threshold` still need R12 semantics.
+
+### S154 — the run budget: a verdict computed every call and asked by nobody (§3.6)
+
+**🔴 THE DEFECT, measured before writing a line.** Drove a real `ModelCallGuard` under a 150-token
+run ceiling with the ambient run key S153 introduced:
+
+```
+call 1: ALLOWED  run_total=100 tok   check_run says: ok
+call 2: ALLOWED  run_total=200 tok   check_run says: exceeded (200/150)
+call 3: ALLOWED  run_total=300 tok   check_run says: exceeded (300/150)
+call 4: ALLOWED  run_total=400 tok   check_run says: exceeded (400/150)
+```
+
+Four calls, 400 tokens, cap 150, **nothing refused** — and the verdict was correct every single time.
+`SpendMeter.check_run` and `budgets.run_budget_from_config` both shipped with **zero production
+callers**; `BudgetExceededError` has always declared a `"run"` scope alongside `"day"`; and
+`max_tokens_per_run` is a user-facing config field with a `_EDITABLE_CONFIG` PATCH allowlist entry
+and a loader. Every piece present, nothing connected — the shape S142 named and this program keeps
+finding.
+
+**CORRECTION to my own S153 log.** It closed by predicting *"a `cost` gate can ask
+`check_run(key, budget_from_gates(trigger))`"* on the fire path. That design is **wrong, and wrong in
+the inert direction**: run totals accrue in-process *as the run spends*, and the fire seam binds a
+FRESH per-fire key immediately before the first call — so a pre-fire gate reads `$0.00` on every fire
+and can never refuse anything. Had I implemented the session as its own predecessor specified, the
+result would have been another live reader of a total that is zero by construction. The measurement
+is what caught it; reading the plan text would not have.
+
+**So enforcement lives in `ModelCallGuard`, beside the day check** — the one place that runs *between*
+a run's model calls, and the same chokepoint `check_day` already uses. Placement forced by the meter,
+not chosen for convenience.
+
+**The ceiling is AMBIENT, for the identical reason S153's run key is.** A per-trigger
+`max_cost_usd_per_run` is known at the fire seam; the guard is built by `provider_bridge` from
+provider config and never sees the trigger, and threading a budget down would touch the same 33 call
+sites S153 measured. So `budgets.set_current_run_budget` pairs with `set_current_run_key`, token-scoped
+so a nested run restores its parent's ceiling. **Ambient beats the config default** — otherwise a
+trigger's own cap is decoration next to the operator's global one.
+
+**🔴 MY OWN PROBE NEARLY HID THE BUG.** The first fake used `model="m"`, and `pricing.estimate_cost`
+returns `$0.00` for an unpriced model — so a correctly-wired cap looked completely inert because
+nothing was ever spent. Re-driven against a priced model (`gpt-4o`), the cap refuses at `$0.025/$0.02`.
+The test suite now carries an explicit **control case** asserting an *uncapped* run really does accrue
+(`$0.10` over 5 calls), so "refused at the cap" can never again be confused with "never spent
+anything". A cap test against zero spend passes for the wrong reason.
+
+**🔴 A SECOND LIVE DEFECT, created BY S153.** `SpendMeter.end_run` shipped with the module and had no
+caller; S153's per-FIRE keying turned that dormant gap into a real leak. Measured: **5000 distinct run
+counters retained after 5000 fires**, held for the life of a gateway process meant to run for months.
+Dropped at the fire seam now, in the same `finally` that resets the scope. Remediation's `"doctor"` key
+is deliberately **not** dropped per job — it is one fixed key that must accumulate across a sweep,
+because its cap is exactly "how much has this sweep spent so far".
+
+**`cost_cap` stays in `UNMETERED_CAPS`, for a NEW reason.** Not "no meter exists" any more: §3.6 defines
+it as a pre-claim check *"against a persistent per-window budget table"*, and `ScheduleRun` carries no
+cost column, so nothing durable exists to sum a window over (`SpendMeter`'s run scope is in-memory and
+dies with the process). Enforcing it off the per-run meter would silently redefine a per-window cap as
+a per-run one — a control that runs, answers confidently, and answers a **different question than the
+user asked**, which is worse than one that admits it is unmetered. `UNMETERED_CAPS` is 4 → 3.
+
+**Fails OPEN on a malformed value, deliberately opposite to `max_fires`.** `gate_failure_mode` already
+classifies `max_cost_usd_per_run` open and `max_fires` closed, and each implementation now follows its
+own entry (asserted by a test, since S130 found the inert control here was *the description of the
+controls*). The asymmetry is principled: a bad `max_fires` costs one visibly refused fire recorded as a
+typed `skipped_budget` row, while a bad cost cap would break every model call **inside a run that
+already started**, surfacing as a mid-run provider error rather than a legible refusal.
+
+**🔴 FOUND BY THE FULL SUITE, NOT BY MY OWN TESTS.** Reading `trigger.gates` directly broke **6 tests**
+across three files that drive the fire path with a `SimpleNamespace` stub carrying no `gates` — a
+*budget bookkeeping lookup* converting a working fire into an `AttributeError`. Wrong in both
+directions at once: the control is fail-open by classification, so the one thing it must never do is
+turn a fire into an error. Now `getattr(trigger, "gates", None)`, matching how this path already reads
+`kind`/`id`/`delivery`, with a regression test.
+
+**Gate:** `make lint` (black+isort+flake8+mypy, 691 files) green; full `pytest -n 4 --dist worksteal`
+green. No `web/` change. Each layer verified load-bearing by reverting it independently: neutering the
+enforcement read turns 2 red, reverting only the ambient precedence turns 1 red.
+
+- **Both cost keys are now closed or honestly named**, and the reason each sits where it does is
+  written down at `UNMETERED_CAPS`. `idempotency`/`threshold` remain the last two, still waiting on
+  R12 to pin their semantics rather than on any missing meter.
