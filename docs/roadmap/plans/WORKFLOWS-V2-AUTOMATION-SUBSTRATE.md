@@ -4127,3 +4127,81 @@ counted ALL ledger rows, which was over-broad the moment every fire writes one. 
   "surfaces in the Runs inbox" half is now possible — `attention_card` and `inbox_fingerprint` exist and
   the state is recorded — but wiring the CARD into the inbox is an INBOX-UNIFICATION surface, not a
   substrate one.
+
+### S140 — the delivery contract was inert (R18 / criterion 10) — DONE
+
+**DISCOVERY: two dead layers, the same shape as S139's autopause chain, found the same way.**
+`triggers/delivery.py` implements criterion 10 in full — `statusUrl` deep links, stable event ids for
+retry dedup, `is_duplicate`, destination formatting, the flat-text negotiation. Its `build_delivery`
+had exactly one caller, `executor.delivery_for` — **which itself had no caller at all**. Driven before
+writing: a completed fire produced no notification and no `statusUrl` anywhere under the home.
+
+That makes three consecutive sessions where a complete, well-designed decision module sat one missing
+call away from working (S139 autopause, this, and S134's screen before them). The modules are good; the
+seams were never closed.
+
+**Routed through `state.notify`, which is `deliver`'s own contract.** R18 says *"the substrate does not
+build a second notification path"*, so the existing `notification_allowed` gate and the per-(source,
+kind) rule both still apply — a trigger whose owner muted its channel stays muted. Asserted on the
+source, because the property is *which layer is called*.
+
+**The dedup set lives on the orchestrator**, which is the honest scope: `is_duplicate`'s own docstring
+says the caller owns the retry window because it is a transport concern. An in-memory set is exactly
+right for one gateway process; a persisted one would claim a durability this path does not have.
+
+**Verified end to end:** a successful fire notifies `automation.run.succeeded` with
+`statusUrl: #/triggers?open=clock:n`; a raising provider notifies `automation.run.failed`; the two
+carry distinct typed events (one label for both would make success unfilterable); a retry of the same
+`run_id` is suppressed while a new run still pings.
+
+**A methodology note worth keeping.** My first probe recorded **zero** notifications and looked exactly
+like the feature still being dead — the fake `state.notify` had a positional `(source, payload)`
+signature while `Delivery.to_notify_kwargs()` produces `kind`/`title`/`body`/`meta`. **A test double
+with the wrong shape reproduces the very bug you are trying to confirm you fixed.** Reading the real
+kwargs before trusting the probe is what distinguished the two, and the fake's docstring now records it.
+
+**Both no-op paths are tested rather than assumed:** a `--no-dashboard` gateway (no `dashboard_state`
+at all) and a notification bus that raises both leave the fire successful. The run already completed; a
+failed ping must not undo it.
+
+- **REMAINING in AUTOMATION-SUBSTRATE:** the E4-blocked webhook fire endpoint (queue S123), `idle`
+  (Loops Phase 4), `web_watch`'s headless tier, a chat-turn event source reading `agent_scope`, meters
+  for the four unmetered caps, and §3.5's undeclared `skip_if_active` / `acting_on`.
+
+### S141 — criterion 3's second clause: an autopaused trigger stopped silently — DONE
+
+**FOUND BY A SYSTEMATIC SWEEP, which is the transferable part.** After three consecutive sessions
+(S134, S139, S140) each found a complete module one missing call from working, I stopped hunting one at
+a time and swept **all 59 public functions in `triggers/`** for any whose only references are its own
+module plus tests. `autopause.attention_card`, `inbox_fingerprint` and `is_duplicate_card` came back
+dead — criterion 3's *"and surfaces in the Runs inbox"* half, unbuilt.
+
+S139 made the pause happen. But **a trigger that stops without saying so is indistinguishable from one
+that finished**: the user's automation goes quiet and nothing explains why. The card is what turns a
+state change into something actionable.
+
+**Deduped on the card's own FINGERPRINT, not the delivery event id**, and the difference matters: a
+fingerprint is `(trigger_id, state)`, so re-entering the same paused state does not re-alert — without
+that, a paused trigger would alert on **every tick forever** — while a trigger that goes
+autopaused → resumed → autopaused legitimately alerts twice. `is_duplicate_card` owns the comparison;
+the seen-set lives on the orchestrator for the same reason S140's does.
+
+**A PARKED trigger gets no card, deliberately.** `attention_card` returns `None` for it, and the module
+is right: parking resolves on its own, so alerting would train the user to ignore the card that
+matters. The "returns None rather than an empty card" design also means the call site reads
+`if card: send it` — there is no way to write a card that says nothing.
+
+**Through `state.notify` like every other substrate notification** (R18: no second path), so a muted
+channel stays muted. Never raises: the pause already happened, and failing to announce it must not undo
+it — verified with a `--no-dashboard` orchestrator, where the pause still lands.
+
+**A process note.** Fixing a line-length warning by line NUMBER corrupted this test file — the edit
+landed inside a neighbouring docstring and broke the parse. I truncated the damaged block and
+re-appended it with short lines from the start. Second time this session that mechanical
+line-arithmetic editing cost more than it saved; write the block correctly rather than reflowing it
+afterwards.
+
+- **REMAINING in AUTOMATION-SUBSTRATE:** the E4-blocked webhook fire endpoint (queue S123), `idle`
+  (Loops Phase 4), `web_watch`'s headless tier, a chat-turn event source reading `agent_scope`, meters
+  for the four unmetered caps, and §3.5's undeclared `skip_if_active` / `acting_on`. **Criterion 3 is
+  now complete in both clauses.**
