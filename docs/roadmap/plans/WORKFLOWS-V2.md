@@ -1167,3 +1167,100 @@ Each slice is independently shippable and testable. Rev-2 scope grows the estima
   consumes them until Slice 6/7); `subworkflow` execution (Slice 10 — it returns a typed
   refusal rather than a silent skip); the effect ledger (Slice 3); mid-flight mutation
   (Slice 4). Retry currently re-runs a fresh attempt; mutation-hint injection is Slice 2.
+
+### S147 — the per-node stall window was declared by four templates and read by nothing (WF2-R5)
+
+**DONE.** Found by a mechanical sweep rather than by reading: every config key the bundled library
+declares (35 distinct) checked against every string literal in `src/gideon`. Two keys had no
+reader anywhere — `allow_failure` and `timeout_stall_secs` — and this session took the dangerous one.
+
+**Four shipped templates set a per-node stall window and every one was ignored:**
+
+| template | node | asks | actually got |
+|---|---|---|---|
+| `design-project` | `refine` | 600s | 300s |
+| `general-project` | `project` | 900s | 300s |
+| `goal-pursuit-open-ended` | `work` | 900s | 300s |
+| `goal-pursuit-verifiable` | `work` | 1200s | 300s |
+
+`_enforce_stall_timeouts` read `self.services.node_timeout_stall` and never looked at the node's own
+config, so the run-level default applied to everything.
+
+**This fails in the wrong direction, which is why it is worth a session.** `timeout_stall` exists to
+catch a node that has gone *silent*, not one that is merely *slow* — that distinction is the entire
+reason `engine._wait_with_progress` feeds a heartbeat while a nested run works. A `work` node whose
+author measured it needing twenty minutes was being cancelled at five, as a TIMEOUT, with a
+remediation pointing at a config key that would not have helped. The knob existed precisely to
+prevent that and had never applied.
+
+**A node may RAISE its window, never lower it.** The run-level value is the operator's floor for how
+long a silent node may sit; letting a bundled spec shorten it would let a template tighten an
+operator's policy from inside the library. So the effective window is `max(run_default, declared)`.
+
+**Zero/invalid falls back to the default rather than disabling the check.** A malformed knob must not
+switch a safety timeout off — the failure mode a `timeout_stall_secs: 0` would otherwise buy is an
+un-killable wedged node, which is strictly worse than a short window. An unknown node path falls back
+too, rather than raising inside the sweep.
+
+**A process note on measurement.** My first probe of `_node_stall_window` reported two failures. The
+implementation was correct; the probe passed a node **id** where the controller keys on a structural
+path (`root.children[0]`). Re-reading what `_walk` actually yields fixed the probe, not the code —
+worth recording because a wrong probe that "finds a bug" is how a correct implementation gets
+rewritten.
+
+The test reads the four real declarations out of the bundled library rather than restating them, so it
+keeps tracking the templates it is meant to protect; a hand-copied list would silently stop covering
+a template that changed its number.
+
+Verified load-bearing: reverting the per-node lookup turns 2 of the 9 new tests red. Gate: `make lint`
+(black+isort+flake8+mypy, 691 files) green; `pytest -n 4 --dist worksteal` **16114 passed, 29 skipped,
+13 xfailed**. No `web/` change.
+
+- **REMAINING from this sweep:** `allow_failure` is declared by `rich-ingest` and read by nothing —
+  the other unread key. It needs a decision about what tolerating a node failure MEANS for the
+  frontier (skip the dependents, or run them with a null input?), which is a contract question rather
+  than a wiring one, so it is recorded here rather than guessed at.
+
+### S148 — `allow_failure` honoured: a tolerated lens degrades, it does not fail the run (WF2-R18)
+
+**DONE.** The second finding of S147's config sweep, and it closes that sweep. `rich-ingest` declares
+`allow_failure: true` on **all five** of its extraction lenses, which run in a `parallel` with
+`join: all`. Measured:
+
+```
+container_outcome([DONE, DONE, DONE, DONE, FAILED], join=ALL)  ->  FAILED
+```
+
+So one flaky lens **discarded the four that had succeeded** — the exact outcome the key exists to
+prevent, on the template that declares it five times over. Confirmed unread in **both** positions: the
+node config where the template puts it, and the `with` block LOOPS-EVOLUTION's log names as "the real
+form" (that block is the action-provider args, so it would not have applied to an `infer`/`stage` lens
+anyway).
+
+**DEGRADED, not DONE — the whole design decision.** `SUCCESS_STATES` already includes DEGRADED, so the
+join proceeds and the run continues. Masking to DONE would make a partial extraction
+indistinguishable from a complete one: the run would report success and nothing would ever say a lens
+was missing, which is the silent-drop shape this program keeps finding. `container_outcome`'s existing
+ALL branch already propagates "any DEGRADED child ⇒ DEGRADED container", so the honest verdict
+travels upward for free.
+
+**Only FAILED is masked.** A CANCELLED child is a decision someone made and a BLOCKED one is waiting
+on a human; tolerating either would convert a deliberate stop into a shrug. Asserted per state.
+
+**Tolerance is PER CHILD, not per container** — a tolerated lens failing must not excuse an intolerant
+sibling failing, or `allow_failure` on one node would silently weaken every node beside it.
+
+**The template turned out to be coherent end to end**, which is worth recording because it is what
+made DEGRADED the right answer rather than a compromise: every downstream consumer already reads
+`{{nodes.lens-X.output.items | default([])}}`, so a tolerated lens yields an empty list and
+`store-decisions`/`store-facts`/… proceed with what did extract. The test asserts that too — without
+the `| default([])`, tolerance would just move the failure one node later, and a future template
+edit that dropped it would silently reintroduce the bug.
+
+Verified load-bearing: removing the mask turns 2 of the 9 new tests red. Gate: `make lint`
+(black+isort+flake8+mypy, 691 files) green; `pytest -n 4 --dist worksteal` **16123 passed, 29 skipped,
+13 xfailed**. No `web/` change.
+
+**The config sweep is now closed** — both unread keys it found (`timeout_stall_secs` in S147,
+`allow_failure` here) are wired, and re-running the sweep reports no bundled config key without a
+reader.
