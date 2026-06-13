@@ -4284,3 +4284,110 @@ red (5, 4 and 4 failures respectively).
   (Loops Phase 4), `web_watch`'s headless tier, a chat-turn event source reading `agent_scope`, meters
   for the four unmetered caps, and §3.5's undeclared `skip_if_active` / `acting_on`. **Criterion 7 is
   now complete in all five clauses**, and criterion 3 in both.
+
+### S149 — `jitter_secs` and `strict` were declared and applied by nothing (AUTO-A1)
+
+**DONE.** Found by running S147's config-key sweep **one level out** — over the trigger store's
+`SPEC_KEYS`/`GATE_KEYS` vocabularies instead of the workflow templates' node configs. Three keys had at
+most one occurrence in `src/` (i.e. only their own declaration): `first_idle_secs` (the Phase-4-gated
+`idle` kind, correctly parked), `jitter_secs` and `strict`.
+
+Measured before writing a line, on the same interval trigger armed three ways:
+
+```
+no jitter declared           -> next_fire = now + 3600.0s
+jitter_secs: 300             -> next_fire = now + 3600.0s
+jitter_secs: 300 + strict    -> next_fire = now + 3600.0s
+```
+
+Identical. So **AUTO-A1's acceptance bar — "migrated cron fires in its old jitter slot" — was
+unmet**, and `models.py`'s own comment above `SPEC_KEYS` names this exact failure mode: *"the single
+most likely authoring mistake and the one with the quietest failure — the trigger loads, the service
+ignores the key, and the automation behaves in a way its author cannot explain."* It was describing
+two of its own keys.
+
+**Byte-compatibility is the point, not a nicety.** `apply_jitter` reuses
+`scheduling.jitter_offset` — the same BLAKE2b-over-trigger-id function the boot stagger uses and that
+`ScheduleService._jitter_offset` used — because AUTO-A1 requires the offset be "preserved
+byte-compatibly from schedule.py". A migrated cron must land in the slot the job it came from
+occupied; a fresh (or random) offset would re-phase every schedule on migration day, which is the one
+thing a migration must not do. Deterministic also means two triggers cannot collide on a later fire
+and a restart cannot reshuffle them.
+
+`strict: true` is the documented opt-out — `schedule.py`'s field says it plainly, "when True, skip
+jitter and fire exactly on schedule" — so an exact wall-clock fire stays available. An absent or
+invalid `jitter_secs` changes nothing, which is every clock trigger shipped before this.
+
+**DISCOVERY — my own fix pushed a fire onto a skipped day.** A `59 23 * * *` cron with
+`jitter_secs: 600` and `2026-08-05` in `skip_dates` armed to **2026-08-05T00:02**: the offset crossed
+midnight ONTO the excluded day, *after* the skip check had already passed on the honest 23:59 slot. My
+first docstring claimed the ordering prevented this; driving it proved otherwise. A skip date is a
+promise about a calendar day, so the jittered instant is now re-checked and a conflicting fire keeps
+its grid slot — losing the jitter is a scheduling nicety, landing on a skipped day is a broken
+guarantee.
+
+**The week grid is deliberately unaffected.** `cadence_next_fire` stays public and un-jittered
+precisely so `calendar.project_occurrences` can plot honest slots; showing a user 09:04:37 for a job
+they wrote as `0 9 * * *` would make the grid harder to read than no grid.
+
+Verified load-bearing: neutralising the window turns 4 of the 45 arm tests red. Gate: `make lint`
+(black+isort+flake8+mypy, 691 files) green; `pytest -n 4 --dist worksteal` **16134 passed, 29 skipped,
+13 xfailed**. No `web/` change.
+
+- **REMAINING from this sweep:** `gates.cooldown_secs` is declared in `GATE_KEYS` and read by nothing.
+  It is NOT a rename of the existing `cooldown_hours`/`cooldown_until` (those are the autopause and
+  routing-suppression clocks), so giving it meaning is a gate-semantics decision — per-trigger minimum
+  spacing between fires, and how it interacts with `max_runs_per_hour` — rather than a wiring. Recorded
+  rather than guessed. `first_idle_secs` stays parked with the `idle` runtime.
+
+### S150 — the five storm-spacing gates were declared, unread, and silent about it (§3.6)
+
+**DONE.** A `GATE_KEYS` sweep (S149's technique, applied to the gate vocabulary instead of the spec
+one) found five declared keys with **no reader on the fire path**: `debounce_secs`, `cooldown_secs`,
+`rate_cap`, `idempotency`, `threshold`.
+
+**The asymmetry is what made it a session.** A user setting `cost_cap` was already told honestly that
+no meter reads it (S133's `unmetered_cap` finding). A user setting `debounce_secs: 300` got
+**silence** — and reasonably believed their automation was spacing its fires. Measured: the five-key
+trigger produced zero findings; a `cost_cap` produced one.
+
+Worse, `firepath`'s own module docstring names the order as *"debounce/quiet/cooldown/condition"*.
+Against the real `GATE_ORDER` — `(incident, screen, quiet, duty, budget, claim, slot, yield,
+capability)` — **three of the four gates it advertises do not exist.** The docstring was describing an
+order the module does not walk.
+
+**🔴 CORRECTION to S149's own execution log.** I recorded there that `cooldown_secs` "is a
+gate-semantics decision rather than a wiring" and needed an owner call. **That was wrong**, and
+re-reading the plan is what corrected it: §7's fire-path order (line 222) lists cooldown among the
+gates, and §1.3's outcome table maps *"quiet-hours / debounce / cooldown / condition-false"* to
+`skipped_gate`. It is declared work with specified semantics.
+
+What it actually needs is a **last-fire timestamp**, and the unified `Trigger` does not have one. It
+carries `last_success_at` and `last_failure_at` — and a **suppressed** fire is neither, so spacing
+fires off either field would count a blocked fire as a fire and let a debounced trigger through. The
+legacy `event_triggers.EventTrigger` *does* carry `last_fired_at`, which is precisely why debounce
+works on the legacy path and not the unified one. Adding that field is a store-shape change with a
+backfill, not something to bolt onto this session.
+
+**So this ships the honest half**, matching what S133 did for the cost caps: all five keys join
+`UNMETERED_CAPS`, and the constant now names the specific missing meter per key — per-run spend
+attribution, a windowed history query, a last-fire timestamp, or unpinned R12 semantics — so the list
+shrinks for a reason rather than by guesswork.
+
+**Plus a completeness test**, which is the durable part: every key in `GATE_KEYS` must be either
+ENFORCED on the fire path or named in `UNMETERED_CAPS`. A key in neither bucket is exactly the defect
+this session found, and the test fails with instructions ("wire them, or add them to
+`UNMETERED_CAPS`"). It also asserts the two sets are disjoint, so a gate cannot be claimed both ways.
+The four genuinely-enforced gates (`max_fires`, `quiet_hours`, `skip_dates`, `condition`) are asserted
+to stay silent — a doctor that flagged a working gate would train the user to ignore it.
+
+Verified load-bearing: removing the five keys turns 2 tests red. Gate: `make lint`
+(black+isort+flake8+mypy, 691 files) green; `pytest -n 4 --dist worksteal` **16137 passed, 29 skipped,
+13 xfailed**. No `web/` change.
+
+- **REMAINING, now precisely scoped** (each blocked on ONE named piece of machinery, not a decision):
+  a `last_fired_at` on the unified `Trigger` unblocks `debounce_secs` + `cooldown_secs`; a `since=`
+  windowed query on `ScheduleRunStore` unblocks `rate_cap` + `max_runs_per_hour` +
+  `max_actions_per_hour` (`missed.within_rate_window` is the decision already waiting); threading a
+  `run_key` through `SpendMeter.charge` unblocks `cost_cap` + `max_cost_usd_per_run`. `idempotency`
+  and `threshold` need R12 to pin their semantics first.
