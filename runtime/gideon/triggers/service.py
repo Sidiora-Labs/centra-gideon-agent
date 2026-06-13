@@ -493,6 +493,17 @@ async def tick(
             # round-tripped, and read by NOTHING — the only field in 41 trigger dataclasses with
             # zero non-declaration readers. Supplied here from the claim store, so a fire that
             # needs `local-llm` while another trigger holds it defers instead of contending.
+            # 🔴 The SPACING meter (S151). `debounce_secs`/`cooldown_secs` were declared in
+            # `GATE_KEYS` and read by nothing because no last-FIRE timestamp existed —
+            # `last_success_at`/`last_failure_at` describe an outcome, and a suppressed fire is
+            # neither. `_since_last_fire` returns None for a trigger that has never fired, which
+            # the gate reads as "nothing to space against" rather than "0 seconds ago".
+            # 🔴 The RATE meter (S152). Three cap keys waited on a windowed history query that
+            # did not exist; `ScheduleRunStore.count_since` is it. Read per DUE trigger rather
+            # than once per tick because it is per-job JSONL — a tick with one due trigger must
+            # not scan every trigger's history. None (unreadable) is NOT zero: see the gate.
+            fires_in_window=await _fires_in_window(trigger, now=now),
+            since_last_fire=_since_last_fire(trigger, now=now),
             busy_slot=claims.busy_slot(trigger, holders=slot_map),
             # 🔴 The EXISTING claim, read from the shared claim store. Measured: this was never
             # supplied, so `claim_fire` always saw `existing=None` and always granted — a trigger
@@ -534,6 +545,12 @@ async def tick(
             # one-shot back into a live trigger holding an elapsed slot, which is the storm S112's
             # retirement exists to prevent. The in-memory count still rides along on the DueFire.
             trigger.run_count = int(getattr(trigger, "run_count", 0) or 0) + 1
+            # The meter the SPACING gate reads (S151). Written here and nowhere else, for the
+            # same reason `run_count` is: this is the one point a fire is GRANTED. Writing it
+            # at completion would let a burst of in-flight fires all see the same stale
+            # timestamp and every one pass a debounce; writing it on a SUPPRESSED fire would
+            # make a blocked fire space out the next real one.
+            trigger.last_fired_at = to_iso(now)
             if persist and trigger.id not in result.retired:
                 store.upsert(trigger)
             result.fires.append(
@@ -547,6 +564,50 @@ async def tick(
 
     result.next_sleep = sleep_for(list(by_id.values()), now=now)
     return result
+
+
+async def _fires_in_window(trigger: Any, *, now: float) -> int | None:
+    """Fires recorded in the last hour, or None when the ledger could not be read (S152).
+
+    Returns None — not 0 — on ANY failure. Zero would hand a runaway trigger a fresh allowance
+    every time the ledger hiccuped, which is the opposite of what a rate cap is for. The gate treats
+    None as fail-open (§1.4's storm-guard class) but the distinction is kept so a future session can
+    tighten it without first re-deriving why the two cases differ.
+
+    Skipped entirely when the trigger declares no hourly cap: this is a file read on the fire path,
+    and paying for it to answer a question nobody asked would tax every automation on the machine.
+    """
+    gates = getattr(trigger, "gates", None)
+    gates = gates if isinstance(gates, dict) else {}
+    if not any(gates.get(k) for k in ("rate_cap", "max_runs_per_hour", "max_actions_per_hour")):
+        return None
+    try:
+        from gideon.config.loader import config_dir
+        from gideon.schedule_history import ScheduleRunStore
+
+        return await ScheduleRunStore(config_dir()).count_since(trigger.id, now - 3600.0)
+    except Exception:  # noqa: BLE001 - an unreadable ledger must not break the tick
+        logger.debug("could not read the rate window for %s", getattr(trigger, "id", "?"))
+        return None
+
+
+def _since_last_fire(trigger: Any, *, now: float) -> float | None:
+    """Seconds since this trigger last fired, or None when it never has (S151).
+
+    None rather than 0.0, and rather than a large number: "never fired" is a different
+    fact from "fired long ago", and only None lets the spacing gate tell "nothing to
+    space against" from a real interval. Reading an absent timestamp as 0.0 would block
+    every trigger's FIRST fire behind its own debounce — a first-run deadlock.
+
+    A timestamp in the FUTURE (a clock that moved backwards, a hand-edited row) clamps to
+    0.0 rather than going negative. A negative "seconds since" compares as less than
+    every window and would suppress forever, so the safe reading is "it just fired":
+    one skipped fire, not a permanently dead trigger.
+    """
+    stamp = to_epoch(str(getattr(trigger, "last_fired_at", "") or ""))
+    if stamp <= 0:
+        return None
+    return max(0.0, now - stamp)
 
 
 def _budget_remaining(trigger: Any) -> float | None:
