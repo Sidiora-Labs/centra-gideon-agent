@@ -46,6 +46,7 @@ from gideon.guardrails.failure import (
     FailureMode,
     ModelCallTimeout,
     OutputContractError,
+    PromptInjectionBlocked,
     SecretLeakBlocked,
 )
 from gideon.guardrails.flags import guard_flag
@@ -85,6 +86,7 @@ __all__ = [
     "OutputContractError",
     "SafetyProfile",
     "ScanResult",
+    "PromptInjectionBlocked",
     "SecretLeakBlocked",
     "SpendMeter",
     "budget_from_config",
