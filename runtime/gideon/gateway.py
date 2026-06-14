@@ -1181,7 +1181,12 @@ class GatewayOrchestrator:
                 trigger_name=str(getattr(trigger, "name", "") or ""),
                 ok=ok,
                 summary=error[:200],
-                destination=str(getattr(trigger, "delivery", "") or ""),
+                # 🔴 The OUTCOME picks the route (R12 / decision 13 — S158). This read
+                # `trigger.delivery` unconditionally, so `failure_delivery` — declared, persisted,
+                # round-tripped and editable — was never consulted, and a `delivery: "none"`
+                # automation that BROKE reported through the silent channel. Its own comment names
+                # the contract: "failures reach the inbox even when `delivery` is none".
+                destination=_delivery.route_for(trigger, ok=ok),
             )
             _delivery.deliver(state, note, delivered_ids=self._delivered_event_ids)
         except Exception:  # noqa: BLE001 - see the docstring
@@ -1257,6 +1262,13 @@ class GatewayOrchestrator:
                 exit_type=exit_type,
                 consecutive_failures=prior,
                 now=time.time(),
+                # 🔴 The PER-TRIGGER budget (R7 — S160). `evaluate` has always accepted `budget=` and
+                # this call never passed one, so `failure_policy.autopause_after` had zero readers:
+                # a trigger declaring `{"autopause_after": 2}` ran to the hardcoded 5. A
+                # control that silently WIDENS a tolerance its author narrowed, and so is
+                # invisible — the trigger
+                # keeps running, exactly as a healthy one does.
+                budget=autopause.budget_for(trigger),
                 quarantined=str(getattr(trigger, "state", "")) == TriggerState.QUARANTINED.value,
             )
 
@@ -1283,6 +1295,18 @@ class GatewayOrchestrator:
                 logger.warning(
                     "trigger %s autopaused: %s", trigger_id, decision.reason or decision.state
                 )
+            # 🔴 PERSIST THE PARK COOLDOWN (§3.7 / decision 9 — S159). `evaluate` has always returned
+            # `retry_after=now + PARK_COOLDOWN_SECS` on a parking exit and this path DROPPED it, so
+            # `unpark_due` — the clock decision that brings a parked trigger back — had nothing to
+            # read and no caller. Measured: one transport outage parked a working trigger,
+            # which then fired 0 times over the next 5 slots and stayed `parked`. A 30-second
+            # network blip permanently disabled the automation.
+            #
+            # Cleared on any NON-parking outcome so a recovered trigger does not carry a stale
+            # cooldown into its next outage.
+            live.park_retry_after = (
+                float(decision.retry_after) if decision.state == TriggerState.PARKED.value else 0.0
+            )
             store.upsert(live)
             # 🔴 Criterion 3's SECOND clause — "and surfaces in the Runs inbox" (S141).
             # `attention_card`, `inbox_fingerprint` and `is_duplicate_card` were all dead: an

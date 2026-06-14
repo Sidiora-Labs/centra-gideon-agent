@@ -4925,3 +4925,206 @@ substring guard: the double-wrap test goes red.
 - **The three-round enum sweep is now exhausted** for real defects. What remains is honest:
   `Outcome.SKIPPED_TRIAGE` (triage stage unbuilt), `FailureMode.TOKEN_OVERFLOW` (no provider emits a
   length stop reason), and the local-provider scan-mode asymmetry S156 recorded as an owner call.
+
+### S158 — a muted automation could not say it broke (R12 / decision 13)
+
+**The query shape, generalised.** S97, S116, S133 and S134 each found ONE `FireContext` field that was
+defaulted and never supplied — S134's log already noted that pattern and audited the whole dataclass at
+once. This session turned it into a sweep: for each decision dataclass, which fields does no production
+writer ever set (neither `name=` at a construction site nor `.name =` assignment)?
+
+```
+🔴 FireContext  moment, budget_readable
+🔴 Trigger      failure_delivery, retry, failure_policy, resource_slots
+🔴 FireRecord   mutated, acted_on
+```
+
+Most are honest: `resource_slots` IS read (S135 wired the slot gate), `acted_on` is pre-allocated for
+LEARNING-FLYWHEEL by explicit design, and `FireRecord.mutated` has a reader (`productive`) that itself
+has no production caller — dead, but not answering wrongly. **`failure_delivery` was the live one.**
+
+**🔴 THE DEFECT.** `Trigger.failure_delivery` is declared, persisted, round-tripped by
+`to_dict`/`from_dict`, defaulted to `"inbox"` by the migration, and accepted by `automation_update` —
+and read by **nothing**. Its own comment states the contract:
+
+> *A SEPARATE route for failures (R12). Failures reach the inbox even when `delivery` is none: an
+> automation the user asked to stay quiet still has to be able to say it broke.*
+
+Measured: `_deliver_fire_outcome` passed `destination=trigger.delivery` **unconditionally**. So a
+`delivery: "none"` automation that broke reported its failure through the silent channel — the
+particular failure mode where a user's own mute setting hides the one thing they would want to know.
+
+**🔴 AND A SECOND HALF, found by driving the first.** `Delivery` carries `destination`, and
+`to_notify_kwargs` **drops it entirely** — it returns only `{kind, title, body, meta}`. Measured:
+
+```
+destination='none'   notified=True  destination_in_kwargs=False
+destination='inbox'  notified=True  destination_in_kwargs=False
+```
+
+So `delivery: "none"` silenced nothing. **Two inert layers stacked so they masked each other:** the
+failure route was never consulted, and the mute it was designed to escape was not being applied either
+— which is why nobody noticed the first defect. A muted trigger and a loud one behaved identically, so
+the "failures escape the mute" promise had nothing visible to be wrong about.
+
+**The fix, and why each half sits where it does.**
+
+- `route_for(trigger, ok=)` picks the destination **by outcome**. A success never inherits the failure
+  route: falling back that way would make a quiet automation start announcing its ordinary runs, which
+  is precisely the setting the user turned off. An EMPTY `failure_delivery` falls back to `delivery`, so
+  a trigger predating the field keeps its old single-route behaviour rather than acquiring a channel
+  nobody asked for.
+- `is_muted` is enforced **inside `deliver`**, not at each caller, so a future emitter inherits it — the
+  same reason redaction already lives at that boundary. A per-caller check is a control that works until
+  someone adds the next caller.
+- Per-trigger routing is decided **before** `state.notify`, never inside it. R18: *"the substrate does
+  not build a second notification path."* `notify` owns GLOBAL policy (mute-all, severity, quiet hours)
+  plus per-(source, kind) rules; per-TRIGGER routing is this substrate's own concern.
+- An empty destination is deliberately **not** muted. `from_dict` defaults `delivery` to `"none"`
+  explicitly, so a blank value means a caller built a `Delivery` without one — reading that as silence
+  would turn a bug into missing alerts, the fail-quiet direction this whole session exists to fix.
+
+**Gate:** `make lint` (691 files) green; full `pytest -n 4 --dist worksteal` green. No `web/` change.
+Both halves verified load-bearing independently: neutering the mute check or the outcome branch each
+turns tests red (3 red between them).
+
+- **Still declared-and-unread, recorded so the next sweep does not re-flag them:** `FireRecord.mutated`
+  (its reader `productive` has no production caller either — a whole materiality view is unbuilt, not a
+  wrong answer), `Trigger.retry` and `Trigger.failure_policy` (R12/R7 policy shapes whose consumers are
+  the retry ladder and autopause's derived counter respectively).
+- **`FireContext.moment` and `budget_readable` are unsupplied and that is CORRECT — verified, not
+  assumed.** My first draft of this log claimed `service.tick` supplied them; reading the single
+  construction site (`service.py:474`) showed it does not, so the claim was wrong and is corrected here.
+  Both are safe by defaulting: `evaluate` does `moment = ctx.moment or datetime.now()`, which is the
+  value a tick would have passed anyway, and `budget_readable=True` is sound because
+  `_budget_remaining` is pure in-memory arithmetic over `gates` and `run_count` — **it has no I/O and
+  therefore cannot fail to read**. The field exists for a caller whose budget lives behind a store; the
+  fail-closed contract in its docstring is a rule for that future caller, not an unmet obligation of
+  this one. A sweep result is a lead, not a finding — this is the one that dissolved on measurement.
+
+### S159 — parking was a one-way door (§3.7 / decision 9)
+
+**Found by chasing S158's sweep leads to their end.** `Trigger.retry` and `Trigger.failure_policy` were
+the two remaining never-written fields; investigating them surfaced something bigger than either.
+
+**First, two leads that correctly dissolved** — recorded so the next sweep does not re-open them:
+
+- **`ExitType.PARTIAL` has no producer.** §3.7 promises *"auto-refire on partial"*, and `PARTIAL` is
+  treated identically to `OK` (`outcome_for_exit` returns `ran`, `evaluate` returns `active`). But
+  `classify_exception` never returns it, no provider reports a cursor or resumable stop, and
+  `ActionResult` has no field that could carry one. Building a refire loop for an exit nothing can emit
+  would be inventing the signal — the S146/S156 call.
+- **`failure_policy.dedupe_hash`** is written by the migration from the legacy `last_failure_hash` and
+  read by nothing. The legacy `gateway.py` DID have the control (`is_dup = fh == job.last_failure_hash`
+  plus a 1h reminder window), so this is a genuine migration regression — but measured, the blast radius
+  is bounded: a real `FAILED` streak autopauses at 5, and a parking exit stops the trigger firing
+  entirely. Worth a session, not this one.
+
+**🔴 THE DEFECT this session fixes.** Chasing "what bounds the alerts" led to the park lifecycle:
+
+```
+ACTIVE  : 5 fires over 5 slots
+PARKED  : 0 fires over 5 slots
+…10 days later: state = parked
+```
+
+`autopause.evaluate` has always returned `retry_after=now + PARK_COOLDOWN_SECS` on a parking exit, and
+`unpark_due` has always implemented the clock decision — with **no caller**, and with `retry_after`
+**never persisted**, so even a caller that asked would have had nothing to read. One
+`transport_unavailable` — a 30-second network blip — permanently disabled a working automation.
+
+**And the asymmetry is what made it silent.** A parking exit deliberately does NOT spend the 5-failure
+budget (so a flapping credential cannot clear a real streak), and `needs_attention("parked")` is
+`False`, so parking never escalates into a state a human is told about. It just goes quiet. Compare a
+real `FAILED` streak, which autopauses at 5 and files an attention card.
+
+**The fix, and why each piece is where it is.**
+
+- **`Trigger.park_retry_after`** persists the cooldown. **Epoch, deliberately breaking this entity's
+  ISO-timestamp convention:** `unpark_due` compares it against `now` as a float, and a conversion at
+  each comparison site is a chance to mix units. The ISO fields are the ones a human reads.
+  Cleared on any non-parking outcome, so a recovered trigger carries no stale cooldown into its next
+  outage.
+- **`_unpark_ready` runs BEFORE `due_ids`.** Order is load-bearing and asserted by a test: a parked
+  trigger has `state != ACTIVE`, so `fires_automatically` is False and the due walk filters it out —
+  unparking after that walk would never revive anything. It also mutates the in-memory `triggers` list
+  the caller already built `by_id` from, so a revived trigger fires in the SAME tick instead of waiting
+  another full cooldown.
+- **Only PARKED is revived.** `autopaused` is five true failures and wants a human; `quarantined` is an
+  injection match `resume_state` refuses even from a button; `paused` is the user's own decision.
+  Reviving any of them on a timer would override a judgement someone made — and for quarantine it would
+  re-run the thing that looked like an attack.
+- **The failure counter is NOT reset on unpark.** Parking never spent the budget in the first place, so
+  clearing it would hand a genuinely failing trigger a fresh allowance every time an unrelated outage
+  parked it. Asserted by a test that greps the implementation, because the tempting "clean slate" line
+  is a one-word change someone will add later.
+- **Absent/0 cooldown reads as DUE** — `unpark_due`'s own documented fail-open contract (*"a park
+  written before this field existed cannot strand a trigger forever"*), which is also the state every
+  row written before this session is in. A missing cooldown must not become an infinite one.
+- **`TickResult.unparked`** names the revival, for the same reason `retired` is named: a state change
+  the user did not make must be explainable, and a revival only a log knows about is how "why did this
+  start again?" becomes unanswerable.
+
+**Gate:** `make lint` (black+isort+flake8+mypy, 691 files) green; full `pytest -n 4 --dist worksteal`
+green. No `web/` change. Load-bearing verified: disabling the `_unpark_ready` call turns 3 red. All five
+lifecycle cases driven end-to-end on a real store (pending cooldown, elapsed cooldown, legacy zero,
+autopaused, quarantined).
+
+- **Still open from this session's leads:** `failure_policy.dedupe_hash` (the migration regression named
+  above — a persistent `FAILED` streak alerts 4× before autopause collapses it) and
+  `ExitType.PARTIAL` (needs a provider-side resumable-stop signal that does not exist).
+
+### S160 — a trigger's own failure tolerance was ignored (R7)
+
+**Taken from S159's recorded lead**, which named `failure_policy` as still-unread. Sweeping its two
+declared KEYS rather than the field found the sharper half: `autopause_after` has **zero occurrences
+anywhere in `src/`** outside the plan text.
+
+**🔴 THE DEFECT.** §1.1 declares `failure_policy: {autopause_after: 5, dedupe_hash: true}`, and
+`autopause.evaluate` has **always** accepted `budget=`, floored it at `max(1, budget)`, and
+interpolated it into both reason strings (`"failure 1 of 5"`, `"paused after N consecutive
+failures"`). The fire path never passed one. Measured:
+
+```
+failure_policy = {"autopause_after": 2}     budget evaluate() used = 5
+  streak=1 -> active
+  streak=2 -> active      ← the author asked to stop here
+  streak=3 -> active
+  streak=4 -> autopaused
+```
+
+An author who asked to stop after two failures got five — and was told so in a reason string quoting a
+number they had never chosen.
+
+**The direction is what made it invisible.** This control silently **widens** a tolerance its author
+deliberately narrowed, so the symptom is *a trigger that keeps running* — indistinguishable from a
+healthy one. Every other inert control this program has found failed the other way: work not
+happening, a fire not fired, an alert not sent. Those announce themselves eventually. This one never
+would.
+
+**Wired.** `budget_for(trigger)` reads the key; `_record_fire_outcome` passes it. Driven end-to-end
+through the real fire path: a `{"autopause_after": 2}` trigger autopauses on its **second** failure
+and is disabled, and the reason string now quotes 2.
+
+**🔴 A malformed value falls back to the DEFAULT, deliberately not to 1.** `evaluate` floors at
+`max(1, budget)`, so coercing a typo to `0` would mean "pause on the FIRST failure" — turning
+`autopause_after: "two"` into an automation that stops the first time anything hiccups. Falling back to
+the shipped tolerance is the only reading that cannot surprise, and it is the fail-OPEN direction for a
+control whose stuck-closed form silences real work. Note this is the OPPOSITE call to `max_fires`
+(S133, fail-closed) and the same call as `max_cost_usd_per_run` (S154) — the discriminator is whether
+the malformed value's failure mode is "runs unbounded" or "never runs", and here it is the latter.
+
+**Compatibility is exact:** absent, empty, non-dict or non-positive `failure_policy` all resolve to
+`FAILURE_BUDGET = 5`, so every trigger authored before this session keeps its precise prior behaviour.
+
+**Gate:** `make lint` (691 files) green; full `pytest -n 4 --dist worksteal` green. No `web/` change.
+Load-bearing verified both ways: dropping the `budget=` argument turns 1 red; changing the malformed
+fallback from `FAILURE_BUDGET` to `1` turns 2 red — so the fail-safe DIRECTION is pinned, not just the
+wiring.
+
+- **`failure_policy.dedupe_hash` remains open** and is now the last unread key on this field. It is a
+  genuine migration regression (the legacy `gateway.py` had `is_dup = fh == job.last_failure_hash`
+  inside a 1h reminder window) and needs a new persisted hash field plus a delivery-time check — a
+  session, not a follow-on. Its blast radius is bounded by this session's fix: a persistent identical
+  failure now alerts at most `autopause_after` times before the trigger is paused, which for a
+  narrowed budget is 1–2 alerts rather than 4.
