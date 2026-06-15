@@ -46,6 +46,15 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
   the terminal already used. Editing a project also stops accepting field names it never wrote:
   an unrecognised field now comes back as an error naming it, instead of a silent no-op or a
   blank "server error".
+- **The dashboard could be tricked into handing over your secrets by changing the case of a
+  filename.** The file panel refuses to open credential files — the session signing key, the
+  local secret, the telemetry salt, `.env`, and anything ending in `.key`/`.pem`/`.secret`. On
+  macOS and Windows, where the filesystem ignores upper/lowercase, that block was case-sensitive
+  and could be walked straight past: asking for `.LOCAL_SECRET` instead of `.local_secret`
+  returned the real bytes. The same hole let the write endpoint clobber a protected file under a
+  different-case name. The block is now case-insensitive and also compares file identity, so no
+  spelling — including hard links or Windows short names — reaches a protected file, in either
+  the read or write direction.
 
 - **One app could borrow another app's permission to run an agent, and read agent runs that
   weren't its own.** The permission check on the app agent-run endpoints read the app name out of
@@ -67,6 +76,12 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
   and telling you to re-embed, so the worst case is that older memories are temporarily missing
   from semantic search instead of new ones being lost entirely. If you have hit this, your
   memories are still there: re-embed to bring them back into search.
+- **A task comment could be signed as anyone, and never taken back.** The comment endpoint took
+  the author straight from the request, so any client reaching your gateway could post a comment
+  under your name — and with no delete, a forged one was permanent short of hand-editing files.
+  The author is now derived on the server from your configured username, sending an `author` is
+  rejected outright rather than quietly ignored, and comments can be deleted from the task panel.
+  A malformed comment body now answers 400 instead of failing with a server error.
 
 ## [0.1.3] — 2026-07-30
 
