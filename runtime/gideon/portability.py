@@ -18,11 +18,6 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
-try:
-    import pysqlite3 as sqlite3
-except ImportError:
-    import sqlite3
-
 from gideon.config.loader import config_dir
 from gideon.security import is_sensitive_path
 from gideon.snapshot import (
@@ -34,6 +29,7 @@ from gideon.snapshot import (
     _merge_notifications,
     _merge_triggers,
 )
+from gideon.sqlite_compat import sqlite3
 
 logger = logging.getLogger(__name__)
 

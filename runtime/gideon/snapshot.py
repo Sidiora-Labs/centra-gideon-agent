@@ -14,11 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 from gideon.atomic_write import atomic_write
-
-try:
-    import pysqlite3 as sqlite3
-except ImportError:
-    import sqlite3
+from gideon.sqlite_compat import sqlite3
 
 VALID_COMPONENTS = (
     "memory",
