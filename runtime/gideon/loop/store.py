@@ -17,7 +17,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-import sqlite3
 import time
 from pathlib import Path
 from typing import Any
@@ -26,6 +25,7 @@ from gideon.atomic_write import atomic_write
 from gideon.config.loader import config_dir
 from gideon.loop.loop import KINDS, TERMINAL_STATUSES, Loop, LoopStatus
 from gideon.security import redact_credentials, redact_exfiltration_urls
+from gideon.sqlite_compat import sqlite3
 
 logger = logging.getLogger(__name__)
 
