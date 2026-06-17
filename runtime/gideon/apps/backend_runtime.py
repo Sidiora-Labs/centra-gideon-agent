@@ -122,9 +122,25 @@ class BackendSupervisor:
             storage_ok = checker is not None and checker.can_use_storage()
             data_dir = app_data_dir(name) if storage_ok else None
 
+            # Mint (or read) the per-app proxy secret and hand it to the backend via env.
+            # Fail-closed: a backend that cannot obtain a verifiable secret does NOT start
+            # — an unprotected backend (no inbound signature check) is worse than a missing
+            # one. The value is 0600 on disk and never logged (see apps/app_secret.py).
+            from gideon.apps.app_secret import ensure_app_secret
+            from gideon.sdk.security import APP_SECRET_ENV
+
+            proxy_secret = ensure_app_secret(name)
+            if not proxy_secret:
+                logger.warning(
+                    "app %s backend: proxy secret unavailable; refusing to start unprotected",
+                    name,
+                )
+                return None
+
             env = dict(os.environ)
             env["PORT"] = str(port)
             env["GIDEON_APP_NAME"] = name
+            env[APP_SECRET_ENV] = proxy_secret
             if data_dir is not None:
                 env["GIDEON_APP_DATA_DIR"] = str(data_dir)
             else:
