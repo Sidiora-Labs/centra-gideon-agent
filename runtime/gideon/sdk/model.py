@@ -43,6 +43,7 @@ from gideon.llm.credentials import Credential  # noqa: F401
 # on AnthropicProvider. (A provider with a distinct wire, e.g. Bedrock's Converse API,
 # owns its own client in its app.)
 from gideon.llm.openai import OpenAIProvider  # noqa: F401
+from gideon.llm.prompt_cache import PromptCache  # noqa: F401
 from gideon.llm.registry import (  # noqa: F401
     CredentialMissing,
     ProviderEntry,
@@ -77,6 +78,7 @@ __all__ = [
     "EVENT_TOOL_CALL",
     "Capability",
     "ProviderCapability",
+    "PromptCache",
     "Credential",
     "get_default_registry",
     "ProviderEntry",
