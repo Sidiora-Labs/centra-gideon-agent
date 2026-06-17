@@ -109,6 +109,39 @@ def test_excludes_gideon_and_orchestrator(
 @patch("gideon.orchestrator_skill.load_all")
 @patch("gideon.orchestrator_skill.load")
 @patch("gideon.orchestrator_skill.save")
+def test_excludes_mixed_case_default_agent_key(
+    mock_save, mock_load, mock_load_all, mock_config_load, skills_loader
+):
+    """The default agent's canonical config key is mixed-case ("Gideon"),
+    but the self-exclusion set is lowercase. The filter must case-fold so the
+    default agent is never listed as a delegation target to itself (#419)."""
+    from gideon.agents.defaults import DEFAULT_NATIVE_AGENT_NAME
+    from gideon.orchestrator_skill import generate_orchestrator_skill
+
+    assert DEFAULT_NATIVE_AGENT_NAME == "Gideon"  # mixed-case, guards the fixture
+
+    mock_config_load.return_value = _config_with(
+        [
+            _FakeAgent(name=DEFAULT_NATIVE_AGENT_NAME, description="General"),
+            _FakeAgent(name="code-reviewer", description="Reviews code"),
+            _FakeAgent(name="researcher", description="Researches topics"),
+        ]
+    )
+    mock_load.return_value = ""
+    mock_load_all.return_value = {}
+    generate_orchestrator_skill(skills_loader)
+    content = _read_skill(skills_loader._dir)
+    # The mixed-case default agent must NOT appear as a roster/delegate entry.
+    assert f"### {DEFAULT_NATIVE_AGENT_NAME}" not in content
+    # Real specialists must still be listed.
+    assert "### code-reviewer" in content
+    assert "### researcher" in content
+
+
+@patch("gideon.config.loader.AppConfig.load")
+@patch("gideon.orchestrator_skill.load_all")
+@patch("gideon.orchestrator_skill.load")
+@patch("gideon.orchestrator_skill.save")
 def test_skill_has_always_true_and_delegation_guidelines(
     mock_save, mock_load, mock_load_all, mock_config_load, skills_loader
 ):
