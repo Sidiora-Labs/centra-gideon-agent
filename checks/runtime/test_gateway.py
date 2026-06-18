@@ -230,27 +230,26 @@ class TestInitServices:
                 mock_vm.return_value = mock_vm_inst
                 with patch("gideon.gateway.SkillsLoader"):
                     with patch("gideon.gateway.HookManager"):
-                        with patch("gideon.gateway.LessonStore"):
-                            with patch("gideon.gateway.ContextBuilder"):
-                                with patch("gideon.gateway.ConversationLog") as mock_cl:
-                                    mock_cl_inst = MagicMock()
-                                    mock_cl_inst.init = MagicMock()
-                                    mock_cl.return_value = mock_cl_inst
-                                    with patch("gideon.gateway.SessionManager"):
-                                        with patch("gideon.gateway.HistoryConsolidator"):
-                                            with patch("gideon.gateway.ChannelHistory"):
+                        with patch("gideon.gateway.ContextBuilder"):
+                            with patch("gideon.gateway.ConversationLog") as mock_cl:
+                                mock_cl_inst = MagicMock()
+                                mock_cl_inst.init = MagicMock()
+                                mock_cl.return_value = mock_cl_inst
+                                with patch("gideon.gateway.SessionManager"):
+                                    with patch("gideon.gateway.HistoryConsolidator"):
+                                        with patch("gideon.gateway.ChannelHistory"):
+                                            with patch(
+                                                "gideon.agent.rebuild_agent_config",
+                                                return_value=Path("/tmp/a"),
+                                            ):
                                                 with patch(
-                                                    "gideon.agent.rebuild_agent_config",
-                                                    return_value=Path("/tmp/a"),
+                                                    "subprocess.run",
+                                                    return_value=MagicMock(
+                                                        returncode=0,
+                                                        stdout="gideon 1.30.0",
+                                                    ),
                                                 ):
-                                                    with patch(
-                                                        "subprocess.run",
-                                                        return_value=MagicMock(
-                                                            returncode=0,
-                                                            stdout="gideon 1.30.0",
-                                                        ),
-                                                    ):
-                                                        orch._init_services()
+                                                    orch._init_services()
 
         assert orch.sessions is not None
         assert orch.ctx_builder is not None
@@ -271,27 +270,26 @@ class TestInitServices:
                 mock_vm.return_value = mock_vm_inst
                 with patch("gideon.gateway.SkillsLoader"):
                     with patch("gideon.gateway.HookManager"):
-                        with patch("gideon.gateway.LessonStore"):
-                            with patch("gideon.gateway.ContextBuilder"):
-                                with patch("gideon.gateway.ConversationLog") as mock_cl:
-                                    mock_cl_inst = MagicMock()
-                                    mock_cl_inst.init = MagicMock()
-                                    mock_cl.return_value = mock_cl_inst
-                                    with patch("gideon.gateway.SessionManager"):
-                                        with patch("gideon.gateway.HistoryConsolidator"):
-                                            with patch("gideon.gateway.ChannelHistory"):
+                        with patch("gideon.gateway.ContextBuilder"):
+                            with patch("gideon.gateway.ConversationLog") as mock_cl:
+                                mock_cl_inst = MagicMock()
+                                mock_cl_inst.init = MagicMock()
+                                mock_cl.return_value = mock_cl_inst
+                                with patch("gideon.gateway.SessionManager"):
+                                    with patch("gideon.gateway.HistoryConsolidator"):
+                                        with patch("gideon.gateway.ChannelHistory"):
+                                            with patch(
+                                                "gideon.agent.rebuild_agent_config",
+                                                return_value=Path("/tmp/a"),
+                                            ):
                                                 with patch(
-                                                    "gideon.agent.rebuild_agent_config",
-                                                    return_value=Path("/tmp/a"),
+                                                    "subprocess.run",
+                                                    return_value=MagicMock(
+                                                        returncode=0,
+                                                        stdout="gideon 1.30.0",
+                                                    ),
                                                 ):
-                                                    with patch(
-                                                        "subprocess.run",
-                                                        return_value=MagicMock(
-                                                            returncode=0,
-                                                            stdout="gideon 1.30.0",
-                                                        ),
-                                                    ):
-                                                        orch._init_services()
+                                                    orch._init_services()
 
         assert orch._channel_delivery is None
         assert orch.sessions is not None
