@@ -1652,7 +1652,16 @@ export interface UnifiedLoopClassification {
 // another, memory-checked so the agent doesn't re-ask what it already knows about
 // you. Returned by POST /api/loops/{id}/grill-tree; the FE walks the phases + folds
 // the answers into the task at launch (persisted in kind_config.grill_phases).
-export interface GrillPhaseStep { title: string; prompt: string }
+// A phase step is `{title, prompt}` from the grill `tree` normalizer today; the OPTIONAL typed
+// fields mirror `workflows/grill_protocol.Question` (kind | choices | recommended | required) so
+// the QuestionSlider stepper renders the richer deep-rigor Round with no shim when a planner emits
+// it. Absent fields default to a required freeform text question (the tree shape's behavior).
+export interface GrillPhaseStep {
+  title: string; prompt: string
+  kind?: 'text' | 'choice' | 'slider' | 'boundary'
+  choices?: string[]; recommended?: string; required?: boolean
+  min?: number; max?: number; step?: number
+}
 export interface GrillPhase { title: string; description: string; steps: GrillPhaseStep[] }
 export interface GrillTreeResult { phases: GrillPhase[]; memory_hits: number }
 
@@ -1698,6 +1707,15 @@ export interface ContentSearchResp { results: ContentMatch[]; engine: 'rg' | 'py
 // every generated .docx/.xlsx/.pptx/.pdf/.csv/video displayed as a "Widget".
 export type ArtifactKind = 'widget' | 'html' | 'react' | 'markdown' | 'svg' | 'json' | 'text' | 'infographic' | 'document' | 'image' | 'csv' | 'docx' | 'xlsx' | 'pptx' | 'pdf' | 'video'
 export type ArtifactSource = 'chat' | 'cron' | 'subagent' | 'manual' | 'import'
+// ── Dashboard-as-views registry (AMBIENT-SURFACES §1 / A2-1) ──
+// A view is ordered tile REFS + size hints — NEVER coordinates (the retired grid's
+// lesson). A tile ref is `core:<widget>` (a hard-imported first-party widget) or
+// `artifact:<slug>` (a pinned artifact tile). `added_by:agent` rows are PROPOSALS
+// that render with an accept/dismiss chip.
+export type TileSize = 's' | 'm' | 'l' | 'full'
+export interface DashboardTile { ref: string; size: TileSize; order: number; added_by: 'user' | 'agent' }
+export interface DashboardView { id: string; name: string; icon?: string | null; nav_pinned: boolean; preset: boolean; tiles: DashboardTile[] }
+
 export type ArtifactEventType = 'created' | 'edited' | 'iterated' | 'referenced' | 'reverted'
 export interface ArtifactEvent {
   ts: string; type: ArtifactEventType; by: string; session_id: string
@@ -3072,6 +3090,20 @@ export const api = {
   artifactVersions: (slug: string) => get<{ slug: string; versions: number[] }>(`/api/artifacts/${encodeURIComponent(slug)}/versions`),
   artifactVersion: (slug: string, n: number) => get<Artifact>(`/api/artifacts/${encodeURIComponent(slug)}/versions/${n}`),
   artifactEvents: (slug: string) => get<{ slug: string; events: ArtifactEvent[] }>(`/api/artifacts/${encodeURIComponent(slug)}/events`),
+
+  // ── dashboard-as-views registry (AMBIENT-SURFACES §1 / A2-1) ──
+  // Presets are read-only: updateView/deleteView on a preset return 403. Pinning
+  // (pinTile) POSTs an artifact:<slug> tile; resolveTile accepts (keep) or removes
+  // (dismiss/unpin) an overlay tile.
+  dashboardViews: () => get<{ views: DashboardView[] }>('/api/dashboard/views').then((d) => d.views),
+  createView: (body: { name: string; icon?: string }) => post<{ view: DashboardView }>('/api/dashboard/views', body).then((d) => d.view),
+  updateView: (id: string, body: Partial<Pick<DashboardView, 'name' | 'icon' | 'nav_pinned'>>) =>
+    put<{ view: DashboardView }>(`/api/dashboard/views/${encodeURIComponent(id)}`, body).then((d) => d.view),
+  deleteView: (id: string) => del(`/api/dashboard/views/${encodeURIComponent(id)}`),
+  pinTile: (viewId: string, body: { slug: string; size?: TileSize }) =>
+    post<{ view: DashboardView }>(`/api/dashboard/views/${encodeURIComponent(viewId)}/tiles`, body).then((d) => d.view),
+  resolveTile: (viewId: string, body: { ref: string; keep: boolean }) =>
+    post<{ view: DashboardView }>(`/api/dashboard/views/${encodeURIComponent(viewId)}/tiles/resolve`, body).then((d) => d.view),
 
   // App Platform (A7) — install/manage apps that extend PClaw.
   // Normalize the app-category flag at the boundary: `native` is the single source
