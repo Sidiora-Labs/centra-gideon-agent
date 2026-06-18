@@ -651,6 +651,32 @@ Send a file to the user. Copies the file to the outbox and notifies the dashboar
 }
 ```
 
+### `project_context_review`
+
+Review THIS conversation and propose updates to the current project's context — its instructions, an inlined context file, or a skill. Call ONLY when the user asks you to review/capture what was established here (e.g. 'review this chat and update the project'); it does not run automatically. You identify the changes from the conversation and pass them as `items`, each with a one-line `rationale` the user reads before deciding. Nothing is written: each item becomes a PROPOSAL in the review queue, and the project changes only when the user accepts it there. A change the user already declined is not re-proposed.
+
+**Response type:** `project.context.review.result`
+
+**Safety:** requires approval
+
+**Parameters:**
+- `items` (array, required) — The proposed changes.
+- `project_id` (string, optional) — Target project id. Omit to use this session's bound project.
+
+**Example — Propose a project instruction from what this chat established:**
+
+```json
+{
+  "items": [
+    {
+      "body": "Always run `make lint` before committing.",
+      "kind": "project_instruction",
+      "rationale": "We agreed lint must pass pre-commit"
+    }
+  ]
+}
+```
+
 ### `skill_invoke`
 
 Load a skill's full instructions by name. Your context carries only a compact INDEX of available skills (name + one-line description); when a listed skill fits the task, call this to pull its complete step-by-step body before acting. Prefer this over reading the skill file directly — it records the skill as used so the library can keep what helps and retire what doesn't.
@@ -1662,6 +1688,7 @@ Turn a natural-language goal into a workflow spec for review BEFORE anything run
 
 **Parameters:**
 - `goal` (string, required) — What the workflow should accomplish, in plain language.
+- `project_id` (string, optional) — Optional: a project this plan targets. When it binds an existing codebase, the plan is grounded in that project's real layout, README and stack so generated stages assume the right conventions.
 - `rigor` (string, optional) — How much structure to propose (default standard).
 - `template` (string, optional) — Optional: a template name to base the plan on.
 
