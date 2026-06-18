@@ -21,7 +21,6 @@ from gideon.dashboard.token_auth import parse_duration
 from gideon.frontend import build_frontend_sync, ensure_dev_dist_symlink
 from gideon.gateway import run_gateway
 from gideon.history import ConversationLog, HistoryConsolidator
-from gideon.learn import LessonStore
 from gideon.memory import MemoryStore
 from gideon.sel import sel
 from gideon.service import controller as service_controller
@@ -618,7 +617,6 @@ def _build_consolidator() -> tuple["SessionManager", HistoryConsolidator, Conver
         log=conv_log,
         memory=memory,
         sessions=sessions,
-        lesson_store=LessonStore(),
         history_idle_secs=cfg.memory.history_idle_hours * 3600,
         vector_store=vector_memory,
         migrated=cfg.memory.migrated,

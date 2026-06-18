@@ -13,7 +13,6 @@ from pathlib import Path
 
 from gideon.context import ContextBuilder
 from gideon.hooks import ContextRule, HookManager, HooksConfig, TransformHook
-from gideon.learn import LessonStore
 from gideon.memory import MemoryStore
 from gideon.skills import SkillsLoader
 from gideon.vector_memory import VectorMemoryStore
@@ -27,7 +26,6 @@ def _builder(tmp_path: Path, **kw: object) -> ContextBuilder:
         memory=store,  # type: ignore[arg-type]
         skills=SkillsLoader(skills_path=tmp_path / "skills", install_builtins=False),
         hooks=kw.get("hooks") or HookManager(),  # type: ignore[arg-type]
-        lessons=kw.get("lessons") or LessonStore(base_dir=tmp_path),  # type: ignore[arg-type]
     )
 
 
