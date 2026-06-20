@@ -220,3 +220,150 @@ Extends **Sessions 7-8** (the ramp — the guide/kit are being written there any
 | T7.4 | Slack to full pattern: add the `inbox` provider registration (`MessageSourceProvider` over the existing runtime client) to `providers[]`; move any non-seam Slack-specific surface behind the app's own `ui` block; scrub vendor-name residue from core seam comments | apps repo `slack-channel/app.json` + `slack_runtime/`, core `inbox_providers/` docstrings | Slack messages flow through the generic inbox source seam (no core slack string); manifest registers ≥2 providers; boundary tests green |
 | T7.5 | Guide + kit: vendor-completeness section in `build-a-channel-app.md` (the seam checklist: channel + inbox + trigger-source-when-available + contributed UI; rule 2's "your UI, not core's" doctrine) + a conformance-kit check that a channel app also registers an inbox source (or declares why not) | `docs/guides/build-a-channel-app.md`, `tests/channel_conformance.py` | the checklist is explicit in the guide; telegram/discord/email tasks (S2-6) cite it; kit flags a channel-only app with a warning |
 | T7.6 | Trigger-source forward note: coordination line into WORKFLOWS-V2-AUTOMATION-SUBSTRATE (app-registered trigger source types) so each vendor app adds its trigger-source provider when that seam lands — no early hand-rolled event glue | this plan + substrate plan cross-refs | both plans reference one seam; no vendor app ships bespoke trigger machinery before it exists |
+
+## Execution log
+
+- **2026-08-09 — DONE: CE-3** (Telegram channel app, Sessions 2-3 T2.1–T2.5, apps#26).
+  Recorded retroactively — this plan had no Execution log section when CE-3 landed, so the entry
+  lived only in the atomic mirror. Shipped `GideonApps/telegram-channel/`: a
+  `ChannelTransportProvider` (`getUpdates` long-poll, offset persisted and advanced before dispatch)
+  + `ChannelDelivery` over the raw Bot API on `httpx`, no vendor SDK, core imported only via
+  `gideon.sdk.*`. 108 bundle tests green, SDK-only boundary lint clean. **V2 pending:** the
+  owner real-phone walkthrough (Owner tasks 1-2) is a real-world step outside automated execution.
+
+- **2026-08-09 — DONE: CE-4** (Discord channel app, Sessions 4-5 T4.1–T4.4, apps#29).
+  Shipped `GideonApps/discord-channel/` — the second channel onto the CE-1 trust seam, built
+  to the same shape as Telegram. Both wire protocols are implemented directly against libraries core
+  already depends on (`websockets`, `httpx`), so the bundle contains no vendor SDK anywhere (tests
+  included) and declares no `pythonDependencies`; core is imported only via `gideon.sdk.*`.
+  - **T4.1 gateway (`gateway.py`)** — the full WS lifecycle: HELLO-driven heartbeat with ACK
+    tracking, IDENTIFY with the intents bitfield summed from NAMED bits (guilds | guild_messages |
+    direct_messages | message_content = **37377**), READY → `session_id`/`resume_gateway_url`,
+    RESUME (op 6) with the last *processed* seq, INVALID_SESSION (honoring the resumable boolean),
+    RECONNECT (op 7). Two traps contained: the **zombied connection** (a beat unacked when the next
+    is due means the gateway stopped processing us while the socket still looks open → close
+    **4000**, never 1000, which would make the session unresumable, then resume), and the
+    **silent-bitfield failure** (a wrong intents int connects fine and the events you didn't ask for
+    simply never arrive — so the value is pinned three ways plus a dedicated `DIRECT_MESSAGES` guard,
+    since dropping bit 12 yields 33281 and a bot that can never be paired by DM).
+  - **T4.2 REST + delivery (`api.py`, `delivery.py`)** — Discord's real difference from a flat
+    `retry_after` API is that rate limits are **per-bucket**: bucket state is folded from the
+    response headers and an exhausted bucket is waited off *pre-emptively* rather than spending a 429
+    to learn it, a global limit is tracked separately from a per-route one, and buckets key on
+    method + concrete path so one busy channel cannot stall another. Approvals are message
+    **components**: an Approve/Deny action row whose `custom_id` carries the request id, resolved by
+    the `INTERACTION_CREATE` press and *always* acknowledged inside Discord's three-second window
+    even for a stale id, after which the prompt is edited to its outcome with `components` stripped
+    so no clickable Approve survives a decision. Streaming is throttled edits with an exact final
+    flush; text splits at 2000.
+  - **T4.3 transport + trust (`transport.py`)** — runs the REAL core seam (`guard_inbound`, provider
+    `"discord"`): DMs pair, guild channels are tracked-only, non-owner content is fenced before it
+    enters a session. `is_dm` is derived from the **absence of `guild_id`** (Discord's actual signal,
+    not a channel-type guess). Self-authored and other-bot messages are dropped — `MESSAGE_CREATE`
+    fires for the bot's own sends, and without that filter the bot answers itself forever; the trap
+    does not exist for Telegram's `getUpdates`. Capabilities are honest: every `True` has an
+    implementation behind it (reactions, typing_indicator included), `max_text_len=2000`.
+  - **T4.4 setup/doctor** — app-owned `dm_activation` + `application_id` in the app's own store, bot
+    token in the shared credential store under the app's own `DISCORD_BOT_TOKEN` key. The
+    application id is deliberately NOT a credential: Discord prints it publicly and it rides in every
+    invite URL, so storing it as a secret would claim a secrecy it lacks and hide it from the
+    Configure form. Setup prints the OAuth2 invite URL with exactly the six permission bits the code
+    exercises (274878008384 — no ADMINISTRATOR, test-guarded); doctor points at the Channels-page
+    Test for the live `GET /gateway/bot` hello probe, which is T4.4's named probe.
+  - **Gate:** 198 bundle tests green with no network and no wall-clock sleeps (`httpx.MockTransport`,
+    a scripted fake WebSocket, injected heartbeat/throttle clocks; trust exercised against the real
+    core seam in an isolated `GIDEON_HOME`). Manifest round-trip stable + `validate()` clean;
+    SDK-only boundary lint clean under CI's repo-wide logic including `conftest.py`;
+    `telegram-channel` 108 still green. The zombie check, the 4000-not-1000 close code, the
+    `DIRECT_MESSAGES` bit, the `is_dm` derivation, the self-message filter and the global-429 gate
+    were each **falsified by breaking them** — every break reds a specific test.
+  - **DISCOVERY (two defects the tests surfaced):** `_handle_dispatch` coerced a bogus non-dict `d`
+    to `{}` via `frame.get("d") or {}` and handed handlers a silently-empty event (now: `None` → `{}`
+    is legitimate for RESUMED, any other non-dict is dropped with a warning). And a tmp
+    `GIDEON_HOME` alone is **not** test isolation — core's `save_credential` mirrors values
+    into `os.environ` and `load_credentials` reads them back, so one test's owner id stayed visible
+    to the next and a missing-owner assertion passed on stale state.
+  - **V4 pending (owner):** validating against a real Discord application, bot and test server
+    (Owner tasks 3) needs a human in the Developer Portal — create the application, **enable the
+    MESSAGE CONTENT privileged intent** (without it every message arrives with empty `content`, the
+    single most common reason a Discord bot looks broken), and invite the bot. The automated suite
+    covers the protocol; it cannot cover "Discord accepted this token."
+  - **Unblocks:** CE-6 (the conformance kit) now needs only CE-5; CE-7 follows it.
+
+- **2026-08-09 — DONE: CE-5** (Email channel app, Session 6 T6.1–T6.3, apps#30).
+  Shipped `GideonApps/email-channel/` — the third channel onto the CE-1 trust seam, and the
+  last one the conformance kit was waiting for. Stdlib `imaplib`/`smtplib` **only**: no vendor SDK,
+  no new `pythonDependencies`, core imported exclusively via `gideon.sdk.*`.
+  - **Not the `mail-inbox` app.** `mail-inbox` (EIAT-2) is a `MessageSourceProvider` — mail as a
+    read-only inbox *source* with its own allowlist. This is the *channel* §Boundary of plan 43
+    reserves for CHANNEL-EXPANSION, and per that boundary it **reuses** the trust seam rather than
+    forking one: trust is owned by core `channel_trust` (`provider="email"`), so this app keeps no
+    allowlist of its own. Separate bundles with no shared imports (apps cannot import each other);
+    where `mail-inbox` already got a MIME trap right, this follows it.
+  - **T6.1 poll transport (`transport.py`, `imap_client.py`)** — both stdlib APIs block, so every
+    IMAP/SMTP call crosses a thread executor; one blocking `select()` on the loop would stall the
+    whole gateway. The loop is **UID-based, never sequence numbers** (which renumber on expunge and
+    would silently skip or reprocess), read-only, and persists `last_uid` + `UIDVALIDITY` in the
+    app's data dir so a restart neither reprocesses nor skips. Two traps contained: the
+    **UIDVALIDITY check runs before the search** and re-derives the cursor under the new numbering,
+    so a renumbered mailbox *recovers* instead of staying permanently skipped; and the cursor
+    advances **before** dispatch (and on `CancelledError`) so a raising handler cannot replay one
+    message forever. Trust is keyed on the `parseaddr` address **only**, with the `local@domain`
+    shape verified rather than assumed — so `From: "bob@allowed.example" <attacker@evil.example>`
+    is denied, the display name being attacker-controlled and used for UI text alone. Self-authored
+    inbound is dropped: providers copy sent mail into the inbox and a reply-to-self loops forever
+    (the same trap Discord has via `MESSAGE_CREATE`, absent from Telegram's `getUpdates`). Pairing
+    is a reply containing the 8-digit code, redeemed through `redeem_pairing_code`. Fail-closed
+    throughout — an unparseable message, a missing `From`, or a trust-store read failure denies and
+    continues the loop; allowed non-owner content enters the session as `guard_inbound`'s
+    `fenced_text`, never raw.
+  - **T6.2 SMTP delivery (`delivery.py`, `smtp_client.py`, `mime.py`)** — outbound sets
+    `In-Reply-To` plus an accumulating `References` chain keyed through `session_map`, so three
+    messages stay one conversation in a real mail client. Per Contract C3 (Email column):
+    `deliver_text` MUST, `deliver_rich` MAY as an HTML alternative, `request_approval` by reply
+    token, `upload_attachment` as a MIME part, `build_thread_link` as a `mid:` anchor. Connections
+    open per send (providers drop idle sessions) and a failed STARTTLS **aborts** rather than
+    retrying in the clear.
+  - **T6.3 setup/doctor** — IMAP/SMTP hosts with app-password guidance for Gmail/Fastmail; the
+    doctor probe is login + select, as the task specifies.
+  - **Gate:** 306 bundle tests green with no network, no wall-clock sleeps and no writes outside a
+    tmp home (fake IMAP/SMTP servers and clocks injected, not monkeypatched onto stdlib; trust
+    exercised against the real core seam in an isolated `GIDEON_HOME`). Manifest round-trip
+    stable + `validate()` clean, permissions `{storage, network}`, no `pythonDependencies`; SDK-only
+    boundary lint clean under CI's repo-wide logic including `conftest.py` and `_fakes.py`;
+    `telegram-channel` 108 and `mail-inbox` 32 still green. Six load-bearing controls were
+    **falsified by breaking them**: the UID advance/persistence, the self-message filter, the
+    `parseaddr`-only trust match, the `References` chain across three messages, the streaming-trio
+    no-op, and the fenced-text-into-session path.
+  - **DEVIATION (streaming=false):** the shipped `ChannelCapabilities` dataclass has no `streaming`
+    field, so the plan's "capabilities declare streaming=false" is expressed as **`edits=False`** —
+    in every other channel a stream *is* a repeatedly-edited message, so no-edits means no-streaming
+    — plus `start_stream()` returning `""` with no-op `append_stream_task`/`stop_stream`. One test
+    pins both halves together so the declaration cannot drift from the behavior.
+  - **DEVIATION (credential keys):** the plan names `EMAIL_IMAP_{HOST,USER,PASS,PORT}` /
+    `EMAIL_SMTP_{...}`. Only the two `*_PASS` keys are secret, so only those live in the credential
+    store (verbatim names); hosts, users and ports live in `ProviderSettings` where the user can see
+    and edit them, and no secret appears in `settingsSchema` at all — following `mail-inbox`.
+    Claiming secrecy for a hostname would hide it from the Configure form for nothing.
+  - **DISCOVERY (three defects the tests surfaced):** `parseaddr` returns a bare token like
+    `not-an-address` as the *address* half, so the trust key was not required to be an address at
+    all — now shape-verified. The `UIDVALIDITY` check originally ran *after* the search, which is
+    precisely the failure it claimed to prevent (a renumbered mailbox stayed permanently skipped);
+    a test now proves the channel recovers, not merely resets. And `imap_use_ssl` was declared in
+    the settings schema with **no `setup` writer**, making a plain-IMAP port-143 mailbox unreachable
+    from `gideon setup` — an audit now shows all 12 declared keys have both a runtime reader
+    and a setup writer.
+  - **DEFERRED, with reasons in the README:** OAuth2/XOAUTH2 (DISCOVERY note; app-password auth is
+    documented for Gmail/Fastmail, which is what §S6 specifies). IMAP **IDLE** — `imaplib` has no
+    IDLE support, so it means hand-rolling the command plus its 29-minute re-issue cycle; the plan
+    already calls IDLE optional-later, and the 60s poll cadence is configurable. The **plan-42 S5
+    digest target** — `deliver_notification` is the hook, but core's `notification_rules.TARGETS`
+    carries `channel_dm` with **no dispatcher wired**, so a digest lands as an inbox item today;
+    nothing in this app changes when that lands. (This is the atom's "digest-target deferral noted
+    if plan-42 S5 absent" clause, discharged.)
+  - **V6 pending (owner):** a dedicated mailbox plus an app password, then a real send/receive/
+    pairing walkthrough (Owner tasks 4). The suite covers the protocol; it cannot cover "this mail
+    provider accepted this app password."
+  - **Unblocks:** CE-6 (the conformance kit) — all five of its atom deps are now `done`, leaving
+    only its `EXT:INBOX-NOTIFICATIONS-UNIFICATION` note, which the plan says uses the existing
+    notification path until that lands. CE-7 follows CE-6 + CE-8.
