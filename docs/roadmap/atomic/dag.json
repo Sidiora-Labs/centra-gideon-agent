@@ -2972,13 +2972,14 @@
         {
           "id": "WF2LEA-5",
           "title": "Criterion 9: wire accountability.attribute on the curator tick — Run-Ledger deltas → verdicts → auto-filed HARMFUL reverts",
-          "status": "todo",
+          "status": "done",
           "scope": "§3.1 change-manifest attribution (predict-then-verify, 5-way verdicts, HARMFUL auto-revert), Status line 'accountability.py has ZERO production importers', success criterion 9",
           "done_when": "A production caller on the curator tick computes fixed[]/regressed[] deltas from Run Ledger outcomes after N post-acceptance runs, invokes accountability.attribute(), records the EFFECTIVE..HARMFUL verdict on the accepted change, and a HARMFUL verdict has auto-filed a revert proposal through the queue; verified end-to-end (module no longer has zero importers)",
           "deps": [
             "WF2LEA-1",
             "WF2LEA-4"
-          ]
+          ],
+          "evidence": "New learning/attribution.py is the production importer of accountability.py (its purity invariant intact — orchestration/store live here, not there). proposals.accept() snapshots the bet (target+predicted_fixes+before-rates keyed by run id) the instant before it unlinks the proposal file; history._run_learning_curator calls attribution.grade_accepted_changes() each curator tick, which recomputes after-rates from the Run Ledger over ≥MIN_RUNS post-acceptance runs of the target, calls accountability.attribute(), records the 5-way verdict, and files a HARMFUL revert PROPOSAL through the shared human-gated queue (never applied). Reads the ledger directly (NOT vector-gated) so it works on every box; inert-by-data when nothing accepted. Config round-trip: learning.attribution_enabled (default on) through dataclass+_meta/load/to_dict/_EDITABLE_CONFIG + config-baseline. 14 new end-to-end tests (real store+ledger+config) incl. accountability-now-has-a-production-importer; make lint (black/isort/flake8/mypy) + 3 gate_report gates + 280 sibling tests green."
         },
         {
           "id": "WF2LEA-6",
@@ -3957,7 +3958,7 @@
         {
           "id": "EIAT-2",
           "title": "mail-inbox provider app: IMAP inbound, checkpointing, fail-closed allowlist, MIME extraction (S2)",
-          "status": "todo",
+          "status": "done",
           "scope": "Session 2 — The mail inbox provider app (T2.1, T2.2, T2.3); Contract C3. New GideonApps/mail-inbox/ app.",
           "done_when": "Polling a real IMAP mailbox surfaces messages as inbox items; a restart neither reprocesses nor skips (UID checkpoint via poll's returned dict, tested) and a duplicate Message-ID is dropped; the sender allowlist is provider-enforced and fail-closed — an unlisted sender and an empty allowlist both surface ZERO messages and zero events (both asserted), startup logs the posture, and SEL mail_sender_rejected fires per rejection; multipart mail extracts text/plain, HTML-only mail is sanitized, a PDF attachment contributes extracted text via the platform's existing document readers; credentials come only from the SDK credential store (never app.json/ProviderSettings); app installs from a local Store source. Validation (V2) requires an owner-provided test mailbox.",
           "deps": [
