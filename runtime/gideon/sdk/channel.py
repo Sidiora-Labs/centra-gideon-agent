@@ -163,6 +163,18 @@ from gideon.skills import SkillsLoader  # noqa: F401
 from gideon.stats import Stats  # noqa: F401
 from gideon.subagent import SubagentManager  # noqa: F401
 from gideon.task import Task  # noqa: F401
+
+# ── Conformance kit (CE-6) — the one executable channel contract ──
+# Lives in the INSTALLED package, not core's `tests/`: `tests/` ships in neither the
+# wheel nor the sdist (pyproject `packages.find where = ["src"]`; MANIFEST.in grafts only
+# web/dist), and the apps repo's CI installs core as a distribution — so a kit under
+# `tests/` would be unimportable exactly where the four apps have to call it. Re-exported
+# here because this facade is the only import path an app is allowed to use.
+from gideon.testing.channel_conformance import (  # noqa: F401
+    CapturingState,
+    ChannelContractError,
+    assert_channel_contract,
+)
 from gideon.textfmt import extract_options, strip_thinking_tags  # noqa: F401
 
 # ── Media + prompts + discovery ──
