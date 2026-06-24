@@ -121,7 +121,8 @@ function ProjectListPage({ onOpen, query, setQuery }: { onOpen: (id: string) => 
         right={<HeaderActions><HeaderControl icon={Plus} label="New project" onClick={() => setCreating(true)} variant="primary" priority="primary" /></HeaderActions>} />
 
       {!!projects?.length && (
-        <ListControls search={{ value: q, onChange: setQ, placeholder: 'Search projects', label: 'Search projects' }} />
+        <ListControls search={{ value: q, onChange: setQ, placeholder: 'Search projects', label: 'Search projects' }}
+          results={{ count: shown.length, noun: 'projects', active: !!needle }} />
       )}
 
       {err && (
@@ -395,7 +396,11 @@ function NewProjectModal({ busy, onClose, onCreate }: {
         </label>
         <div className="flex items-center justify-end gap-2 pt-1">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button onClick={submit} disabled={!name.trim() || busy}>
+          {/* The reason keeps the button reachable and says what is missing — a bare
+              `disabled` submit is removed from the tab order, so a keyboard user tabs past
+              the action with no way to learn why (measured: title null, NOT focusable). */}
+          <Button onClick={submit} disabled={!name.trim() || busy}
+            disabledReason={!name.trim() ? 'Enter a project name first' : undefined}>
             {busy ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />} Create project
           </Button>
         </div>
