@@ -306,17 +306,10 @@
         "enum:Completeness.INFERRED"
       ]
     },
-    "src/gideon/workflows/judge_actors.py": {
+    "src/gideon/workflows/judge_contract.py": {
       "inert": 1,
       "surfaces": [
-        "enum:Actor.WORKER"
-      ]
-    },
-    "src/gideon/workflows/judge_contract.py": {
-      "inert": 2,
-      "surfaces": [
-        "enum:Ratchet.RELAXED",
-        "enum:Verdict.REPLAN"
+        "enum:Ratchet.RELAXED"
       ]
     },
     "src/gideon/workflows/models.py": {
@@ -330,10 +323,10 @@
     "by_kind": {
       "config": 0,
       "editable_config": 0,
-      "enum": 12,
+      "enum": 10,
       "sdk_export": 127,
       "trigger_kind": 0
     },
-    "inert": 139
+    "inert": 137
   }
 }
