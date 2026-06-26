@@ -37,6 +37,16 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
 
 ### Added
 
+- **You can share a chat as a read-only artifact — inside your own instance, never on the
+  internet.** Right-click a chat in Chat History → **Share as read-only artifact** and the
+  conversation is saved into your artifacts library as a Markdown record, then opened for you. The
+  body is the *same* credential-redacted transcript the Export action produces (redaction covers
+  your own messages too, which the chat log itself does not), and the artifact is frozen: it can be
+  read, downloaded, or deleted, but never edited — a record you can point at, not a document that
+  can drift from what happened. It is created only when you ask, on an authenticated request: there
+  is no public link, no share token, and nothing shares a chat automatically. Incognito and
+  temporary chats refuse to be shared, since an artifact is durable and those chats promise not to
+  be. Export is unchanged.
 - **A Routing & Efficiency panel in Settings shows which model is efficient for which kind of
   work.** Settings → Routing & Efficiency lets you pick a use case (chat / code & tools / reasoning)
   and a request kind (short chat, code, summarize, extract structured, long reasoning — both
@@ -100,6 +110,30 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
 
 ### Fixed
 
+- **`gideon update` was a dead end unless you had installed from git.** If you installed the
+  documented way — `pipx install gideon`, `pip install gideon`, `uv tool install
+  gideon` — `gideon update` printed "❌ GIDEON_PROJECT_DIR not set — cannot locate
+  source tree" and exited 1, because the CLI still ran the old git-only pipeline while the
+  install-kind-aware updater the dashboard uses lived elsewhere. The command now behaves per install
+  kind: a **wheel install** upgrades itself in place (`-U gideon==<latest>`, no source tree, no
+  Node) and tells you to `gideon restart`; a **git checkout** keeps the fetch + reset + rebuild
+  pipeline and honours Developer update mode (ride release tags by default, every commit when it's
+  on); a **container** prints the two `docker compose pull` / `up -d` commands rather than pretending
+  it can patch an image; a **desktop** install defers to the app's own updater. An install kind it
+  does not recognize says what it detected and refuses to guess, instead of falling back to
+  `git reset --hard` on a tree it may not own.
+- **`gideon update` could run `git reset --hard` without anyone agreeing to it.** With
+  uncommitted tracked changes, the confirmation prompt used to read whatever was on stdin — so from
+  cron, a pipe, or `< /dev/null` it could take a piped "y" and discard your work, or crash with an
+  `EOFError` traceback. Without a terminal it now refuses the destructive reset, names the files at
+  risk and the remedy (`git stash` or commit), and exits non-zero. Declining at a real prompt still
+  exits 0 — that's a choice, not a failure. Untracked files are no longer listed as at risk, because
+  a reset does not touch them.
+- **A detached-HEAD update fetched a branch that does not exist.** When git reported no branch (a
+  checkout parked on a release tag), the updater fell back to a hardcoded branch name this project
+  has never used, so the fetch failed with a confusing git error. It now resolves the branch
+  honestly: the branch you are on, else the remote's own `HEAD` (read locally, so it still works
+  offline), else what the remote reports, else `main`.
 - **Deleting a knowledge item mid-enrichment crashed its background pipeline with a noisy
   error.** If you deleted an item within the ~30 seconds its tags/insights were still being
   extracted, the enrichment pipeline hit a `FOREIGN KEY constraint failed` error, logged a full
