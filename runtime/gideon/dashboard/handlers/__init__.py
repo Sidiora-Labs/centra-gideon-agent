@@ -334,7 +334,6 @@ from gideon.dashboard.handlers.updates import (  # noqa: E402, F401
     _QueueLogHandler,
     _RingLogHandler,
     _update_info,
-    _version_tuple,
     api_changelog,
     api_log_level,
     api_log_level_get,
