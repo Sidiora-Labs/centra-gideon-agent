@@ -2340,12 +2340,14 @@
         {
           "id": "WF2LOO-10",
           "title": "code-project template (product decision + build)",
-          "status": "todo",
+          "status": "done",
           "scope": "Per-Kind Template Designs 4: Code/SDLC Loop -> code-project (R5); Success Criteria 6",
           "done_when": "The product decision is made (replace the shipped code-implementation template vs. add code-project beside it) and the chosen template ships with the R5 structural gates: gated initializer (4-condition checklist), WIP=1 engine-enforced single_active_feature, reproduction-before-edit with inverted success_when for bug-flavored runs, baseline capture, and dual verify+guard gate. Verified: a 'build a feature' run passes the init-gate, holds WIP=1, and classifies a seeded regression vs a pre-existing failure via the baseline diff (criterion 6).",
           "deps": [
             "WF2LOO-3"
-          ]
+          ],
+          "pr": "#1105",
+          "evidence": "PRODUCT DECISION: evolve `code-implementation` INTO `code-project` (replace, not add) — clean-break tenet forbids two near-duplicate code templates, and loop_aliases.KIND_TO_TEMPLATE already existed to keep legacy `code` references resolving at READ time with zero migration. Shipped: bundled/code-project/workflow.json with all five R5 gates; code-implementation/ deleted and every reference swept (py aliases, FE containerKey.KIND_TO_TEMPLATE + templateSuggest, two bundled when_not_to_use lines, 6 test files). Two NEW engine mechanisms, each with a live writer and a live reader: `success_when` (writer = the repro stage; reader = controller._check_success_when, narrows success only, `output.*` root added to BindingContext) and `single_active_feature` (writer = runtime_hints.execution; readers = tick.frontier's per-fan-out cap 1 + Frontier.wip_held journaled as a DECISION record, AND validator WF_WIP_CONTRADICTION refusing a spec that declares WIP=1 beside max_concurrency>1). New workflows/conditions.py is the ONE boolean dialect (||/&&/!/parens/==/!=) now read by the expression gate, `until` loops and success_when — it also FIXED two shipped gates that could never reject (interpolate-then-truthy made `{{inputs.fix}} == true` the truthy string \"false == true\"). The dual gate classifies via GuardOutcome (clean/pre_existing/regression/undetermined/skipped) against the baseline's guard result: regression FAILS, pre-existing DEGRADES. Also wired EngineServices.verify=verify.run_verify_block in the gateway — it was UNSET, so every verify_command gate in production failed INTERNAL 'no verifier wired'. 78 new tests (test_workflows_code_project.py + test_workflows_conditions.py) drive the SHIPPED spec's own nodes through the real dispatchers; criterion 6 is proven by really running the shipped baseline node in a temp tree (guard red vs green) and asserting the same failing guard yields opposite verdicts."
         },
         {
           "id": "WF2LOO-11",
@@ -3029,13 +3031,16 @@
         {
           "id": "WF2LEA-9",
           "title": "Step 9: polish tier — multi-gate heat promotion, memory-heat kernel migration, observability panel completion, per-tool approval identity, intent-adaptive/ablation sweeps",
-          "status": "todo",
+          "status": "done",
           "scope": "§7 step 9, §2.3 heat-earned promotion + decay kernel (R6f), §6 flywheel observability panel completion (R14b), §4 Disposition 'stats approve/deny counters → procedural priors'",
           "done_when": "heat-earned promotion uses the multi-gate (usage+recency+diversity); memory_record.heat migrated onto the one kernel; observability panel shows health composite (0-100), judge-calibration MAE buckets (R10d), attribution verdict history (R16), per-op LLM cost aggregates (R19e); per-tool approval identity added and fed to procedural priors (or dropped with DEVIATION); intent-adaptive weight profiles + ablation-delta sweep",
+          "status_note": "4 of 5 parts shipped; part 4 (per-tool approval identity) DROPPED with a DEVIATION under the plan's own line-317 authorization — see the plan's Execution log.",
+          "evidence": "Part 1: `usage.promotion_ready` had NO caller in src/ and `Kind.TIER_MIGRATION` had NO writer — now wired via curator.promotion_suggestions/file_promotion_suggestions from the verified consolidation tick (history._run_learning_curator), read by the Proposal Inbox; AST test asserts the call site. Part 2: memory_record.heat's private `0.5·e^(−days/30)` recency term replaced by decay.strength() with an exhaustive MemoryKind→profile map that RAISES on an unmapped kind; behaviour change pinned (30d/0-visit heat 0.18394 → 0.291-0.406 by kind); doctrine asserted — the kernel's prune verdict does not reorder procedural_priors and recency alone cannot outrank usage. Part 3: new GET /api/learning/health + HealthPanel on the existing Learning page renders the 0-100 composite with the 50-80% band, R10d MAE buckets (predicted confidence from judge_evidence.samples — `overall` is never journaled), R16 attribution verdict history, R19e per-cadence cost; budget utilization got the writer it never had (context._record_ambient_measurements → allocation_samples), since ambient.report() only debug-logged it. Part 5: intent profiles were already live; added surfacing.ablation_deltas over 5 named heuristics, persisted on a daily cadence and rendered, with a null-result verdict. Every metric renders unmeasured as null, never 0.",
           "deps": [
             "WF2LEA-2",
             "WF2LEA-5"
-          ]
+          ],
+          "pr": "#1109"
         },
         {
           "id": "WF2LEA-10",
