@@ -247,6 +247,21 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
 
 ### Changed
 
+- **"Reduce motion" now actually stops the springs — and the Bounciness slider reaches everything it
+  claimed to.** If your operating system is set to reduce motion, Gideon relied on a framework
+  setting that neutralises movement *across the screen* but leaves the underlying spring running, so
+  anything animating opacity or a blur still bounced its way in. Every spring in the app now collapses
+  to an instant swap under that setting, in one place, so a new animation cannot escape it. Separately,
+  menus and popovers were reading your **Bounciness** value once when the app loaded and then ignoring
+  it: moving the slider changed nothing for them until a full reload. They now read it every time they
+  open. The app's spring presets are also down to one named set of four — *snappy*, *smooth*, *fluid*
+  and *playful* — so motion is consistent between surfaces that used to pick from two overlapping
+  lists; a few entrances (dialogs, the update overlay, the composer) are slightly quicker and bouncier
+  as a result, and Settings → Design → Motion tunes all of them. **Three new sliders in that same
+  group** control drag and swipe feel: how far a dragged card stretches past its edge, and the flick
+  speed *or* distance at which a swipe dismisses it (a toast can now be flicked away quickly or hauled
+  away slowly — previously only one worked, at values you could not change).
+
 - **Housekeeping now runs when your machine actually needs it, instead of on a fixed clock — and
   one system does it, not two.** Gideon's minute-by-minute heartbeat used to carry its own
   maintenance schedule: rebuild the memory search index every 15 minutes whether or not anything
@@ -323,6 +338,21 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
 
 ### Added
 
+- **You can approve what Gideon is waiting on from your phone.** A run that stops to ask
+  permission used to stay stopped until you were back at a desk, because the only place the question
+  appeared was the desktop dashboard. There is now a phone route at **`#/companion`** — open it on
+  your phone (over your tailnet or however you reach your gateway) and it shows every pending tool
+  approval with the whole decision on screen: the tool, its **full arguments** (not a truncated
+  preview — you should never approve something you cannot read), why it wants to run, which session
+  or automation asked, and how long it has been blocked. Allow and Deny are thumb-sized, and the
+  answer lands on the same gateway the dashboard talks to, so a run held up by a permission prompt
+  proceeds the moment you tap. Two things it deliberately will *not* do: if it cannot reach your
+  gateway it says so and offers a retry, rather than showing an empty list that would read as
+  "nothing needs you"; and if an answer fails to send, the card comes back instead of quietly
+  disappearing. The rest of the companion — running loops, inbox, notifications — is named on the
+  page as not built yet rather than shown as empty, and push notifications for approvals are still
+  to come. This first release has no app-store app and no offline install; it is a page you open in
+  your phone's browser.
 - **Gideon can now earn autonomy one action at a time, and lose it instantly.** The safety
   floor used to be binary — an unattended action was read-only, or it was a permission you granted
   when you created the automation — so a reply draft you had approved unchanged forty times still
