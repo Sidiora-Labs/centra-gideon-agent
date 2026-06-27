@@ -5698,10 +5698,11 @@
         {
           "id": "MC-3",
           "title": "S2 approvals-first companion route + approve/reject wiring",
-          "status": "todo",
+          "status": "done",
           "scope": "Amendment §Session placement S2 — Approvals-first companion (T2.1r) + C2 Companion route API map",
           "done_when": "On a phone viewport, `#/companion` renders full-context approval cards from GET /api/approvals (tool name, arguments, session/agent; plan-43 decision-brief when present, raw fallback until then — do not block on plan 43) and approve/reject round-trips against a dev gateway; all other sections stubbed behind S3.5; URL doctrine holds.",
-          "deps": []
+          "deps": [],
+          "pr": 1250
         },
         {
           "id": "MC-4",
@@ -5896,12 +5897,13 @@
         {
           "id": "FM-1",
           "title": "Physics preset system: named springs, gesture helpers, Motion tokens + author guide",
-          "status": "todo",
+          "status": "done",
           "scope": "Session 1 — Physics system (T1.1–T1.3, V1); Contracts C1",
           "done_when": "physics presets (snappy/smooth/fluid/playful) scale with the bounciness slider and zero out under prefers-reduced-motion; dragSpring/swipeDismiss shipped in motion.ts; new Motion tokens wired in tokenRegistry + tokens.css; docs/design/motion.md guide lets an author pick a preset and know the budget/reduced-motion constraints from the doc alone; 2-3 existing interactions (pressable/list-enter/overlay) adopt the presets with no hardcoded transitions left",
           "deps": [
             "EXT:DESIGN-SYSTEM-CONSISTENCY:consistent components+tokens as the motion substrate (shipped v0.1.2)"
-          ]
+          ],
+          "pr": 1252
         },
         {
           "id": "FM-2",
@@ -7393,8 +7395,23 @@
         "plan": "ET"
       },
       {
-        "id": "FM-1",
-        "title": "Physics preset system: named springs, gesture helpers, Motion tokens + author guide",
+        "id": "FM-2",
+        "title": "Morph.tsx shared-element wrapper + wire one real card→detail morph",
+        "plan": "FM"
+      },
+      {
+        "id": "FM-3",
+        "title": "LiquidShape.tsx fluid-blob shape morph (coral-tinted, expr()-scaled)",
+        "plan": "FM"
+      },
+      {
+        "id": "FM-5",
+        "title": "Wire viewTransition() into hash-route changes (cosmetic-only)",
+        "plan": "FM"
+      },
+      {
+        "id": "FM-6",
+        "title": "Orchestrated staggered entrances for 2-3 key surfaces",
         "plan": "FM"
       },
       {
@@ -7458,8 +7475,8 @@
         "plan": "MC"
       },
       {
-        "id": "MC-3",
-        "title": "S2 approvals-first companion route + approve/reject wiring",
+        "id": "MC-4",
+        "title": "S3 PWA installability: manifest + service worker (app-shell precache, /api never cached)",
         "plan": "MC"
       },
       {
@@ -9911,9 +9928,9 @@
         "code": "MC",
         "plan": "MOBILE-COMPANION",
         "total_atoms": 10,
-        "done": 1,
+        "done": 2,
         "in_progress": 0,
-        "todo": 9,
+        "todo": 8,
         "blocked": 0
       },
       {
@@ -9929,9 +9946,9 @@
         "code": "FM",
         "plan": "FLUID-MOTION",
         "total_atoms": 7,
-        "done": 0,
+        "done": 1,
         "in_progress": 0,
-        "todo": 7,
+        "todo": 6,
         "blocked": 0
       },
       {
