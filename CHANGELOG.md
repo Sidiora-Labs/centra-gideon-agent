@@ -338,6 +338,36 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
 
 ### Added
 
+- **The desktop app can now tell the dashboard what it is actually allowed to do.** The macOS shell
+  gained a typed capability bridge — `window.pclawDesktop.capabilities` — covering the microphone,
+  screen recording, native notifications, the menu-bar item, a global hotkey and open-at-login. Each
+  one can be probed for its real OS permission state and, where macOS allows an app to ask, requested;
+  the request raises exactly one system dialog, and a capability already denied routes you to System
+  Settings instead of silently doing nothing. Two capabilities are honest about their limits rather
+  than guessing: macOS gives an app no way to prompt for Screen Recording and no way to read whether
+  notifications are authorized, so those are labelled as such and offer no button that would do
+  nothing. On boot the shell registers this manifest with your gateway over loopback, so
+  **Settings → Security → Desktop capabilities** shows the truth — and in an ordinary browser tab it
+  says "Desktop app not connected" instead of listing native permissions a tab could never grant.
+  Apps can reach a capability only by declaring it (`"permissions": {"desktop": ["audio_capture"]}`);
+  the gateway mediates every such call, refuses an undeclared one, records the refusal in the security
+  event log, and the Store names the capabilities an app asked for before you install it.
+
+- **First run now sets you up with a working model instead of pointing at Settings.** The second step
+  of the welcome flow used to be a readiness check: if no model provider was configured it told you
+  chat could not run, offered a link to Settings, and left you to find your own way. It is now an
+  **Essential apps** step that does the work in place. Four groups are listed from the app catalog —
+  a **model provider** (required; nothing else works without one), plus optional **web search**,
+  **speech** (transcription/voice) and a **messaging channel** — and for the model you can go from
+  nothing to a bound, tested model without leaving the flow: install the provider app, fill in its
+  own settings fields, run its real connection **Test**, then pick which model chat should use. If
+  the Test fails you see the provider's actual error and can correct it right there; skipping every
+  optional group still gets you to a working dashboard. **Nothing installs by itself.** Each app has
+  a **Review** step that shows exactly what installing grants it — the same permission disclosure,
+  scheduled-job list and scanner warning the Store shows — and installs only when you click that
+  card's own Install button. Where you are in the flow, and which of the four you set up, is now
+  remembered on the server.
+
 - **You can approve what Gideon is waiting on from your phone.** A run that stops to ask
   permission used to stay stopped until you were back at a desk, because the only place the question
   appeared was the desktop dashboard. There is now a phone route at **`#/companion`** — open it on
