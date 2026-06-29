@@ -294,6 +294,37 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
   rather than leaving you to guess it is broken. Libraries indexed before this release are brought into
   the index automatically on the first search after upgrading.
 
+- **The library you already have becomes searchable by content, without you doing anything.** The two
+  changes above only help documents Gideon has broken into passages, and it only started doing
+  that on the way in — so everything you added *before* it kept matching the old way, on its title and
+  summary alone. That was the gap: on a library of six long documents, asking "how far behind can a
+  replica get before it stops serving reads" returned one result, the document whose *title* was the
+  closest match and which did not contain the answer anywhere, with no citation, while the document
+  that actually answered it was not returned at all. Gideon now indexes the passages of your
+  existing documents in the background, starting the next time it launches, and after that the same
+  question returns the right document first and cites the section that answers it — the heading and the
+  exact lines. Three things about how it does that. It works in small batches, so a library of any size
+  costs the same in memory; it can be interrupted at any point — quit, crash, power cut — and picks up
+  exactly where it stopped, without redoing or skipping a document; and searching *while* it is partway
+  through is safe: documents it has not reached yet keep matching the way they always did, so nothing
+  becomes unfindable in the meantime. Running it a second time does nothing, by design. It reads your
+  documents and adds passages; it never rewrites anything you can see, and it leaves the whole-document
+  index alone. Expect the database to grow — measured on a 300-document library, indexing 2,100
+  passages took it from 1.5 MB to 11 MB and took about nine seconds. If no embedding model is available
+  yet, it says so in the log and waits for the next launch.
+- **Anthropic models now reuse the stable head of a conversation instead of re-reading it every
+  turn.** Anthropic bills prompt content it has already seen at a fraction of the normal input
+  price, but only when the request marks where the reusable part ends — and Gideon never sent
+  that mark, so every turn paid full price for the same assembled context, memory and skills. It is
+  sent now, on the last piece of stable content in each request, which means from the second turn of
+  a conversation onward that whole prefix is billed at the reduced rate and comes back faster.
+  Nothing about *what* the model is told changes: the same words in the same order, just flagged as
+  reusable. Only Anthropic-family models are affected — providers that cache on their own
+  (OpenAI-compatible endpoints) already benefited from the prompt reordering in the previous
+  release, and a provider with no cache support sends byte-for-byte the request it sent before.
+  Anthropic reports how much of each request it served from cache; showing that back to you as a
+  per-turn saving is still to come.
+
 - **"Reduce motion" now actually stops the springs — and the Bounciness slider reaches everything it
   claimed to.** If your operating system is set to reduce motion, Gideon relied on a framework
   setting that neutralises movement *across the screen* but leaves the underlying spring running, so
@@ -414,6 +445,16 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
   scheduled-job list and scanner warning the Store shows — and installs only when you click that
   card's own Install button. Where you are in the flow, and which of the four you set up, is now
   remembered on the server.
+- **Prompt caching is now a switch you can find, in Settings → Models.** Providers that support it
+  can be asked to cache the stable front of your prompt — the assembled context that does not change
+  from turn to turn — so a long conversation stops re-paying for the same tokens on every turn.
+  That was already happening; there was no way to see it or stop it. There is now a **Prompt
+  caching** switch beside your model bindings, on by default. It is on by default because caching is
+  transparent: the model is shown exactly the same tokens either way, and a provider without cache
+  support is unaffected. Turn it off when you are debugging a provider and want caching ruled out —
+  nothing else changes when you do. In particular, **what the model is shown and in what order is
+  identical either way**: the ordering of the served prompt is a correctness property, not part of
+  the caching feature, so the switch does not quietly serve you a different prompt.
 
 - **You can approve what Gideon is waiting on from your phone.** A run that stops to ask
   permission used to stay stopped until you were back at a desk, because the only place the question
