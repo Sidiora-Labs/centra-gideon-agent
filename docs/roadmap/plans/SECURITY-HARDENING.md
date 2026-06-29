@@ -133,3 +133,142 @@ def credential_backend() -> CredentialBackend: ...   # keychain if available+ena
 | T3.4 | Baseline as packaged data (`baseline_denylist.json` + sha), loader with integrity re-assert on read + periodic re-verify; SEL events `baseline_denylist_reasserted`/`_tamper_attempt`; user config strictly additive (dedupe, no shrink path) | `src/gideon/security.py`, `src/gideon/security/baseline_denylist.json`, `guardrails/denylist.py` | mutating the in-memory list at runtime is healed on next read + SEL-logged; effective set is provably ⊇ packaged baseline (property test); user additions still merge |
 | T3.5 | Mode-independence matrix: baseline-matched command refused under default/auto/yolo/acceptEdits and all trust simulators; deny-before-approval ordering regression-pinned; `baseline-tamper` corpus class added to the S3 harness | `tests/security/test_scanner_adversarial.py`, `tests/security/corpus/baseline-tamper/`, native runtime/builtin_tools tests | every mode fixture refuses; reordering the deny check below the approval gate turns CI red |
 | T4.4 | Security panel: baseline shown read-only with version + verified-hash indicator and "N user additions"; docs state the anti-drift/anti-LLM-tamper (not anti-owner) threat model honestly | `dashboard/handlers/core.py` (`/api/security/denied-commands` payload), security settings page, `docs/security/` | panel renders baseline-verified state; tamper fixture flips the indicator; limitation documented |
+
+## Execution log
+
+### 2026-08-14 — SH-10 (Amendment T4.4) the Security panel renders the verified baseline — DONE
+
+SH-6 built the verification; nothing showed it. The panel listed 112 patterns with no way to
+tell a healthy instance from a drifted one, and counted the user's config list rather than what
+that list actually adds.
+
+- **Payload** — `GET /api/security/denied-commands`
+  (`dashboard/handlers/core.py::api_security_denied_commands`) now returns, alongside the
+  existing `builtin`/`user` arrays: a `baseline` block (`version`, `sha256`, enforced `count`,
+  `verified`, `detail`) sourced from `verify_baseline_denylist()`, and `user_additions`.
+- **`user_additions` is derived, not counted** — `len(denied_command_patterns()) - len(baseline)`.
+  `len(config.security.denied_commands)` is the obvious implementation and it is wrong: a user
+  entry equal to a built-in is deduped by `denied_command_patterns()` and widens nothing. Verified
+  live: config `['aws s3 cp .* s3://.*', 'my-secret-tool .*', 'aws s3 cp .* s3://.*']` → 3 entries,
+  `user_additions: 1`.
+- **The indicator flips, and the identity shown stays the verified one** — with the packaged file
+  diverged, `verified` goes `false` and `detail` names the divergence, while `version`, `sha256` and
+  `count` keep reporting the baseline actually in force. A diverged file is reported, never adopted,
+  so the panel must not start advertising the attacker's version.
+- **Panel** (`web/src/pages/settings/SecurityPanel.tsx`) — the baseline chip's **role flips with the
+  state**: `status` when it matches what shipped, `alert` when it does not (unrequested news that
+  changes what the list below means). Both carry an explicit `aria-label` because `status`/`alert`
+  take no name from content — without one the chip would be an unnamed live region. The baseline
+  region stays read-only (asserted by role, as the *absence* of a control inside it, with the user
+  row's Remove button as the vacuity guard).
+- **Both reads went bare** — `securityStats` and `deniedCommands` dropped `.catch(() => null)`, and
+  the panel branches on `error` into `LoadError`. This is the one surface where a swallowed read is
+  worse than a blank one: an empty denylist and "nothing is blocked" are the same picture. The gate
+  is `!s`, not `s === undefined`, because the settings hub shares the `settings:security` cache key
+  and still persists a substituted `null` into `sessionStorage`.
+- **Docs** — extended `docs/security/threat-model.md` (boundary 1) with **Baseline denylist
+  integrity: anti-drift and anti-LLM-tamper, not anti-owner**: what the digest does catch (on-disk
+  corruption, a partial write, an edit that changed patterns but not the digest, in-process mutation,
+  and a *self-consistent* rewrite of both — the fingerprint is held in memory from import) and what
+  it does not (the owner; anyone who can edit the installed package before startup). A matching
+  bullet joined "What we deliberately don't defend against". `limitations.md` was left alone: this is
+  a boundary with a control and a stated non-goal, not a known gap.
+- **Tests** — `tests/test_baseline_denylist_integrity.py::TestSecurityPanelPayload` (6) and
+  `web/src/pages/settings/securityBaselineState.test.tsx` (11).
+
+**DEVIATION — fixed two swapped copy strings in the same file.** `SecurityPanel.tsx`'s two
+`unavailableWhen` reasons were exactly transposed: the shell-denylist Add said "Enter a host first"
+and the egress host Adds said "Enter a pattern first". Both land in `title`, so the wrong noun is
+what a hover and a description read. One-word correction, no mechanism change, pinned by
+`securityBaselineState.test.tsx` (falsified: re-swapping turns it red). Out of the atom's literal
+scope, but leaving a wrong string in a file being edited for legibility would be the wrong trade.
+
+**DISCOVERY — reading the panel writes SEL when the baseline has diverged.** The handler calls
+`verify_baseline_denylist()`, which logs `baseline_denylist_tamper_attempt` on a diverged file with
+no per-digest dedup on that path (unlike the unrecoverable-read path). Every panel load, including a
+background revalidation, therefore appends a row while the file stays diverged. Kept deliberately —
+an owner viewing a diverged baseline is an auditable event, and it is the same behaviour the periodic
+doctor probe already has — rather than adding a second, non-logging status accessor that could drift
+from the enforcing one. Documented in the handler docstring. If the row volume ever matters, the fix
+belongs in `security.py`'s reporting guard, not in a parallel read path.
+
+**DISCOVERY — a suite-wide `GIDEON_HOME` fails ~11 tests that are green without it.**
+Measuring the baseline with `GIDEON_HOME` exported for the whole run produced 12 failures
+across `test_portability`, `test_mcp_core`, `test_ephemeral_sessions` and
+`test_harness_workflow_resume_audit`; the same four files pass 132/132 on the same commit with the
+variable unset. The failures are the env var, not the tree. Recorded so the next session does not
+inherit a phantom baseline.
+
+### 2026-08-14 — SH-6 (Amendment T3.4) baseline denylist as packaged data — DONE
+
+The baseline bash denylist is now a packaged, integrity-verified data file that heals
+itself on read, and both enforcement paths load it from one source.
+
+- **`src/gideon/baseline_denylist.json`** — `{version: 1, description, sha256,
+  patterns[]}`, all 112 previously-in-code patterns byte-for-byte, digest
+  `2b7db3c6…c6e872` (sha256 over the newline-joined patterns, so content *and* order are
+  covered — first-match-wins ordering is part of the baseline).
+- **`security.py`** — `_read_packaged_baseline()` reads and verifies the file at import
+  and **raises** on a missing file, malformed JSON, an empty pattern list, or a digest
+  that disagrees with the patterns. `BUILTIN_DENIED_COMMAND_PATTERNS` becomes the loaded
+  copy; the verified tuple + its fingerprint are held as `_BASELINE_PATTERNS` /
+  `_BASELINE_SHA256`. `baseline_denied_command_patterns()` re-asserts on every read: one
+  sha256 over ~110 short strings on the fast path (silent), and on mismatch it heals the
+  list **in place** from the snapshot, or re-reads the file if the snapshot itself was
+  rebound. `denied_command_patterns()` then appends user patterns deduped against the
+  baseline, so the result is always a superset in the baseline's original order.
+- **SEL, two distinct kinds.** `baseline_denylist_reasserted` (outcome `healed`) fires
+  when in-memory drift was repaired, carrying `restored_count`/`restored_sample`.
+  `baseline_denylist_tamper_attempt` (outcome `rejected`) fires when a shrink was
+  refused: the periodic re-verify found the packaged file no longer matching the
+  fingerprint captured at import, or no verified source remained. A cold untampered read
+  emits nothing; the unrecoverable case is reported once per distinct broken state
+  (`_BASELINE_TAMPER_REPORTED`) rather than once per screened command.
+- **Fail-closed everywhere.** After import the file is never consulted for *content* —
+  deleting or rewriting it cannot shrink what is enforced. `verify_baseline_denylist()`
+  reports a diverged file instead of adopting it; with no verified source left the effective
+  set is the union of every copy seen, never a smaller one.
+- **Periodic re-verify** — Doctor probe `security.baseline_denylist` (capability
+  `security`, Tier.CAPABILITY) runs `verify_baseline_denylist()` off-loop and goes red on
+  a diverged file while the verified baseline stays in force.
+- **Shared source** — `guardrails/denylist.py` and the `/api/security/denied-commands`
+  payload both call `baseline_denied_command_patterns()`; no module but `security.py`
+  names the data file (asserted by a test), so the two enforcement paths cannot drift.
+- **Both packaging surfaces** — `pyproject.toml` package-data *and*
+  `gideon-backend.spec` `_backend_data()`; PyInstaller's import analysis cannot see
+  a data file. Verified by building the wheel (`gideon/baseline_denylist.json`
+  present) and by a test asserting both declarations.
+- **Tests** — `tests/test_baseline_denylist_integrity.py`, 45 cases: the heal (clear,
+  single-entry removal, reordering, rebound snapshot, no-source-left), the superset
+  property over ~215 configs (every baseline entry echoed back one at a time, duplicates,
+  five shadow-key shapes, 200 seeded random mixes), the identical-pattern no-shrink case,
+  the periodic re-verify incl. a self-consistent file rewrite, the Doctor probe both ways,
+  the shared-source rails, and a matching-behaviour regression matrix plus a pinned
+  baseline digest.
+- **Falsified twice.** Disabling the re-assert (returning the live list unchecked) turns 7
+  tests red including every heal case; letting a user pattern equal to a baseline entry
+  remove it turns the superset property test red, naming the offending config.
+
+**DEVIATION (file location).** The amendment names
+`src/gideon/security/baseline_denylist.json`, but `security` is a module, not a
+package — that path cannot exist alongside `security.py`. The file ships at
+`src/gideon/baseline_denylist.json`, the same package-root spot as
+`model_pricing.json` / `model_tokens.json`.
+
+**DEVIATION (`baseline_denylist_immutable` envelope).** The amendment's PATCH error
+envelope was not added. `security.denied_commands` is the only config write surface and it
+is additive by type, so the envelope would have had no reachable trigger — an inert control.
+The removal-attempt path is instead covered by the tamper-attempt event on a rejected
+shrink, plus a test proving shadow keys (`removed_denied_commands`,
+`denied_commands_override`, `baseline_denied_commands`, `builtin_denied_commands`,
+`allowed_commands`) are dropped at `load()` and change nothing. If SH-10's panel gains a
+write path that could shrink the view, the envelope belongs there.
+
+**DISCOVERY (what the hash does and does not buy).** The digest catches on-disk
+corruption, a partial write, and an edit that changed the patterns but not the digest —
+those fail at import rather than shrinking the set. Because the fingerprint is held in
+memory from import onward, it also catches a *self-consistent* rewrite of both the patterns
+and the digest, which a naive "hash the file against its own field" check cannot see. It
+does **not** stop the owner of the machine: anyone who can rewrite the installed package
+before the process starts owns the baseline. Anti-drift and anti-LLM-tamper, not
+anti-owner — as the amendment states.
