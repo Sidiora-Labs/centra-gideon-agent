@@ -71,6 +71,10 @@ def _backend_data():
         ("src/gideon/slack-manifest.yaml", "gideon"),
         ("src/gideon/model_tokens.json", "gideon"),
         ("src/gideon/model_pricing.json", "gideon"),
+        # The baseline bash denylist (SH-6) — PyInstaller's import analysis cannot see a
+        # data file, and security.py raises at import without it, so the frozen binary
+        # would refuse to start rather than run with a shorter denylist.
+        ("src/gideon/baseline_denylist.json", "gideon"),
         ("src/gideon/config", "gideon/config"),
         ("src/gideon/eval/scenarios", "gideon/eval/scenarios"),
         ("src/gideon/scripts", "gideon/scripts"),
