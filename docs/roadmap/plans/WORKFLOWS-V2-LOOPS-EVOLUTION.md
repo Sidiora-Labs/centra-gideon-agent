@@ -11,12 +11,21 @@ The original design record is kept below — execution logs, measured findings a
 
 **Status:** IN PROGRESS — sessions 29-33 shipped (PRs #168-#172, on `main`): judge contract,
 pre-tier, actors, loop middleware, calibration, aliases, and 5 of 8 templates.
-🔴 **BUT THE RUN-PATH INTEGRATION IS INERT** — `workflows/{loop_middleware,judge_calibration,
-judge_pretier,judge_actors}.py` have **ZERO production importers** (AST audit 2026-08-04); the
-cluster is self-referential, nothing emits `judge_verdict`/`judge_divergence`, and the steering queue
-is stored but never consumed. The plan's own log admits this four times. Criteria 2/3/8/9/11 are
-unmet until one wiring session lands. The legacy `src/gideon/loop/` remains the live engine.
-Status corrected 2026-08-04 by code audit. (rev 2 — research-integrated 2026-07-12)
+🟡 **THE RUN-PATH INTEGRATION IS WIRED; THE LEGACY ENGINE IS STILL THE LIVE ONE.** The
+2026-08-04 audit's "**ZERO** production importers / nothing emits `judge_verdict`/
+`judge_divergence` / the steering queue is stored but never consumed" is **no longer true** and was
+re-measured on 2026-08-14 (WF2LOO-16). As built: `loop_middleware` ← `controller.py`,
+`compaction.py`; `judge_calibration` ← `service.py`, `controller.py`,
+`dashboard/handlers/learning.py`; `judge_pretier` ← `engine.py`; `judge_actors` ← `engine.py`.
+`judge_verdict` is emitted from `engine.py:1718` onto the node output and read back out of the
+ledger by `controller._emit_judge_divergence` (`:2616`), which emits `judge_divergence` and is
+called at `controller.py:1054`; the steering queue is consumed by `controller._consume_steering`
+(`:2644`), called at `:2753`. What remains true is the part that matters for the migration:
+`src/gideon/loop/` is still the **live** loop engine and no bundled template has replaced it.
+Since WF2LOO-16 the two are no longer separate dialects, though — `loop/judge.py` and
+`loop/kinds/goal.py` import `judge_contract` directly, the loop's private `CycleVerdict` is deleted,
+and a loop cycle's verdict IS the contract's record. Criteria 2/3/8/9/11 need re-measuring against
+this state rather than against the 08-04 reading. (rev 2 — research-integrated 2026-07-12)
 
 ---
 
@@ -842,6 +851,69 @@ These loop-engine behaviors are baked into `gateway._fire`, the watchdog, and th
 
 ## Execution log
 
+- **[2026-08-14][WF2LOO-16] DONE — the THIRD verdict vocabulary is deleted, not bridged.**
+  `loop/judge.CycleVerdict{done, done_reason, marginal_value, quality_score, regressed, reasoning,
+  adversarial, band_used}` is gone. `assess_cycle`/`assess_cycle_skeptic` now return
+  `judge_contract.JudgeVerdict`, which absorbed every field only the loop carried.
+  **The atom's "contract fields" are `JudgeVerdict`'s, not `Verdict`'s** — `Verdict` is a
+  `class Verdict(str, Enum)`, the closed *decision* vocabulary, so no field can be added to it; the
+  dataclass is what carries a record. `Verdict`'s member set is unchanged by this atom.
+  **POPULATION MEASURED BEFORE ENFORCEMENT — the number is ZERO.** Every shape
+  `CycleVerdict.to_dict()` could persist (including the best possible one: done, quality 5,
+  marginal 5, reasoning, adversarially cross-checked) failed `validate_verdict` at the FIRST step
+  with `unknown verdict None`; the proof precondition was never even reached. 0 persisted verdict
+  files existed to grandfather. The cause is upstream of the record: the bundled `task-cycle_judge`
+  prompt asks for exactly `{reasoning, done, done_reason, marginal_value, quality_score, regressed}`
+  and names no `verdict`, `proof`, `evidence_refs` or `scores`. **So the precondition is NOT applied
+  to a loop cycle** — the supervisor still routes on `done`, and `done`/`passed` are deliberately
+  two different claims on one record (`done` = the judge said complete; `passed` = and it survived
+  validation). Enforcing it would have failed 100% of loop cycles, which is an outage, not a gate.
+  What the atom DID buy: the precondition became **satisfiable**. `evidence_refs_from_observation`
+  derives refs by PARSING the block `_observe_ground_truth` returned (unchanged, as required) rather
+  than rebuilding them from `verify_command`/`deliverables` — so a ref can never cite a command that
+  did not run or a file that was not readable. Re-measured: **0/4 → 3/4**; all three anchored shapes
+  now round-trip through `validate_verdict` as a valid PASS, and only the transcript-only cycle does
+  not. Both halves are asserted as tests so the scoping decision cannot rot.
+  **`done` → enum mapping, explicit and tested at all four corners:** PASS when done (including
+  done-and-regressed, because `goal._assess_open_ended` completes on `done` without reading
+  `regressed` — a projection stricter than the routing it labels would be a lie), REJECT on a
+  non-done regression (the watchdog already publishes `ratchet_regression` as its own event, which
+  is the hiccup-vs-dead-end distinction `Verdict` documents), RETRY otherwise. One function,
+  `verdict_for_cycle`; nothing else maps it.
+  **The asymmetric rule moved WITH the fields it merges** — `judge_contract.adjudicate`, so it is a
+  contract rule rather than a loop dialect. Both directions falsified: `and`→`or` reds
+  `test_a_done_does_NOT_survive_a_disagreeing_skeptic` + `test_adjudicate_done_needs_two_yeses`;
+  `or`→`and` reds `test_a_regressed_survives_EITHER_judge_flagging_it`,
+  `test_a_regression_flagged_by_one_judge_is_not_downgraded_to_RETRY` +
+  `test_adjudicate_regressed_survives_either`. The 0-5 clamp is now STRUCTURAL (`__post_init__`), so
+  every producer clamps; removing it reds `test_the_0_5_clamp_is_structural[99-5.0]`, `[-4-0.0]` and
+  `[high-0.0]`. All three mutations reverted byte-identical.
+  **DISCOVERY — the loop-local `adjudicate` silently dropped `reasoning`.** It rebuilt the verdict
+  field-by-field without it, so the bounded chain-of-thought (AUTONOMY-GUARDRAILS §2.4) was
+  discarded on exactly the high-stakes verdicts that earned a second judge — and post-atom it would
+  have discarded the observed `evidence_refs` too. The contract version carries both.
+  **DEVIATION — `adversarial`/`band_used` are now emitted unconditionally.** `CycleVerdict.to_dict`
+  omitted them when unset; on the contract record they are 2 of 21 keys and every other one is
+  unconditional. The cockpit is unaffected (it guards with `verdict?.adversarial` and
+  `typeof band_used === 'number'`, both of which reject `false`/`null`).
+  **DEVIATION — `quality_score`, `done_reason`, `adversarial` and `band_used` were absorbed too,**
+  not just the `marginal_value`/`regressed` the Done-when enumerates. Deleting `CycleVerdict`
+  without bridging it forces a home for every field it carried, and `quality_score` is named in the
+  atom's own blast-radius line; dropping it would blank the cockpit's ★ chip, break the canary's
+  `_CANARY_MIN_SEPARATION` and break `reproduce_confirm`'s ship bar.
+  **Blast radius, as built:** `loop/judge.py` (`CycleVerdict`, `adjudicate`, `_clamp` deleted),
+  `loop/kinds/goal.py` (imports the contract's `adjudicate`), `loop/instrument.py` (docstring),
+  `workflows/judge_contract.py`. `loop/kinds/sdlc.py` and `watchdog._publish_cycle_verdict` needed
+  NO change — both read the persisted dict, and the wire shape is purely additive: every key a
+  stored verdict carried is still spelled the same. `web/src/lib/api.ts`'s `LoopVerdict` declares
+  the new fields and the cockpit surfaces the observed `evidence_refs` in its verdict panel, keeping
+  its existing tolerance for older verdicts with null scores. `learning/refiner.py`'s `regressed`
+  (a `list[str]` of regressed clusters) is an unrelated concept and was deliberately not touched.
+  **Header corrected** rather than baselined: this plan's 🔴 "ZERO production importers / nothing
+  emits `judge_verdict`" claim was re-measured and is false (importer census + `engine.py:1718`,
+  `controller.py:1054`/`:2616`/`:2644`/`:2753`), and this atom made it more wrong by giving the live
+  loop engine a direct contract import.
+
 - **[2026-08-12][WF2LOO-15] DONE — judge_actors claimed two enforced invariants and ran one.**
   Measured live references outside the module: `plan_judge_session` **3**, `validate_judge_model` **4** — judge
   isolation IS enforced from `engine.dispatch_gate`, and `engine.py:1296` records that this very seam was dead until
@@ -1526,3 +1598,68 @@ Verified load-bearing: removing the rule turns the flagging test red. Gate: `mak
   pre-existing `tests/test_harness_validate.py` failures that red in any worktree; generators
   re-run — `inert-surface-baseline.json` legitimately SHRANK by 2 and is committed,
   `gideon.manifest_reference` byte-identical, `regen_dag_derived.py --check` current.
+
+### WF2LOO-17 — the judge no longer grades on the worker's model binding
+
+**DONE.** `loop/judge.assess_cycle`'s docstring has claimed since it was written that the judge
+"resolves the 'reasoning' use-case (a stronger third-party check than the worker's model)". The code
+resolved `resolve_provider_for_use_case("loops")` — and `loops` is documented, in
+`providers/use_cases.py`'s own vocabulary comment, as the LOOP WORKER's axis. Same at
+`assess_cycle_skeptic` and at `gates.judge_verdict`. So the judge was independent in **session** and
+in **prompt** and **correlated in model**: the one dimension where correlation actually costs you a
+verdict, since a reviewer sharing the reviewee's blind spot shares its mistakes.
+
+**The claim was made true, not softened** — the atom's explicit instruction, and the interesting part
+of it. `loops.judge_use_case` (default `reasoning`) is wired through all four config points, and all
+three judge call sites resolve it through one `loop/judge.judge_use_case()` helper. Nothing new was
+built: one field, one helper, three call sites.
+
+**The normalizer is fail-SAFE, not fail-open.** An unknown axis, a blank value, or an unreadable
+`config.json` collapses to `reasoning` — never to `loops`. The failure being closed here is precisely
+"the judge silently grades on the worker's binding", so a typo in config.json must not re-create it.
+
+**Two documents had recorded the defect as the design**, and both were corrected in the same change:
+`gates.judge_verdict`'s docstring ("loop judgments ride the loops chain so long-horizon work gets its
+own model knob") and `providers/use_cases.py`'s canonical vocabulary comment (`loops — loop worker
+sessions + loop gates/judges`). That comment is the reason the defect read as intentional.
+
+**DISCOVERY — a source-text ratchet was PINNING the defect.**
+`tests/test_use_case_chains.py::test_loop_judges_resolve_loops_axis` asserted that both judge modules
+contained `resolve_provider_for_use_case("loops")` and that `"reasoning"` did **not** appear in
+`judge.py`. A correct fix therefore had to red an existing green test. It is **inverted, not deleted**
+(same class, renamed to `..._resolve_the_judge_axis_not_the_worker_axis`, asserting the worker's
+literal axis appears at no judge call site) — a test whose premise the product has disowned is a
+liability, not coverage. Net test count: +16 new, 0 removed, 1 inverted.
+
+**DISCOVERY — `test_config_roundtrip.py` verifies 3 of the 5 config points, and the PATCH allowlist
+is one of the two it misses.** Confirmed by falsification: deleting the `_EDITABLE_CONFIG` entry
+leaves that file **fully green**, because its `_EDITABLE_CONFIG` assertions are hardcoded to specific
+`evals.*` keys rather than derived from the dataclass. So point 4 got its own rail that drives a
+**real PATCH** through the handler, reads the value back off disk, reloads `AppConfig`, and then
+drives the three judge call sites to prove the patched value reaches them. Without it the field would
+have read as "wired" on a green roundtrip while being a live reader of a key no write path could set.
+
+**DEVIATION — no frontend control (config point 5), deliberately.** No `LoopsConfig` field has one:
+there is no Loops settings panel and no schema-driven config UI, so a lone control for the fourth
+field would mean building a new surface — outside an atom whose own scope says "cheap by
+construction: no new mechanism". The write path is the PATCH allowlist entry (railed end to end), and
+the knob is documented in `docs/reference/CONFIG-REFERENCE.md`'s `loops.*` table, which is exactly
+where that file says a knob with no dashboard control belongs.
+
+**The degraded path is proved unchanged, not assumed.** A judge whose provider cannot start still
+returns `None` (defer — never a false complete) and still logs WARNING; the gate variant still
+returns `""`, which `verdict_is_pass` and `verdict_rendered` both read as *no verdict*. The WARNING
+now names the resolved axis and `loops.judge_use_case`, so the binding to go check is in the log line
+instead of being inferred. Falsified by making a dead judge return `CycleVerdict(done=True)`: that
+reds both the new rail and the pre-existing
+`test_loop_gates.py::TestJudgeIndependence::test_judge_unavailable_is_observable_not_silent`.
+
+Falsification, all three restored from file backups: (1) reverting `gates.py`'s call site to
+`"loops"` reds `test_all_three_judge_call_sites_resolve_the_judge_entry` naming it
+(`['reasoning', 'reasoning', 'loops']`) plus the inverted source ratchet; (2) deleting the
+`_EDITABLE_CONFIG` entry reds `test_point_4_editable_config_allowlist_entry` and both PATCH-drive
+tests while `test_config_roundtrip.py` stays green; (3) breaking the defer reds the two tests above.
+
+Gate: `make lint` green (black/isort/flake8/mypy, 1597 files / 821 source files);
+`config-baseline.json` regenerated in the same commit (a new config field legitimately grows it).
+No `web/` change, so no web gate.
