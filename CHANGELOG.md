@@ -10,6 +10,17 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
 
 ### Changed
 
+- **A loop's judge no longer runs on the same model as the worker it grades.** Autonomous goal
+  loops never let the worker certify its own work — a separate judge, in its own session with its
+  own prompt and no write tools, decides whether a cycle is done. But that judge was resolving the
+  same model binding as the worker, so the two shared a blind spot on exactly the question the judge
+  exists to answer. The judge now resolves its own axis, `loops.judge_use_case`, which defaults to
+  **Reasoning** — so if you have pinned a stronger model to Reasoning in Settings → Models, that is
+  now the model that decides done-ness, and the loop's work still runs on the Loops binding. Set
+  `loops.judge_use_case` to `loops` in `config.json` to put both back on one binding.
+  A judge whose model is unavailable behaves exactly as before: the cycle is **deferred**, never
+  reported complete, and the warning in the log now names the binding to go check.
+
 - **The approval prompt now tells you what a tool call can touch, and how far your answer
   reaches.** When the agent asks permission to run a tool, the card is a four-part brief instead
   of a tool name and four buttons: **what** (the tool and its arguments), **why** (the one-line
@@ -367,6 +378,19 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
   not deliberately picked a personality — **nothing changes**: both surfaces render exactly the markup
   they did before, asserted against the previous release's output rather than promised.
 
+- **A goal loop's judge verdict now shows you what the supervisor checked for itself.** When a loop
+  declares something checkable — a verify command, or a named deliverable file — Gideon does
+  not take the worker's word that it worked: it runs the command and reads the file itself, and
+  weighs that over the worker's account. It has done so for a while, but only the *judge* saw the
+  result; you got a one-line reason and no way to tell whether it rested on an independent
+  observation or on the worker's own narration. A cycle's verdict panel now lists what was
+  independently observed — the command it ran and what that command returned, and each deliverable
+  it read — so "done" comes with its receipts. A cycle with nothing checkable to observe says
+  nothing new, which is the honest answer for a goal that named no anchor. Under the hood this is
+  one verdict record instead of three: the loop's private vocabulary was folded into the workflow
+  judge contract, so a loop cycle and a workflow gate now describe "was this good enough?" the same
+  way, including the marginal-value and regression signals that drive when a loop decides it has
+  stopped making progress. Verdicts stored by an earlier version still display correctly.
 - **"Reduce motion" now actually stops the springs — and the Bounciness slider reaches everything it
   claimed to.** If your operating system is set to reduce motion, Gideon relied on a framework
   setting that neutralises movement *across the screen* but leaves the underlying spring running, so
