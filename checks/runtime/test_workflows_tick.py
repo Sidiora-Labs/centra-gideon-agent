@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import pytest
 
+from gideon.workflows.admission import DEFAULT_LANE_CAPS
 from gideon.workflows.models import (
     SUCCESS_STATES,
     InstanceState,
@@ -27,7 +28,6 @@ from gideon.workflows.models import (
     NodeKind,
 )
 from gideon.workflows.tick import (
-    DEFAULT_LANE_CAPS,
     Limits,
     container_outcome,
     edge_key,
