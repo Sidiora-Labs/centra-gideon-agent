@@ -1,9 +1,20 @@
 # Plan: Platform Primitives — Edges, Verdicts and Policies as First-Class Nouns
 
-**Status:** IN PROGRESS — 2 of 16 atoms shipped (`PP-4` ledger extraction and `PP-1`
-`WF_UNORDERED_DEP`, both 2026-08-14 — see `## Execution log`). Startable now: `PP-2`, `PP-3`
-(both unblocked by `PP-1`), `PP-6`, `PP-8`, `PP-9`, `PP-11`. `PP-5` and `PP-14` are unblocked by
-`WF2LOO-16`. `PP-7` still waits on `PP-6`. 16 atoms in [`../atomic/PP.md`](../atomic/PP.md).
+**Status:** IN PROGRESS — 3 of 16 atoms shipped (`PP-4` ledger extraction, `PP-1`
+`WF_UNORDERED_DEP` and `PP-3` the `output_contract` reader cross-check, all 2026-08-14 — see
+`## Execution log`). Startable now: `PP-2` (unblocked by `PP-1`), `PP-6`, `PP-8`, `PP-9`, `PP-11`.
+`PP-5` and `PP-14` are unblocked by `WF2LOO-16`. `PP-7` still waits on `PP-6`. 16 atoms in
+[`../atomic/PP.md`](../atomic/PP.md).
+**Status:** IN PROGRESS — 2 of 16 atoms shipped (`PP-4` the ledger extraction and `PP-9` the general
+outcome record, both 2026-08-14 — see `## Execution log`). Five startable now (`PP-1`, `PP-6`,
+`PP-8`, `PP-10`, `PP-11`): `PP-4` unblocked four, and `PP-9` landing unblocked `PP-10`. `PP-5` still
+waits on `WF2LOO-16` and `PP-7` on `PP-6`. 16 atoms in [`../atomic/PP.md`](../atomic/PP.md).
+**Pillar:** A (Execution Engine + Convergence) · **rev 17** (2026-08-14)
+
+**Soul guardrail.** Everything here stays personal-scale: one user, local files, local SQLite,
+one gateway. This plan removes duplicated machinery; it adds no fleet, no service tier, and no
+distributed substrate. If an atom below starts to look like a platform for other people's
+workloads, it has drifted and should be re-scoped.
 
 ---
 
@@ -288,3 +299,133 @@ discipline in [`AGENTS.md`](../../../AGENTS.md))*
   auto-discovery
   (`packages.find`), and `gideon-backend.spec`'s `hiddenimports` exists only for
   importlib-loaded modules, which a statically-imported pure-Python package is not.
+
+- **2026-08-14 — CENSUS (`PP-3`): the warning's population is the whole shipped library, which is
+  why the warning is scoped.** Measured over the 19 bundled templates before writing the rule: **18
+  of 19 carry `{{nodes.*.output}}` reads — 145 distinct reads, 45 bare and 100 at a sub-path (151
+  before deduplicating a ref that appears twice in one node) — and ZERO declare an `output_contract`
+  at all.** Two consequences. (1) The ERROR half has an empty population here: nothing shipped is
+  wrong, and nothing shipped exercises it, so the unit tests carry the whole weight and
+  `test_the_rule_RESOLVES_a_read_against_a_real_contract` is the vacuity floor that keeps a rule
+  which resolved *nothing* from reading as a rule which resolved fifty satisfiable paths — both are
+  silent. (2) The WARNING half, unconditionally, fires **77** times across **18 of 19** templates
+  (**49** if only sub-path readers count). Every template warning on every validation is how an
+  author learns to skim validator output — and it would also contradict
+  `test_it_validates_STRICTLY`, whose stated contract is that a bundled template ships no warning at
+  all, so the alternatives were "weaken that gate" or "author ~49 contracts across 18 shipped
+  templates". The second is worse than it looks: `must_be_json` + `required_keys` is *enforced* at
+  run time by `engine.check_output_contract`, so a contract guessed onto a producer whose model
+  sometimes answers in prose converts a working template into a failing one.
+
+- **2026-08-14 — DEVIATION (`PP-3`): the warning is scoped to specs that already use contracts.**
+  The atom says "a producer read structurally but declaring no contract raises a WARNING naming the
+  readers". Severity, content and trigger are all as written; a precondition is added — the spec must
+  declare at least one `output_contract` somewhere. Rationale: an author who has adopted the
+  mechanism and left one producer out has an actionable inconsistency, while a spec with no
+  contracts anywhere has not adopted it and is being nagged, not validated. Two further narrowings
+  fall out of the same reasoning: only sub-path reads count (a contract buys nothing checkable for
+  `{{nodes.x.output}}` — there is no path it could have judged), and the warning is ONE per producer
+  naming all its readers rather than one per read. **Measured volume on the shipped library: zero.**
+  Honest limitation recorded rather than papered over: no generator in the tree currently produces
+  both a contract and a cross-node sub-path read — `batch_compile` emits `output_contract` for every
+  typed leaf, but compiled leaves do not read each other's output — so the warning's live population
+  today is hand-authored specs, and its mechanism is proven by unit tests
+  (`test_one_contract_anywhere_turns_the_warning_on` is the switch, asserted against its own
+  contract-free twin).
+
+- **2026-08-14 — DONE (`PP-3`): `output_contract` cross-checked against its readers.**
+  `WF_UNSATISFIABLE_OUTPUT_REF` (error) fires when a reader takes a path whose first segment is
+  absent from a producer's `required_keys` on a contract that also declares `must_be_json`;
+  `WF_UNCONTRACTED_OUTPUT_REF` (warning, scoped as above) names the producer that declares nothing
+  and the readers that take paths through it. No new vocabulary: `must_be_json` + `required_keys`
+  are read exactly as `engine.check_output_contract` reads them, and `engine.py` is untouched. Only
+  the FIRST path segment is judged — `required_keys` is a promise about an object's top level, and
+  judging `findings.0.verdict` would mean inventing nesting the engine cannot enforce. Both halves
+  of the pairing are required: `required_keys` alone is the shape
+  `batch_compile.schema_to_contract` emits for a schema with no `type`, and refusing it would refuse
+  the author who described their output least. **Built on `PP-1`'s edge list rather than beside it**
+  — `DepEdge` gained an `output_reads` field derived from the same `bindings.refs_in` scan
+  `node_deps` is built on, `validate_node_tree` computes the list ONCE and hands it to both rules,
+  and `test_the_read_paths_ride_the_SAME_edge_list_as_the_ordering_rule` asserts every producer the
+  paths name is one `node_deps` already found. A second reference parser would have been the exact
+  two-edge-list defect this pillar exists to remove. Gate: `make lint` exit 0, `pytest -n 0` 431
+  passed across `test_workflows_validator.py` (70, +33) / `test_workflows_bundled.py` (241, +5) /
+  the two batch modules, full suite green. Falsified three times: (1) the atom's named probe —
+  giving `knowledge-health`'s `scan` an agreeing contract (`required_keys: ["report"]`, library
+  still "Spec is valid.") then renaming it to `["summary"]` while `verdict` still reads
+  `output.report` — reds `test_it_validates_STRICTLY[knowledge-health]` plus three census tests with
+  a message naming reader, producer and path; (2) dropping the `must_be_json` requirement reds
+  `test_required_keys_WITHOUT_must_be_json_never_errors`, proving the rule does not over-refuse an
+  under-declared contract; (3) making the rule resolve nothing reds both vacuity floors
+  (`test_the_rule_RESOLVES_a_read_against_a_real_contract` and
+  `test_the_rule_sees_the_measured_read_population`) rather than going quietly green.
+
+- **2026-08-14 — DISCOVERY (`PP-3`): a bundled ACTION node cannot declare an `output_contract`
+  without also touching a test rail.** `test_workflows_bundled.py:597`'s flat-argument rail allows
+  only `("provider", "with", "context", "payload")` in an action node's config, so the falsification
+  probe above tripped it as a stray argument — even though `engine.py:409` reads `output_contract`
+  from exactly that config for action nodes. Left alone deliberately: no shipped template declares
+  one, and widening a rail for a population of zero is speculative. Whoever adds the first
+  action-node contract (or `PP-2`, which will move these edges) should widen that allowlist in the
+  same change rather than discovering it as an unrelated red.
+- **2026-08-14 — `PP-9` DONE.** The outcome pair is now a general facility: `ledger/outcomes.py`
+  owns the producer vocabulary (`decision`/`publish`/`escalation`/`proposal`/`control`, a CLOSED set
+  so a typo is a loud `ValueError` at the open rather than a producer nobody can query for), the two
+  resolutions, the two metric SOURCES, the idempotency subtraction (`open_questions`), the
+  benchmark-relative `score`, and the `OutcomeLedger` mixin carrying `open_outcome`/`resolve_outcome`
+  — mixed into `LedgerWriter`, so every producer that can carry a ledger can open a question, not
+  just the one feature that first needed it. `journal.pending_outcome`/`outcome_resolved` survive as
+  thin WORKFLOW-SHAPED adapters that contribute `instance_path`/`node_id`/`epoch` and nothing else,
+  which is where the `ledger/` boundary rail forces them to live. `PA-4`'s decision journal lands on
+  this facility as `PRODUCER_DECISION` with its own `context` fields — one facility, stated in the
+  module docstring so the next session does not build a second one. Two non-decision producers wired
+  in the same change: `engine.apply_publish` opens `artifact.<slug>.consumed` (memory-sourced, a
+  7-day horizon, baseline 1.0 — one consumption is the whole bet) and `controller._ask_for_input`
+  opens the escalation's bet beside `confirmation_pending`, ledger-sourced on the
+  `confirmation_resolved` its own `confirmation_id` will carry. Gate: `make lint` clean (black /
+  isort / flake8 / mypy over 822 source files), 916 learning+ledger tests and 4593 workflows tests
+  green, full suite 19 194 passed / 30 skipped / 12 xfailed / 0 failed. Collection 19 207 → 19 234;
+  a function-name diff against `origin/main` shows 28 added and one removed, and that one is the
+  rename of `test_no_vector_store_is_a_noop` (its clause changed, see the DEVIATION below) — no test
+  was deleted. The ledger golden fixtures were regenerated in the same commit: `pending_outcome`
+  gains `producer`/`metric_source` and loses `resolved_at`, `outcome_resolved` gains
+  `producer`/`decay_profile`, and nothing else in 50 emitter lines moved.
+
+- **2026-08-14 — DEVIATION (`PP-9`): the resolver is no longer inert without a vector store, and
+  `resolved_at` is deleted.** LEARN-R18 returned an empty report unless a live vector store was
+  injected, which was right when every metric was a semantic-memory key. It is wrong for a general
+  facility: an escalation's ground truth is an event the run wrote itself. So availability is now
+  per-SOURCE — a memory-sourced question with no vector store is counted `pending` and left OPEN
+  (spending it as `inconclusive` would charge a missing dependency to the bet), while a
+  ledger-sourced one grades on any box. `service is None` still short-circuits. Separately,
+  `pending_outcome` carried a `resolved_at: ""` field that its only writer wrote empty and no reader
+  ever read — the resolution is a separate event — so it is gone rather than carried forward.
+
+- **2026-08-14 — DISCOVERY (`PP-9`): "after the bet" must be FILE POSITION, not `seq`.** The
+  ledger-sourced measurement first ordered candidate events by `seq`, and the escalation test read
+  its own answer as unmeasurable. Cause: `Journal(run_id)` is a fresh dataclass with `seq = 0`, and
+  `_load_cache` only recovers the sequence when something asks for a cache lookup — so a SECOND
+  writer built for a run that already has 40 events starts at 1 and re-mints `event_id`s the file
+  already holds (the resolver itself builds one). Append order is the only ordering the log actually
+  guarantees, so `measure_from_events` scans forward from the question's own position. The colliding
+  `event_id` is a pre-existing hazard for anything keyed by it and is left named here rather than
+  fixed inside this atom.
+
+- **2026-08-14 — DECISION (`PP-9`): only a DECISION's outcome files a lesson proposal.** Generalizing
+  the producers would otherwise generalize the queue noise: every publish would file "this
+  artifact's outcome is inconclusive", which the user cannot act on and which `PP-10` is the atom
+  that knows how to interpret. `_PROPOSING_PRODUCERS` is one frozenset in the resolver, and the
+  publish/escalation producers write their outcome to the ledger and stop there.
+
+- **2026-08-14 — `PP-9` proof.** Falsified three times, each with the target line read first and
+  restored from a file copy (never `git checkout --`): emptying `open_questions`' answered set reds
+  `test_a_second_tick_is_idempotent` and `test_an_answered_question_is_not_open`; collapsing
+  `DECAY_PROFILE` so both resolutions name `speculative` reds
+  `test_the_two_resolutions_map_onto_different_decay_profiles` and
+  `test_an_inconclusive_outcome_decays_out_while_a_measured_one_survives` (that one asserts the
+  OUTCOME — at 60 active days the kernel prunes the inconclusive evidence and keeps the measured, not
+  merely that a field differs); removing the `_open_publish_outcome` call from `apply_publish` reds
+  `test_publishing_an_artifact_opens_an_outcome`, which drives the real `publish:` seam against a
+  fake artifact provider rather than calling the emitter directly. The escalation producer is driven
+  end-to-end against a really-parked gate in `test_workflows_confirm_emission.py`, including the
+  answer that measures it and the re-poll that must not open a second question.
