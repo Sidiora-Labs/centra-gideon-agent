@@ -8,6 +8,21 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
 
 ## [Unreleased]
 
+### Added
+
+- **Runs now record what LANDED, not just what they did.** A workflow that made a measurable
+  decision could already journal the bet it was making and have it graded once the horizon passed.
+  That was the only thing in the system able to do it. Now any producer can open the same kind of
+  question, and two more already do: **publishing an artifact** asks whether anyone ever consumed it
+  (a week's horizon), and **stopping to ask you a question** asks whether interrupting you was worth
+  it — graded from your own answer, so an approval reads as the interruption landing, a rejection as
+  a bet that lost, and a gate nobody ever answered as an interruption that went nowhere. Two
+  restraints kept from the original: a question whose ground truth cannot be read closes as
+  *inconclusive* rather than being invented, and that weaker evidence ages out about four times
+  faster than a real measurement; and only a decision's outcome files anything for you to review —
+  the rest are recorded in the run's own ledger, because "this artifact's outcome is inconclusive"
+  is not something you can act on.
+
 ### Changed
 - **A workflow that reads another step's output now refuses to save unless that step is guaranteed to
   run first.** The engine kept two separate pictures of how steps relate: what must run before what,
@@ -18,6 +33,19 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
   (`WF_UNORDERED_DEP`) naming the reader, the step it reads, and why the ordering is missing. **No
   bundled template was affected** — all 19 were checked first, and every one already ordered its
   steps correctly. Nothing about how workflows run has changed.
+
+- **A workflow step that declares what its output will contain is now checked against the steps that
+  read it.** A step can declare an output contract — "this must be JSON, and it must contain these
+  keys" — and the engine has always enforced it on the *producing* step. Nothing ever compared it to
+  the steps reading that output, so a template could bind `{{nodes.classify.output.summary}}` from a
+  step whose own contract promises `findings`, save perfectly clean, and then die partway through the
+  run on an unresolvable reference. That is now a typed error at save time
+  (`WF_UNSATISFIABLE_OUTPUT_REF`) naming the reader, the step it reads, the key it wanted and the
+  keys the producer actually guarantees. In a workflow that already uses contracts, a step read at a
+  sub-path but declaring none raises an advisory warning instead, listing the readers that would
+  benefit. **No bundled template was affected** — all 19 were censused first: none declares an output
+  contract today, so nothing shipped changes and nothing new appears in validation output. No new
+  contract vocabulary was added, and nothing about how workflows run has changed.
 
 
 - **A loop that keeps working but stops getting anywhere now stalls, even when it insists it is
