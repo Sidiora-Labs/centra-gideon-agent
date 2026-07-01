@@ -25,18 +25,23 @@ import { join } from 'node:path'
 //
 //   pages/code/CodeCockpitPage  ×2   full pattern (via the hook)   ← canonical
 //   ui/NavRail                       full pattern                  ← cycle 189 (inline, its own state)
-//   ui/SidePanel                     full pattern (via the hook)   ← this change
-//   pages/terminal/TerminalDrawer    tabIndex + keydown, no role/valuenow
-//   ui/Composer · pages/chat/ChatFilePanel   pointer-only
+//   ui/SidePanel                     full pattern (via the hook)   ← cycle 190
+//   pages/chat/ChatFilePanel         full pattern (via the hook)   ← cycle 191
+//   pages/terminal/TerminalDrawer    full pattern (via the hook)   ← this change
+//   ui/Composer                      pointer-only  ← the last one, deferred on a TASTE CALL
 //
-// 🪤 THIS RAIL DELIBERATELY DOES NOT FAIL THE POINTER-ONLY TWO. Failing them today would either force a
-// rushed change or invite the cheap fix of DELETING a role to go green — and each has a real wrinkle
-// the hook does not yet cover: `ui/Composer`'s height interplays with textarea autosize, and
-// `pages/chat/ChatFilePanel` cannot be driven in a dev home without a file reference in a message (so a
-// keyboard change there is unverifiable here). Both are their own cycles. `TerminalDrawer` also uses
-// the hook for its drag but hand-rolls its handle markup without the role/valuenow — a smaller gap. What
-// the rail guarantees is that nobody can ship the NavRail defect again: claiming the role obliges the
-// contract.
+// 🪤 ONLY `ui/Composer` REMAINS POINTER-ONLY, and it is deferred for a reason that is not the hook's to
+// settle: its handle sits directly above the primary chat input, so making it a focusable splitter puts
+// a tab stop in front of the app's most-used control. That is an owner taste call — weakened further
+// because the textarea already auto-grows with content, so keyboard resize is a convenience there, not
+// an access necessity. (Its key `composer-resth2` also lacks the `-w` suffix, but the hook's
+// `storageKey` override — added for the terminal drawer — already solves that half.) Failing it today
+// would invite the cheap fix of DELETING a role to go green. What the rail guarantees is that nobody can
+// ship the NavRail defect again: claiming the role obliges the contract.
+//
+// TerminalDrawer was the adopter that justified the hook's two generalisations — a `max` thunk (its
+// ceiling is `innerHeight × MAX_FRAC`) and a `storageKey` override (its `terminal-drawer-h` key predates
+// the `-w` convention). Both are real, used-now capabilities, not speculative API.
 
 const SRC = join(process.cwd(), 'src')
 const walk = (d: string): string[] =>
@@ -53,7 +58,9 @@ describe('a declared splitter implements the splitter contract', () => {
 
   it('finds the claimants — not vacuous', () => {
     expect(claimants().map((f) => f.rel).sort()).toEqual([
+      'pages/chat/ChatFilePanel.tsx',
       'pages/code/CodeCockpitPage.tsx',
+      'pages/terminal/TerminalDrawer.tsx',
       'ui/NavRail.tsx',
       'ui/SidePanel.tsx',
     ])
