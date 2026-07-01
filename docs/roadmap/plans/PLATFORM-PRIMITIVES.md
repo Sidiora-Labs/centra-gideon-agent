@@ -1,10 +1,6 @@
 # Plan: Platform Primitives — Edges, Verdicts and Policies as First-Class Nouns
 
-**Status:** IN PROGRESS — 3 of 16 atoms shipped (`PP-4` ledger extraction, `PP-1`
-`WF_UNORDERED_DEP` and `PP-3` the `output_contract` reader cross-check, all 2026-08-14 — see
-`## Execution log`). Startable now: `PP-2` (unblocked by `PP-1`), `PP-6`, `PP-8`, `PP-9`, `PP-11`.
-`PP-5` and `PP-14` are unblocked by `WF2LOO-16`. `PP-7` still waits on `PP-6`. 16 atoms in
-[`../atomic/PP.md`](../atomic/PP.md).
+**Status:** IN PROGRESS — 6 of 16 atoms shipped (`PP-4` ledger extraction, `PP-1` `WF_UNORDERED_DEP`, `PP-3` the `output_contract` reader cross-check, `PP-9` the general outcome record, `PP-11` the `AdmissionPolicy` seam, and `PP-10` consumer-liveness detection, all 2026-08-14 — see `## Execution log`). Startable now: `PP-2` (unblocked by `PP-1`), `PP-6`/`PP-8` (by `PP-4`), `PP-12` (by `PP-11`), and `PP-5`/`PP-14` (by `WF2LOO-16`). `PP-7` waits on `PP-6`, `PP-13` on `PP-12`. 16 atoms in [`../atomic/PP.md`](../atomic/PP.md).
 **Status:** IN PROGRESS — 2 of 16 atoms shipped (`PP-4` the ledger extraction and `PP-9` the general
 outcome record, both 2026-08-14 — see `## Execution log`). Five startable now (`PP-1`, `PP-6`,
 `PP-8`, `PP-10`, `PP-11`): `PP-4` unblocked four, and `PP-9` landing unblocked `PP-10`. `PP-5` still
@@ -13,6 +9,15 @@ waits on `WF2LOO-16` and `PP-7` on `PP-6`. 16 atoms in [`../atomic/PP.md`](../at
 admission seam, both 2026-08-14 — see `## Execution log`). Five startable now (`PP-1`, `PP-6`,
 `PP-8`, `PP-9`, `PP-12`): `PP-4` unblocked four and `PP-11` unblocked `PP-12`. `PP-5` still waits on
 `WF2LOO-16` and `PP-7` on `PP-6`. 16 atoms in [`../atomic/PP.md`](../atomic/PP.md).
+**Status:** IN PROGRESS — 6 of 16 atoms shipped (`PP-4` ledger extraction, `PP-1`
+`WF_UNORDERED_DEP`, `PP-3` the `output_contract` reader cross-check, `PP-9` the general outcome
+record, `PP-11` the admission seam, and `PP-2` deriving ordering from bindings — all 2026-08-14,
+see `## Execution log`). Startable now: `PP-6`, `PP-8`, `PP-10`, `PP-12` (deps `PP-4`/`PP-9`/`PP-11`
+all landed). `PP-5` and `PP-14` are unblocked by `WF2LOO-16`; `PP-7` still waits on `PP-6`. 16 atoms
+in [`../atomic/PP.md`](../atomic/PP.md).
+<!-- Header consolidated 2026-08-14 (PP-2): three sibling branches (PP-1/PP-3, PP-9, PP-11) each
+left their own `**Status:**` block on merge; they are folded into the single accurate line above. -->
+
 **Pillar:** A (Execution Engine + Convergence) · **rev 17** (2026-08-14)
 
 **Soul guardrail.** Everything here stays personal-scale: one user, local files, local SQLite,
@@ -597,3 +602,130 @@ discipline in [`AGENTS.md`](../../../AGENTS.md))*
   additively (two independent projection functions) and resolves by keeping both. No shared symbol is
   touched. `PP-4`'s ledger-boundary rail stays green: this work lives in `workflows/`, which may import
   `ledger`; the reverse import the rail guards is untouched.
+- **2026-08-14 — DONE (`PP-10`): consumer-liveness detection.** `learning/consumer_liveness.py`
+  sweeps every work unit's graded publish outcomes and files ONE `retirement` proposal for a unit
+  whose last `DORMANCY_CYCLES` (3) matured cycles all went untouched. "Consumer touch" is observed
+  entirely through writers that already exist — an artifact `referenced` / `edited` / `reverted`
+  event whose actor is not `agent` (`record_impression` from the dashboard's
+  `POST /api/artifacts/{slug}/events` and from `chat_runner`; the `update`/`revert` routes), or the
+  slug in `entity_settings/pinned_artifacts.json`. `created` and an agent `iterated` are excluded, or
+  every work unit would look consumed by itself. Driven on the curator tick in `history.py`
+  immediately AFTER `outcome_resolver.resolve`, so a cycle that matured this tick is in the window
+  rather than one tick late. Stateless: no new file, no new `StateEntry`, no counter — idempotency is
+  the proposal queue's own fingerprint plus decision memory.
+
+- **2026-08-14 — DEVIATION (`PP-10`): a THIRD metric source, and the publish producer moved onto it.**
+  `PP-9` opened the publish question against `SOURCE_MEMORY` with a semantic key
+  (`artifact.<slug>.consumed`) nothing writes, so it always closed `inconclusive` and its own docstring
+  handed the counter to `PP-10`. Rather than write that counter — a second store the atom exists to
+  avoid — `ledger/outcomes.py` gains `SOURCE_CONSUMPTION` and `engine._open_publish_outcome` declares
+  it. Consequences: the publish bet now grades as a real `measured` 1.0/0.0, and it grades on a box
+  with NO vector store (the memory-source availability gate no longer applies to it). The reader lives
+  in `learning/`, not `ledger/` — reading a provider is I/O, and `PP-4`'s rail keeps `ledger/` pure.
+  `consumption_metric()` / `slug_from_metric()` are the one place the metric name is built and parsed,
+  because the resolution record carries the metric and not the slug.
+
+- **2026-08-14 — MEASURED (`PP-10`): the firing population before the control got teeth.** Per this
+  program's standing rule (`PP-1`, `PP-3`, `WF2LOO-18`): **0 of the 19 bundled templates declare a
+  `publish:` node** (census over `workflows/bundled/*/workflow.json` for `config.publish` at any
+  nesting), so on a fresh or seeded install the sweep can fire on ZERO work units and no scoping-down
+  was needed. Firing requires a user-authored publishing work unit, at least three runs of it, and
+  every recent artifact untouched past its 7-day horizon. Three further anti-nag guards, each tested:
+  one touch anywhere in the window is `LIVE`; an `inconclusive` cycle is `INSUFFICIENT` and never
+  `DORMANT`; and the proposal BODY is stable per work unit (the volatile slugs ride in
+  `evidence_refs`, outside the fingerprint) so a re-file REINFORCES the one row and a REJECTED finding
+  is never re-filed.
+
+- **2026-08-14 — DISCOVERY (`PP-10`): an un-versioned artifact edit leaves no timeline event.**
+  `NativeArtifactProvider.update()` appends its `edited`/`iterated` event only on the
+  `snapshot=True` branch, and `PATCH /api/artifacts/{slug}` defaults `snapshot` to False — so a
+  content edit without a version bump is invisible to any consumer of the artifact timeline, this
+  sweep included. Left as-is and recorded in the module docstring: widening it changes artifact event
+  semantics for every timeline consumer. The failure direction is the safe one — a missed touch can
+- **2026-08-14 — `PP-2` DONE.** Ordering is now DERIVED from bindings and consumed by the frontier;
+  the second, hand-maintained edge list is gone. `validator.dep_ordering_edges` emits ONE list
+  carrying both origins (`EDGE_BINDING`/`EDGE_NEEDS`); `tick.ordering_for` re-reads that same
+  derivation, so validation and admission cannot disagree about "ordered first". `WF_UNKNOWN_NEEDS`
+  became a global EXISTENCE check (`_validate_binding_targets`), the sibling-only rule in
+  `_validate_shape` is deleted, and a diamond spanning two containers is now expressible — proven by a
+  pure-frontier driver run to `DONE` (`test_a_diamond_spanning_two_containers_completes`).
+- **2026-08-14 — `PP-2` composition with `PP-11`.** Derived ordering and admission are ORTHOGONAL
+  axes, not competitors: `_ordering_satisfied` gates a node's CANDIDACY (are its producers terminal?)
+  while `admission.compose(policies, …)` gates its SLOT (lane/container/WIP budget). `order`/`inst`
+  are built once in `frontier()` and threaded down exactly as `PP-11`'s `policies` are — neither
+  replaces the other, and both are threaded so a run-level rule cannot become per-node-optional. The
+  earlier PP-2 attempt threaded `wip: bool` through `tick`; that mechanism no longer exists after
+  `PP-11`, so this is a re-expression on the current base, not a rebase.
+- **2026-08-14 — `PP-2` the "restriction is unnecessary" argument HELD against the post-`PP-11` code.**
+  The sibling-only rule's stated reason was "cross-container edges would break the frontier's
+  locality." Verified false on the current tree: `frontier()` already resolves every producer against
+  the whole (global) `states` map and holds the whole spec tree, so a derived edge between any two
+  nodes is honoured by re-derivation each tick. `PP-11` restructured admission but left the tree walk
+  and the global state map untouched, so nothing it changed reintroduced a locality constraint.
+- **2026-08-14 — `PP-2` no existing schedule changed (the honest proof).** `PP-11`'s bundled
+  golden-frontier fixture (`tests/fixtures/frontier_golden/`) re-ran BYTE-IDENTICAL after deriving
+  ordering over all 19 templates (18 with `{{nodes.*}}` bindings, 0 with `needs`). This is expected:
+  `PP-1` already guarantees every binding edge in a validated spec is ordered by container structure,
+  so the derived gate is satisfied exactly when the reader would have been visited anyway — the only
+  shape that flips (a concurrent-parallel binding) was refused before, so no shipped template had one.
+- **2026-08-14 — `PP-2` the `to_skip` reachability change (the named risk surface).** The asymmetry:
+  a plain `needs` onto a SKIPPED node is SATISFIED (terminal — keeps a join off an untaken leg), but a
+  DATAFLOW edge onto a SKIPPED producer makes the reader UNREACHABLE (its output will never exist), so
+  only that reader is cascade-skipped. The deadlock check gained `and not fr.to_skip`: a tick whose
+  only work is retiring an unreachable reader is PROGRESS, not deadlock, and without the guard the
+  controller would FAIL a run about to proceed. Test matrix in `TestDerivedOrderingReachability`:
+  decline-with-a-cross-container-reader, decline-inside-parallel (skips exactly the unreachable target,
+  not the live sibling), a skipped producer inside a `foreach` body (per-item `_producer_instance`
+  resolution), a live/pending producer that makes its reader WAIT and never skip (the dangerous
+  early-fire direction), plus the WF2-R18 join tests staying green.
+- **2026-08-14 — `PP-2` DEVIATION (plan step 3).** The plan asked for a warning on a `needs` ABSENT
+  from the derived set ("real non-dataflow ordering or a stale edge"). That would fire on EVERY correct
+  non-dataflow `needs` — now the field's only legitimate use — teaching authors to skim validator
+  output. Instead: `WF_UNSATISFIABLE_NEEDS` (ERROR) for a `needs` the structure cannot honour (a
+  contradiction that would hang the run), and `WF_REDUNDANT_NEEDS` (WARNING) for a `needs` a binding
+  already implies. The `origin` tag on every `DepEdge` lets an inspection surface show non-dataflow
+  `needs` without spending author attention at each save. Volume on the bundled library: zero (no
+  template declares `needs`).
+- **2026-08-14 — `PP-2` DISCOVERY.** A pure frontier cannot re-derive a per-item BRANCH decline whose
+  selector is `{{item}}` — the item is not in the binding context during derivation, so `_select_case`
+  returns None and the branch derives PENDING. Per-item routing is the CONTROLLER's job (it stores each
+  item's branch output and skips the subtree per item); the frontier's reachability cascade then
+  resolves per-item from the resulting state. The foreach reachability test therefore represents the
+  decline by its RESULT (the producer's SKIPPED state), which is exactly what exercises
+  `_producer_instance`.
+- **2026-08-14 — `PP-14` DONE.** `workflows/supervisor_policy.py` lands the ONE `SupervisorPolicy`
+  declaration the two half-policies converge on, plus its tolerant parser and (in
+  `workflows/validator.py`) six typed authoring-time codes. **All ten fields REUSE the types that
+  already exist** — no parallel vocabulary was minted: `RubricCriterion`/`clamp_marginal` from
+  `judge_contract`, `Rung`/`DEFAULT_LADDER`/`FailureClass` (and the canonical `_resolve_ladder`
+  parser) from `loop_middleware`, `StepConfig` from `loop.tick`, `Attention` from `autonomy`,
+  `ScopeMode` from `scope`, and the `reasoning|standard|fast` tier set the `WF_BAD_MODEL_TIER` lint
+  already owns. The only new structure is `WriteScope` (a paths+`ScopeMode` bundle) and the closed
+  `POLICY_FIELDS` set, which is the contract itself.
+- **2026-08-14 — `PP-14` the honesty rail (the atom's centre).** A static AST **call/construction
+  census** over `src/gideon` (excluding tests and the declaration itself) counts code that
+  CONSTRUCTS a `SupervisorPolicy` or invokes `parse_supervisor_policy` — the acts that WIRE it in.
+  Following the `detectors.gate` precedent it is call-based, NOT import-based, so the authoring-time
+  validator consulting `POLICY_FIELDS` is correctly not a caller and `POLICY_FIELDS` can stay a single
+  source of truth. Railed both directions: **direction 1** asserts `callers == 0` (a new caller reds
+  it); **direction 2** asserts the module still carries its `zero production callers` / `PP-15` marker
+  (stripping it reds it); a coupling test asserts `HAS_ZERO_PRODUCTION_CALLERS == (callers == 0)` so
+  the claim can never silently drift. **Two-sided vacuity floor:** a positive control proves the
+  detector returns 2 on a snippet that DOES call, and a scan floor asserts ≥50 modules were seen.
+- **2026-08-14 — `PP-14` DECISION: tolerant reads vs the closed set.** The parser never raises —
+  missing/blank/malformed values all fall to the strict defaults (the `hints_from_dict` pattern), and
+  it IGNORES unknown top-level keys. The closed-set contract lives in the VALIDATOR, which emits
+  `WF_SUPERVISOR_UNKNOWN_FIELD` for a stray key and `WF_SUPERVISOR_{NOT_OBJECT,BAD_TIER,BAD_RUNG,
+  BAD_HITL,BAD_FAILURE_CLASS}` for bad shapes/values — accumulated, never one-per-turn. Zero runtime
+  change: `loop/tick.py` and `controller.py` are untouched; the new codes fire only in
+  `validate_node_tree`. Census of the shipped population: **zero bundled templates declare a
+  `supervisor` key**, so the new codes ship against a population that trivially passes them.
+- **2026-08-14 — `PP-14` DECISION: no CHANGELOG entry.** The declaration is deliberately inert — no
+  user can observe a `SupervisorPolicy` until `PP-15` wires it into `evaluate`. The CHANGELOG is
+  user-facing (the in-app Updates panel), so the entry belongs to `PP-15`.
+- **2026-08-14 — `PP-14` falsifications (all reverted from `cp` backups, probe markers grepped).**
+  (1) a fake `parse_supervisor_policy(...)` caller added under `src/` reds
+  `test_DIRECTION_1_no_production_caller_exists_while_the_marker_claims_zero` + the coupling test;
+  (2) stripping `zero production callers` from the module reds
+  `test_DIRECTION_2_the_inert_module_declares_itself_inert`; (3) disabling the unknown-field check
+  reds `test_an_unknown_field_is_a_typed_error` while the missing-field tolerance test stays green.
