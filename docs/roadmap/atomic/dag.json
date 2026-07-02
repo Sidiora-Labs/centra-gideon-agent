@@ -1617,7 +1617,8 @@
         {
           "id": "ES-2",
           "title": "RunPin + versioned scenario library migration (amendment E1)",
-          "status": "todo",
+          "status": "done",
+          "pr": 1359,
           "scope": "Amendment 2026-07-26 E1 — evals/pinning.py RunPin, Loop-1 scenario library, results.tsv pin",
           "done_when": "eval/scenarios/*.json migrate to versioned ~/.gideon/evals/scenarios/ over named seeded fixture homes; every matrix/study/gate run persists a RunPin (scenario_sha256, model_fingerprint, prompt_pack_sha256, config_snapshot_ref); re-running a scenario after a model rebind yields a different fingerprint row with the same scenario hash, and a run without a pin cannot be written to results.tsv",
           "deps": [
@@ -3099,6 +3100,7 @@
           "id": "MRT-2",
           "title": "Shared pricing rate table (rate_for + model_rates.json + BrandedProviderSpec.pricing)",
           "status": "done",
+          "pr": 1359,
           "scope": "§5.1 Where pricing lives (this plan owns the rate table)",
           "done_when": "routing/rates.py:rate_for(provider,model) resolves effective rate as overlay > app default > absent; BrandedProviderSpec (sdk/provider_helpers.py) gains optional pricing map that round-trips; ~/.gideon/model_rates.json (atomic_write) overrides app defaults and editing it changes rate_for output with no restart-order dependency; local providers price 0.0 (SC #7). Cross-plan: offered as the shared impl to AUTONOMY-GUARDRAILS SpendMeter dollars_est and WF2-R13 cost_usd (both already built) — adoption, not a blocker.",
           "deps": []
@@ -3430,7 +3432,7 @@
         {
           "id": "MI-3",
           "title": "Duplex-loop hardening pack (confirmation gating, echo filter + STT mute, pre-TTS cleaning, voice disclaimer, VoiceConfig)",
-          "status": "todo",
+          "status": "done",
           "scope": "§4 Duplex-Loop Hardening Pack (§4.1 confirmation-phrase gating; §4.2 TTS-echo filter + mute-during-playback; §4.3 clean_for_speech after existing redaction; §4.4 voice-origin disclaimer + input_origin metadata; §4.5 VoiceConfig via the four wiring points)",
           "done_when": "voice/duplex.py pure functions (is_confirmation/is_exit/is_echo 3-consecutive-word/clean_for_speech) with unit suite; FE hands-free transcript accumulation + mute-during-playback hook draining mic buffers; api_voice_synthesize records last-TTS-text and cleans after redact calls; api_stt_transcribe consults echo on duplex:true returning {text:'',filtered:'echo'}; voice turns carry the disclaimer + input_origin:voice in session JSONL; VoiceConfig six fields round-trip through dataclass/_meta, load(), to_dict(), _EDITABLE_CONFIG PATCH + VoicePanel.tsx controls",
           "deps": []
@@ -5586,6 +5588,7 @@
           "id": "APE-10",
           "title": "storageRead/storageShared manifest pair + consent + read-only env mount + sdk/util.shared_app_data_dir",
           "status": "done",
+          "pr": 1359,
           "scope": "Amendment 2026-07-26 T3.2 (consented cross-app read; folds into Session 3)",
           "done_when": "fixture consumer reads the sharer's file via GIDEON_APP_SHARED_DIR_<NAME> (read-only); undeclared pair gets no mount; a write attempt fails; consent lists the grant (capability_grant SEL); import-boundary test green",
           "deps": [
@@ -7595,11 +7598,6 @@
         "plan": "EIAT"
       },
       {
-        "id": "ES-2",
-        "title": "RunPin + versioned scenario library migration (amendment E1)",
-        "plan": "ES"
-      },
-      {
         "id": "ES-3",
         "title": "Retrieval eval harness with per-arm P@k/R@k ablation (both stores, read-only)",
         "plan": "ES"
@@ -7732,11 +7730,6 @@
       {
         "id": "MI-1",
         "title": "voice_profiles entity store + resolver (CRUD, lock-from-history, consent-as-provenance, per-surface bindings + 4-level precedence)",
-        "plan": "MI"
-      },
-      {
-        "id": "MI-3",
-        "title": "Duplex-loop hardening pack (confirmation gating, echo filter + STT mute, pre-TTS cleaning, voice disclaimer, VoiceConfig)",
         "plan": "MI"
       },
       {
@@ -9794,9 +9787,9 @@
         "code": "ES",
         "plan": "EVALUATION-SUBSTRATE",
         "total_atoms": 11,
-        "done": 1,
+        "done": 2,
         "in_progress": 0,
-        "todo": 10,
+        "todo": 9,
         "blocked": 0
       },
       {
@@ -9938,9 +9931,9 @@
         "code": "MI",
         "plan": "MULTIMODAL-IO",
         "total_atoms": 5,
-        "done": 0,
+        "done": 1,
         "in_progress": 0,
-        "todo": 5,
+        "todo": 4,
         "blocked": 0
       },
       {

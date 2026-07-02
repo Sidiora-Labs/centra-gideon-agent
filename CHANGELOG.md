@@ -17,6 +17,27 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
   data fails; to send another app data, apps still go through the app-messaging broker). Both
   declarations are shown on the install-consent screen so you see, before installing, which apps an
   app shares with or reads, and each active grant is recorded to the security event log.
+- **Evaluation scenarios are now yours to keep, version and extend.** The four bundled scenarios
+  install into `~/.gideon/evals/scenarios/` on first use instead of hiding inside the
+  installation, so `gideon eval` runs — and the offline eval substrate scores — the same
+  library you can edit and add your own scenarios to. An upgrade refreshes a bundled scenario only
+  when it ships a newer version than the copy in your home, so your edits survive updates. Each
+  scenario also names the seeded fixture home it runs over, so a run starts from a known clean state
+  rather than from whatever your home happens to contain — and nothing an eval run does can touch
+  your real home. Every recorded eval result now carries a pin (which scenario, which models, which
+  prompts, which config), and a result that can't be attributed is refused rather than filed
+  misleadingly: "did the score move, or did something underneath it move?" is now answerable.
+- **Voice input can now run hands-free, and spoken replies stop talking over you.** Beside the
+  push-to-talk mic there is a hands-free toggle: keep talking and your dictation accumulates in the
+  composer, and nothing is sent until you say a confirmation phrase ("go ahead", "do it") — say
+  "cancel" and the draft is thrown away, so a half-finished thought can't become an executed
+  instruction. While a reply plays aloud the microphone is released and whatever it captured is
+  discarded, and any transcription that repeats three consecutive words the assistant just said is
+  dropped as echo, with the dashboard saying so rather than looking deaf. Spoken text is cleaned
+  first — code blocks, URLs, file paths and CLI flags are no longer read out letter by letter, while
+  the transcript keeps the full text — and a dictated turn tells the model it came from speech so it
+  self-corrects misheard words. All six knobs live in **Settings → Speech & Transcription →
+  Hands-free voice**.
 - **Attention notifications can now ask for a second opinion before interrupting you.** Turn on
   verification for a proposal or agent-request rule and, before its notification fires, a cheap
   background check judges whether the claim holds. Only a clear refutation withholds it — every
