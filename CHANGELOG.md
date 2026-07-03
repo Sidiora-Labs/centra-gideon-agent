@@ -10,6 +10,28 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
 
 ### Added
 
+- **You can point Gideon at an outside skill catalog and browse it in the Skills store.** Add a
+  catalog under `packs.skill_catalogs` — a JSON index endpoint, or a repo laid out as
+  `skills/<slug>/SKILL.md` — and it shows up as one more source alongside the bundled skills, with
+  per-source match counts on the source filter so a large catalog tells you how much of it matched,
+  not just how many rows fit on screen. A catalog is treated as untrusted third-party content
+  whatever you think of its author: it installs through exactly the same guarded path as every other
+  marketplace (staged to quarantine, scanned at community trust, then committed with a lock file you
+  can re-verify later), so a malicious skill is refused before anything reaches your skills tree.
+  Catalog fetches go through the same network guard as every other outbound connector — a catalog URL
+  can't be talked into reaching a private address — and browsing a big index costs one fetch and no
+  model tokens; only the skill you choose to install is ever downloaded. One unreachable catalog is
+  skipped with a log line instead of emptying your store.
+- **When two machines edit the same thing while offline, nothing is overwritten — you get asked.**
+  Multi-machine sync now tells a real conflict apart from an ordinary catch-up: if both machines
+  changed the same record since they last agreed on it, the change is not applied. Your local copy
+  stays exactly as it is, both versions are kept, and the divergence lands in a conflict review queue
+  as a needs-review item — memory conflicts on the memory review surface, knowledge conflicts on the
+  knowledge one. A background model pass drafts a suggested merge with a short rationale for you to
+  look at, and that draft is only ever a suggestion: Gideon never applies it for you. With no
+  model configured (or when the model is unavailable) the conflict still appears — just without a
+  suggestion. A one-sided change, where only one machine moved, keeps merging automatically as before.
+
 - **Apps can now share data with each other, read-only, only when both sides agree.** An app that
   wants to expose its stored data declares `storageShared: true`; an app that wants to read another's
   data names it in `storageRead`. A read is granted only when BOTH are declared — neither app can
