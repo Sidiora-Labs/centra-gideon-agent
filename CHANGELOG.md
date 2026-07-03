@@ -25,6 +25,19 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
   (ids and verdicts only, never the recording or what you said). If you create no profiles,
   nothing changes: speech resolves exactly as it did before.
 
+- **Proposals are now one thing you approve in one place — and an app can raise one.** Anything that
+  suggests a change (a skill the system wants to extract, a workflow it wants to run, an action, or
+  an installed app's own suggestion) files the same kind of proposal, and the Inbox's new Proposals
+  view shows what approving would actually DO before you click. Approving runs it through the
+  machinery that already exists for that kind of work — no separate approval path per producer — and
+  **if the apply fails, the proposal stays in your inbox with the error on it** rather than quietly
+  disappearing as if it had worked. Batch approve is deliberately narrow: it lights up only when
+  every selected proposal comes from the same source and is the same kind, so "approve all" can never
+  sweep together four unrelated changes you reviewed as one. Proposals whose payload is marked
+  editable can be edited before approving, and what you edited is exactly what runs. An app must
+  declare each proposal kind it may raise in its manifest (`permissions.proposals`), which you see at
+  install time; an undeclared kind is refused, and one app can never propose an action that calls
+  into another app. Every app-raised proposal is recorded in the security event log.
 - **You can point Gideon at an outside skill catalog and browse it in the Skills store.** Add a
   catalog under `packs.skill_catalogs` — a JSON index endpoint, or a repo laid out as
   `skills/<slug>/SKILL.md` — and it shows up as one more source alongside the bundled skills, with
@@ -84,6 +97,18 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
   Unattended SDLC loops can run the same derivation after a stage's gate passes
   (`loops.check_work_stages`, off by default) — which catches the case a gate command can't see: the
   command passed, but the stage claimed a file it never wrote.
+- **Ask for a few versions and get the best one, with the others one click away.** Say "give me 3
+  versions and pick the best" and Gideon drafts the candidates **in parallel** — each at a
+  different temperature, so they are genuinely different answers rather than the same one three
+  times — then judges them against criteria you confirm and leads with the winner. The runners-up sit
+  in a collapsible list with their scores, and "use #2" switches to that candidate verbatim, no
+  re-drafting. Because N candidates cost N model calls, it always confirms the count (capped at 5)
+  and what "best" means before spending anything, and every call is metered and logged like any other
+  model call. If one candidate fails you still get the rest, judged; if the judge is unavailable you
+  get one answer clearly labeled as unranked; if everything fails it says so instead of inventing an
+  answer. Each run also records an anonymous line — how many candidates, how far apart their scores
+  were, which one won — so it can eventually tell you when sampling is actually worth the extra cost
+  and when it isn't.
 - **Apps can now share data with each other, read-only, only when both sides agree.** An app that
   wants to expose its stored data declares `storageShared: true`; an app that wants to read another's
   data names it in `storageRead`. A read is granted only when BOTH are declared — neither app can
