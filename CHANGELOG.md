@@ -10,6 +10,21 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
 
 ### Added
 
+- **A voice is now a thing you own, not a dropdown value.** Voice profiles hold a name, the
+  engine that renders them, a reference clip, a pinned seed and a spoken-consent record, and you
+  can bind a different one per surface — one voice in the web dashboard, another for a Slack
+  channel, another for a specific agent — with an explicit "speak as this one" request always
+  winning over any binding. When you hear a generation you like you can lock it: Gideon
+  copies that clip and pins its seed, so the voice stops being a lottery until you unlock it
+  again. Reference and consent clips upload resumably, so a long clip that stalls picks up where
+  it left off instead of starting over, and a half-finished upload is never treated as a usable
+  clip. Two guarantees are structural rather than promised: consent for a cloned voice is
+  re-derived from the recording on disk every single time it is read — editing the saved flag by
+  hand proves nothing — and revoking consent immediately stops that voice's audio from being
+  served back out, with every consent record/verify/revoke written to the security audit log
+  (ids and verdicts only, never the recording or what you said). If you create no profiles,
+  nothing changes: speech resolves exactly as it did before.
+
 - **You can point Gideon at an outside skill catalog and browse it in the Skills store.** Add a
   catalog under `packs.skill_catalogs` — a JSON index endpoint, or a repo laid out as
   `skills/<slug>/SKILL.md` — and it shows up as one more source alongside the bundled skills, with
@@ -56,6 +71,19 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
   with three ways to overrule it: a mode (off / prefer local / learn from results), a pin (always
   local, always cloud, or one exact model), and manual reordering. Off by default; changes to the
   table are recorded to the security event log, since routing decides which models see your prompts.
+- **"Check this work" — verification that actually runs, instead of a second opinion from the same
+  voice.** A new bundled `check-work` skill answers "did that actually work?" by reconstructing what
+  the session CLAIMED, deriving 2-4 executable checks from those specific claims (does the file
+  exist, does it contain the symbol the claim named, does the command re-run clean), running them
+  with real tool calls, and reporting pass/fail with the observed line quoted as evidence. A check it
+  cannot execute is reported **unverifiable** with the reason — never assumed passing — and a session
+  from which no check can be derived is told so rather than handed a generic checklist. After a turn
+  that did real multi-step work and said it was done, chat now offers a **Check this work** chip: it
+  only offers, and the checks run when you click it, so verification never spends your tokens or your
+  latency without you asking (**Settings → Chat → Offer 'Check this work'**, on by default).
+  Unattended SDLC loops can run the same derivation after a stage's gate passes
+  (`loops.check_work_stages`, off by default) — which catches the case a gate command can't see: the
+  command passed, but the stage claimed a file it never wrote.
 - **Apps can now share data with each other, read-only, only when both sides agree.** An app that
   wants to expose its stored data declares `storageShared: true`; an app that wants to read another's
   data names it in `storageRead`. A read is granted only when BOTH are declared — neither app can
