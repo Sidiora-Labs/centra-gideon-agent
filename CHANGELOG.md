@@ -31,7 +31,31 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
   look at, and that draft is only ever a suggestion: Gideon never applies it for you. With no
   model configured (or when the model is unavailable) the conflict still appears — just without a
   suggestion. A one-sided change, where only one machine moved, keeps merging automatically as before.
+- **Memory now has slots: a handful of small, always-there notes about you, instead of facts the
+  assistant has to go looking for.** Six of them exist by default — persona, preferences, pending
+  items, self-notes, glossary (per workspace) and self-model — and whatever is in them is put in
+  front of the assistant at the start of every session, so standing context like "call me by my
+  first name" or "in this project, 'run' means the deploy script" stops depending on whether a
+  search happened to surface it. Each slot has a size limit and the whole block has a hard ceiling,
+  because something injected on every turn costs you context forever. When a slot is full, the write
+  is **refused and you are told what would have to go** — with the specific lines named — rather than
+  quietly trimmed or quietly dropped: losing something you asked to be remembered without saying so
+  is the one outcome worth failing loudly to avoid. Slots start out empty and nothing is written
+  until you put something in one. Anything the assistant adds to a slot on its own is only ever
+  appended, and a line **you** delete is never brought back, no matter how many times it re-observes
+  it. (An editor for slots arrives with the memory dashboard work; today they are reachable through
+  the memory API.)
 
+- **Gideon can now try a local model first for background work, and fall back to a cloud
+  model when it can't.** Bind two models to a background use case — say a local one and a cloud one
+  under Reasoning — turn routing on, and Gideon will reach for the local model first, moving
+  on to the next model you bound if it's unavailable or too slow. It only ever reorders the models
+  you already chose: it never adds one, never removes one, and a model that can't be reached still
+  reports a clear error rather than being quietly swapped for something else. Settings → Models →
+  Routing gains a policy table showing exactly which model each kind of request tries first and why,
+  with three ways to overrule it: a mode (off / prefer local / learn from results), a pin (always
+  local, always cloud, or one exact model), and manual reordering. Off by default; changes to the
+  table are recorded to the security event log, since routing decides which models see your prompts.
 - **Apps can now share data with each other, read-only, only when both sides agree.** An app that
   wants to expose its stored data declares `storageShared: true`; an app that wants to read another's
   data names it in `storageRead`. A read is granted only when BOTH are declared — neither app can
@@ -146,6 +170,13 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
   raised again.
 
 ### Changed
+- **The assistant now needs to see a habit work three times, not twice, before it offers to make it
+  a standing principle.** Its self-model — the one part that learns from what quietly *works*
+  instead of from corrections — proposes a behavioural principle only after three reinforcements.
+  Twice is the count a coincidence reaches, and a principle is always-on: it changes how every
+  later answer is shaped, which is a change you would struggle to trace back. Working theories,
+  which announce themselves as guesses, keep the lower bar. As before, nothing is installed on its
+  own — it is still a proposal you accept or reject.
 - **A step that reads another step's output no longer needs a hand-written ordering — and steps in
   different branches of a workflow can now feed each other.** The engine now derives "run after"
   directly from "reads the output of": if a step binds `{{nodes.other.output}}`, the scheduler holds
