@@ -239,6 +239,7 @@ Not config-file fields, but part of the same operator surface:
 | `GIDEON_BYPASS_LOCAL_NETWORKS` | `1` = skip token auth for loopback/RFC1918 clients (dev convenience; public origins still need a token). |
 | `GIDEON_FIRST_PARTY_APPS_DIR` | Point a packaged install at a first-party apps directory. |
 | `GIDEON_SKIP_APP_BACKENDS` | Don't launch app backend subprocesses (test isolation). |
+| `GIDEON_CREDENTIAL_BACKEND` | Where new credentials are stored: `keychain` (OS secret service, needs the `keychain` extra) or `dotenv` (default — `~/.gideon/.env` at mode 0600). A `keychain` request on a machine with no usable secret service falls back to `.env` 0600 and `gideon doctor` says so. Reads always see both stores, so switching back never hides an existing secret. |
 
 ## Programmatic surfaces
 
