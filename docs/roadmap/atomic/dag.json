@@ -5252,7 +5252,7 @@
         {
           "id": "WS-9",
           "title": "Sources UI in the Knowledge section + as-a-user validation",
-          "status": "todo",
+          "status": "done",
           "scope": "§2.4 create flow UI; §6.3 'no AI' chip; health rollups (§12 risk row); §11 step 5 (UI + as-a-user validation). Implementation-owns-product tenet: users can find/create/tune/inspect sources",
           "done_when": "Sources UI in the Knowledge section lists all source kinds with health status, drives the paste-URL preview/tune/save create flow, shows the 'no AI' chip on raw sources, and offers listing-page/render-tier remediation affordances; validated as a user driving web/feed/dir sources end-to-end from the frontend",
           "deps": [
@@ -7046,7 +7046,7 @@
         {
           "id": "PEP-1",
           "title": "PresetEmptyState primitive + Triggers/Schedule preset on-ramp",
-          "status": "todo",
+          "status": "done",
           "scope": "Build a reusable PresetEmptyState + PresetCard primitive (icon, title, cadence/summary line, description, onPick(prefill)) in the shared UI with keyboard and focus-visible a11y. Apply it to the Triggers/Schedule surface: a data-driven preset catalog (cadence derived from the locale-format seam, not frozen en-US copy), empty-state cards that deep-link into the existing TriggerCreatePage/ScheduleForm with a prefill payload, and grouping of the lifecycle-event combobox (live events first, dormant ones collapsed under 'advanced'). Presets only seed the existing form; the blank expert create path is left unchanged.",
           "done_when": "On a fresh dev home the Triggers empty state shows preset cards; clicking e.g. 'Morning briefing' opens the create flow pre-filled to a working schedule trigger; the expert blank-create path still works unchanged; keyboard/focus a11y verified.",
           "deps": []
@@ -7784,8 +7784,8 @@
         "plan": "PCS"
       },
       {
-        "id": "PEP-1",
-        "title": "PresetEmptyState primitive + Triggers/Schedule preset on-ramp",
+        "id": "PEP-2",
+        "title": "Cross-surface preset empty-state sweep",
         "plan": "PEP"
       },
       {
@@ -7951,11 +7951,6 @@
       {
         "id": "WS-8",
         "title": "Connector-pack app kind (parse-only, engine-mediated fetch) + source-recipe directory",
-        "plan": "WS"
-      },
-      {
-        "id": "WS-9",
-        "title": "Sources UI in the Knowledge section + as-a-user validation",
         "plan": "WS"
       }
     ],
@@ -10083,9 +10078,9 @@
         "code": "WS",
         "plan": "WATCHED-SOURCES",
         "total_atoms": 9,
-        "done": 5,
+        "done": 6,
         "in_progress": 0,
-        "todo": 4,
+        "todo": 3,
         "blocked": 0
       },
       {
@@ -10245,9 +10240,9 @@
         "code": "PEP",
         "plan": "PRODUCT-EXPERIENCE-PARITY",
         "total_atoms": 11,
-        "done": 3,
+        "done": 4,
         "in_progress": 0,
-        "todo": 8,
+        "todo": 7,
         "blocked": 0
       },
       {
