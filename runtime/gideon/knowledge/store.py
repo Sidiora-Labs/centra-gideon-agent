@@ -792,6 +792,14 @@ class KnowledgeStore:
             self.db.execute("ALTER TABLE items ADD COLUMN source_id TEXT")
         if "guid" not in item_cols:
             self.db.execute("ALTER TABLE items ADD COLUMN guid TEXT")
+        src_cols = {r[1] for r in self.db.execute("PRAGMA table_info(sources)").fetchall()}
+        if src_cols and "last_escalations" not in src_cols:
+            # Added after `sources` shipped, so it is a guarded ALTER rather than a DDL edit
+            # (knowledge.db has no schema-version counter — same idempotence discipline as the
+            # item columns above). The CREATE below carries it for a fresh database.
+            self.db.execute(
+                "ALTER TABLE sources ADD COLUMN last_escalations TEXT NOT NULL DEFAULT '[]'"
+            )
         self.db.executescript("""
             -- A WatchedSource: user-library configuration (§1.2), not harness state, so it
             -- lives here in knowledge.db beside the items it produces. `spec`/`budget` are
@@ -814,6 +822,10 @@ class KnowledgeStore:
                 last_new_count INTEGER DEFAULT 0,
                 health_status TEXT DEFAULT 'ok',
                 last_error_summary TEXT DEFAULT '',
+                -- The tiers the last poll had to climb, or was refused (WATCHED-SOURCES
+                -- §2.3): a render escalation is the expensive one, and an escalation nobody
+                -- can see is indistinguishable from a cheap poll. JSON array of strings.
+                last_escalations TEXT NOT NULL DEFAULT '[]',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -849,6 +861,14 @@ class KnowledgeStore:
             CREATE UNIQUE INDEX IF NOT EXISTS idx_items_source_guid
                 ON items(source_id, guid)
                 WHERE source_id IS NOT NULL AND guid IS NOT NULL;
+
+            -- The cross-source merge lookup (§3.3). NOT unique: two different sources
+            -- legitimately hold the same canonical URL for a moment (the merge collapses
+            -- them), and native/imported bookmarks may share a URL with a source item.
+            -- Partial, so the index only carries rows a source wrote.
+            CREATE INDEX IF NOT EXISTS idx_items_source_url
+                ON items(url)
+                WHERE source_id IS NOT NULL;
         """)
         self.db.commit()
 
@@ -902,6 +922,12 @@ class KnowledgeStore:
                 d[key] = json.loads(val) if val else {}
             except (TypeError, ValueError):
                 d[key] = {}
+        raw_esc = d.get("last_escalations")
+        try:
+            parsed = json.loads(raw_esc) if raw_esc else []
+        except (TypeError, ValueError):
+            parsed = []
+        d["last_escalations"] = [str(x) for x in parsed] if isinstance(parsed, list) else []
         d["enabled"] = bool(d.get("enabled"))
         return d
 
@@ -932,6 +958,7 @@ class KnowledgeStore:
         health_status: str = "ok",
         error_summary: str = "",
         next_poll_at: str = "",
+        escalations: list[str] | None = None,
     ) -> None:
         """Persist the poll's outcome: the new cursor + the source's runtime rollups.
 
@@ -940,7 +967,13 @@ class KnowledgeStore:
         so a crash the instant before this call re-yields the same items next poll and the
         UNIQUE gate drops them — exactly-once persist on top of at-least-once poll (§3.2).
         The cursor upsert + rollup update share one txn so the engine's view of a source
-        never shows a fresh cursor against stale rollups."""
+        never shows a fresh cursor against stale rollups.
+
+        ``escalations`` are the tiers this poll had to climb (§2.3), OVERWRITTEN per poll
+        rather than appended: they describe the last poll's cost, and an ever-growing list on
+        a row the UI reads would be a log in a rollup column. Recorded on the success path too
+        — an escalation that only surfaced on failure would make the expensive-but-working
+        case the invisible one."""
         now = datetime.now().isoformat()
         self.db.execute("BEGIN")
         try:
@@ -952,13 +985,15 @@ class KnowledgeStore:
             )
             self.db.execute(
                 "UPDATE sources SET last_poll_at = ?, next_poll_at = ?, last_new_count = ?, "
-                "health_status = ?, last_error_summary = ?, updated_at = ? WHERE id = ?",
+                "health_status = ?, last_error_summary = ?, last_escalations = ?, "
+                "updated_at = ? WHERE id = ?",
                 (
                     now,
                     next_poll_at or None,
                     int(new_count),
                     health_status,
                     error_summary,
+                    json.dumps([str(e) for e in (escalations or [])]),
                     now,
                     source_id,
                 ),
@@ -1033,12 +1068,16 @@ class KnowledgeStore:
         tag_names = _clean_tag_names(tags)
         word_count = len((content or "").split())
         extra = extra or {}
+        is_source_item = bool(source_id and guid)
         # Canonicalize a bookmark's URL at the storage boundary so dedup is consistent
         # regardless of caller (HTTP handler, agent tool, provider) and tracking-param /
-        # trailing-slash variants of the same page collapse to one item.
-        if item_type == "bookmark" and url:
+        # trailing-slash variants of the same page collapse to one item. EVERY source item
+        # is canonicalized too, whatever its item_type (§3.3): the cross-source merge key
+        # is this same canonical form, so normalizing here is what lets
+        # `find_item_by_merge_key` be one indexed equality instead of a full scan that
+        # re-canonicalizes every candidate row.
+        if url and (item_type == "bookmark" or is_source_item):
             url = normalize_url(url)
-        is_source_item = bool(source_id and guid)
         self.db.execute("BEGIN")
         try:
             if is_source_item:
@@ -1114,6 +1153,82 @@ class KnowledgeStore:
             "SELECT * FROM items WHERE source_id = ? AND guid = ?", (source_id, guid)
         ).fetchone()
         return self._serialize_item(row) if row else None
+
+    def mark_source_seen(self, source_id: str, guid: str) -> bool:
+        """Record that *source_id* has now seen *guid*, writing NO item (§3.3).
+
+        The other half of the cross-source merge: when a second feed carries a story the
+        library already holds, no item is written — but that source must still remember the
+        sighting, or every subsequent poll would re-offer it and re-run the merge forever
+        (the storm the seen-set exists to stop, arriving through the one path that skips
+        ``create_typed_item``'s folded-in gate). Returns True when this was a first sighting.
+        """
+        if not (source_id and guid):
+            return False
+        cur = self.db.execute(
+            "INSERT OR IGNORE INTO source_seen (source_id, guid, first_seen_at) "
+            "VALUES (?, ?, ?)",
+            (source_id, guid, datetime.now().isoformat()),
+        )
+        self.db.commit()
+        return cur.rowcount > 0
+
+    def find_item_by_merge_key(self, merge_key: str, *, exclude_source_id: str = "") -> dict | None:
+        """The existing SOURCE item whose canonical URL is *merge_key* (§3.3 cross-feed dedupe).
+
+        Scoped to rows a source wrote (``source_id IS NOT NULL``) — a hand-saved bookmark
+        that happens to share a URL is the user's own item and must not silently acquire
+        feed attributions. ``exclude_source_id`` keeps a source from merging against
+        itself: within one source, identity is the guid the source itself asserted, and two
+        of its rows sharing a URL means the source called them different items.
+
+        Oldest-first, so the FIRST source to carry a story owns the item and every later
+        feed becomes an attribution on it. That ordering is what makes the outcome
+        independent of which source happened to poll first inside one cycle.
+        """
+        if not merge_key:
+            # An item with no derivable cross-source identity. Never a wildcard match: see
+            # ``source_identity.merge_key`` — empty means "keep both", not "match anything".
+            return None
+        row = self.db.execute(
+            "SELECT * FROM items WHERE url = ? AND source_id IS NOT NULL "
+            "AND (? = '' OR source_id != ?) ORDER BY created_at, id LIMIT 1",
+            (merge_key, exclude_source_id or "", exclude_source_id or ""),
+        ).fetchone()
+        return self._serialize_item(row) if row else None
+
+    def record_also_seen_in(self, item_id: str, *labels: str) -> bool:
+        """Add cross-source attributions to an existing item's metadata (§3.3, SC#3).
+
+        ``file_metadata['also_seen_in']`` is a list of strings, the same shape as the
+        provider-facing :attr:`~gideon.knowledge_providers.base.SourceItem.also_seen_in`
+        field, so an engine-derived attribution and a provider-declared one are one
+        vocabulary rather than two shapes a reader has to branch on.
+
+        The write is ADDITIVE and idempotent: a story seen in three feeds names all three,
+        and re-merging the same source is a no-op. Replacing the list instead of appending
+        is the failure mode SC#3 is written against — an item that names only the feed it
+        arrived in FIRST is indistinguishable from one whose second sighting was silently
+        dropped, which is precisely the duplicate-vs-merge distinction the criterion tests.
+        Returns True when the item's attributions changed.
+        """
+        item = self.get_item(item_id)
+        if not item:
+            return False
+        wanted = [str(x).strip() for x in labels if str(x).strip()]
+        if not wanted:
+            return False
+        meta = item.get("file_metadata")
+        meta = dict(meta) if isinstance(meta, dict) else {}
+        current = meta.get("also_seen_in")
+        seen = [str(x) for x in current if str(x).strip()] if isinstance(current, list) else []
+        added = [lbl for lbl in wanted if lbl not in seen]
+        if not added:
+            return False
+        meta["also_seen_in"] = seen + added
+        self.update_item(item_id, file_metadata=meta)
+        self.db.commit()
+        return True
 
     def archive_source_item(self, item_id: str, *, deleted_at: str = "") -> bool:
         """Archive a source item whose upstream copy is gone, stamping when (SC#5).

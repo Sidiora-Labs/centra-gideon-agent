@@ -150,6 +150,12 @@ class SourceEngine:
         """Poll one source once; return how many items were (re-)indexed this pass — new
         items plus re-enqueued edits, excluding archives (:meth:`_persist`). Never raises —
         a provider fault becomes a degraded health status, not a dead loop (§1.1)."""
+        from gideon.knowledge_providers.base import (
+            HEALTH_DEGRADED,
+            HEALTH_ERROR,
+            HEALTH_OK,
+        )
+
         sid = source["id"]
         provider = self._provider_for(source["provider"])
         if provider is None or not self._is_poll_capable(provider):
@@ -157,7 +163,7 @@ class SourceEngine:
                 sid,
                 cursor=self._store.get_source_cursor(sid),
                 new_count=0,
-                health_status="error",
+                health_status=HEALTH_ERROR,
                 error_summary=f"provider {source['provider']!r} not enrolled (poll-capable)",
             )
             return 0
@@ -178,19 +184,24 @@ class SourceEngine:
                 sid,
                 cursor=cursor,
                 new_count=0,
-                health_status="error",
+                health_status=HEALTH_ERROR,
                 error_summary=str(exc)[:200],
             )
             return 0
+        escalations = list(getattr(result, "escalations", None) or [])
         if result.error:
             # A soft failure the provider chose to report: keep the cursor (retry from the
-            # same position), surface the reason, do not treat the source as dead.
+            # same position), surface the reason, do not treat the source as dead. A provider
+            # that KNOWS why it failed declares its own health status (a page needing the
+            # render tier, §2.3); flattening that into `degraded` would hide the one
+            # remediation the user could act on.
             self._store.record_poll(
                 sid,
                 cursor=result.cursor or cursor,
                 new_count=0,
-                health_status="degraded",
+                health_status=getattr(result, "health_status", "") or HEALTH_DEGRADED,
                 error_summary=result.error[:200],
+                escalations=escalations,
             )
             return 0
         max_items = int(cfg.max_items_per_poll)
@@ -211,8 +222,9 @@ class SourceEngine:
             sid,
             cursor=result.cursor or cursor,
             new_count=new_count,
-            health_status="ok",
+            health_status=HEALTH_OK,
             next_poll_at=next_at,
+            escalations=escalations,
         )
         return new_count
 
@@ -256,11 +268,68 @@ class SourceEngine:
             return 0
         return self._create_new(source, item)
 
+    @staticmethod
+    def _declared_attributions(item: Any) -> list[str]:
+        """A provider's own ``also_seen_in`` claims, normalized (§3.3). A provider that
+        already knows a story ran in two places (an aggregator echoing its upstream) says
+        so and the engine records it verbatim rather than re-deriving it."""
+        raw = getattr(item, "also_seen_in", None) or []
+        if isinstance(raw, str):  # a provider that meant one label, not a char sequence
+            raw = [raw]
+        return [str(x).strip() for x in raw if str(x).strip()]
+
+    def _merge_cross_source(self, source: dict, item: Any) -> bool:
+        """Fold this sighting into an item ANOTHER source already wrote, if it is the same
+        story; return True when it was merged (so no second row is written) — §3.3, SC#3.
+
+        The identity rule is canonicalized-URL equality and nothing else
+        (:func:`~gideon.knowledge.source_identity.merge_key`, which returns no key
+        for a link-less item or a bare origin). Deliberately narrow: a duplicate item is
+        visible and one delete away, while a WRONG merge destroys one of two distinct
+        stories and stamps the survivor with an attribution that is false. So an ambiguous
+        identity yields two items, and this method simply declines.
+
+        A merge does two writes, and BOTH are required:
+
+        * the second source's seen-set gets the guid (so the merge happens once, not every
+          poll — this path bypasses ``create_typed_item``'s folded-in gate, so nothing else
+          would record the sighting), and
+        * the surviving item gains the second source's attribution, APPENDED. Dropping the
+          existing list here would make a merge look exactly like a lost sighting.
+        """
+        from gideon.knowledge.source_identity import merge_key
+
+        key = merge_key(getattr(item, "url", "") or "")
+        if not key:
+            return False
+        existing = self._store.find_item_by_merge_key(key, exclude_source_id=source["id"])
+        if existing is None:
+            return False
+        self._store.mark_source_seen(source["id"], item.guid)
+        self._store.record_also_seen_in(
+            existing["id"], source["id"], *self._declared_attributions(item)
+        )
+        logger.debug(
+            "source %s guid %r merged into existing item %s (%s)",
+            source["id"],
+            item.guid,
+            existing["id"],
+            key,
+        )
+        return True
+
     def _create_new(self, source: dict, item: Any) -> int:
-        """First sighting → a new item. ``create_typed_item`` writes the seen-row + item
-        atomically and returns None when the guid was already seen — the novelty gate.
-        Only a genuinely-new item (an id) is enqueued, so a page that changes every render
-        cannot storm the queue."""
+        """First sighting → a new item, unless another source already has this story.
+
+        Cross-source dedupe runs FIRST (§3.3): a story the library already holds from a
+        different feed becomes an attribution on that item, not a second row. Otherwise
+        ``create_typed_item`` writes the seen-row + item atomically and returns None when
+        this source's guid was already seen — the per-source novelty gate. Only a
+        genuinely-new item (an id) is enqueued, so a page that changes every render cannot
+        storm the queue.
+        """
+        if self._merge_cross_source(source, item):
+            return 0
         item_id = self._store.create_typed_item(
             item_type=source.get("item_type") or "bookmark",
             title=item.title or item.url or item.guid,
@@ -273,6 +342,9 @@ class SourceEngine:
         )
         if item_id is None:
             return 0
+        declared = self._declared_attributions(item)
+        if declared:
+            self._store.record_also_seen_in(item_id, *declared)
         self._enqueue(item_id)
         return 1
 
