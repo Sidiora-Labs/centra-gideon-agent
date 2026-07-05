@@ -269,7 +269,7 @@
         {
           "id": "MGAV-5",
           "title": "Memory formation: Extract\u2192Gather\u2192Decide consolidation + holder attribution + Louvain topology",
-          "status": "todo",
+          "status": "done",
           "scope": "\u00a74.1 two-phase Extract\u2192Decide consolidation, \u00a74.2 takes/claims holder attribution, \u00a72.4 community topology (Louvain) + topology block; Session 3",
           "done_when": "_consolidate_locked restructured to Extract\u2192Gather\u2192Decide with one added structured call producing ADD/UPDATE/SUPERSEDE/NOOP mapped to the v4 supersession chain + WAL (no physical deletes, keep-both conflict flag surfaced in lint); optional holder column + weight caps + claim.* prefix with attributed fact-block rendering and holder precedence in Decide; deterministic seeded Louvain post-step writes community into mem_link_stats and materializes a <=400-char topology block gated by graph_topology_in_context (default off)",
           "deps": [
@@ -5220,7 +5220,7 @@
         {
           "id": "WS-6",
           "title": "Fetch-and-slice ingestion primitive (arXiv/DOI/PDF sniff, section detection, slices, sha256 cache, references)",
-          "status": "todo",
+          "status": "done",
           "scope": "\u00a75 Fetch-and-Slice (am.1): knowledge/slicing.py source-sniffing, cascaded section detection (thresholds in one constants block), purpose-cut slices as extracted_contents rows, sha256 source cache under knowledge_files_dir(), deterministic reference extraction; consumed by Document graph + chat file-drop + deep-research template; \u00a711 step 4",
           "done_when": "An arXiv PDF ingests: sections detected deterministically, slice:brief/body/meta rows persist in extracted_contents on the ONE item (no chunking), references extracted by the cascade, and re-ingest is served from the sha256 cache with zero network (SC#9)",
           "deps": [
@@ -7714,11 +7714,6 @@
         "plan": "MC"
       },
       {
-        "id": "MGAV-5",
-        "title": "Memory formation: Extract\u2192Gather\u2192Decide consolidation + holder attribution + Louvain topology",
-        "plan": "MGAV"
-      },
-      {
         "id": "MGAV-6",
         "title": "Two-way readable vault: mode config, wikilink projection, sync pass, vault lints, raw capture, seeding, snapshot",
         "plan": "MGAV"
@@ -7942,11 +7937,6 @@
         "id": "WF2WOR-12",
         "title": "Container workspace mode + snapshot-anchored fork (deferred, opt-in)",
         "plan": "WF2WOR"
-      },
-      {
-        "id": "WS-6",
-        "title": "Fetch-and-slice ingestion primitive (arXiv/DOI/PDF sniff, section detection, slices, sha256 cache, references)",
-        "plan": "WS"
       },
       {
         "id": "WS-7",
@@ -9660,9 +9650,9 @@
         "code": "MGAV",
         "plan": "MEMORY-GRAPH-AND-VAULT",
         "total_atoms": 9,
-        "done": 6,
+        "done": 7,
         "in_progress": 0,
-        "todo": 3,
+        "todo": 2,
         "blocked": 0
       },
       {
@@ -10083,9 +10073,9 @@
         "code": "WS",
         "plan": "WATCHED-SOURCES",
         "total_atoms": 9,
-        "done": 6,
+        "done": 7,
         "in_progress": 0,
-        "todo": 3,
+        "todo": 2,
         "blocked": 0
       },
       {
