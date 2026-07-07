@@ -54,6 +54,34 @@ describe('the loop cockpit says whether its feed is alive', () => {
     expect(read('pages/settings/DiagnosticsPanel.tsx')).toMatch(/connected \? 'Streaming' : 'Connecting…'/)
   })
 
+  it('the DESIGN cockpit shows it too — the loops family is now complete', () => {
+    // Cycle 593. `DesignCockpitPage` is the third full-page watch surface on this hook, and the one my
+    // ux-592 probe accidentally proved is reachable (a `design`-kind loop routes here, not to
+    // LoopCockpitPage). Same gate, same vocabulary.
+    const code = read('pages/loops/DesignCockpitPage.tsx')
+    expect(code).toMatch(/const \{ connected \} = useRunStream/)
+    expect(code).toMatch(/\{connected \? 'Streaming' : 'Connecting…'\}/)
+    expect(code).toMatch(/background: connected \? 'var\(--color-ok\)' : 'var\(--color-on-surface-low\)'/)
+    expect(code, 'a finished loop has no stream').toMatch(/\{running && \(/)
+  })
+
+  it('CodeCockpitPage now has it too — every watch surface on this hook is covered', () => {
+    // This test previously asserted the OPPOSITE (that CodeCockpitPage was not yet wired), so the gap
+    // could not be mistaken for done. Wiring it and leaving that guard would have turned the rail red —
+    // which is exactly what a guard like that is for.
+    const code = read('pages/code/CodeCockpitPage.tsx')
+    expect(code).toMatch(/const \{ connected \} = useRunStream/)
+    expect(code).toMatch(/\{connected \? 'Streaming' : 'Connecting…'\}/)
+    expect(code, 'gated on its own running flag').toMatch(/\{active && \(/)
+  })
+
+  it('LoopPlanReview stays the one deliberate opt-out', () => {
+    // A review panel is not a live watch surface. It calls the hook and ignores the flag.
+    const code = read('pages/loops/LoopPlanReview.tsx')
+    expect(code).toMatch(/useRunStream\(/)
+    expect(code).not.toMatch(/const \{ connected \} = useRunStream/)
+  })
+
   it('the remaining consumers still compile against the new return', () => {
     // Backwards-compatible by construction: they ignore the value.
     for (const rel of ['pages/loops/DesignCockpitPage.tsx', 'pages/code/CodeCockpitPage.tsx', 'pages/loops/LoopPlanReview.tsx']) {
