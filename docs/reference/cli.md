@@ -226,6 +226,7 @@ editable from the dashboard — they are config-file-only on purpose.
 | Command | What it does |
 |---|---|
 | `gideon consolidate KEY \| --all` | Run skill/memory extraction over a session transcript now (the same path the idle poll and session-end triggers use). |
+| `gideon discover [--timeout SECS] [--json]` | Find Gideon gateways advertising themselves on the local network (mDNS/DNS-SD `_gideon._tcp`). Prints each one's name and base URL. Finding nothing is a normal result and exits 0 — discovery is opt-in, is a no-op on a loopback-only gateway, and many networks filter multicast. See [Companion apps](../guides/companion-apps.md). |
 | `gideon eval [SCENARIOS...] [--all] [--judge]` | Run multi-session evaluation scenarios (default: a ~30s smoke test; `--judge` enables LLM scoring). |
 | `gideon mcp-schedule` / `gideon mcp-core` | Internal MCP server entry points spawned by ACP agents — not user-facing (hidden from `--help`). |
 
