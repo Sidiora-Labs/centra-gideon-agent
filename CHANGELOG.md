@@ -55,6 +55,14 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
   does, and every piece inside carries its own fingerprint — change one byte anywhere and the
   whole import is refused before anything is written.
 
+- **Buttons inside a generated widget now work everywhere you can see the widget.** A widget the
+  agent builds can carry real controls, and clicking one used to only do something while you were
+  looking at it inside a conversation — the same button in an artifact's preview or on a dashboard
+  tile quietly did nothing. Now it opens a chat and your click arrives as the first thing you said,
+  form fields and all; pressed inside a conversation it still answers in that conversation rather
+  than starting a new one. A widget still cannot press its own buttons — only a real click counts —
+  and it cannot pad your message either: anything past 16 KB is cut with a visible …truncated so you
+  can see it was shortened.
 - **A guided tour of the app, and you can take it again whenever you like.** The last screen of
   setup now offers a quick walk through the five places that matter: the sidebar, chat, the Inbox,
   where anything risky waits for your permission, and Settings. It happens on the real app — each
@@ -920,6 +928,17 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
 
 ### Fixed
 
+- **Generated documents no longer show up in your library as broken images, and a generated PDF
+  finally previews.** A Word document, spreadsheet, deck, PDF or video that Gideon made for
+  you had its card drawn as a picture — so the grid showed the browser's torn-page glyph for a
+  file that had been created perfectly. Those cards now show the icon for what they actually are,
+  in that format's own colour, while an image artifact still shows its real thumbnail. Opening a
+  generated PDF used to show nothing at all: the viewer knew how to display a PDF sitting in your
+  files but not one the agent had just produced, and quietly came up empty. It now displays either
+  one, and if a PDF genuinely cannot be found it says so instead of offering to open a file that
+  is not there. An artifact of a kind the app does not recognise now reads "Unknown kind" rather
+  than borrowing the name of a real one — that impersonation is why every generated document was
+  labelled "Widget" for four releases with nothing anywhere reporting a problem.
 - **The Loops page no longer tells you that you have no loops when it simply could not load
   them.** If the request failed, the page said "No loops yet" and invited you to start your
   first — the most confident possible way to say the opposite of what happened, to someone whose
