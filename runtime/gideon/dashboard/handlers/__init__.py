@@ -2,7 +2,7 @@
 
 Aggregates the public handler API from the ``handlers/`` submodules (agents,
 schedule, files, hooks, mcp, memory, messaging, prompts, sessions,
-terminal, updates, usage, core, optimizer, portability) under the flat
+terminal, updates, usage, core, optimizer, durability) under the flat
 ``gideon.dashboard.handlers.X`` import path used by ``server.py``.
 
 System metrics (CPU, memory, network, disk) live in ``handlers_system.py``;
@@ -144,9 +144,11 @@ from gideon.dashboard.handlers.doctor import (  # noqa: E402, F401
 
 # ── Durability: scheduled backups + retention (handlers/durability.py) ──
 from gideon.dashboard.handlers.durability import (  # noqa: E402, F401
-    api_durability_restore,
+    api_durability_archive,
+    api_durability_archive_restore,
+    api_durability_export,
+    api_durability_import,
     api_durability_run,
-    api_durability_snapshots,
     api_durability_status,
 )
 
@@ -237,13 +239,16 @@ from gideon.dashboard.handlers.memory import (  # noqa: E402, F401
     api_memory_entities,
     api_memory_entity_backlinks,
     api_memory_entity_create,
+    api_memory_entity_graph,
     api_memory_entity_proposals,
+    api_memory_entity_proposals_list,
     api_memory_episodic_delete,
     api_memory_episodic_list,
     api_memory_episodic_search,
     api_memory_event_undo,
     api_memory_events,
     api_memory_graph,
+    api_memory_graph_export,
     api_memory_graph_rebuild,
     api_memory_history,
     api_memory_import,
@@ -254,10 +259,14 @@ from gideon.dashboard.handlers.memory import (  # noqa: E402, F401
     api_memory_projects,
     api_memory_promote,
     api_memory_recall,
+    api_memory_record_links,
     api_memory_semantic,
     api_memory_semantic_delete,
     api_memory_semantic_write,
     api_memory_settings,
+    api_memory_slot_append,
+    api_memory_slot_line_retire,
+    api_memory_slots,
     api_memory_stats,
     api_memory_vault_status,
     api_memory_vault_sync,
@@ -286,13 +295,6 @@ from gideon.dashboard.handlers.messaging import (  # noqa: E402, F401
 )
 from gideon.dashboard.handlers.optimizer import (  # noqa: E402, F401
     handle_optimize,
-)
-
-# ── Portability (export/import as zip) ──
-from gideon.dashboard.handlers.portability import (  # noqa: E402, F401
-    api_portability_export,
-    api_portability_import,
-    api_portability_preview,
 )
 from gideon.dashboard.handlers.prompts import (  # noqa: E402, F401
     MAX_PROMPT_BYTES,
