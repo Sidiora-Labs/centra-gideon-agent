@@ -6,7 +6,7 @@ Offline API/tool reference for Gideon (manifest apiVersion 1). Generated from th
 
 1. Read this index to locate the surface you need — don't read every file.
 2. Drill into the one relevant section:
-   - **[tools.md](tools.md)** — 90 registered tools across 13 providers, with exact input schemas + examples.
+   - **[tools.md](tools.md)** — 91 registered tools across 13 providers, with exact input schemas + examples.
    - **[routes.md](routes.md)** — 712 agent-callable HTTP routes (of 716 total), with summaries.
    - **[providers.md](providers.md)** — the provider-type taxonomy + 27 registered providers.
 3. Copy the exact signature — never guess a parameter name.
@@ -24,7 +24,7 @@ Offline API/tool reference for Gideon (manifest apiVersion 1). Generated from th
 - `gideon-prompts` — 1 tools
 - `gideon-subagents` — 4 tools
 - `gideon-tasks-tools` — 9 tools
-- `gideon-ui-docs` — 2 tools
+- `gideon-ui-docs` — 3 tools
 - `gideon-workflows` — 19 tools
 - `workflows-tools` — 2 tools
 
