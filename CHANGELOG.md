@@ -10,6 +10,19 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
 
 ### Added
 
+- **Nudge an artifact's look without spending a message on it.** A generated card, chart or
+  dashboard can now declare its own tunables, and the **Iterate** rail beside it turns them into
+  real controls — a colour swatch, a slider, a switch. Drag one and the artifact restyles as you
+  move, with nothing sent anywhere: no model call, no request, no turn. When you like it, **Save as
+  a new version** reads what the preview is actually showing, writes those values back into the
+  artifact itself and snapshots a version, so a reload comes back the way you left it and the old
+  look is still one click away in the version history. Everything else in the artifact is left
+  exactly as the agent wrote it.
+- **Point at what is wrong instead of describing it.** Switch on **Mark elements**, click the parts
+  of a rendered artifact you want changed, and type one short note each. Sending it produces a
+  single message that names every element you marked, so the agent fixes all of them in one pass
+  rather than guessing which "second heading" you meant. On a loop's output it goes to that loop as
+  guidance; anywhere else it opens a chat and asks for the same artifact to be refreshed in place.
 - **Saved the same article twice? Knowledge will now tell you, and fold the two together.** Open a
   knowledge item and the **More details** panel lists anything that looks like the same document
   again, each with the reason it was matched and how long ago it arrived, so you can judge the claim
@@ -61,6 +74,13 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
   **Branched from** link back to the one it came from, which stays there after a reload and
   follows the original if you rename it. Nothing is overwritten, so there is no confirmation
   to click through.
+- **A bad edit is no longer permanent.** Before the agent's first write to a file in a turn,
+  Gideon now saves that file's current bytes. When a turn wrecks something, `/rewind-to-turn N`
+  first *shows* you what it would change — the exact files, with diffs — and only writes after you
+  confirm. It restores the files and leaves the conversation alone, so the transcript still shows what
+  happened (`/undo` remains the one that rolls back the chat). Credential files like `.env` are never
+  copied at all, which also means a rewind will not restore one — the preview says so rather than
+  quietly skipping it. Tune the store under **Settings → Chat → File checkpoints**.
 
 - **Your phone can find this machine on its own now, if you ask it to.** Getting a companion
   device onto your gateway used to start with reading an IP address off one screen and typing it
