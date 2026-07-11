@@ -11,6 +11,8 @@ Commands:
     gideon spawn run "task"     Spawn a background subagent
     gideon spawn list           List subagents
     gideon learn add|list|remove Save and manage learned corrections
+    gideon app new --list-types  Provider types you can scaffold an app for
+    gideon app new NAME --type T Scaffold an installable app
     gideon setup                Interactive credential setup
     gideon doctor               Verify setup
 """
@@ -827,6 +829,9 @@ Examples:
     cfg_set.add_argument("--file", "-f", dest="file", help="Load full config from a JSON file")
     cfg_sub.add_parser("edit", help="Open config in $EDITOR")
 
+    # app — scaffold a third-party app (types derived from the provider registry)
+    _add_app_parser(sub)
+
     # skills
     skills_parser = sub.add_parser("skills", help="Manage skills from the skills marketplace")
     skills_sub = skills_parser.add_subparsers(dest="skills_command")
@@ -1028,6 +1033,10 @@ Examples:
         rc = _backup_cmd(args)
         if rc:
             raise SystemExit(rc)
+    elif args.command == "app":
+        rc = _app_cmd(args)
+        if rc:
+            raise SystemExit(rc)
     elif args.command == "agent":
         _handle_agent(args)
     elif args.command == "skills":
@@ -1041,6 +1050,8 @@ Examples:
 
 
 from gideon.auth.cli import auth_cmd as _auth_cmd  # noqa: E402
+from gideon.cli_app_new import add_parser as _add_app_parser  # noqa: E402
+from gideon.cli_app_new import app_cmd as _app_cmd  # noqa: E402
 from gideon.cli_chat import _chat  # noqa: E402
 from gideon.cli_commands import (  # noqa: E402
     _automation,
