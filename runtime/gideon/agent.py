@@ -947,6 +947,50 @@ def _apply_user_agent_hooks(config: dict, pc_cfg: dict) -> None:
         logger.debug("SEL audit for agent_hooks merge failed", exc_info=True)
 
 
+def _bundled_hooks(bundled: dict) -> dict:
+    """Return the bundled ``hooks`` block with its path placeholders resolved.
+
+    The shipped ``postToolUse`` command appends a bash-audit line to
+    ``audit.log``, and it used to name that file with a literal ``~/.gideon/``
+    tilde. That path ignores ``GIDEON_HOME``, so the moment a CLI honours the
+    generated ``gideon.json`` (which is what ACP-AGENT-PARITY §2.1 prong B
+    makes happen for kiro) every isolated-home session appends to the operator's
+    REAL home instead of its own — a home-isolation break in a security control,
+    measured as `G31`. The token is expanded against :func:`config_dir` at generation
+    time rather than left to the CLI's shell, because an unset ``GIDEON_HOME``
+    would expand ``$GIDEON_HOME/audit.log`` to ``/audit.log``.
+
+    Raises when a placeholder survives: a hook command containing ``{{`` would be
+    run verbatim by the CLI's shell and silently write to a junk relative path.
+    """
+    from gideon.config import config_dir
+
+    hooks = bundled.get("hooks")
+    if not hooks:
+        return {}
+    audit_log = str(config_dir() / "audit.log")
+    resolved: dict = {}
+    for event, entries in hooks.items():
+        if not isinstance(entries, list):
+            resolved[event] = entries
+            continue
+        out = []
+        for entry in entries:
+            if isinstance(entry, dict) and isinstance(entry.get("command"), str):
+                entry = {
+                    **entry,
+                    "command": entry["command"].replace("{{GIDEON_AUDIT_LOG}}", audit_log),
+                }
+                if "{{" in entry["command"]:
+                    raise RuntimeError(
+                        f"bundled hook {event!r} has an unresolved placeholder: "
+                        f"{entry['command']!r}"
+                    )
+            out.append(entry)
+        resolved[event] = out
+    return resolved
+
+
 def build_agent_config() -> dict:
     """Return the final agent config (shipped defaults + user overrides + dynamic fields).
 
@@ -963,7 +1007,7 @@ def build_agent_config() -> dict:
     # is stale. (Bash command screening is enforced natively in
     # ``gideon.security`` — not via a per-agent-file denylist.)
     bundled = _load_json(_BUNDLED_CFG_DIR / "defaults.json")
-    bundled_hooks = bundled.get("hooks")
+    bundled_hooks = _bundled_hooks(bundled)
     if not bundled_hooks:
         raise RuntimeError("Cannot build agent config: hooks missing from bundled defaults")
     config["hooks"] = bundled_hooks
@@ -1022,7 +1066,7 @@ def _refresh_dynamic_fields(config: dict) -> None:
             "Cannot refresh security fields: bundled defaults.json is not a JSON object"
         )
 
-    bundled_hooks = bundled.get("hooks")
+    bundled_hooks = _bundled_hooks(bundled)
     if not bundled_hooks:
         raise RuntimeError("Cannot refresh security fields: hooks missing from bundled defaults")
     config["hooks"] = bundled_hooks

@@ -11,7 +11,7 @@
     "postToolUse": [
       {
         "matcher": "bash",
-        "command": "{ echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) BASH:\"; cat; echo; } >> ~/.gideon/audit.log"
+        "command": "{ echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) BASH:\"; cat; echo; } >> {{GIDEON_AUDIT_LOG}}"
       }
     ]
   }
