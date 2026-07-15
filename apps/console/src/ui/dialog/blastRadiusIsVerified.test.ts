@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { pyMethod } from '../../design/pySource'
 
 // ── A destructive dialog's body is a CLAIM about the backend ────────────────────────────────────
 //
@@ -252,5 +253,146 @@ describe('two more bodies: one corrected, one confirmed', () => {
     // disk-purge fallback because "Delete" used to 404 for a non-resident session, leaving its JSONL on
     // disk and letting the chat RESURRECT on reopen — the exact opposite of what this sentence promises.
     expect(del.slice(0, 6000)).toMatch(/letting it resurrect on reopen/)
+  })
+})
+
+describe('the project delete, and the two workflow bodies', () => {
+  it('says the LISTS go and the TASKS stay — which is the way round the code works', () => {
+    // 🪤 It said "task lists detached", which implies the lists survive unattached. They do not:
+    // `delete_project` unlinks each list file. What survives is the TASKS — separate files that become
+    // orphaned-by-list. The reassurance was pointed at the wrong noun.
+    const ui = web('pages/projects/ProjectsSection.tsx')
+    expect(ui).toContain('task lists are removed — the tasks themselves stay')
+    expect(ui, 'the misleading word must not come back').not.toContain('task lists detached')
+    const h = pyMethod(py('tasks/hierarchy.py'), '    def delete_project')
+    expect(h, 'list files are unlinked, not detached').toMatch(
+      /self\._list_path\(tl\.id\)\.unlink\(missing_ok=True\)/,
+    )
+    expect(h, 'and the tasks are explicitly NOT the provider\'s job here').toMatch(
+      /the task provider owns task deletion/,
+    )
+  })
+
+  it('the workspace-untouched half holds for the dialog that says it', () => {
+    // The rmtree DOES take the project's own `worktrees/` — but those exist only for bound loops/code
+    // work, and that case is refused without ?force and gets its own dialog. So this sentence is true
+    // wherever it is shown. Both halves pinned, because the guard is what makes the copy safe.
+    const h = pyMethod(py('tasks/hierarchy.py'), '    def delete_project')
+    expect(h, 'the project dir goes wholesale').toMatch(/shutil\.rmtree\(self\._project_dir\(project_id\)/)
+    const handler = py('tasks/hierarchy_handlers.py')
+    expect(handler, 'bound work is refused without force').toMatch(
+      /rmtree its worktrees out\s*\n?\s*#?\s*from under git/,
+    )
+    expect(web('pages/projects/ProjectsSection.tsx'), 'and the force path has its own warning')
+      .toMatch(/STOPS and REMOVES any bound loops/)
+  })
+
+  it('a workflow run really does keep its own spec copy', () => {
+    expect(web('pages/workflows/WorkflowsListPage.tsx')).toContain(
+      'Existing runs keep their own copy of the spec and are unaffected.',
+    )
+    expect(py('workflows/service.py'), 'the run persists its own spec at start')
+      .toMatch(/store\.write_spec\(run\.id, spec\)/)
+  })
+
+  it('cancel stops the run without deleting what finished', () => {
+    expect(web('pages/workflows/WorkflowRunDetail.tsx')).toContain('In-flight steps are stopped. Completed work is kept.')
+    const cancel = py('workflows/service.py').slice(
+      py('workflows/service.py').indexOf('def cancel_run('),
+      py('workflows/service.py').indexOf('async def delete_run('),
+    )
+    // The distinction the copy rests on: cancel requests a terminal status; DELETING a run is a separate,
+    // explicit call. If cancel ever started removing rows, "Completed work is kept" would be false.
+    expect(cancel, 'cancel does not delete').not.toMatch(/delete|rmtree|unlink/)
+    expect(py('workflows/service.py'), 'deletion is its own deliberate operation')
+      .toMatch(/async def delete_run\(/)
+  })
+})
+
+describe('four more bodies, all already true — pinned so they stay that way', () => {
+  it('the tag delete really re-parents children instead of deleting the branch', () => {
+    // 🔑 THE FRAGILE ONE. This body promises "Its N nested tags become top-level rather than being
+    // deleted", and nothing in `delete_tag` re-parents anything — the promise rests entirely on
+    // `ON DELETE SET NULL` on the tags self-FK, which SQLite honours only with the pragma on. Same
+    // two-part dependency as the annotations cascade, so both parts are pinned: lose either and a
+    // parent delete silently destroys the branch beneath it while the dialog says it will not.
+    const ui = web('pages/knowledge/TagManager.tsx')
+    expect(ui).toContain('become top-level rather than being deleted')
+    const store = py('knowledge/store.py')
+    const ddl = store.slice(store.indexOf('CREATE TABLE IF NOT EXISTS tags'))
+    expect(ddl.slice(0, ddl.indexOf(');')), 'the self-FK sets null').toMatch(
+      /parent_id INTEGER REFERENCES tags\(id\) ON DELETE SET NULL/,
+    )
+    const connect = store.slice(store.indexOf('self.db = sqlite3.connect('))
+    expect(connect.slice(0, 400), 'and the connection enforces foreign keys').toMatch(/PRAGMA foreign_keys=ON/)
+    // And the untag half of the same sentence.
+    expect(ui).toMatch(/This removes the tag from \$\{t\.usage_count\} item/)
+    expect(pyMethod(store, '    def delete_tag'), 'the docstring states the same contract')
+      .toMatch(/Children are re-parented to root rather than deleted/)
+  })
+
+  it('the shelf delete leaves the items alone', () => {
+    expect(web('pages/knowledge/KnowledgeListPage.tsx')).toContain(
+      'The shelf goes away. The items on it stay in your library.',
+    )
+    const del = pyMethod(py('knowledge/store.py'), '    def delete_collection')
+    expect(del, 'membership rows and the collection row go').toMatch(/DELETE FROM collection_items/)
+    expect(del, 'and the items table is never touched').not.toMatch(/DELETE FROM items/)
+  })
+
+  it('the skill delete really removes the directory', () => {
+    expect(web('pages/skills/SkillInspector.tsx')).toContain('This removes it from disk. This cannot be undone.')
+    expect(pyMethod(py('skills/loader.py'), '    def delete_skill'), 'rmtree, not a registry flag')
+      .toMatch(/shutil\.rmtree\(skill_dir\)/)
+  })
+
+  it('the Ollama delete really reaches the host — across the app boundary', () => {
+    // 🪤 A CROSS-REPO CLAIM, and the reason it is worth pinning: nothing in core implements this. The
+    // handler calls `catalog.delete_model`, and the only implementation lives in the REMOVABLE
+    // `ollama-models` app bundle, which is exactly where provider logic is supposed to live. A grep of
+    // core alone says the promise is unimplemented; it is not.
+    expect(web('pages/settings/OllamaModelManager.tsx')).toContain(
+      "This frees disk on the Ollama host and can't be undone.",
+    )
+    const h = py('dashboard/handlers/providers.py')
+    expect(h, 'core delegates to the catalog').toMatch(/await catalog\.delete_model\(model\)/)
+    expect(h, 'and only for a provider whose catalog can do it').toMatch(/isinstance\(catalog, ModelManager\)/)
+  })
+})
+
+describe('the stop-project dialog, and the file delete', () => {
+  it('warns that a running task loses its worktree — the half that costs work', () => {
+    // 🔴 Stop is TERMINAL and its teardown force-removes every task worktree. The old body reassured
+    // ("Work already written to the workspace is kept") without saying that in-flight work is discarded,
+    // which is the one thing a terminal action owes the user.
+    const ui = web('pages/code/CodeCockpitPage.tsx')
+    expect(ui).toContain('a task still running loses its own worktree and branch')
+    expect(ui, 'and it now says how kept work got there').toContain('already merged into your workspace is kept')
+    // The mechanism, both halves. `--force` discards uncommitted work; `-D` takes the branch even
+    // unmerged, so committed-but-unmerged work goes too.
+    const wt = pyMethod(py('loop/worktree.py'), 'def cleanup_all')
+    expect(wt, 'the worktree is force-removed').toMatch(/"worktree", "remove", "--force"/)
+    expect(wt, 'and its branch force-deleted').toMatch(/"branch", "-D", branch_name\(name\)/)
+    // …and the reason the "kept" half is true: a FINISHED task is merged back first.
+    expect(py('loop/kinds/sdlc.py'), 'a finished task merges into the workspace')
+      .toMatch(/worktree\.merge_worktree\(ws, tid/)
+  })
+
+  it('stop really is terminal, which is why the warning matters', () => {
+    const stop = pyMethod(py('loop/manager.py'), 'async def stop')
+    expect(stop, 'teardown then a terminal status').toMatch(/_teardown\(svc, loop_id\)[\s\S]{0,200}LoopStatus\.STOPPED/)
+    expect(pyMethod(py('loop/manager.py'), 'async def _teardown'), 'and teardown is what cleans worktrees')
+      .toMatch(/worktree\.cleanup_all\(loop\.workspace_dir/)
+  })
+
+  it('the folder delete really recurses', () => {
+    const ui = web('pages/files/FilesSection.tsx')
+    expect(ui).toContain('This deletes the folder and all its contents. This cannot be undone.')
+    // Conditional on `is_dir`, so a file does not get the folder sentence.
+    expect(ui).toMatch(/entry\.is_dir \? 'This deletes the folder and all its contents/)
+    const h = py('dashboard/handlers/files.py')
+    const del = h.slice(h.indexOf('async def api_file_delete'))
+    expect(del.slice(0, 2200), 'a directory is rmtree-d').toMatch(/shutil\.rmtree\(path\)/)
+    expect(del.slice(0, 2200), 'and a root is refused').toMatch(/refusing to delete a root directory/)
   })
 })
