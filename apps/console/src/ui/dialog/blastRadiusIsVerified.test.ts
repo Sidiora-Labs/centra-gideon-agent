@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { pyMethod } from '../../design/pySource'
+import { pyBetween, pyMethod } from '../../design/pySource'
 
 // ── A destructive dialog's body is a CLAIM about the backend ────────────────────────────────────
 //
@@ -394,5 +394,109 @@ describe('the stop-project dialog, and the file delete', () => {
     const del = h.slice(h.indexOf('async def api_file_delete'))
     expect(del.slice(0, 2200), 'a directory is rmtree-d').toMatch(/shutil\.rmtree\(path\)/)
     expect(del.slice(0, 2200), 'and a root is refused').toMatch(/refusing to delete a root directory/)
+  })
+})
+
+describe('the conflict-resolve body, per choice', () => {
+  const ui = () => web('pages/settings/DurabilityPanel.tsx')
+
+  it('promises reversibility ONLY for the choice that earns it', () => {
+    // 🔴 It said "The version you don't pick stays in the shared store" for all three choices. Only
+    // `keep_local` discards the REMOTE row — the one the shared store actually holds. The other two
+    // discard THIS machine's row, which no store keeps.
+    expect(ui()).toMatch(/choice === 'keep_local'/)
+    expect(ui(), 'the reversible branch names the other side').toContain(
+      "The other machine's version stays in the shared store, so you can still decide differently from that side.",
+    )
+    expect(ui(), 'and the destructive branch says what is gone').toContain(
+      "That copy is not kept anywhere else — only a snapshot has it.",
+    )
+    expect(ui(), 'the unconditional promise must not come back').not.toContain(
+      "The version you don't pick stays in the shared store",
+    )
+  })
+
+  it('the backend pushes nothing, which is what makes the keep_local half true', () => {
+    const mod = py('durability/conflict_resolve.py')
+    expect(mod, 'resolving is a LOCAL write').toMatch(/Nothing is pushed from here/)
+    // …and the detector re-holds the id, so the other side really can still decide.
+    // 🪤 Bounded by the NEXT bullet, not by a character count — the span is longer than the 400 I first
+    // guessed, which is the same mistake `pySource`'s own docstring exists to prevent.
+    const keepLocal = pyBetween(mod, '``keep_local``', '``take_remote``')
+    expect(keepLocal, 'the keep_local bullet must be found').toMatch(/three shas are unchanged/)
+    expect(keepLocal, 'the divergence is detected and held again').toMatch(/HOLDS the\s+id again/)
+  })
+
+  it('take_remote and accept_proposal really do overwrite this machine\'s row', () => {
+    const mod = py('durability/conflict_resolve.py')
+    expect(pyBetween(mod, '``take_remote``', '``accept_proposal``'), 'take_remote converges onto the remote sha')
+      .toMatch(/local becomes the remote sha/)
+    const proposal = mod.slice(mod.indexOf('``accept_proposal``'))
+    expect(proposal.slice(0, proposal.indexOf('"' + '""')), 'accept_proposal writes a third sha')
+      .toMatch(/local becomes a THIRD sha/)
+    // The write is whole-entry substitution of the chosen row — nothing archives the old one.
+    expect(pyMethod(mod, 'def _write_chosen_row'), 'the old row is simply replaced')
+      .toMatch(/Substitute ``row`` for ``entity_id``/)
+  })
+
+  it('a resolved record is never silently re-applied — the other half of "decide again"', () => {
+    // The copy says you decide again from the OTHER SIDE, not by re-resolving here, and the backend
+    // enforces exactly that.
+    expect(py('durability/conflict_resolve.py')).toMatch(
+      /``already_resolved``\s*the record was reviewed already \(never re-applied silently\)/,
+    )
+  })
+})
+
+describe('the last three bodies, and what this sweep does NOT claim', () => {
+  it('the intent delete really takes what it gathered', () => {
+    const ui = web('pages/knowledge/KnowledgeListPage.tsx')
+    expect(ui).toContain('Everything it gathered goes with it')
+    expect(ui, 'and the no-outcomes branch says only the intent goes').toContain(
+      'It has gathered nothing yet, so only the intent itself goes.',
+    )
+    // The handler drops the outcomes BEFORE the intent, which is what makes the sentence true.
+    const h = py('dashboard/handlers/knowledge.py')
+    const del = h.slice(h.indexOf('async def delete_intent('), h.indexOf('async def list_intent_outcomes'))
+    expect(del, 'outcomes are deleted with it').toMatch(/delete_intent_outcomes\(intent_id\)/)
+  })
+
+  it('the theme delete really falls back to the default when the theme was active', () => {
+    const ui = web('pages/settings/DesignPanel.tsx')
+    expect(ui).toContain('You are using this theme, so the app goes back to its default colors.')
+    expect(ui, 'and the inactive branch says what a theme IS').toContain('a saved theme is a file, not a snapshot')
+    // The mechanism for the active branch — without this the app would point at a scheme that is gone.
+    const app = web('app/appearance.tsx')
+    expect(app, 'the active scheme reverts to the default').toMatch(
+      /p\.scheme === id\s*\n?\s*\? \{ \.\.\.p, scheme: DEFAULT_SCHEME/,
+    )
+    expect(app, 'and the theme itself is a deleted file').toMatch(/await api\.deleteTheme\(slug\)/)
+  })
+
+  it('records the two bodies this sweep deliberately did NOT decide', () => {
+    // 🪤 AN HONEST BOUNDARY, asserted so it is not mistaken for coverage. Both of these delete something
+    // real and carry only the helper's default ("This cannot be undone."), and in both cases I could not
+    // state a further consequence WITHOUT guessing:
+    //
+    //   MultiInstanceCard  deleting one provider instance unlinks its JSON and nothing else. Whether a
+    //                      use case pointed at its models loses that selection depends on how instance
+    //                      refs are named: `_prune_removed_providers` drops refs by PROVIDER NAME, so a
+    //                      surviving sibling instance keeps the name known and the ref lingers instead.
+    //                      Either outcome deserves copy — but which one it is needs tracing that ref
+    //                      format end to end, not a plausible sentence.
+    //   LocalModelManager  its sibling (Ollama) says "This frees disk on the Ollama host"; this one says
+    //                      nothing about disk. The delete delegates through `local_models.registry` to a
+    //                      runtime manager that lives outside core, so the disk claim is not core's to
+    //                      make until that manager is read.
+    //
+    // Asserting the CURRENT state means a later pass finds this note rather than re-deriving it, and a
+    // change to either body trips a test that points at the open question.
+    expect(web('pages/settings/MultiInstanceCard.tsx'), 'still the default body')
+      .toMatch(/confirmDelete\('instance', inst\.display_name \|\| inst\.id\)/)
+    expect(web('pages/settings/LocalModelManager.tsx'), 'still the default body')
+      .toMatch(/confirmDelete\('model', name\)/)
+    // And the reason the instance question is open, pinned to the code that makes it open.
+    expect(py('providers/use_cases.py'), 'pruning keys on the provider NAME, not the instance')
+      .toMatch(/str\(r\)\.split\(":", 1\)\[0\] in known/)
   })
 })
