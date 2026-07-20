@@ -1174,7 +1174,7 @@
         {
           "id": "MRI-5",
           "title": "V2 owner validation: drive the surface from a real MCP-enabled client end-to-end",
-          "status": "todo",
+          "status": "done",
           "scope": "Session 2 \u2014 V2 + Owner tasks (real-world validation client)",
           "done_when": "A real MCP-enabled client (IDE MCP config or mcp CLI) on the same machine connects over loopback, exercises all six tools, trips the rate cap, flips the kill switch mid-session, and SEL + inbound_audit.jsonl trails match design; remote access still refused without allow_remote + public_url; validation ledger written. (Owner-gated: requires an MCP client installed on the machine.)",
           "deps": [
@@ -6674,7 +6674,7 @@
         {
           "id": "EI-8",
           "title": "Turn-bound two-phase file checkpointing + /rewind-to-turn + localhost web preview",
-          "status": "todo",
+          "status": "done",
           "scope": "\u00a76 two-phase checkpoint (identity-set snapshot + pre-edit backup in mcp_core file tools) + /rewind-to-turn (preview diff + confirm, SEL-audited, filesystem-only) + per-session caps; \u00a76.2 localhost web preview (port discovery on the sandbox handle, ephemeral preview_urls); \u00a711 Session 7",
           "done_when": "SC8: after a turn that mangled three files, /rewind-to-turn N previews exactly those files with diffs and restores them byte-identical on confirm; .env files were never captured; the checkpoint store respects its cap and prunes with the session; a run's dev server port surfaces an \"Open Preview\" affordance to localhost:<port>",
           "deps": [
@@ -7587,11 +7587,6 @@
         "plan": "EI"
       },
       {
-        "id": "EI-8",
-        "title": "Turn-bound two-phase file checkpointing + /rewind-to-turn + localhost web preview",
-        "plan": "EI"
-      },
-      {
         "id": "EI-10",
         "title": "Secrets vault UX + presence-only API + grant-to-sandbox toggles",
         "plan": "EI"
@@ -7675,11 +7670,6 @@
         "id": "MI-2",
         "title": "Cloning-capable TTS engine app beside piper + capability flags (supports_cloning/supports_voice_design) + typed refusal",
         "plan": "MI"
-      },
-      {
-        "id": "MRI-5",
-        "title": "V2 owner validation: drive the surface from a real MCP-enabled client end-to-end",
-        "plan": "MRI"
       },
       {
         "id": "MRT-3",
@@ -9591,9 +9581,9 @@
         "code": "MRI",
         "plan": "MCP-READONLY-INBOUND",
         "total_atoms": 5,
-        "done": 4,
+        "done": 5,
         "in_progress": 0,
-        "todo": 1,
+        "todo": 0,
         "blocked": 0
       },
       {
@@ -10077,9 +10067,9 @@
         "code": "EI",
         "plan": "EXECUTION-ISOLATION",
         "total_atoms": 12,
-        "done": 4,
+        "done": 5,
         "in_progress": 0,
-        "todo": 8,
+        "todo": 7,
         "blocked": 0
       },
       {
