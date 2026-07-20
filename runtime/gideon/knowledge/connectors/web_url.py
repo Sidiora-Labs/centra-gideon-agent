@@ -56,7 +56,7 @@ class WebUrlConnector(BaseConnector):
     """Connector that fetches and stores text content from any web URL."""
 
     _HEADERS = {
-        "User-Agent": "Gideon-KnowledgeBot/1.0 (compatible; +https://github.com/gideon/gideon)"  # noqa: E501
+        "User-Agent": "Gideon-KnowledgeBot/1.0 (compatible; +https://github.com/Gideon/Gideon)"  # noqa: E501
     }
 
     def source_type(self) -> str:

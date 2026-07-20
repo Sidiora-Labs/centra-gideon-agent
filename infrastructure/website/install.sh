@@ -111,7 +111,7 @@ offer_setup() {
     have gideon || return 0
     say ""
     step "Installed. Next steps:"
-    say "  gideon setup      # configure your name + first model provider"
+    say "  gideon setup      # configure your workspace directory + timezone"
     say "  gideon gateway    # start the dashboard on http://localhost:10000"
     say ""
     # Only prompt when we have a real TTY (piped `curl | sh` has none — don't hang).
