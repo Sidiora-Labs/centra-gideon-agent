@@ -952,3 +952,180 @@ Sequence these **independently of S1-S3** — they touch the store's indexing la
     primitive-adoption or reduced-motion ratchet moved) · `npm run build --workspace web` rc 0.
     `duplicateMerge.test.tsx` — the known intermittent — **passed first try, 17 tests in 927 ms, in
     the union run**; not touched by this change, so no concurrency probe was needed.
+
+- [2026-08-20][KL-14] **PARTIAL — the atom stays `todo`.** The host is built, wired and driven; two
+  clauses of clause 7 are unmet and named below with their evidence rather than papered over.
+
+  **What landed.** `knowledge/maintenance.py` is the deferred graph-maintenance host: a dirty
+  watermark, a due rule, a snapshot-bounded clear, a bounded-batch claim loop and a pass registry.
+  `knowledge/maintenance_passes.py` registers the standing jobs. The durability tick drives it,
+  the gateway installs its in-flight probe and registers its passes, and every index-affecting
+  knowledge write moves the watermark instead of doing graph work inline.
+
+  **The clauses, one at a time.**
+  1. *Writes mark a watermark, not inline work.* Five sites: `create_typed_item`, `update_item`,
+     `delete_item`, `forget_source_item`, `merge_items` — each AFTER the commit, so a rolled-back
+     write marks nothing. `update_item` is gated on an ALLOWLIST
+     (`_INDEX_AFFECTING_FIELDS`), and the allowlist direction is load-bearing: `embedding`,
+     `insights`, `ai_title` and the processing columns are what the maintenance passes THEMSELVES
+     write, so a denylist would have every pass re-dirty the index it just cleaned and
+     `clear_up_to(snapshot)` would find `dirty_ts` past its snapshot forever — a loop that reports
+     success. An allowlist cannot acquire that bug when a column is added later; a denylist
+     acquires it by default.
+  2. *Due only when dirty AND (queue drained OR dirt older than max-staleness).* Both disjuncts
+     asserted. TWO stamps, not one: `dirty_since` is the FIRST write since the last clean and is
+     what the staleness rule reads, because a busy pipeline's LATEST write is always recent — a
+     rule written against it would defer forever exactly when the backlog is largest. `dirty_ts`
+     is the snapshot boundary. One stamp cannot be both, and that was the first thing I got wrong.
+  3. *Coalescing and anti-starvation.* A 7-item bulk import performs ZERO passes inline and ONE
+     after a host run (asserted at the host with a counting pass, not inferred from the stamp).
+  4. *The snapshot.* `execute` reads `dirty_ts` before running and clears only up to it, so a
+     write landing mid-pass leaves the state dirty. Falsified by clearing to `time.time()` instead.
+  5. *Bounded batches.* Each `run(batch_size)` call opens and closes its own store work, so the
+     lock is released between sub-batches; a pass that always claims more is capped at
+     `max_batches` so a buggy job costs one tick, not the loop.
+  6. *The boot hook is deleted (clean break).* `_backfill_item_chunks_startup` and
+     `start_chunk_backfill` are gone — a hook that only fires at gateway start never runs again,
+     which is the defect. Verified as a DELETION the way mypy cannot (`ignore_missing_imports`
+     hides a stranded first-party import): a runtime import sweep over 10 modules, all clean, and
+     `grep -rn start_chunk_backfill src tests` → **0**. `backfill_item_chunks` already had both a
+     `batch_size` and a `max_items` bound, so the pass uses them rather than inventing one.
+  7. **UNMET, in two ways.**
+     * *The graph linker backfill has no callable.* Measured:
+       `grep -rn "def .*backfill" src/gideon/knowledge/` returns
+       `chunk_backfill.backfill_item_chunks` (registered), `store.backfill_entity_description` (a
+       one-entity setter) and `artifact_ingest.ArtifactIngest.backfill`. The nearest thing to a
+       linker pass is `knowledge_maintain_provider._reindex` / `_wikilink_mentions` — both PRIVATE
+       helpers inside an action provider, neither a resumable library sweep. Registering a private
+       helper across a module boundary, or inventing a public linker backfill, is a design decision
+       that belongs to whoever owns the linker, not a side effect of building a host.
+       `maintenance_passes._probe_unregistered_linker_backfill` carries the reason at the grep site
+       and a test asserts it stays absent, so this reads as a decision rather than an omission.
+     * *Consolidation is registered PLAN-ONLY.* `plan_consolidation`'s own docstring is "Everything
+       a pass would do, without doing any of it", and that is the half that belongs on an
+       unattended cadence today. `KnowledgeConsolidateActionProvider.execute` spends model calls and
+       merges the user's items; putting that on a timer is an autonomy decision, not a cadence fix.
+  8. *Tests.* 20 write-side + 25 host-side + 13 reindex, plus the store slice (491) and
+     `test_knowledge.py`. Max-staleness round-trips dataclass → `_meta` → `load()` → `to_dict()` →
+     `_EDITABLE_CONFIG` → the reader, asserted end to end.
+
+  **A host-selection hazard worth recording.** The host rides the durability tick because that loop
+  already exists and `gateway.py`'s rule is one dispatch path "rather than two that drift". But
+  that loop gates its jobs on `durability.auto_backup`, so registering inside the gate would mean a
+  user turning off scheduled backups silently loses graph maintenance — two unrelated failure
+  mitigations tied to one switch. Maintenance is called OUTSIDE the gate and
+  `test_maintenance_runs_with_auto_backup_off` is the proof rather than the intention.
+
+  **A second inert-by-default trap.** The in-flight probe cannot be imported: the ingest queue is a
+  lazy accessor on `DashboardState` that STARTS a worker when none exists, so asking "how busy is
+  it?" would create one, and `knowledge/` importing the dashboard inverts the boundary. It is
+  injected by the gateway, reads the PRIVATE attribute so probing cannot construct the thing it
+  probes, and an ABSENT probe logs a warning instead of silently reading "drained" — the first
+  version called a `knowledge.get_ingest_queue` that does not exist, so every lookup fell into an
+  except and the coalescing clause would have been inert.
+
+  **Gate:** `make lint` clean (mypy 936 files); 193 targeted + the store slice; full suite green.
+  Ten falsifications across the three parts, each mutating the LIVE line, confirming it applied,
+  observing the named red and restoring from a file copy: clear-to-now (swallowed write), staleness
+  off the latest stamp (starvation), the in-flight gate dropped (a pass per tick), a single-sweep
+  pass treated as batched (the lint busy-loop — 10 runs), maintenance behind the `auto_backup` gate,
+  the probe not installed, the registration call dropped, the no-op-on-chunked-library guard removed,
+  `mark_dirty` removed from `create_typed_item`, and inline `execute()` in the write path (the exact
+  N-vs-1 defect). One test of mine failed for a real reason and was fixed rather than adjusted: the
+  tick's guard lived in the durability loop, not in the seam a direct caller touches.
+
+  **Two facts for whoever takes KL-13 (which this unblocks once clause 7 closes):** `source_seen`
+  has a FOREIGN KEY to `sources`, so a fabricated `source_id` raises `IntegrityError` instead of
+  exercising the novelty gate; and `maintenance`'s only clock use is `time.time()`, so
+  `monkeypatch.setattr(maintenance, "time", fake)` makes the stamp inequalities exact — under real
+  time the mid-run assertion flakes in the direction that HIDES a swallowed write.
+
+- [2026-08-20][KL-15] DONE — the embedding batch path, with retry and adaptive bisection. Every
+  clause is met; the atom flips.
+
+  **The measured starting state.** `EmbeddingProvider.embed_batch` had been on the ABC since
+  embeddings shipped and had **zero callers in core** — implemented by the `bedrock-models` and
+  `sentence-transformers` app bundles and unreached by the ingest path that would benefit.
+  `pipeline/runner.embed_item_chunks` called the provider once per chunk inside a bare
+  `except Exception: vec = None`: no retry, no log, and a transient 429 indistinguishable from a
+  permanently unembeddable chunk. `chunk_backfill.py`'s own comment stated the consequence —
+  "chunks are embedded one at a time anyway — a bigger batch buys no throughput" — and is
+  corrected in this change.
+
+  **Why bisection instead of a configured ceiling.** Providers are removable app bundles, so core
+  cannot know their batch limits: the limit is per-provider, per-model, sometimes per-token rather
+  than per-item, and it changes when the app updates. A number core declares is wrong in both
+  directions — too low wastes the batching, too high fails whole imports. So a batch that fails
+  splits in half and each half retries, recursively, to size 1. The ceiling is DISCOVERED per run
+  and the cost of discovering it is logarithmic: measured, 32 texts against a ceiling of 8 converge
+  in fewer than 32 calls, and the atom's own named fixture (a provider rejecting batches above K)
+  embeds all 16 of 16 texts with K=4.
+
+  **The invariant that makes it safe on an import path.** `embed_texts` returns a list of exactly
+  `len(texts)`, positionally aligned; an un-embeddable text is `None`, which the caller already
+  stores as a vector-less chunk (still keyword-reachable). Nothing is dropped, reordered or
+  truncated — a short list would attach one chunk's vector to another's text and no test downstream
+  could detect it. Falsified from both sides: carrying only texts through a split reds the
+  by-value alignment test, and zipping a wrong-count provider response reds its own test.
+
+  **Retry classification.** A terminal error (auth, unknown model) is NOT retried — retrying one 3x
+  per batch across a 2,000-chunk import is 6,000 pointless calls and a slow, confusing failure.
+  An UNRECOGNISED error still bisects, deliberately: core cannot enumerate every app bundle's
+  wording, so "we did not recognise this message" must not become "abandon the import". Both
+  directions are pinned, and tightening the rule to a strict allowlist reds the unrecognised case.
+
+  **Call sites.** `embed_item_chunks` now makes ONE provider call for an item's chunks — asserted
+  by counting calls on a fake, observed 1 for a 6-chunk document, with the chunk count itself
+  asserted so the test cannot go vacuous on a chunker change. `store.reembed_all` batches by the
+  configured size while preserving its `{reembedded, failed, total}` shape and firing
+  `on_progress` once per item, in order (grouping made progress coarser in TIME, not in call
+  count). The re-embed composition was checked rather than assumed — `embed_for_item` is
+  `embed(compose_item_text(...))` — and a byte-identity test pins the stored blobs, which caught a
+  dropped-summary mutation that the existing `test_embedding_reindex` could not, because its fake
+  returns a constant.
+
+  A design decision worth naming: the registry's batch fn resolves the ACTIVE embedding selection,
+  so it is used only when the embedder IS the `UnifiedEmbedder` resolving that same selection. A
+  caller-supplied embedder keeps its own `.embed` — otherwise chunk vectors from one model would
+  land beside item vectors from another, the mixed-model index the re-index path exists to prevent.
+  A test asserts the accessor is never consulted in that case.
+
+  **The thread-pool churn, and a second defect inside it.** Four sites wrapped a single async embed
+  in a brand-new `ThreadPoolExecutor` — one executor AND one event loop per text, so a
+  2,100-chunk library meant 2,100 of each. Measured, the timeout in that shape also did not work:
+  `with ThreadPoolExecutor() as pool:` calls `shutdown(wait=True)` on `__exit__`, which joins the
+  still-running worker, so `.result(timeout=0.2)` raised on schedule and the block then blocked
+  anyway — **3.00s on a 0.2s budget, a 15x overrun**, reproduced independently at the real call
+  site before and after. All four now share one bridge: a single daemon thread hosting one
+  persistent loop, reached with `run_coroutine_threadsafe`, so the happy path creates NOTHING per
+  call and a timed-out task is genuinely cancelled. Each site keeps its OWN budget (30s / 60s /
+  60s / 30s) rather than a silently unified one, pinned per site. "No churn" is asserted three
+  ways: zero `ThreadPoolExecutor` constructions across 25 embeds, one identical loop object, and a
+  bounded `threading.active_count()` delta.
+
+  Tradeoff recorded rather than hidden: one loop thread means a provider doing BLOCKING sync I/O
+  inside `async def` (plausible for a boto3-backed embed) occupies the loop, so concurrent callers
+  queue and hit their own timeouts. That is strictly better than today, where those callers blocked
+  for the full duration with the timeout defeated, and it self-heals when the blocking call
+  returns.
+
+  **Gate:** `make lint` clean (mypy 938 files); 41 targeted across the three new suites, 426 in the
+  knowledge/embedding slice, 1142 across all `test_knowledge*`, 343 across the backfill/reindex
+  consumers; full suite green. `config-baseline.json` regenerated for the two new config fields —
+  and worth recording, the parallel agent hit those two reds, measured the drift as exactly the
+  spine's 12 lines, and RESTORED the file rather than committing another fence's generated
+  artifact, which is why there was no conflict.
+
+  **Eleven falsifications**, each mutating the live line, confirming it applied, observing the named
+  red and restoring from a file copy. Two findings from that pass are worth carrying forward:
+  * My own `sleep: Callable = time.sleep` was a DEFAULT-ARGUMENT SNAPSHOT, so the injection point
+    was unpatchable, an autouse fixture that looked like it controlled time did nothing, and the
+    backoff tests really slept — the suite took 48s and dropped to 9.9s once `sleep` was resolved
+    at call time. A default argument is an unsupplied input.
+  * My reader-side clamp test used `0`, which `_config_int`'s `or default` already handles, so it
+    PASSED with the clamp deleted. The clamp actually guards a NEGATIVE (`-5 or 32` is `-5`, and a
+    negative step yields no groups at all — an import that reports success having embedded
+    nothing). Both inputs now have their own test.
+  * A falsification leg produced NO output rather than a red on the first attempt, because a
+    regex-based body replacement mangled the function. Redone as a single verified line swap; an
+    unrun leg is not a pass.
