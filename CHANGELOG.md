@@ -10,6 +10,25 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
 
 ### Added
 
+- **A turn that will not fit says so before it runs, and says what to do about it.** Gideon
+  used to find out a prompt was too big by sending it and reading the provider's error back — after
+  you had already waited. The context is now measured against the bound model's real window *before*
+  the call, and exactly one of three things happens: it fits; it fits after compression, and you are
+  told which block was compressed and from what size to what; or it cannot fit, and the turn is
+  refused with the specific oversized block named — that tool result, that retrieved document, not a
+  generic "context overflow" — plus a fix: shorten that block, run `/compact`, or switch to a model
+  with a larger window.
+  **Room to answer is part of the budget.** A prompt that fills the window exactly leaves nothing for
+  the reply and fails the same way one that is too long does, so the bound is the window minus the
+  reply reserve — the same number the model is handed as its output limit, not a second guess at it.
+  **You are warned while there is still room to act.** A long session now reports its headroom as it
+  tightens, instead of only once it is gone.
+  **An unmeasurable window hides nothing and blocks nothing.** If neither the model catalog nor the
+  window table names your model, the turn proceeds and the pressure reads as unmeasured: "we could
+  not measure this" and "there is plenty of room" are different answers, and a hardcoded default
+  standing in for either is a guess dressed as a fact. In the same spirit, the one silent drop that
+  was already there — the session-context cap quietly shortening long history and telling only a
+  server log — now tells you.
 - **Know whether a model will actually run on your machine before you download it.** Every model in
   the download lists now carries a fit chip — green, yellow, red — computed from this machine's real
   memory budget: total RAM, minus a reserve held back for the OS and the inference runtime, plus a
@@ -999,6 +1018,19 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
   is only a file copy; create one of each by hand if a screenshot needs them.
 
 ### Changed
+- **The agent can no longer edit a file it has not read.** An edit computed against a stale or
+  imagined version of a file used to succeed silently and revert whatever someone else had just
+  changed. Now a write to an existing file is admitted only if that file's *current* content was
+  actually shown to the agent first, and a write that cannot prove it is refused with the exact read
+  to do instead — so the agent fixes itself in one step rather than clobbering your work. The check is
+  on what was really observed, not on whether a read happened: a read of a *different* file does not
+  count, and neither does one whose output was cut off before the part being edited, because reading
+  the first page of a long file does not tell you what is on the fifth. **Creating a new file needs no
+  read** (there is nothing to lose), but overwriting an existing one is held to the same bar as an
+  edit, and it must have been seen in full — an overwrite replaces everything, including the part you
+  never saw. If a file changed on disk after the agent read it, the write is refused too, and the
+  refusal says so; `bash` is the one exception, since a shell command names no target the check could
+  hold it to.
 - **Rewinding a conversation no longer throws the old ending away — and that history is now
   stored inside your chats.** Editing a message from earlier in a conversation used to delete
   everything after it. It still replays from that point, but the turns that came off are kept on
