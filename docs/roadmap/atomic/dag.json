@@ -2685,7 +2685,7 @@
         {
           "id": "LMMV-8",
           "title": "Hardware-aware model fit: one memory budget, one traffic-light verdict, fit-filtered browse",
-          "status": "todo",
+          "status": "done",
           "scope": "Capability-gap amendment (2026-08-19)",
           "done_when": "ONE module owns one memory-budget function and one fit verdict \u2014 unified memory counted once, an integrated GPU's VRAM never added on top of system RAM (the arithmetic that otherwise reports a larger budget than the machine has and then OOMs on load), only discrete VRAM adding a second pool, and a fixed reserve subtracted for the OS and runtime \u2014 producing a red/yellow/green/unknown verdict from model weights plus a KV-cache estimate; the host facts we ALREADY collect (GPU probe, total memory, free disk) are routed through one helper instead of three unrelated call sites, so the fit answer cannot disagree with itself; every model row renders a fit chip beside the existing status chips, and a browse filter that hides models the device cannot run defaults ON while an unknown or unmeasured budget hides NOTHING; a quoted size uses the median variant rather than the smallest so the chip cannot promise a fit the user will not get from the variant they actually pick, and the download panel steps down to the largest variant that fits; a pre-download free-space check refuses with a typed reason naming both numbers and SKIPS WITH A WARNING when the filesystem cannot be measured (an unmeasurable disk is not a reason to block a good download); unit tests pin the budget arithmetic including a machine smaller than the reserve, plus a vacuity assertion that on a synthetic small host at least one shipped model is red and at least one is green; the filter default and the reserve round-trip through config",
           "deps": []
@@ -6160,6 +6160,7 @@
           "id": "FM-7",
           "title": "Motion budget proof: 60fps pass + reduced-motion/expressiveness=0 zero-motion CI guard",
           "status": "done",
+          "pr": 1829,
           "scope": "Session 3 \u2014 budget proof (T3.3, V3)",
           "done_when": "60fps verified on ChatPage + a cockpit with no jank; expressiveness=0 and prefers-reduced-motion both proven to yield instant/crossfade with zero springs; a reduced-motion assertion added to web CI where feasible; full-app motion pass holds at bounciness=1 (delightful) and bounciness=0 (calm)",
           "deps": [
@@ -7717,11 +7718,6 @@
       {
         "id": "LMMV-7",
         "title": "Session 5b \u2014 Hardening: per-model context-budget helper, refresh/registry-drift/destructive-test regressions, full-matrix as-a-user validation",
-        "plan": "LMMV"
-      },
-      {
-        "id": "LMMV-8",
-        "title": "Hardware-aware model fit: one memory budget, one traffic-light verdict, fit-filtered browse",
         "plan": "LMMV"
       },
       {
@@ -9770,9 +9766,9 @@
         "code": "LMMV",
         "plan": "LOCAL-MODEL-MANAGER-V2",
         "total_atoms": 8,
-        "done": 6,
+        "done": 7,
         "in_progress": 0,
-        "todo": 2,
+        "todo": 1,
         "blocked": 0
       },
       {
