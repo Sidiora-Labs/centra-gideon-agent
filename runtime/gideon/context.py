@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from gideon.channel_history import ChannelHistory
     from gideon.history import ConversationLog
     from gideon.session import SessionManager
+    from gideon.skills.allocation import SkillDecision
 
 
 def _path_home_gideon():
@@ -1352,6 +1353,11 @@ class ContextBuilder:
         # headroom notice by the seam, because a drop the user never sees is
         # indistinguishable from a wrong answer.
         notices_out: list[str] | None = None,
+        # CE2-9: when a list is supplied it is filled with one `SkillDecision` per skill
+        # this turn considered — admitted, reduced or refused, with the numbers behind it.
+        # The per-turn answer to "why did my skill not take effect", for callers that want
+        # it structured rather than as the prose notice.
+        skill_decisions_out: list["SkillDecision"] | None = None,
     ) -> tuple[str, HookResult]:
         """Build the full message with context and hook processing.
 
@@ -1441,6 +1447,39 @@ class ContextBuilder:
                     name="session context (memory · lessons · history)",
                     compressible=False,
                 )
+            # CE2-10: a RESUMED session gets the account of what already happened, DERIVED from
+            # the run's own recorded facts. This is the branch that created the defect: the
+            # `resumed` path above deliberately skips thread history (the agent owns it), which
+            # leaves "step 3 already finished" as something the model has to INFER from surviving
+            # prose — and it infers wrong, re-running yesterday's completed step.
+            #
+            # NOT compressible: an account trimmed in the middle is an account that has silently
+            # dropped a completion, which is the very defect it exists to fix. If it does not fit,
+            # CE2-8's contract must name it and refuse.
+            #
+            # `ResumeStateInconsistent` is deliberately NOT caught here. The record contradicting
+            # the tree is the one case where continuing is worse than stopping, and swallowing it
+            # would leave the turn running on a premise already known to be false. The chat runner
+            # turns it into the user-visible refusal.
+            if resumed and session_key:
+                from gideon.resume_account import NOT_CONSULTED, resume_account_block
+
+                _account = resume_account_block(
+                    session_key=session_key,
+                    # NOT_CONSULTED, not []: the assembly seam holds no per-tool outcome record.
+                    # The conversation log persists a tool's TITLE and nothing about whether it
+                    # succeeded, so claiming to have read the tool history here would be a
+                    # confident "nothing happened" about a source nobody read. The compaction
+                    # seam, which DOES hold the tool_calls/tool-result pairs, reads it.
+                    tool_messages=NOT_CONSULTED,
+                    tree_root=cwd,
+                )
+                if _account:
+                    parts.add(
+                        _account + "\n\n",
+                        name="record of already-completed work",
+                        compressible=False,
+                    )
 
         # Channel history — inject on every message for group channel context
         ch_ctx: str | None = None
@@ -1549,29 +1588,38 @@ class ContextBuilder:
         except Exception:
             logger.debug("active-workflows block skipped", exc_info=True)
 
-        # Force-loaded skills (goal-loop planner/quorum): a loop's confirmed
-        # skill_ids load ACTIVELY every cycle, bypassing both the is_custom skip
-        # (the loop worker is a custom agent) and passive trigger-matching. The
-        # user picked these in Plan Review precisely so they're always present.
+        # ── Skills (CE2-9: one budget, declared tiers, a visible decision) ──
+        #
+        # Both skill paths GATHER here and ALLOCATE once below. Before CE2-9 each one
+        # concatenated its bodies straight into `parts` — so a large skill took the window
+        # by being appended, and a matched skill that did not fit had no way to say so.
+        # Now every body is a candidate in the allocator's existing `skills` slot, bounded
+        # per skill by its declared `context_tier` and in aggregate by the turn's skill
+        # budget, and each one comes back admitted / reduced / refused.
+        #
+        # Force-loaded skills (goal-loop planner/quorum): a loop's confirmed skill_ids load
+        # ACTIVELY every cycle, bypassing both the is_custom skip (the loop worker is a
+        # custom agent) and passive trigger-matching. The user picked these in Plan Review
+        # precisely so they're always present — which is why they enter at the higher
+        # score, not why they get unmetered room.
+        # Imported here, not at module scope: `skills.allocation` reaches into
+        # `gideon.learning`, whose package __init__ pulls the whole learning graph —
+        # a cost every `import gideon.context` would otherwise pay. Same reason the
+        # ablation import at :214 is local.
+        from gideon.skills.allocation import FORCED_SCORE, SkillRequest, allocate_skills
+
+        skill_requests: list[SkillRequest] = []
         forced_skills: list[str] = []
         if force_skill_ids:
             for name in force_skill_ids:
                 content = self.skills.load_skill(name)
                 if content:
-                    stripped = self.skills.strip_frontmatter(content)
-                    parts.add(
-                        f"[Skill: {name}]\n{stripped}\n[End of skill]\n\n",
-                        name=f"skill: {name}",
+                    skill_requests.append(
+                        SkillRequest(name=name, content=content, score=FORCED_SCORE, forced=True)
                     )
                     forced_skills.append(name)
             if forced_skills:
                 logger.info("Force-loaded loop skills: %s", ", ".join(forced_skills))
-                try:
-                    from gideon.skills.usage import SkillUsageStore
-
-                    SkillUsageStore().record_uses(forced_skills)
-                except Exception:
-                    logger.debug("skill usage record skipped (error)", exc_info=True)
 
         # Surfaced skills (on-demand, any message) — semantic ∪ keyword (#26),
         # skip for custom agents
@@ -1589,7 +1637,6 @@ class ContextBuilder:
                 _disclosure_threshold = AppConfig.load().skills.progressive_disclosure_threshold
             except Exception:
                 _disclosure_threshold = 8
-            injected: list[str] = []
             if _disclosure_threshold and len(triggered) > _disclosure_threshold:
                 index_lines = [
                     "[Relevant skills — INDEX only. Call skill_invoke{name} to load a "
@@ -1608,20 +1655,28 @@ class ContextBuilder:
                 for name in triggered:
                     content = self.skills.load_skill(name)
                     if content:
-                        stripped = self.skills.strip_frontmatter(content)
-                        parts.add(
-                            f"[Skill: {name}]\n{stripped}\n[End of skill]\n\n",
-                            name=f"skill: {name}",
-                        )
-                        injected.append(name)
-            # Turn-time use counter (skill-use-counter): record the skills actually
-            # inlined into this turn — the shared signal for semantic-surfacing
-            # ranking (#26) and library GC (#27). Advisory, never breaks a turn.
-            if injected:
+                        skill_requests.append(SkillRequest(name=name, content=content))
+
+        if skill_requests:
+            skill_alloc = allocate_skills(self.skills, skill_requests, query=text)
+            for _name, _block in skill_alloc.blocks:
+                parts.add(_block, name=f"skill: {_name}")
+            # VISIBLE: which skill was reduced or refused, and why, on CE2-8's existing
+            # assembly-notice channel rather than a second one.
+            if notices_out is not None:
+                notices_out.extend(skill_alloc.notices)
+            if skill_decisions_out is not None:
+                skill_decisions_out.extend(skill_alloc.decisions)
+            # Turn-time use counter (skill-use-counter): record the skills whose content
+            # actually reached this turn — the shared signal for semantic-surfacing
+            # ranking (#26) and library GC (#27). A REFUSED skill is deliberately not
+            # counted as used: crediting a use to a skill the agent never saw would train
+            # the ranker on the allocator's failures. Advisory, never breaks a turn.
+            if skill_alloc.loaded:
                 try:
                     from gideon.skills.usage import SkillUsageStore
 
-                    SkillUsageStore().record_uses(injected)
+                    SkillUsageStore().record_uses(skill_alloc.loaded)
                 except Exception:
                     logger.debug("skill usage record skipped (error)", exc_info=True)
 

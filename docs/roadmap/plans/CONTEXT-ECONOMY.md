@@ -412,3 +412,252 @@ Sessions 1-3 (NEW-16) and 4-5 (NEW-22) are independent tracks; either alone is a
   that set lands. (The pre-existing "This session completes CONTEXT-ECONOMY — all six sessions
   are now DONE" line above refers to the plan's original six sessions, not to the rev-18
   amendment atoms CE2-8/9/10.)
+
+## Execution log — CE2-10 (a resumed session's derived account of completed work)
+
+- **[2026-08-21][CE2-10] DONE.** A resumed or compacted session now carries a structured account
+  of what already happened, `src/gideon/resume_account.py`. Every line is DERIVED from a
+  record some other code wrote; nothing composes it, and there is no `summarize_fn` in the module.
+
+- **Three sources, each with a closed status vocabulary.** (1) The **ledger** —
+  `ledger.reader.read_events(store, run_id, kinds=ACCOUNT_KINDS)` over
+  `step_completed`/`step_failed`/`step_skipped`/`effect`/`decision`, whose live writers are
+  `workflows/controller.py:2961/:2334/:1596/:2292/:3690`. (2) The **tool history** — the native
+  loop's `tool_calls`/`{"role":"tool"}` pairs, classified with the runtime's OWN discriminator
+  (`agents/native/runtime.py:1143`, `failed = result_str.startswith("Error:")`) plus
+  `security.is_denial_observation` for the denied-is-not-failed split (WF2LEA-13), reused rather
+  than re-derived so there is no second answer to "what is a failed tool call". (3) The **turn
+  checkpoints** — a new read-only `turn_checkpoints.recorded_file_entries()` over the pre-edit
+  manifests written by `agents/native/builtin_tools.py:1304`, the only source that PERSISTS which
+  files a session touched and therefore the only one a post-restart resume can use.
+
+- **`SEL` was evaluated as the tool-outcome authority and rejected.** `log_tool_invocation`
+  records an `outcome`, but its vocabulary is OPEN and semantically mixed — the live call sites
+  write `allowed`, `ok`, `hard`, `invoked`, `ungated`, `bypass`, `blocked`, `too_large`,
+  `not_found`, `denied`, `failed`, `refused_low_memory`. Mapping that onto done/failed would have
+  meant inventing a classification (and `allowed`/`invoked` mean *permitted*, not *succeeded*),
+  i.e. minting another dialect over a set nobody closed. Recorded here because it looks like the
+  obvious source and is not one.
+
+- **Five statuses, and only one of them is `done`.** `done` / `failed` / `denied` / `skipped` /
+  `attempted`. `attempted` is the load-bearing one: a recorded tool call with NO recorded result,
+  or an `effect_status=attempted` ("unknown, possibly fired"), is the case a resumed model most
+  wants to call finished. An UNRECOGNISED `effect_status` degrades to `attempted`, never `done`.
+  A retry that later succeeded reads `done` with `retried=True` rather than erasing the failure
+  that made it necessary.
+
+- **Two seams.** `context.py` — inside the `is_new_session` branch, gated on `resumed`, added as a
+  labelled CE2-8 component `record of already-completed work` with `compressible=False` (an
+  account trimmed in the middle has silently dropped a completion). `context_compaction.compact()`
+  — an existing block is CARRIED verbatim (its facts came from messages already folded away, so it
+  cannot be re-derived) and a fresh one is DERIVED for the region being folded, both inserted
+  between the summary and the untouched verbatim tail. `protect_tail` is not changed, which is how
+  "does not evict the live task" is proved: `after[-8:] == before[-8:]` byte-identical.
+
+- **Bounded, measured with the allocator's counter.** `MAX_ACCOUNT_CHARS = 4000`,
+  `MAX_ACCOUNT_TOKENS = 1400`; a pathological 1000-fact ledger with 200-char names renders **4000
+  chars / 1000 tokens** (typical: 731 chars / 183 tokens), counted through
+  `context_headroom.count_tokens` — no second counter, per `context_headroom.py:146-155`. The
+  omitted-fact note is placed ABOVE the fact list, because the post-render cap cuts from the end
+  and a note appended after the facts is the first thing a truncated account loses.
+
+- **The refusal is one concrete claim: a path the record says exists must exist.** Fed by
+  successful write-shaped tool calls and by checkpoint entries with `existed: True` — restricted to
+  `existed is True` (identity, not truthiness) because an `existed: False` capture records a CREATE
+  whose failure legitimately leaves the file absent, and because an absent key is an unrecorded
+  fact rather than a negative one. A recorded DELETE is never presence-checked; a path outside the
+  tree root is skipped, not counted. `verify_resume_state` runs at
+  `dashboard/chat_runner.py` BEFORE `assemble_context`, because `assemble_context` quarantines a
+  raising ENGINE to the default one — a refusal arriving there as an exception would have been
+  logged as an engine fault instead of shown to the user. Refusal shape copies the CE2-8
+  `CANNOT_FIT` block exactly: error card, `_last_turn_errored = True`, `return`.
+
+- **A REAL DEFECT FOUND BY THE END-TO-END TEST — the fence would have been inert.**
+  `build_message` runs the assembled prompt through `context._MULTIBYTE_TABLE`, which rewrites an
+  em dash to `--`. The account's fence originally contained one, so the block that actually shipped
+  read `[RESUME ACCOUNT -- RECORDED FACTS]` while `context_compaction.is_resume_account` matched on
+  the em-dash form: the carry rule would never have fired, while looking perfectly implemented.
+  Fence constants are now ASCII-only and `test_the_fence_survives_prompt_assembly` asserts both the
+  translate-identity and the end-to-end `is_resume_account(assembled_message)`.
+
+- **A VACUOUS TEST CAUGHT BY FALSIFICATION, then fixed.** `test_compaction_reads_the_original_tool
+  _results_not_the_pruned_digests` passed under a mutant that derived from the pruned copy: the
+  fixture had ONE tool result, and `prune_tool_outputs` keeps the newest
+  `_KEEP_RECENT_TOOL_RESULTS` full, so pruned and original were identical. The fixture now pushes
+  the error result out of that window and asserts the digest actually replaced it before compacting.
+  Same lesson on the assembly-seam test: `"FAILED" in text` passed under the fold-failed-into-done
+  mutant because the block's PREAMBLE contains the word — it now asserts on the step's own line.
+
+- **Falsifications (mutate the live line, observe, restore from a file copy).** (a) `STEP_FAILED`
+  → `done`: 3 red incl. both load-bearing negatives. (b) compose facts from message prose: 1 red
+  (`test_nothing_reaches_the_account_that_is_not_in_a_record`). (c) inconsistent tree warns and
+  proceeds: 2 red (checker + seam). (d) account dropped from the carried set: 1 red
+  (`test_the_account_survives_a_compaction_verbatim`). (e) derive from the pruned copy: 1 red
+  (after the vacuity fix; green before it). (f) em-dash fence: 2 red.
+
+- **Tests:** `tests/test_resume_account.py`, 29 cases, 6s. The ledger halves drive the REAL
+  `workflows.journal.Journal` emitters rather than hand-written dicts — a reader of a key nothing
+  emits is the inert-control shape, and a hand-rolled fixture cannot tell the two apart.
+
+- **One clause satisfied narrowly.** "which commands succeeded" is answered with full fidelity for
+  the ledger and for the native tool history. For a resumed **plain dashboard** session the
+  assembly seam passes `NOT_CONSULTED` for tool history and says so in the block, because the
+  conversation log persists a tool's TITLE and nothing about its outcome — the honest answer is
+  "nobody read that source", not a confident "nothing happened". Persisting per-tool outcomes to
+  the conversation log is a separate change with its own storage question.
+
+- **Roadmap bookkeeping — no `dag.json` row to flip**, same as CE2-8: `main`'s
+  `docs/roadmap/atomic/dag.json` carries CE2-1…CE2-7 only; CE2-10 arrived with the rev-18
+  capability-gap set, still unmerged. No row invented. This entry is the record until it lands.
+## Execution log — CE2-9 (skill bodies allocate on the one budget)
+
+- **[2026-08-21][CE2-9] DONE.** A loaded skill can no longer crowd out the conversation, because
+  skill bodies stopped being concatenated ahead of the budget and became candidates inside it.
+
+- **Where the bodies were.** `context.py:1562-1565` (forced, goal-loop `skill_ids`) and
+  `context.py:1611-1615` (surfaced) each did
+  `parts.add(f"[Skill: {name}]\n{stripped}\n[End of skill]\n\n")` with nothing measuring the
+  result. The allocator already declared a `skills` slot (`learning/surfacing.py:165`) and had
+  never seen a body — only the skill *index*, via `learning/ambient.sources_for(skill_index=…)`.
+  Both sites now GATHER `SkillRequest`s and hand them to one `allocate_skills(...)` call, whose
+  blocks land in the same `skills` slot at priority 3, non-sacrificial (so an oversized item
+  skips rather than truncates — the slot policy already said the right thing).
+
+- **Two caps, one mechanism — enforced inside `allocate`, not beside it.** `Candidate.max_tokens`
+  is the candidate's own declared ceiling, and `surfacing._tier_fits(cost, used, budget, cap)` is
+  the single test both bounds go through, feeding the SAME degrade ladder. A per-skill pre-filter
+  next to the budget would have been the two-budget defect this atom exists to delete.
+  `test_the_per_skill_cap_binds_even_with_the_whole_budget_free` drives a 500,000-token budget so
+  only the declared cap can explain the reduction.
+
+- **The tier is declared, and the key is NOT called `resource_tier` — DEVIATION, recorded.** The
+  atom's wording is "resource tier", but `resources:` frontmatter is *already* "the skill RESOURCE
+  tier" (WF2LEA-10, `loader.py`'s own section header, `tests/test_skill_resource_tier.py`, and
+  `docs/reference/skill-format.md`'s interoperability table). Shipping a second meaning of the
+  phrase in the same frontmatter block is a coherence defect, so the key is **`context_tier`**
+  with the concept still named "resource tier" in prose. Values and caps, MEASURED against the
+  17 bundled skills (median 1,183 tokens, largest 4,202, total 23,025): `light` 1,000,
+  `standard` 3,000 (the default — clears 16 of 17), `heavy` 8,000. Unknown or absent → `standard`,
+  logged: a frontmatter typo must not silently shrink a skill. **Aggregate 16,000** — 8 is the
+  progressive-disclosure threshold, so 8 bodies is the most a turn ever carries; at the median all
+  8 cost 9,464 and nothing reduces, while at the `standard` cap they would want 24,000. So the
+  aggregate binds exactly when several skills sit near their own ceilings, and never otherwise.
+  Deliberately model-BLIND: CE2-8 already measures the assembled prompt against the real window,
+  and re-deriving that here would be the second budget again.
+
+- **`visual-output` now declares `context_tier: heavy`,** because the census found it is the one
+  bundled skill (4,093 tokens by `count_tokens`) over the default cap — discovered by measuring
+  the shipped library rather than by trusting the number.
+  `test_every_bundled_skill_fits_the_cap_its_declared_tier_grants` is the ratchet, with a
+  ≥15-file vacuity floor so an empty glob cannot read as a pass.
+
+- **REDUCED = the DECLARED summary, and the classification reads the TEXT not the tier.**
+  `reduced_block` renders `description` + the `resources:` entry points + the `skill_invoke` call,
+  complete. Nothing slices a body. Classification keys off the string that really reached the
+  prompt, because `Candidate.text` falls back down the chain (`l1 or l0`): a skill with no
+  declared summary is *labelled* tier L1 while rendering the L0 pointer, so trusting the tier
+  label would have reported a REDUCED load of content that is not there.
+
+- **No declared summary ⇒ REFUSED, and that is a decision not an omission.** There is nothing to
+  reduce *to*, and manufacturing a summary from the body's first N characters is exactly the
+  byte-boundary cut the clause forbids. What loads is a one-line pointer naming the skill and
+  `skill_invoke{name}` — reported REFUSED because no part of the skill's content reached the
+  prompt.
+
+- **Continued cost is re-evaluated at `build_message`, which runs EVERY turn.** Verified rather
+  than assumed: `chat_runner.py:2041` is `elif state.context_builder:`, not an `is_new` branch, and
+  the skill block sits at method-body indent outside `build_message`'s `if is_new_session:`. Nothing
+  caches an admission. `test_a_skill_admitted_on_one_turn_is_re_fitted_on_the_next` admits a
+  midsize body on turn 1, shrinks only the room, and gets REDUCED on turn 2 from the same file.
+
+- **Visible through CE2-8's channel, not a new one.** Per-skill notices go out via
+  `notices_out` → `AssembledContext.notices` → `chat_runner:2218` →
+  `activity_event {kind:"headroom"}` → `ActivityLine`. The structured triple rides
+  `AssembledContext.metadata["skill_decisions"]`, and `logger.info` reports
+  `N admitted, N reduced, N refused — used/budget` every turn a skill was considered — including
+  the all-admitted turn, since a report that only appears on a problem cannot answer "did it
+  load?". `SkillAllocation.counts` keeps all three keys present at zero for the same reason. **No
+  `web/` change**, and the reason was checked rather than assumed: CE2-8 verified `ActivityLine`
+  renders any unknown `activityKind` inline, so a new kind was unnecessary and a new component
+  would have been a second channel.
+
+- **A REAL MEASUREMENT CHANGED THE DESIGN TWICE.**
+  1. **Rank decay let load order beat priority one layer down.** With a confirmed (1.0) skill
+     passed *after* a surfaced (0.9) one, `fuse` stamps `source_rank` by list position and
+     `score_candidate` decays 0.85 per rank — measured salience **0.405 for the rank-0 guess vs
+     0.383 for the rank-1 confirmation**. The guess won. `allocate_skills` now sorts by declared
+     score before the pool sees anything, making rank decay a tie-breaker among equal declarations
+     instead of a second ranking. Found by a test that deliberately passed them in the wrong
+     order; `test_a_forced_skill_outranks_a_surfaced_one_at_the_same_overlap` is the rail.
+  2. **A catalogue block would have shipped INERT, and the proof is arithmetic.** The first cut
+     emitted the allocator's near-miss catalogue as its own component. It can never render for a
+     skill: the catalogue is only appended when `used + tokens(catalogue) <= budget` while the
+     item's own L0 already failed `used + tokens(l0) <= budget`, and the catalogue *is* L0 plus a
+     header — measured 57 tokens against 43 for the line it would carry. Both conditions cannot
+     hold. The block and the `Allocation.catalogue` field it needed were deleted rather than
+     shipped as a control nothing can reach; the per-skill pointer lands where the skill would
+     have been and says more.
+
+- **Two allocator changes beyond the cap, both with a reason.** `FULL_BODY_KINDS = {"skill"}` —
+  L2 is the default for a skill instead of a grant, because `L2_MAX_ITEMS=3` would have made a
+  perfectly affordable fourth skill load reduced with budget to spare (and it does not consume the
+  grant budget, so three skills cannot starve a lesson's L2). `UNCAPPED_KINDS` gained `"skill"` —
+  `MAX_PER_SOURCE=3` runs inside `fuse`, BEFORE the allocator can catalogue a near-miss, so a
+  quota there is a drop nobody can see; skills are bounded by their declared cap and the
+  aggregate, which are reported. `test_learning_surfacing.py`'s two diversification tests used
+  `skill` as their capped EXAMPLE and were re-pointed at `memory` (still capped) with the
+  exemption pinned by name — the policy change is explicit, not absorbed.
+  Also fixed on the way: the degrade ladder treated an **empty rendering as a fit** (cost 0), which
+  would have added a blank block reading as a loaded item. Guarded, and
+  `test_a_tier_that_renders_empty_is_not_a_fit` reds without it.
+
+- **MEASURED end to end** (`build_message`, isolated home): a skill with a **42,458-token** body
+  against the shipped caps loaded REDUCED at **89 tokens**; the whole assembled prompt came to
+  **307 tokens** with the user's request intact, and neither the body's first line nor its last
+  reached the prompt.
+
+- **Falsifications** — each mutation applied to the LIVE line, `grep`-confirmed present before the
+  run, restored from a `cp` file copy (never `git checkout --`), with `git status --porcelain`
+  empty afterwards.
+  1. **Restored the pre-CE2-9 concatenation** in `context.py` (bodies pasted straight into
+     `parts`) → `test_an_oversized_skill_loads_reduced_and_the_conversation_survives` RED:
+     `'Step 2000. Do the 2000th thing…' is contained here:` — the full 42k body back in the
+     prompt, the conversation crowded out. 1 failed / 1 passed.
+  2. **Replaced reduction with a byte-boundary cut** (`l1=full_block(...)[: cap * 4]`) →
+     `test_a_reduced_skill_carries_its_declared_summary_not_a_slice_of_its_body` RED, and the
+     failure output shows the exact pathology the clause names — the block ends mid-sentence at
+     `Step 146.`.
+  3. **Made the reduction silent** (dropped the `notices_out.extend`) →
+     `test_the_notice_names_the_skill_and_the_reason` RED (`assert 0 == 1`) and
+     `test_the_decisions_ride_out_in_the_assembled_metadata` RED on the notice assertion.
+  4. **Collapsed three states to two** (`REDUCED` → `REFUSED` at the classification site) →
+     `test_one_turn_can_produce_all_three_states_and_they_are_distinct` RED and
+     `test_the_per_turn_report_counts_every_state_including_the_empty_ones` RED
+     (`{'reduced': 0} != {'reduced': 1}`).
+  - Residue sweep after restoring: `grep -rn "FALSIFICATION\|if False and\|# PROBE\|MUTANT"` = 13
+    (the pre-existing benign count), tree clean.
+
+- **Gates.** `make lint` clean (mypy 952 files). Targeted **413 passed, 1 xfailed** across the new
+  suite + context / context-headroom / context-engine / learning-surfacing / learning-ambient /
+  skills / skill-resource-tier / skill-progressive-disclosure / skill-format-compat /
+  bundled-skills-catalog / skill-surfacing / skill-usage / skill-agent-local-tier /
+  thread-context / inert-surface-baseline / config-roundtrip, every path existence-checked as a
+  quoted zsh array; real-home rail reported clean. Full `make test` **23,717 passed, 30 skipped,
+  12 xfailed, 0 failed** in 8m49s, real-home rail clean on that run too
+  (`/Users/golani/.gideon unchanged by this run.`). No `web/` change → no web gate and no
+  `consistency-audit.json` drift. No config field added, so no baseline regeneration.
+
+- **Clauses scoped rather than satisfied.** (a) The **progressive-disclosure index path** (above 8
+  matched skills) still bypasses the allocator, and correctly: it injects no bodies, so there is
+  nothing to allocate — but it means the index block itself is unbudgeted, bounded only by the
+  match count. Left as is; budgeting a name-and-description list is a different, smaller problem.
+  (b) `skill_invoke`'s on-demand body is **not** allocated: it is a tool RESULT, bounded by
+  `project_output` at dispatch, which is the same seam CE2-8 declared out of its own scope.
+  So the agent can still pull a full body past this budget deliberately, which is the point of an
+  explicit call — but it is not a second silent path, and saying so is better than implying the
+  budget covers it.
+
+- **Roadmap bookkeeping — still no `dag.json` row.** `origin/main`'s
+  `docs/roadmap/atomic/dag.json` carries CE2-1…CE2-7 only; CE2-8/9/10 arrived with the rev-18
+  capability-gap set, which has not landed. No row invented, same as CE2-8's entry — a mirrored
+  status surface must not be flipped without the row it mirrors. This entry is the record.
