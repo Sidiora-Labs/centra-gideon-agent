@@ -40,6 +40,29 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
   meaning. And when there is genuinely nothing there, it says which fact was missing — no such
   item, no such relation, no such tag — instead of quietly handing back the closest thing it
   could find.
+- **Independent lookups in one turn now run at the same time.** When the agent asked for several
+  things it could have looked up simultaneously — a few greps, a couple of file reads, a repo map —
+  it did them strictly one after another, and you waited for the sum. A representative
+  eight-lookup turn over a 1,200-file repo took **2,219 ms on average and swung between 1.4 and
+  3.6 seconds**; it now takes **942 ms and never exceeds 993 ms**. That is 2.35× faster on the
+  average, and the *worst* new sample beats the *best* old one — the old spread was the serial
+  accumulation showing through. Calls that could interfere still take turns: a write to a file
+  waits for the reads of that file, a call needing your approval runs by itself, and anything the
+  system cannot classify runs alone rather than optimistically. Results come back in the order
+  they were requested, so nothing you see is reordered.
+- **Long lists stay fast however long they get.** Sessions, inbox, knowledge, workflow runs and the
+  diagnostics log now render only the rows on screen. On a real store of 5,000 chat sessions the
+  session list was rendering all 5,000 rows and 175,688 DOM nodes: typing in its search box took
+  **137 ms per keystroke**, scrolling ran at **5 fps**, and reaching the last row took **12
+  seconds**. It now renders 18 rows and 1,337 nodes no matter how much you have — **13 ms** per
+  keystroke, smooth scrolling, **1.3 s** to the last row, and those numbers no longer grow with
+  your library. Below 64 rows nothing changes at all, so short lists behave exactly as before.
+  Keyboard navigation still reaches rows that aren't rendered yet (End really does go to the last
+  one), a row you had selected is still selected when you scroll back to it, screen readers still
+  announce the true total rather than the visible slice, and a link straight to a row still scrolls
+  to it — that last one was quietly broken in the inbox for any row deeper than about 400. One
+  honest trade: browser find (Ctrl+F) only searches what's on screen, so each list now says so and
+  points at its own search field, which searches everything.
 - **Know whether a model will actually run on your machine before you download it.** Every model in
   the download lists now carries a fit chip — green, yellow, red — computed from this machine's real
   memory budget: total RAM, minus a reserve held back for the OS and the inference runtime, plus a
