@@ -61,6 +61,45 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
   that declares no version at all (a script, a `curl`) is treated as the oldest version still
   supported rather than assumed current, so it keeps working today and is told plainly, rather than
   breaking silently, on the day support for it ends.
+- **The app stops showing you an old number and then quietly changing it.** Every screen used to
+  read its data through a hand-rolled cache — 124 files reached for the same helper, and a few
+  surfaces kept private caches of their own beside it. A cached page painted instantly, which is
+  good, but it painted with total confidence whether the value had landed forty milliseconds or
+  forty minutes ago, and then swapped it for a different one a moment later. That repaint reads as a
+  bug even when both numbers were once true. There is now one data layer, and a cached first paint
+  is either **fresh** or **says "Updating…"** while it is being re-read. Measured on the old build:
+  the Settings → Inbox card painted "30 day retention" after a reload when the server already said
+  7, with nothing on screen to indicate it, and then became 7.
+  **A change is reflected everywhere, immediately, without a reload.** Accept a proposal on one
+  screen and the badge counting it on another updates itself; delete something in one list and a
+  picker elsewhere stops offering it. Each write now declares which data it affects, so nothing has
+  to be refreshed by hand and no surface is left describing something that has already changed.
+  **A screen that could not load its data says so, instead of saying you have nothing.** "We
+  couldn't load your items" with a Retry is a different message from "you have no items yet", and
+  they are no longer interchangeable.
+  **And opening a page asks the server once.** Several cards reading the same thing used to make the
+  same request several times over; they now share one.
+- **Your knowledge library can live as plain markdown files you own, and you can edit them.** A
+  knowledge item used to be reachable only through Gideon's database. Turn
+  `knowledge.vault_mode` on and every item is also written out as a human-readable markdown file
+  under your home — YAML front-matter carrying its identity and its relations, wikilinks you can
+  follow, readable in Obsidian or `grep` or any text editor, with or without Gideon running.
+  **`two_way` means an edit you make in a text editor is read back, not overwritten** — which is the
+  whole difference between an export and ownership. It reuses the memory vault's projector rather
+  than adding a second one, so both vaults are the same artifact in two directories.
+  **Nothing is silently resolved.** A page that changed in your editor *and* in the app since the
+  last sync is not merged, not overwritten, and not quietly filed toward the database: nothing is
+  written on either side, your text is left exactly as you typed it, `sync_conflict:` appears in the
+  page's front-matter, and the Doctor reports it as a page waiting on you.
+  **Deletion means deletion, in both directions.** Delete a page in your file manager and it stays
+  deleted — it is not re-created on the next sync, and your item is not deleted either (a missing
+  file is an ambiguous signal, not an instruction). Delete an item in the app and its file goes with
+  it, leaving no stale page behind.
+  **Off by default, and it cannot run away with your files.** The projection is opt-in, an
+  unreadable config resolves to off, it runs in bounded batches on the existing maintenance cadence
+  rather than a loop of its own, and an item too large to project is refused and reported rather
+  than truncated.
+
 - **A turn that will not fit says so before it runs, and says what to do about it.** Gideon
   used to find out a prompt was too big by sending it and reading the provider's error back — after
   you had already waited. The context is now measured against the bound model's real window *before*
