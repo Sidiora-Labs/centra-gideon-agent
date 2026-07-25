@@ -35,7 +35,8 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 
-from gideon.manifest import API_VERSION, build_manifest
+from gideon.api_version import API_VERSION
+from gideon.manifest import build_manifest
 from gideon.manifest_meta import canonical_route, is_excluded_route
 
 # The route-registration verbs whose path is a string-literal argument, mapped to
