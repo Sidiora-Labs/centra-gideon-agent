@@ -563,6 +563,35 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
   from the tool's display name. A name like "Running: ls -la" reads as an action, so a plain
   directory listing was refused in a mode that exists to let you look around. The command is now
   read wherever the agent put it.
+- **The session line said "Session created" on every single turn, and named the wrong runtime.** The
+  activity line on the Loop and Code cockpits — `Session created · <agent> · <model> · via <runtime>`
+  — got both halves wrong. It announced a *creation* on turn forty of the same conversation, so the
+  one signal that would have told you an agent had lost its history and started over was the same
+  sentence you saw when nothing had happened at all. And the runtime it named was the little
+  protocol adapter Gideon launches (`acp:claude-agent-acp`), not the CLI you actually chose
+  (`acp:claude-code`) — or, when the adapter had to be fetched on demand, the fetching tool itself:
+  `via acp:npx`, which names nothing you have ever heard of.
+  **The line now says what happened.** A session that was genuinely started says **created**; one
+  restored from a saved conversation says **resumed**; a turn served by the session already running
+  says **continued** — a state the line previously had no word for and so reported as a creation.
+  **And it names the runtime you picked**, on every turn, however that runtime was launched. Which
+  matters beyond the label: the same misread name was also the key Gideon used to look up a
+  backend's known permission-gating limitations and to stamp its audit records, so under an
+  on-demand adapter fetch a *documented* limitation could read as an unexplained gap.
+- **The assistant learned "never more" as a permanent rule.** Ask it to answer in one sentence "from
+  now on, never more" and it wrote itself a standing rule reading `Never: never more`, showed you
+  `Learned: never more`, and kept the row forever. The word "never" was enough on its own: whatever
+  followed it up to the next full stop became the prohibition, so an intensifier ("never more"), an
+  idiom ("never mind the tests"), and a proverb ("better late than never") all read as hard rules.
+  This was the loosest thing the assistant learned and also the most permanent one, because a "never"
+  rule is stored as a lesson — the place standing always/never rules live — while an ordinary style
+  preference is stored as a preference that fades unless you repeat it.
+  **A "never" is now only learned when it prohibits an action** — the words after it have to name
+  something to not do. Real rules are unaffected: "never force-push to main", "don't ever delete my
+  notes", "never commit secrets to the repo" are all still learned, and a genuine rule stated after a
+  false one in the same message is now picked up where before the fragment won and stopped the search.
+  Quantity phrasings like "never more than one sentence" are deliberately not treated as
+  prohibitions; say it as a preference ("keep responses short") and it is learned as one.
 - **The context gauge said "0%" on turns that were nearly full.** The little ring on the model pill,
   and the "Turn complete" line under a finished turn, both printed a context percentage on every
   turn — including turns where the agent behind the chat had never reported one. The number they
