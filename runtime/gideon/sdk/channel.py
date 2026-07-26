@@ -21,8 +21,11 @@ from gideon.acp.errors import (  # noqa: F401
     AcpTimeoutError,
 )
 from gideon.acp.types import (  # noqa: F401
+    CANCELLED_STOP_REASONS,
     STOP_REASON_CANCELLED,
     STOP_REASON_END_TURN,
+    STOP_REASON_STOPPED_BY_USER,
+    is_cancelled_stop,
 )
 from gideon.atomic_write import atomic_write  # noqa: F401
 from gideon.channel_delivery import ChannelDelivery  # noqa: F401
