@@ -592,6 +592,23 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
   false one in the same message is now picked up where before the fragment won and stopped the search.
   Quantity phrasings like "never more than one sentence" are deliberately not treated as
   prohibitions; say it as a preference ("keep responses short") and it is learned as one.
+- **A reasoning-effort setting that the coding CLI cannot honor is now refused instead of
+  silently stored.** Some external coding CLIs report that they have no reasoning-effort
+  control at all, and the composer already hides the pill for those. The API did not agree:
+  it accepted an effort anyway, saved it onto the session and read it back afterwards, so the
+  setting looked applied when nothing would ever act on it. Both places that set it now check
+  what the runtime actually declared and refuse anything outside it, naming the runtime and
+  the options it does offer. The opposite case is fixed too — a CLI offering its own value
+  (say `xhigh`) had it rejected, because the check compared against a fixed
+  low/medium/high/max list instead of the CLI's own. Clearing the setting is always allowed.
+- **A reasoning-effort setting no longer quietly lapses partway through long-running work.**
+  Some external coding CLIs treat a session as finished after one turn, so for long jobs the app
+  opens a fresh session per cycle. It re-applied the agent, the model and the permission mode on each
+  one but not the reasoning effort — so from the second cycle onward the work continued at the CLI's
+  default effort while everything on screen still said otherwise. It is re-applied now. The same
+  path also skipped draining the tool-server startup messages before beginning the turn, which is now
+  done too.
+
 - **The context gauge said "0%" on turns that were nearly full.** The little ring on the model pill,
   and the "Turn complete" line under a finished turn, both printed a context percentage on every
   turn — including turns where the agent behind the chat had never reported one. The number they
