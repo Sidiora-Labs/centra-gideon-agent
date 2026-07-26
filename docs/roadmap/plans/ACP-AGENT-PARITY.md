@@ -2982,3 +2982,93 @@ cited above.
   full run on the pre-amendment tree had **1 red**, `test_loop_worktree_sparse.py::TestPoolBound::
   test_batch_creates_every_worktree` — the documented sparse-cone flake; **47/47 in isolation** and
   absent from the final run (run count: 2 full, 1 red). Nothing in this diff touches worktrees.
+- **2026-08-22 — `G21` host half CLOSED: the API stops accepting a reasoning effort the runtime
+  reported it cannot honor.** Measured on codex (`C2`: `supported_efforts: []`; `C12`: a bind with
+  `reasoning_effort: "low"` accepted, persisted and echoed back). The FE half was ALREADY closed —
+  `web/src/ui/composer/controls.tsx`'s `effortsForAgent` returns `[]` for an ACP agent declaring none
+  and the pill is hidden — so the open half was the API disagreeing with its own UI.
+  **`supported_efforts` had exactly ONE occurrence under `src/gideon/dashboard/`** on
+  `origin/main` (`handlers/providers.py:459`, the emit site), verified with `git grep` against
+  `origin/main`. Zero readers on any write path: the declaration was published to the composer and
+  then never consulted again.
+  **Two write paths, and they disagreed with each other.** `POST …/acp-agent` enforced a hardcoded
+  `("low","medium","high","max")` ladder; `POST …/reasoning-effort` states "No fixed scale — each
+  backend declares its own effort values" and applies `_validate_reasoning_effort` (a FORMAT bar). So
+  a backend-declared `xhigh` was refused at bind and accepted per-turn. Both now apply the same two
+  bars — format, then the declared set — and name the runtime plus the options it does offer.
+  **The load-bearing distinction is `[]` vs `None`.** New `providers.declared_efforts(runtime_id)` is
+  cache-only (discovery opens a live ACP session, ~15-20 s — a write path must never trigger it) and
+  returns `None` for unknown, `[]` for "asked and reported no axis". Unknown FAILS OPEN: refusing a
+  bind we cannot judge would break the picker whenever discovery has not warmed. A cached-but-empty
+  agent list and a payload predating the field both read unknown, not empty.
+  **A defect in my own first cut, caught by reading the shape instead of assuming it:**
+  `supported_efforts` rows are the backend's VERBATIM option dicts (`{"value","label"}`), the shape
+  the composer renders and `record_capabilities` reads `value` from. Stringifying a row would have
+  compared an effort against `"{'value': 'low', …}"` and refused every legitimate bind.
+  **A second one, caught by my own test:** the refusal message sorted the declared set, rendering a
+  low→high ladder as "high, low" to the one person who reads that sentence. It now preserves the
+  backend's declared order.
+  **A THIRD hardcoded ladder was found inert and deleted in the same change.**
+  `chat_persistence._REASONING_EFFORT_VALUES = frozenset({"", "low", "medium", "high", "max"})` had
+  **zero readers** — its comment claimed it was "kept as a name for callers that want the native
+  ladder (composer fallback)", but that fallback is the FE's `NATIVE_EFFORTS` in `controls.tsx`, and
+  `_validate_reasoning_effort` uses `_REASONING_EFFORT_RE`, not the set. A dead constant asserting a
+  fixed scale, in the module whose own comment says there isn't one. Runtime import sweep for the
+  deletion (mypy's `ignore_missing_imports` cannot catch a stranded first-party import): occurrences
+  **1 → 0** across `src`/`tests`/`harness`/`web`, then five affected modules re-imported clean
+  (`chat_persistence`, `chat_handlers`, `chat`, `handlers.providers`, `server`).
+  **The append-only wire-code ratchet caught a miss my targeted legs did not.** Both new refusals
+  go through `json_error` (the flat census sits at exactly `FLAT_BASELINE = 1507` with zero slack, so
+  a new `{"error": "<prose>"}` would red the suite), but a `json_error` code is a stable wire surface
+  and `test_http_error_codes_append_only.py` requires an `HTTP_ERROR_CODES` row in the same change.
+  The full suite found it; the targeted run had not included that path. `invalid_reasoning_effort` and
+  `reasoning_effort_not_declared` are now registered with their one-line meanings, and the flat census
+  is unchanged at 1507.
+  **Falsifications** (AST-confirmed, restored from file copies): · **M1** collapse `None` into `[]` →
+  2 red (the fail-open test and the accessor's `[]`-vs-`None` test). · **M2** drop the per-turn
+  declaration check → 2 red. · **M3** restore the hardcoded ladder on the bind path → 2 red (the
+  `xhigh` acceptance and the declaring-none refusal). **Blind spot measured:** under M2 the
+  pre-existing suites (`test_chat_session_reasoning_effort.py`, `test_dashboard_chat.py`) were
+  **316 passed, 0 failed** — nothing existing consulted the declaration, which is what the 12 new
+  tests close. They drive the endpoints over a seeded discovery cache rather than calling the
+  validator directly, because the defect was never in a validator: no write path consulted the
+  declaration at all.
+  **Still a CLI constraint, and the doc says so:** nothing the host does makes codex reason at a
+  chosen effort. `acp-parity.md`'s `G21` row now records the host half closed and the axis still
+  absent, marked **not re-driven** (unit-proven, not a measured cell). No matrix cell flipped and
+  `dag.json` is untouched.
+- **2026-08-22 — a per-turn pin loss found while investigating `G20`, fixed. `G20`'s own model
+  clause stays OPEN with the mechanism narrowed.** `AcpClient.start_fresh_turn_session`'s docstring
+  promises it re-runs the handshake tail — *"session/new + activate/model/mode/effort + drain"* — and
+  the code ran only `activate`, `model` and `mode`. **Effort and the drain were both named in the
+  contract and never executed.** It has live callers: `gateway.py:2306` reopens a session per cycle
+  for a long-lived driver (claude-code finishes a session after its first turn), and
+  `acp_agent.py:589` forwards to it. So from cycle 2 onward the agent/model/mode kept the session
+  looking correctly specialized while the EFFORT silently reverted to the adapter default — and MCP
+  init notifications stayed queued to interleave into the turn, on the very path `AAP-4` exists to
+  keep core reachable.
+  **`G20` as written says the MODEL pin lapses, and the code does not support that.** The fresh-turn
+  path DOES re-send `set_model` (verified: `client.py`'s block re-runs `set_model_request` with
+  `self._model`, which the method never clears). The `ACP model: auto (from agent config)` line
+  `C13` recorded comes from the FULL-start else-branch (`client.py:566`,
+  `self._model or "auto"`), so it printed "auto" because `self._model` was **empty on a full start**
+  — a provider rebuilt without the model kwarg, which is `G5`'s ephemeral-binding root, not a
+  per-turn lapse. Localizing that needs a live codex drive (owner-gated), so **`G20` is NOT closed
+  and no matrix cell flipped**; what is closed is the provable sibling on the same "pin stops
+  applying after turn 1" axis.
+  **Falsifications** (restored from a file copy): · **M1** drop the effort re-application →
+  **2 red** (the effort assertion and the vacuity floor that compares a pinned run against an
+  unpinned one). · **M2** drop the drain → **1 red**. **Blind spot measured:** under M2 the
+  pre-existing suites (acp-client, acp-session, acp-unattended-and-loop-breaker) were **67 passed,
+  0 failed** — nothing asserted what the fresh-turn path re-applies.
+  **The tests read PARAMS, not method names.** codex sends model, mode and effort all as
+  `session/set_config_option`, distinguished only by `configId`, so an assertion on the method name
+  cannot tell them apart — it would pass on a path that re-sent the model twice and no effort at all.
+  They also drive the real method through the file's own `_client` helper: `_work_dir` is a property
+  that writes through to the transport, so a hand-assembled client raises before the method runs,
+  which would look like a passing test that never executed the path. My first attempt did exactly
+  that.
+  **One assertion of mine was a tautology and was removed:** `assert METHOD_SET_MODEL not in
+  conn.sent or True`. Grounding the assertions meant first printing what the dialects actually emit
+  (codex: three `set_config_option` calls; default dialect: `session/set_model` and no mode/effort
+  verb at all).
