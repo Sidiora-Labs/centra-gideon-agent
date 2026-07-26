@@ -2137,3 +2137,192 @@ and move `G45` from line 487 into the `**P3**` tier.
 
 **No `dag.json` change, no code change, no push.** The atom stays `todo` on the record that already
 said so; this entry only makes the reason auditable.
+### `G47` closed in code — what a background pass now costs to observe (2026-08-21)
+
+**DONE — `G47` (P2).** Both halves landed. A guarded model attempt now carries the SUBSYSTEM that
+asked for it, and a skill-ladder pass reports its own verdict at a level a default install shows.
+
+**The caller vocabulary already half-existed, and none of the three candidates could carry this.**
+Checked before minting anything: `routing/policy.py:457`'s `caller="user"` is the **SEL's** actor
+field (`sel.log_api_access`, stored as `caller_identity`) — "who invoked this API", values like
+`user` / `system` / `autonomy` / a remote address, on a security record, not on the attempt row.
+`model_call.py` already passes `caller=f"model_call:{use_case}"` into that same SEL call, which is
+the axis again, not the asker. `usage_ledger.TurnUsage.source` and `routing.usage.PURPOSES` are the
+TURN ledger's axes (one record removed from an attempt), and `PURPOSES` is deliberately coarse —
+**every** value we need maps to its single `background` purpose, which is precisely the collapse
+`G47` reports. So this is the FIRST vocabulary for "which subsystem asked", not a second, and it is
+**closed**: `guardrails/audit.CALLERS` is the one definition, `set_current_caller` raises
+`ValueError` on an unlisted value (`routing.policy.set_mode`'s posture), and `record_attempt` drops
+an out-of-vocabulary caller to `""` with a WARNING so a hand-built record cannot smuggle a fifth
+spelling into the file either. Four members, each with a live binder: `skill_ladder`,
+`inbox_triage`, `nl_to_cron`, `conflict_merge` — a ratchet test fails if any member has no
+production `caller_scope("…")` call site.
+
+**Writer → reader, both live.** Written at `guardrails/model_call.py:472` (`_audit`, the constructor
+of every `AttemptRecord` the guard writes) from a ContextVar, for the reason `_CURRENT_RUN_KEY` is
+one: the guard is built by `provider_bridge` from provider config and never sees its caller, and
+threading a parameter would touch the same 33 bridge call sites S153 measured. Read at
+`guardrails/health.py:_caller_rollup` → `GET /api/models/health` → the Guardrails settings panel's
+`CallerRow`. The read model `G47` names — `routing/telemetry.py`'s `(use_case, query_class)` keying —
+was **deliberately not touched**: filtering its rows by caller would mix a fold that has no caller
+dimension with a JSONL tail that does, producing rows whose `n` counts every caller and whose p50
+counts one. Additive elsewhere instead.
+
+**DEVIATION from the gap's prescription: the line is not INFO-only, and an INFO-only line would
+have shipped INERT.** Measured while wiring it: the shipped default log level is **WARNING**, not
+INFO — `AgentConfig.log_level` defaults to `"WARNING"` (`config/loader.py:786`) and `cli.py:966`
+applies it whenever `--verbose` is absent. So `G47`'s literal "an INFO line" would still have been
+invisible on a default install, which is the exact property it reports. Instead every ladder pass
+emits **exactly one** terminal line: WARNING for the verdicts that mean the pass produced nothing
+and the money is spent (`provider_error`, `unparsable`, `incomplete_decision`, `enqueue_failed`,
+`internal_error`), INFO for the verdicts that mean it worked — including `no_action`, the common
+one. Spam bound: one line per pass, and a pass only runs on a learning-worthy turn
+(`learning_decision_for_turn` + the `skill_ladder` cadence flag), so a healthy install is silent at
+the default level and a dead provider warns once per gated turn. An unmapped verdict logs at
+WARNING, deliberately — an unrecognised outcome must get louder, not quieter.
+
+**The pass had EIGHT silent exits, not one.** The gap named the DEBUG failure path; the dominant
+`action == "none"` exit logged nothing at all, so a live ladder and a ladder that was never
+scheduled were the same observation (none). `run_skill_ladder_review` is now a wrapper that binds
+the caller scope and owns the single log line; the body moved to `_ladder_pass`, which returns
+`(verdict, detail, summary)` so no exit is nameless. The line is emitted from a `finally`, so an
+exception escaping the pass is still reported as a verdict.
+
+**What it costs to observe now.** A silently-dead learning pass produces (1) one WARNING per gated
+turn naming the verdict, the elapsed ms and the session — the measured 60,010 ms timeout reads as
+`skill-ladder review: provider_error in 60010 ms (session=…) — TimeoutError` at the shipped level,
+where before it was a DEBUG line; and (2) a `skill_ladder` row on `GET /api/models/health` and in
+Settings → Guardrails → Provider health reading `6 calls · 0% ok · provider error`. Neither existed
+before. The per-provider rollup could not show this by construction: with one caller healthy and
+one dead the provider row reads `50% ok`, which is asserted directly in
+`tests/test_model_call_attribution.py` so the two views cannot be conflated later.
+
+**Falsifications (mutate the live line, confirm the enclosing function by AST, restore from a file
+copy).** (a) `caller=current_caller()` → `caller=""` in `_audit` (line 472, enclosed by `_audit`
+436-484): 2 tests red with `KeyError: 'inbox_triage'` — both callers collapse into
+`(unattributed)`, i.e. the red is on *telling callers apart*, not on the field existing. (b) the
+verdict line's level → `logging.DEBUG` (enclosed by `_log_ladder_verdict`): 3 tests red with
+`exactly one line per pass, got []` — the red is on *invisibility at the shipped default level*,
+which the test reads from `AgentConfig.log_level`'s default rather than hardcoding. (c) the closed-set
+check removed from `set_current_caller`: `DID NOT RAISE ValueError`. (d) one binder's literal
+changed to `""`: the census ratchet reds with `unbound caller(s): ['nl_to_cron']`, so it is not
+vacuous.
+
+**The seven other `proposals.enqueue` callers: mostly a non-question, and it was already answered.**
+`learning.proposals.enqueue` takes `source_cadence`, and every one of those seven passes its own
+(`skill_promotion`, `outcome_resolver`, `consumer_liveness`, `refiner_tools`, `self_model_observer`,
+`attribution`, `project_context_review`) — so on the PROPOSAL record, callers were already
+distinguishable and no new field was needed. The unanswered half was only ever the MODEL-CALL
+ledger, and of those seven only the skill ladder makes a model call at all (`skill_promotion` is
+explicitly "deterministic, no model here"). Widening the vocabulary to name subsystems that make no
+guarded call would have declared members nothing binds.
+
+**Cells NOT flipped.** The skill-ladder review row stays **`NOT-EXERCISED`** in both `AAP-1` (`O31`)
+and `AAP-3` (`K56`): this change makes the cell *measurable*, it does not measure it. Confirming it
+needs an owner-gated live drive of an authenticated CLI (one correction turn, then read the
+`skill_ladder` row on `/api/models/health` and the verdict line in `gateway.log`), which is
+deliberately out of a code-only session's reach. `dag.json` untouched; no matrix cell changed.
+
+**Gates.** `make lint` clean (mypy 958 files); targeted pytest 300+ green across
+telemetry/routing/stats/usage, guardrails model-call/query-class/profiles, after-turn-review,
+skill-promotion, learning-proposals, inbox-service, nl-to-cron, durability-conflicts and the
+inert-surface baseline; `make test` full suite; `gate_report.py` **6/6**; flat wire-error census
+**1507/1507** (no new flat envelope — nothing here adds an error path); web typecheck, `test:web`
+and build. One pre-existing test updated, not weakened: `test_health_empty` asserted the exact
+`provider_health()` dict, so it now names the new empty `callers` list.
+### 2026-08-21 — `G8` closed: the context-% chip stops stating a number it was never given
+
+**DONE (code-only; no CLI drive, no authenticated session).** `G8`/`O7`: a `context_usage` frame was
+emitted every turn with `pct: 0.0` and `Turn complete: … context 0%` printed on all ~14 audited turns,
+including ones carrying 18 KB of injected context. The root cause was representational, not a bad
+computation: **the producer could not express "unknown".** `AcpPromptStats.context_pct` and
+`AgentEvent.context_usage_pct` were bare defaulted `float`s, so "the adapter told us nothing" and "the
+context is genuinely empty" were the same value — and every consumer rendered the second.
+
+**Shape (following `local_models/fit.py`'s precedent):** the measurement is now `float | None` end to
+end, `None` = unmeasured. `fit.py` needs BOTH explicit `memory_measured`/`disk_measured` flags AND
+`None` on its derived values, because its *collector* aggregates several independently-measurable facts
+into one dataclass — one flag per fact is the only way to say "memory known, disk not". Here there is
+exactly one fact travelling five hops (ACP metadata frame → `AcpPromptStats` → `AcpEvent` →
+`AgentEvent` → provider getter → WS frame → chip), so a parallel bool would have to be threaded through
+every hop and could desync from the number it describes. `None` on the one field is the whole answer,
+matching `fit.py`'s own derived shape (`budget_bytes: int | None`, `usable_memory_bytes() -> int | None`).
+
+**Producers** — `acp/types.py` (`AcpPromptStats.context_pct`, `AcpEvent.context_usage_pct`),
+`acp/session.py:context_usage_pct`, `llm/events.py:AgentEvent.context_usage_pct`,
+`llm/base.py:context_usage_pct` (the contract), `llm/acp_agent.py`, `llm/acp_session_provider.py`,
+`guardrails/model_call.py`, `agents/provider.py` (default was `0.0`, now `None`).
+`acp/translate.py:extract_context_pct` already returned `float | None` — the wire decoder could always
+say "absent"; the collapse was one layer in. `llm/openai.py` and `llm/anthropic.py` report `None` until
+their first usage report and are otherwise untouched (their real arithmetic is unchanged).
+
+**Consumers, all now omitting rather than printing zero** — `dashboard/chat_runner.py:506`
+`_turn_complete_line` (the observed surface: the whole `, context N%` fragment is dropped),
+`chat_runner.py:3713`/`:3812` (WS `context_usage` broadcasts `pct: null`), `dashboard/state.py:933`
+(post-compaction broadcast was a hardcoded `0.0`), `session.py:context_info` (`/api/sessions/context`
+emits JSON `null`), `session.py:check_context_usage` (unknown neither compacts nor logs a percentage),
+`cli_chat.py:98`, and `web/src/pages/ChatPage.tsx` + `ui/composer/controls.tsx`.
+
+**Two decisions, made deliberately.**
+
+1. **The cross-turn carry at `session.py:306-307` is KEPT**, and now carries `None` as faithfully as it
+   carries a number. It exists because the metadata frame is per-adapter and optional: an adapter that
+   reports once and goes quiet should keep showing its last real measurement rather than dropping the
+   chip mid-conversation. What changed is that the carry no longer *manufactures* a starting value —
+   propagating `None` from a session that was never measured is exactly the ~14-turn case, and it now
+   propagates as "unknown" instead of as "0%".
+2. **The frontend's `contextPct > 0` guard is now REDUNDANT AND WRONG, so it was removed** rather than
+   left as a second guard. It was load-bearing while Python could not say "unknown" — it was the only
+   thing hiding the fabricated ring. Once absence is expressible as `undefined`, `> 0` becomes the
+   *inverse* defect: it folds a legitimately empty context into "unmeasured" and hides a real answer.
+   Falsified as such (MUTANT-D below).
+
+**Two inverse-direction bugs found and fixed in passing**, both instances of the sentinel collision this
+gap is about: `session.py:_maybe_recycle_background` keyed its blind fallback on `pct == 0.0`, so a
+background session measured at a genuine 0% was recycled as though no reading had ever arrived; and
+`agents/native/runtime.py:796` gated its gauge update on `if usage.context_usage_pct:` (truthiness), so
+a provider reporting a real 0% was ignored.
+
+**Falsifications — five mutations, each applied to the LIVE statement, re-read after writing, and
+AST-probed for its enclosing function before running anything** (a mutation that lands in a docstring
+reds nothing and reads as "unenforced"). All restored from `cp` file copies, never `git checkout`.
+
+| # | Mutation | AST-confirmed site | Observed red |
+|---|---|---|---|
+| A | unknown falls back to `0.0` (`round(context_pct or 0.0)`) | live `AugAssign`, `_turn_complete_line` (487-519) | 3 failed — `assert 'context' not in 'Turn complete: …, context 0%'` **on the rendered line**, plus both disagreement assertions |
+| B | a measured `0.0` folded into unknown (`if context_pct:`) | live `If`, `_turn_complete_line` (487-520) | 3 failed — `assert 'context 0%' in 'Turn complete: 12 events, 3 tool calls'`, plus both disagreement assertions |
+| C | blind fallback keyed on `not pct` | live `If`, `recycle_background` (934-972) | `test_measured_zero_is_not_blind` — "Expected shutdown to not have been awaited. Awaited 1 times." |
+| D | frontend `> 0` guard restored | `controls.tsx:143` | 2 failed — measured-zero ring absent, and the markup-disagreement test |
+| E | frontend renders `contextPct ?? 0` | `controls.tsx:143` | 2 failed — unmeasured states a percentage, and the markup-disagreement test |
+
+Every pair is additionally asserted to **DISAGREE** in one assertion, as `fit.py`'s own test does — a
+test that only checks `is None` passes just as happily when both cases collapse to the same output again.
+
+**Tests:** `tests/test_context_pct_honesty.py` (13) and
+`web/src/ui/composer/contextRingHonesty.test.tsx` (4), plus three existing tests corrected to the honest
+contract (`test_acp_types` defaults, `test_agent_provider` stateless defaults,
+`test_recycle_blind_fallback`) and three added to `test_session.py`.
+
+**No matrix cell flipped and `dag.json` untouched.** The `O7` cell needs an owner-gated live drive to
+re-mark; this change makes the surface honest rather than measuring it.
+
+**DISCOVERY — one intermittent red I could NOT root-cause, recorded rather than papered over.**
+`tests/test_subagent.py::TestSubagentReaper::test_reaper_kills_expired_subagent` and
+`::test_a_failed_reaper_audit_write_raises` failed together in **2 of 5** full-suite runs on this
+branch, and passed in the other 3; the base commit (`a692faa9`) was green in **3 of 3**. They pass in
+isolation (7/7), and `tests/test_subagent.py` alone passes 3/3 under `-n 8 --dist worksteal`. Both
+failures need a cross-file neighbour and only ever appeared at ~99% on one worker, immediately after
+`test_subagent_persistence` / `test_subagent_validate` / `test_durability_sync_*` on that worker.
+Narrowed but not solved: **the signature is `patch("gideon.subagent.sel")` not affecting the
+lookup the executing `_force_reap` performs** — every other assertion in the same test passes (`info.done`,
+`_running_count`, the batched `on_done`, the event ordering), so `_force_reap` ran to completion, yet
+`mock_sel().log_tool_invocation` records **0 calls** and the sibling test's `pytest.raises(OSError)` sees
+nothing raised. That is consistent with the REAL `sel()` running inside the `with patch(...)` block, i.e.
+a module-identity / leaked-patch hazard in the test infrastructure, not a defect in the reaper. Ruled out:
+a pytest 120 s timeout killing an earlier test mid-`with` (no timeouts in any run's log), and
+`importlib.reload` of `gideon.subagent` (nothing reloads it). This diff touches none of
+`subagent.py`, `sel.py`, or the reaper path, and the suite runs under `--dist worksteal` (timing-derived
+scheduling), so the most likely reading is a pre-existing order-dependent isolation bug that this
+change's timing shift exposes — but **3-of-3 green on the base is not enough runs to prove that at a
+~40 % failure rate**, so it is NOT claimed as a known flake. Nothing was skipped, weakened, or
+xfail-ed. Wants its own session with a deterministic ordering harness.
