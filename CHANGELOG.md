@@ -519,6 +519,50 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
   looking like an ordinary reply. Being moved onto another agent without being told is the part that
   actually costs you something.
 
+- **The assistant learned nothing from turns run through an external coding CLI.** Gideon keeps
+  a quiet record of which tools actually work for which kind of job, and leans on it later. That
+  record was only ever written by the built-in agent. Run the same work through an external CLI
+  (Claude Code, Codex, kiro and friends) and **nothing was written at all** — a turn with six tool
+  calls in it, three of them failing, left no trace. All the learning that comes from watching your
+  own tools succeed and fail was silently switched off for anyone using an external agent, which is
+  most people. Those turns are now recorded on exactly the same footing as the built-in agent's.
+  **A failing tool is now reported as failing.** Underneath, the reason for the silence was that the
+  "this call failed" mark was being dropped in translation, one step after it was written. Two other
+  things were quietly relying on it, and both start working again: a failed tool call in the
+  transcript is now coloured as failed rather than looking like a success, and the brake that stops
+  the agent hammering the same broken command over and over can finally see the failures it counts.
+  Before this, an external agent could fail the identical call six times in a row and get no warning
+  and no stop.
+- **A read-only command is no longer called "destructive", and read-only tools no longer wait on
+  you.** Approval cards, the tool audit log and the "approval needed" inbox notification all print
+  how risky a tool call is. For sessions running through an external coding CLI, that number was
+  arriving from the wrong place. Those agents announce a tool in two steps — first "I am about to run
+  a shell command", then a moment later the command itself — and the risk was being decided at step
+  one, when the only thing known was "a shell command". With nothing to read, it printed the worst
+  case: a plain `pwd; ls` was audited as **destructive**. In the same sessions the reverse also
+  happened — the approval request for a file read arrived without the "this is a read" label the
+  agent had already sent one message earlier, so **Read**, **Search** and **Fetch** never qualified
+  as safe and kept raising a card even with "auto-approve read-only tools" turned on.
+  **The label the agent sent is now carried across to the approval request** it belongs to, and a
+  command the assistant supplies inline is read there too. So a read is labelled a read and
+  auto-approves when you asked for that, and a read-only command is labelled safe.
+  **A command nobody could read is now labelled "caution", not "destructive"** — a card still comes
+  up, so nothing runs behind your back, but the audit trail no longer asserts something nobody
+  measured. **It is still blocked in Ask and Plan mode**: honest labelling is not permission.
+- **The approval card now tells you which tool it is asking about.** On sessions running through an
+  external coding CLI, approval cards and the tool audit trail could read just `unknown` — you were
+  being asked to approve something the card could not name, and the audit log recorded
+  `unknown ｜ approved` afterwards. The name was never missing; those agents announce a tool in two
+  messages and some of them put the human-readable name only in the first one, which the approval
+  request did not carry over. It does now, alongside the risk label. A card still reads `unknown` in
+  the one case where it is true — when the agent never named the tool in either message — because a
+  name that was guessed would be worse than one that is missing.
+- **Ask mode no longer refuses a read-only `ls`.** Ask and Plan mode allow inspection and block
+  changes, but they decide from the command text — and when that text was attached to the approval
+  request rather than to the earlier announcement, it was being dropped, leaving the gate to guess
+  from the tool's display name. A name like "Running: ls -la" reads as an action, so a plain
+  directory listing was refused in a mode that exists to let you look around. The command is now
+  read wherever the agent put it.
 - **The context gauge said "0%" on turns that were nearly full.** The little ring on the model pill,
   and the "Turn complete" line under a finished turn, both printed a context percentage on every
   turn — including turns where the agent behind the chat had never reported one. The number they
