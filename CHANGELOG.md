@@ -507,6 +507,18 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
 
 ### Fixed
 
+- **Restarting Gideon quietly moved a chat onto a different agent.** If you had pointed a chat
+  at an external coding CLI, or put it in Ask or Plan mode, a restart threw both away and the next
+  message you sent ran on the built-in agent instead — with a different set of tools and a different
+  idea of what it was allowed to touch, and nothing on screen to say so. A chat you had deliberately
+  put in Plan mode came back in Agent mode, free to make changes. The binding was in fact being
+  written to disk when you picked it; the very next turn then overwrote the file without it.
+  **A chat now keeps the agent and the mode you gave it across a restart.** And if the agent you
+  chose genuinely cannot be brought back, the chat says which one it could not restore and that the
+  built-in agent has different tools and different limits — once, in the turn's activity, rather than
+  looking like an ordinary reply. Being moved onto another agent without being told is the part that
+  actually costs you something.
+
 - **The context gauge said "0%" on turns that were nearly full.** The little ring on the model pill,
   and the "Turn complete" line under a finished turn, both printed a context percentage on every
   turn — including turns where the agent behind the chat had never reported one. The number they
@@ -520,6 +532,17 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
   zero: the background session was recycled as "no readings ever arrived" when it had in fact
   measured an empty window, and the automatic-compaction check no longer treats an unknown gauge as
   a low one.
+- **Typing `/compact` at a coding-CLI agent killed the whole turn.** Any message starting with a
+  slash was sent as a *command* to whichever agent was bound, without ever asking whether that agent
+  understands commands. None of the three CLIs we drive does, so the answer came back "Method not
+  found" and the turn died on an error card — you got no reply at all, and `/compact` compacted
+  nothing. A slash command now goes out as a command only to an agent that says it can run one;
+  otherwise your message is answered as an ordinary question and an inline line tells you the
+  command was not run natively, so you are never handed a plain answer while believing a command
+  executed. If a command does fail as unknown *after* the agent has already started replying, the
+  turn stops and says why rather than silently starting a second one — re-asking would duplicate the
+  reply you can already see and bill the work twice. Any other command failure still surfaces as the
+  failure it is.
 - **The sign-in page said "Sign-in failed" no matter what went wrong.** It read the error out of the
   wrong place in the response, so a wrong password, a rate-limited address, a password-sign-in that
   is switched off and an already-used device code all produced the same unhelpful sentence — and the

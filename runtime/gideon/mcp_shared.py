@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from gideon.config.loader import AppConfig, config_dir
+from gideon.constants import JSONRPC_METHOD_NOT_FOUND
 from gideon.dashboard.origin import parse_dashboard_url
 from gideon.sel import sel
 
@@ -495,4 +496,11 @@ def run_mcp_stdio_loop(
                 result_text = call_tool_fn(tool_name, tool_args)
                 respond(req_id, build_tool_response(result_text))
         elif req_id is not None:
-            respond(req_id, None, error={"code": -32601, "message": f"Unknown method: {method}"})
+            respond(
+                req_id,
+                None,
+                error={
+                    "code": JSONRPC_METHOD_NOT_FOUND,
+                    "message": f"Unknown method: {method}",
+                },
+            )

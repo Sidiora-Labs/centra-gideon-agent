@@ -29,6 +29,7 @@ from gideon.dashboard.chat_title import _maybe_auto_title
 from gideon.dashboard.chat_utils import (
     _BLOCKED_SLASH_COMMANDS,
     _SLASH_COMMANDS,
+    SLASH_FALLBACK_ACTIVITY_KIND,
     _apply_incognito_prefix,
     _broadcast_auto_tool,
     _broadcast_compaction_result,
@@ -41,6 +42,7 @@ from gideon.dashboard.chat_utils import (
     _project_context_preamble,
     _redact_for_display,
     _validate_tool_name,
+    stream_slash_command,
     strip_status_sentinel,
     task_mode_denies,
     task_mode_framing,
@@ -1795,6 +1797,29 @@ async def _run_chat(
             provider_kind = _acp_provider
             provider_agent = getattr(session, "acp_provider_agent", "") or ""
 
+        # G5 honesty rail. ``_acp_meta_binding`` is what this session's persisted meta
+        # line asked its runtime to be, recorded on restore whether or not the binding
+        # was honoured. If the turn is NOT resolving on that axis, SAY SO: the harm in a
+        # lost ACP binding is never the binding itself, it is a turn that runs with a
+        # different tool set and different confinement while looking completely normal.
+        # One-shot — consumed here so a restored session says it once, not every turn.
+        _meta_binding = getattr(session, "_acp_meta_binding", "") or ""
+        if _meta_binding:
+            session._acp_meta_binding = ""
+            if not provider_kind.startswith("acp"):
+                state.broadcast_ws(
+                    "activity_event",
+                    {
+                        "session": session.key,
+                        "kind": "session",
+                        "text": (
+                            f"Could not restore this session's {_meta_binding} runtime — "
+                            "running on the built-in agent instead, which has different "
+                            "tools and different confinement"
+                        ),
+                    },
+                )
+
         # Per-session ACP permission-mode override (e.g. an unattended goal loop
         # worker sets bypassPermissions so an ACP agent freely executes file
         # writes instead of avoiding them in the default "prompts for writes"
@@ -2414,9 +2439,39 @@ async def _run_chat(
             except Exception:
                 logger.warning("screen-frame delivery failed", exc_info=True)
 
-        # Slash commands use _vendor.dev/commands/execute for full native output;
-        # regular messages use session/prompt.
-        event_stream = client.stream_command(message) if is_slash else client.stream(full_message)
+        # Slash commands use _vendor.dev/commands/execute for full native output — but ONLY
+        # when the bound provider says it speaks that extension. Sending it blind is what
+        # `G4` measured: claude-code answers `-32601` and the WHOLE TURN hard-errors, so the
+        # user's `/compact` produced an error card instead of an answer. `stream_slash_command`
+        # owns all three outcomes (gate → substitute, `-32601`-before-output → substitute,
+        # `-32601`-after-output → refuse and say why) and reports the substitution here so a
+        # user is never handed a plain-prompt answer while believing a command ran.
+        # Set the moment a substitution is announced. Read by the deferred-compaction
+        # branch after the loop: waiting on `wait_for_compaction` is only meaningful when
+        # a real `/compact` COMMAND was dispatched. A substituted turn has no compaction
+        # coming, and that branch discards the streamed answer before waiting — so left
+        # ungated it would trade `O23`'s error card for a 120 s stall ending in
+        # "Compaction timed out.", with the answer we just produced thrown away.
+        slash_substituted = False
+
+        def _slash_notice(text: str) -> None:
+            nonlocal slash_substituted
+            slash_substituted = True
+            logger.info("slash fallback (%s): %s", session.key, text)
+            state.broadcast_ws(
+                "activity_event",
+                {
+                    "session": session.key,
+                    "kind": SLASH_FALLBACK_ACTIVITY_KIND,
+                    "text": text,
+                },
+            )
+
+        event_stream = (
+            stream_slash_command(client, message, prompt=full_message, notify=_slash_notice)
+            if is_slash
+            else client.stream(full_message)
+        )
         state.broadcast_ws("chat_status", {"session": session.key, "status": "Thinking…"})
         state.broadcast_ws(
             "activity_event", {"session": session.key, "kind": "status", "text": "Thinking…"}
@@ -3687,9 +3742,12 @@ async def _run_chat(
         # /compact acknowledged but compaction deferred — send a lightweight
         # follow-up to trigger the actual compaction so the user doesn't have to.
         logger.debug(
-            "Compaction check: first_word=%r saw_compaction=%s", first_word, saw_compaction
+            "Compaction check: first_word=%r saw_compaction=%s slash_substituted=%s",
+            first_word,
+            saw_compaction,
+            slash_substituted,
         )
-        if first_word == "/compact" and not saw_compaction:
+        if first_word == "/compact" and not saw_compaction and not slash_substituted:
             # Clear ACP agent's streamed "Compacting conversation..." text
             session.messages = [m for m in session.messages if m.get("role") != "chunk"]
             assistant_text = ""
