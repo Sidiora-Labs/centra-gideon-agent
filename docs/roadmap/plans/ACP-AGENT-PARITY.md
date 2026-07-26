@@ -534,14 +534,51 @@ found zero warn/block/circuit output after six failures in one turn (`G6`).
   `AcpAgentProvider.provider_id` is `f"acp:{Path(self._command[0]).name}"`
   (`src/gideon/llm/acp_agent.py:72-75`). The bundle deliberately passes the dialect
   explicitly to avoid basename inference; the label was missed. Under the npx fallback the same
-  line would read `acp:npx`.
-- **`G15` "Session created" prints on EVERY turn** — the line is gated on `resumed`, never on
-  `is_new` (`src/gideon/dashboard/chat_runner.py:1731-1748`), so a long ACP conversation
-  repeats "Session created" and never says "resumed". `AAP-7`'s accurate-labelling acceptance
-  criterion needs this row too.
+  line would read `acp:npx`. **FIXED** (`fix-g14-g15-session-line`): `provider_id` now returns the
+  configured `acp:<cli>` entry name (threaded as `runtime_id` through `_factory`), basename only as
+  the fallback — the same rule `AcpSessionProvider.provider_id` and `discover_agents`'
+  `options["runtime_id"]` already followed.
+  **CORRECTION — `G14` was misfiled as P3/cosmetic.** The same basename value is *also* the
+  not-gateable/SEL provider key: `chat_runner.py:2497-2499` derives `_acp_cli = provider_id[4:]`
+  and feeds it to `acp_permission_authority.not_gateable_entry()` (`:1367`) plus two SEL audit rows
+  (`:1414` `"provider": acp_cli`, `:2914`). `normalize_provider` maps `claude-agent-acp` →
+  `claude-code` via `_PROVIDER_ALIASES`, but **`npx` resolves to no coverage row at all** — so under
+  the npx fallback a *declared* not-gateable tool read as an undeclared hole, and every ungated-tool
+  audit row named the adapter rather than the runtime. The label was the visible symptom of a
+  security-legibility defect, not the whole of it.
+- **`G15` "Session created" prints on EVERY turn** — the SYMPTOM is real and now fixed; the filed
+  mechanism and recommendation were both wrong. **CORRECTED:** (a) the line cite was stale — the real
+  sites were `chat_runner.py:1912-1930` on `origin/main` at `05bba66e`; (b) a `resumed` branch *did*
+  exist (`:1913`), so "never says resumed" was an overstatement — it said "resumed" on the rare
+  cold-reload path only; (c) the actual cause is that `SessionManager.get_or_create`'s **reuse path
+  returns `resumed=False` unconditionally** (`session.py:1065`, `return provider, was_new, False`),
+  so every later turn of one live session took the `else` branch; (d) **the recommendation "gate on
+  `is_new`" would have inverted the same lie** — `is_new` is True only when a runner was *started*
+  this turn (creation path returns `(provider, True, resumed)` at `session.py:1281`; reuse returns
+  `was_new`, which is False except right after `mark_new()`), so gating the verb on it alone makes a
+  reused session read "resumed". **FIXED** by splitting the two questions the one flag was being
+  asked to answer: `is_new` says whether a runner was started at all, `resumed` picks the verb when
+  one was — `is_new and resumed` → "resumed", `is_new and not resumed` → "created", `not is_new` →
+  **"continued"** (a third, previously unsayable state). One broadcast, one format string.
+  `AAP-7`'s accurate-labelling acceptance criterion needs this row too.
 - **`G16` The preference-facet extractor learned the fragment "never more"** from
   "…in exactly one sentence from now on, never more." (`O22`) — the capture path is live
-  (that is the CONFIRMED part) but the extraction is poor.
+  (that is the CONFIRMED part) but the extraction is poor. **FIXED 2026-08-22** (see the
+  execution log). Mechanism, since the bullet as filed was imprecise about it in three ways:
+  (1) the writer is `preference_facets.detect_facet_candidate`'s veto branch, whose regex was
+  the trigger word plus `[^.!?\n]*` — so `never` matched as a *degree adverb* and the clause
+  took `" more"`; (2) the fragment reached TWO surfaces from that one detector — the
+  `Learned: never more` chip (`dashboard/chat_runner.py:211-217`, which prints the returned
+  text bare) and the durable lesson row `Never: never more`
+  (`after_turn_review.capture_preference_facet`, which prefixes it) — so one fix closes both;
+  (3) `K16`'s turn produced **two** `learned` events from **two different writers** — this one
+  and `is_correction_signal` → "User correction to honor: …" — and only the first is the facet
+  extractor. **`K49`'s second veto artifact is NOT closed by this fix and is a different
+  defect:** `Never: never violate these):` was clipped from *injected prompt boilerplate*, so
+  its root cause is provenance (capture ran over injected context that arrived inside the user
+  message), not grammar — "never violate these" is a well-formed prohibition and the tightened
+  rule accepts it, correctly by its own terms. That row needs the capture path to distinguish
+  the user's own words from injected content; filed here rather than half-fixed.
 
 ### Incidental bugs fixed in-session
 
@@ -2760,3 +2797,188 @@ cited above.
   re-derived to six. Both are marked **not re-driven** — the fix is unit-proven, so the doc states a
   landed mechanism, not a measured cell. `G18`'s inventory bullet is the record; no matrix cell
   flipped and `dag.json` is untouched.
+
+- **2026-08-22 — `G14` + `G15` DONE (P3 legibility, ad-hoc off `origin/main` `05bba66e`).** One
+  sentence, two lies, fixed together because correcting the verb while the runtime label still named
+  the adapter would have left the line lying.
+  **`G15` verdict: the recommendation was WRONG, and `resumed` was only half the right gate.** The
+  audit the task asked for changed the fix. Read `session.py`: `get_or_create` returns
+  `(provider, is_new, resumed)`, and the **reuse path returns `resumed=False` unconditionally**
+  (`:1065` `return provider, was_new, False`) while the creation path returns `(provider, True,
+  resumed)` (`:1281`). So `is_new` means "a runner was STARTED this turn" — exactly what
+  `chat_runner.py`'s floor-seeding comment says — and `resumed` means "that runner LOADED a persisted
+  session". Gating the verb on `resumed` alone made every later turn of one live session say
+  "created" (the filed symptom, real); gating it on `is_new` alone would have made every reused turn
+  say "resumed" (the filed recommendation, worse). The two flags answer two different questions, so
+  the fix uses both: `is_new` decides whether a runner was started, `resumed` picks the verb when one
+  was, and `not is_new` gets a third word the line could not previously say — **"continued"**. Two
+  divergent `broadcast_ws` branches collapsed into one call with one format string, since two
+  branches is precisely how `G14` shipped a stale label.
+  **`G14`: the label now names the runtime the user PICKED.** `AcpAgentProvider.provider_id` returns
+  the configured `acp:<cli>` `ProviderEntry` name, threaded in as a `runtime_id` kwarg by `_factory`
+  (`entry.name`); basename inference survives only as the fallback for a provider built without one
+  (`test_agent_provider.py:30`'s existing assertions still pass unchanged). This is **convergence,
+  not invention** — `AcpSessionProvider.provider_id` already returned `self._runtime_id`,
+  `discover_agents` already applied entry-name-with-basename-fallback to `options["runtime_id"]`
+  (`acp_agent.py:284`), and `GET /api/agent-providers` already reported `entry.name` as the row's
+  `provider_id` with `test_agent_providers_endpoint.py:341-346` locking `"acp:claude-agent-acp" not
+  in rows`. `AcpAgentProvider` was the last of the four disagreeing. The `acp:` prefix is enforced as
+  an invariant rather than passed through, because `chat_runner.py:2498` derives the not-gateable/SEL
+  key as `provider_id[4:]` behind a `startswith("acp:")` test — a bare entry name would have silently
+  disabled the ungated-tool report.
+  **`provider_id` consumers checked BEFORE touching it** (the census is why the change is safe):
+  four definitions (`NativeAgentRuntime` → `"native"`; `AcpAgentProvider`; `AcpSessionProvider` →
+  `self._runtime_id`; the `AgentProvider` ABC). Only TWO sites read the property off an instance —
+  `chat_runner.py:1912` (this label) and `:2497` (the `_acp_cli` derivation). `agents/registry.py`'s
+  `provider_id` parameter is fed from config/`entry.name`, never from the property. Nothing persists
+  it to disk or JSON, and nothing in `src` compares it to a literal. The one identity consumer,
+  `acp/permission_authority.py:272-286` `normalize_provider`, is **explicitly documented as
+  accepting "the bundle name, the `acp:<cli>` runtime id, or the raw launch-command basename … since
+  the three disagree"** — so it tolerates both the old and new value. `runtime_label` /
+  `_runtime_label_for` (`handlers/providers.py:345`) was deliberately NOT reused for this line: it
+  title-cases to `"Claude Code"`, which reads like an agent name and loses the external-CLI signal
+  the line exists to carry. It stays the providers-list display form.
+  **Not fixed, named rather than hidden:** the `"Creating session…"` status broadcast at
+  `chat_runner.py:1850` fires before `get_or_create`, so it also over-claims on the reuse path. It is
+  a transient `kind: "status"` progress line and the truth genuinely is not knowable before the call,
+  so it is left alone rather than half-fixed. **Also measured:** `ChatPage.tsx:961` drops
+  `kind === 'session'` outright, so this sentence is user-visible on the **Loop** and **Code**
+  cockpits (`LoopCockpitPage.tsx:368-373` — whose comment literally says "session created" —
+  and `CodeCockpitPage.tsx:459-460`), not in the main chat transcript. No frontend change needed;
+  no `web/` file touched.
+  **Falsifications (mutate the LIVE line, re-read, AST-probe the enclosing function, restore from a
+  file copy).** (a) `provider_id`'s configured branch neutered → **6 red**, including the rendered
+  sentence: `['Session created · default · auto · via acp:claude-agent-acp']` and
+  `['Session created · … · via acp:npx']` — the adapter binary and the npx degradation both named on
+  the wire. (b) verb re-gated on `resumed` alone (the filed bug restored) → **3 red** on the wrong
+  word: `"Session created"` for a reused session, `"Session continued"` for a loaded one. (c) the
+  settled gate inverted (`not is_new` → `is_new`) → **6 red**. AST probes confirmed each mutation sat
+  in real code inside the intended function (`provider_id` [72-97] as an `Assign`; `_run_chat`
+  [1435-4197] as an `If` testing `resumed`/`is_new`) — not in a docstring.
+  **BLIND SPOT (worth having): nothing pre-existing noticed either mutation.** Ten suites / **430
+  passed, 1 skipped** under mutation (a); twelve suites / **458 passed, 1 skipped** under mutation
+  (b) — including `test_dashboard_approval.py` and `test_chat_rewind.py`, which drive `_run_chat`
+  heavily, and `test_agent_provider.py`, which asserts `provider_id` directly. The reason is that
+  **zero tests asserted this sentence before this change** (`grep -rn "Session created"` over `src`,
+  `tests` and `web/src` matched only the two producing f-strings), and the suites that drive
+  `_run_chat` assert decoder output and approval outcomes over hand-built mocks. Both gaps were
+  invisible to the entire suite by construction, which is why the new rails assert the broadcast
+  sentence and not the flags.
+  **Gates.** `make lint` clean (mypy 959 source files). Targeted pytest: 12 new + 458 pre-existing
+  across `test_agent_provider` / `test_acp_permission_authority` / `test_agent_providers_endpoint` /
+  `test_acp_bundles` / `test_dashboard_chat` / `test_acp_session_provider` /
+  `test_session_acp_pool_claim` / `test_acp_unattended_and_loop_breaker` / `test_chat_plan_mode` /
+  `test_acp_slash_command_fallback` / `test_dashboard_approval` / `test_chat_rewind` — **470 passed,
+  1 skipped**. `make test` full suite **green on the first run: 24,017 passed / 30 skipped / 12
+  xfailed / 0 failed in 271s** — neither known item appeared (no `test_loop_worktree_sparse` sparse-
+  cone flake, no `test_subagent.py` isolation red). `gate_report.py` **6/6**; flat wire-error census
+  **1507/1507, delta 0** (this change adds no error path). No `web/` file touched, so the frontend
+  gates do not apply. `git status --porcelain` clean.
+  No matrix cell flipped to CONFIRMED; `dag.json` untouched. Depends on nothing in flight, but
+  **note for `#1876`** (`G5`, a runtime-binding rail around `chat_runner.py:1798-1818`): it lands
+  next to these sites and a textual conflict is expected — the two changes are independent
+  (`#1876` fixes *which* runtime is bound, this fixes what the line *says* about it).
+- 2026-08-22 — **`G16` FIXED** (code-only; no CLI driving, no owner authentication). The reported
+  mechanism reproduced exactly: `detect_facet_candidate`'s veto branch searched
+  `\b((?:never|do ?n'?t ever|do not ever|always avoid)\b[^.!?\n]*)`, so against
+  "Answer in exactly one sentence from now on, never more." it matched `never` as a **degree
+  adverb**, `[^.!?\n]*` took `" more"`, and `capture_preference_facet` wrote the durable lesson
+  `Never: never more`.
+  **The rule now, stated once in `preference_facets.py` and implemented once in the new
+  `veto_clause()`:** a veto is recognized only when a negative trigger is followed by a
+  **prohibited-action clause** — (1) a head token that can open a verb phrase, i.e. NOT a
+  closed-class function word / degree adverb / comparative / pronoun / preposition / conjunction /
+  copula / modal (`_NON_ACTION_HEADS`), (2) at least one further token for the action's
+  object-or-complement, and (3) not one of the enumerated non-prohibitive idioms
+  (`_VETO_IDIOM_HEADS` = "never mind …", `_VETO_IDIOM_CLAUSES` = "never say never").
+  **Deliberately rejected:** "never more", "never more than one sentence" (a quantity nudge — the
+  style detector and the after-turn summarizer own preferences of that shape), "never again",
+  "never mind the tests", "better late than never", "now or never", "I would never have guessed"
+  (`have`/`had` are excluded as heads on purpose: the counterfactual is commoner than "never have
+  X"), and any trigger with no complement. Precision over recall, as the docstring already
+  promised: this is the ONE candidate class that reaches the durable lesson store, so a missed
+  veto is cheap and a false one is not. **No LLM call added** (C15's constraint) — the fix is
+  strictly cheaper than the regex it replaced plus a frozenset lookup.
+  **Recall went UP, not down, in one respect:** every trigger occurrence is now tried, so
+  "In one sentence, never more. Also never use emoji." yields `never use emoji`, where the old
+  single-`re.search` returned the fragment and stopped.
+  **Routing NOT changed, deliberately.** The asymmetry the gap notes is real — the loosest matcher
+  produced the least reversible record — but splitting heuristic vetoes off into a decaying facet
+  would rebuild the parallel always/never model this module's docstring (`:13-15`) exists to
+  prevent, and `upsert_facet` returns None for `veto` specifically to enforce the single home. The
+  proportionality dial already exists on the READ side: `learning/lesson_confidence.derive` gives a
+  single-sighting non-human-authored lesson `corroboration(1) = 0.0` against a `0.5` threshold, so
+  a junk row is RETAINED-not-INJECTED until three sightings. That is a mitigation, not the fix, for
+  three measured reasons: the row is still written and still consumes contradiction judging; the
+  standings computation **fails OPEN** (`vector_memory.py:2925-2934` — an unreachable evidence store
+  injects everything at 1.0); and a habitual phrasing crosses the threshold on the third repeat, at
+  which point the junk rule *is* injected. So the fix is at the writer, and confidence composes
+  underneath it as a second line.
+  **Falsifications (each mutation applied to the LIVE line, re-read, and its enclosing function
+  confirmed by an `ast` probe; each restored from a `cp` file copy, never `git checkout`):**
+  · **M1 — old regex restored** inside `veto_clause` (AST: `veto_clause`, line 257). Red observed on
+  the STORED TEXT, not on a regex: `AssertionError: ['Never: never more']` from
+  `test_facet_capture_does_not_learn_a_never_fragment_as_a_lesson`, plus 13 more (11 rejection cases,
+  the multi-trigger recovery, the `veto_clause` unit) = **14 failed / 66 passed**.
+  **Blind spot: the pre-existing suites did not notice at all — 147 passed, 0 failed** across
+  preference-facets / after-turn-review / lesson-confidence / lesson-contradiction / lesson-scope /
+  lessons-memory-reroute / memory-service / temporary-chat with the new tests deselected. The defect
+  had zero coverage; that measurement is the finding.
+  · **M2 — precision collapsed to "detect nothing"** (`len(tokens) < 2` → `< 99`; AST: `veto_clause`,
+  line 260). Pre-existing suites **DID** notice: 3 reds including the store-level
+  `test_facet_capture_veto_routes_to_lesson`. The new direction-(b) tests red too (8, one per genuine
+  veto), so they are not vacuous.
+  · **M3 — veto→lesson routing flipped** to `upsert_facet(vs, "style", …)` (AST:
+  `capture_preference_facet`, line 179). Pre-existing suites noticed with 1 red; the new
+  `test_veto_is_durable_while_a_style_nudge_decays` red at its `force-push`-in-the-lesson-store
+  assertion, so the durable-vs-decaying distinction is now **asserted, not assumed**.
+  **DISCOVERY — `K49`'s second veto artifact is a DIFFERENT defect and stays open.**
+  `Never: never violate these):` was clipped from *injected prompt boilerplate*, so its root cause
+  is provenance (capture ran over injected context that had arrived inside the user message), not
+  grammar: "never violate these" is a well-formed prohibition and the tightened rule accepts it,
+  correctly by its own terms. Closing it means teaching the capture path to separate the user's own
+  words from injected content — filed on the `G16` bullet rather than half-fixed here. The same
+  `K16` turn's *other* row ("User correction to honor: …") comes from `is_correction_signal`, a
+  different writer, and is likewise untouched.
+  **Gates.** `make lint` clean (mypy 959 files); targeted pytest **168 green** across
+  preference-facets, after-turn-review, lesson-confidence, lesson-contradiction, lesson-scope,
+  lessons-memory-reroute, memory-service and temporary-chat (paths existence-checked first);
+  `make test` full suite **green on the first run — 24026 passed, 30 skipped, 12 xfailed**, with
+  neither the documented `test_loop_worktree_sparse` sparse-cone flake nor the open `test_subagent.py`
+  isolation red appearing (run count: 1). `gate_report.py` **6/6**; flat wire-error census
+  **1507/1507, zero slack** (this change adds no error path). No cell flipped to CONFIRMED;
+  `dag.json` untouched.
+  **INDEPENDENT VERIFICATION found a false NEGATIVE on the same axis, fixed here.** Probing the
+  shipped `veto_clause` over 18 phrasings (9 per direction) rather than re-reading its regex,
+  **"never, ever do that again" was silently dropped** — emphatic doubling puts the intensifier in
+  the clause-head position, `ever` is (correctly) a `_NON_ACTION_HEADS` member, and `ever` alone is
+  not a trigger, so no later occurrence rescued it. An emphatic veto is the *most* emphatic kind, so
+  this is the atom's own property failing, not a recall trade-off: added `_EMPHATIC_CLAUSE_HEADS`
+  and a leading-emphatic strip before the head is judged, +2 positive and +2 negative cases
+  ("never, ever", "never ever more" must still be refused — stripping must not manufacture a veto
+  out of nothing). Falsified: `while False and …` (AST-confirmed, real `While`, inside
+  `veto_clause`) reds **exactly the 2 new positive cases**, 43 passed.
+  **A wrong-target mutation of my own is worth recording.** Re-running M1 as `len(tokens) < 2` →
+  `< 1` gave **41 passed, zero red** — not a hole in the property but a *weaker* mutation than the
+  agent's "old regex restored": for "never more" the token count is 1, so the count guard passes and
+  the **next** guard (`more` ∈ `_NON_ACTION_HEADS`) still refuses it. Mutating that head check
+  instead reds 3 (`I would never have guessed`, `never mind the tests…`, `never more than one
+  sentence please`). So the two guards are **complementary, neither redundant** — the count guard
+  alone catches "never more", the head guard alone catches "never have guessed" — which the agent's
+  single-mutation account did not show. Untouched suites saw **37 passed** under the head mutation:
+  the blind spot the new tests close.
+  **Two claims re-verified against code, one citation corrected.** The fail-open confidence path is
+  verbatim at `vector_memory.py:2927-2934` (`LessonStanding.INJECTED`, "confidence unavailable —
+  injected rather than silently dropped"), so a veto that reaches the store is *injected* even when
+  confidence is unavailable — which is why precision, not recall, is the right bar here. And
+  `_HUMAN_AUTHORED_SOURCES` is `frozenset({"user_explicit", "vault_edit"})` at `vector_memory.py:126`,
+  so `facet_veto` is **not** human-authored (the agent cited `lesson_confidence.py` — wrong file,
+  right substance).
+  **Final gate, re-run independently on the amended tree:** `make lint` clean (mypy **959** files);
+  targeted **115 green** across preference-facets, after-turn-review, lesson-confidence,
+  lesson-contradiction and the wire-error census, every path existence-checked first;
+  `gate_report.py` **6/6**; flat census **1507/1507**; probe sweep **16** (the PHF-14 baseline) and
+  `git status` empty; full `make test` **24030 passed, 30 skipped, 12 xfailed, exit 0**. An earlier
+  full run on the pre-amendment tree had **1 red**, `test_loop_worktree_sparse.py::TestPoolBound::
+  test_batch_creates_every_worktree` — the documented sparse-cone flake; **47/47 in isolation** and
+  absent from the final run (run count: 2 full, 1 red). Nothing in this diff touches worktrees.
