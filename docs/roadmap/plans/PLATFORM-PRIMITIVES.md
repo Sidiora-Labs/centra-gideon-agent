@@ -1175,3 +1175,89 @@ discipline in [`AGENTS.md`](../../../AGENTS.md))*
   **Four tests were re-contracted, none weakened:** three asserted bounds that encoded the binary
   failure (`<= 4`, `< 20`, an exact iteration count) and now assert the STRONGER property — the run
   surfaces through the ladder rather than drifting into its cap, with the nudge tier tried first.
+
+- **2026-08-22 — `PP-16` slice DONE: no non-terminal status is actionless. Atom stays `todo`.** The
+  2026-08-20 slice reported this and did not take it: *"the union of all four source sets omits
+  `intake` and `planning`, so a loop wedged in either (a dead classifier) has no available action at
+  all and `DELETE` is its only exit."* This closes it.
+  **Why the guard was the whole obstacle, measured.** `store.update_status` refuses only transitions
+  **out of** a terminal state (`store.py:437`) — there is no per-state table — so `intake → stopped`
+  and `planning → stopped` were always legal. `manager.stop` tears down whatever is armed and
+  `_teardown` no-ops when nothing is (`main = svc.get_by_session(...)`; `if main is not None`). So the
+  backend could always service it and only `ACTION_SOURCE_STATES` (read by `loop_routes.py:534`) said
+  no. Losing the record to `DELETE` was the user's only exit from a dead classifier.
+  **`STOPPABLE_STATUSES`, deliberately its own name.** `ACTIVE_STATUSES` also drives the "active loop"
+  list filters and badge counts, where a loop still in intake is **not** active — widening it would
+  have silently changed those counts. The FE mirrors it as `STOPPABLE_LOOP_STATUSES`, composed as
+  `new Set([...ACTIVE_LOOP_STATUSES, 'intake', 'planning'])` so the seven shared members are still
+  never restated.
+  **The rail is asserted as the general property, not as a two-state patch:**
+  `test_no_non_terminal_status_is_actionless` fails for ANY non-terminal status missing from every
+  row, so the next enum member added inherits the check instead of the hole.
+  **Two shipped tests pinned the defect as intended behaviour, and both were corrected, not
+  weakened.** `designLifecycleAffordances.test.tsx` asserted `Stop` was ABSENT on an intake loop with
+  the reason *"stop 409s on a pre-launch loop"*, and `PRELAUNCH_LOOP_STATUSES`' doc comment in
+  `loopStatus.ts` said *"the backend refuses `stop` on a pre-launch loop with a 409"* — both true when
+  written, and together they are why the gap read as a decision rather than an oversight. Each now
+  states the current contract and says what it used to say. `test_loop_entity`'s
+  `stop == ACTIVE_STATUSES` became the exact relationship (`== STOPPABLE_STATUSES`, difference is
+  exactly `{intake, planning}`, and a strict-superset check) rather than a bare superset assertion.
+  **The mirror rail needed a real extension, not a loosened assertion.** Its parser resolved a
+  referenced set by name but could not expand a `...SPREAD`, so the composed FE set read as only its
+  two literal members and the per-action **equality** check failed. It now expands spreads innermost
+  first, bounded by the set count so a cycle cannot hang the suite, with a post-pass assertion that
+  each spread actually expanded — a parser that silently under-counts would make the equality check
+  pass on a subset, which is the precise failure mode the equality (not subset) choice exists to
+  prevent.
+  **Falsification:** restoring `"stop": ACTIVE_STATUSES` reds **4** — the invariant, both guard
+  parameters, and the mirror equality. **Blind spot measured:** under that mutation the pre-existing
+  loop suites (loop-http, loop-entity, loop-gates, loop-code-stages) were **171 passed, 0 failed** —
+  nothing asserted that every non-terminal state has a way out.
+  **Still open on `PP-16`** (unchanged by this slice): the noun change itself, one adoption/reaping
+  path (`loop/manager.reap_orphaned_loops`, 73 lines, called from `gateway.py:2417`, vs
+  `workflows/watchdog._boot_sweep`+`_adopt`), retiring `LoopKindStrategy`, one projection to tasks,
+  and the two status vocabularies (`LoopStatus` 13 members vs `RunStatus` 8; `stopped`≡`cancelled`,
+  and `FAILED` is terminal for a run but not for a loop).
+  **Unrelated drift found and NOT swept in:** `docs/design/consistency-audit.json` regenerates on
+  `npm run build` and its committed copy is stale — `filesScanned` 527 → 547 with a new
+  `pages/settings/ProjectionRulesPanel.tsx` row, a file this slice never touched (`driftHits` stays
+  8). Restored from `HEAD` and reported here instead of riding along.
+- **2026-08-22 — `PP-16` BLOCKED on an owner decision: retiring the inert `WorkflowRun.task_list_id`
+  makes a Loop field homeless, and the map's own rail says that is an owner call.** The change was
+  built, verified end to end, and then REVERTED rather than pushed past the rail. Recorded with the
+  evidence so the decision can be made once and the edit re-applied in minutes.
+  **The field is genuinely inert, measured.** Filtering out the unrelated and very live
+  `Task.task_list_id` (the tasks domain, ~80 references), `WorkflowRun.task_list_id` exists as exactly
+  five things: the dataclass field (`workflows/models.py:845`), its `_KNOWN` entry, `to_dict`
+  (`:914`), `from_dict` (`:951`), and a persisted SQLite column (`workflows/store.py:91` DDL +
+  `_COLUMNS`). **No writer sets it to a real value and no reader consumes it** — so it is a declared
+  field AND a persisted column that nothing populates, which is the `loop_run_map` field map's own
+  finding 3.
+  **Removal is clean and backward-compatible — tested, not assumed.** With the field, the DDL row and
+  the `_COLUMNS` entry gone: a run round-trips through the real store with `extra` left EMPTY (the
+  column is never SELECTed, so nothing spills into the tolerant reader); and against a **legacy
+  schema** — created by `ALTER TABLE runs ADD COLUMN task_list_id`, populated with `'tl-legacy'` — the
+  new code reads that row fine and still writes NEW rows, because the column keeps its
+  `NOT NULL DEFAULT ''`. There is no migration to write. A runtime import sweep over models, store,
+  service, controller, loop_run_map, materialize and dashboard.server was clean.
+  **Why it stopped.** `loop_run_map`'s `task_list_ids` row named `WorkflowRun.task_list_id` as its
+  destination, so `test_every_declared_destination_resolves` correctly reds the moment the field goes.
+  Re-homing that row to `NONE` then trips
+  `test_the_homeless_fields_are_pinned_and_explained`, whose message is explicit: *"It must SHRINK as
+  PP-16 lands; a new homeless field is an owner decision, not a detail."* Removing an inert
+  destination GROWS the homeless set by one, which is precisely what that rail exists to stop a
+  session doing unilaterally.
+  **The decision, stated once.** `Loop.task_list_ids` is `{phase_key: task_list_id}` — one TaskList per
+  phase. Either (a) `WorkflowRun` gains a per-phase destination designed for that shape and the inert
+  singular field is replaced, or (b) the row re-homes to `PROJECTION` on the argument that a per-phase
+  TaskList map is a projection of run state (`materialize.py` already projects tasks that way), or
+  (c) the singular field stays as a reserved slot and the projection keeps provisioning imperatively
+  through `loop/tasks_link.py`. **(c) is the status quo and the cost of it is a slot a later migration
+  can fill with the wrong shape** — the reason this was worth attempting now while it is still a plain
+  clean break.
+  **One thing worth carrying:** the DDL↔`_COLUMNS` direction IS railed — adding a `_COLUMNS` entry with
+  no DDL column reds **34** store tests with `sqlite3.OperationalError: table runs has no column
+  named task_list_id`. What no schema rail can catch is the shape that actually occurred: a
+  *consistent* DDL + `_COLUMNS` + dataclass triple that nothing writes or reads. That is why this field
+  survived, and why the inert-surface baseline does not mention it either (0 hits — its detector does
+  not cover a declared-but-unused dataclass field).
