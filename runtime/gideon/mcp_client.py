@@ -26,7 +26,6 @@ import re
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 from gideon import trace_recorder as _trace
@@ -600,7 +599,13 @@ def _gideon_mcp_specs() -> dict[str, dict[str, Any]]:
     """
     import json
 
-    path = Path.home() / ".gideon" / "mcp.json"
+    from gideon.config.loader import config_dir
+
+    # `config_dir()`, not `Path.home()`: this is the store the NATIVE agent loop spawns
+    # from, so a `Path.home()` hardcode made a dev session with GIDEON_HOME set read
+    # the operator's REAL servers and their credentials while the dashboard wrote the dev
+    # home — and every dev-side edit looked like it did nothing.
+    path = config_dir() / "mcp.json"
     if not path.is_file():
         return {}
     try:
