@@ -775,3 +775,61 @@ Canonical usage of each shared primitive + each interaction pattern (selection, 
 - **🪤 A JSX opening tag cannot be found by scanning to the first `>`.** The scripted pass that wired `stale` through 23 bento tiles inserted the prop at the first `>` after `<BentoCard`, which lands **inside** `onClick={() => go('inbox')}`. Ten `TS1109`s. Re-run with a brace/quote-depth scan; the file was restored from a `cp` copy first, not patched forward.
 - **🪤 An identifier codemod rewrites PATH STRINGS too.** `useCachedData` → `useQuery` turned `codeOf('lib/useCachedData.ts')` into `codeOf('lib/useQuery.ts')` (a test then failed on ENOENT rather than on its assertion) and rewrote a prose reference in `ui/motion/Entrance.tsx`. Both swept afterwards by grepping the new name in string position.
 - **Gate (from the worktree root, main checkout's venv on PATH).** `npm ci` · `npm run typecheck:web` clean · **FULL `npm run test:web`: 462 files / 4,840 tests, 0 failures** · `npm run build --workspace web` clean · `make lint` (Python) exit 0 · **`make test` SKIPPED, with the reason: this change touches zero Python files** (`git show --stat HEAD` has no `.py`, no `Makefile`, no `pyproject.toml`). `ui/disabledReasonCensus.test.ts` went red on its own and was re-keyed in the same commit — it pins sites by `file:line` and the knowledge `stale` prop shifted `KnowledgeListPage.tsx:917` → `:918`, exactly as DSC-13 predicted. **No baseline needed regenerating:** `primitiveAdoption.baseline.json` and `windowedListAdoption.baseline.json` both stayed green (the migration moved imports and destructures, not raw controls or windowing adoption), and regenerating either without a red would have been a blind edit. `docs/design/consistency-audit.json` regenerates on every full web run and drifts on `main` independently; left uncommitted.
+
+- **2026-08-22 — the primitive-adoption ratchet had SLACK, so its own stated guarantee was false for
+  form elements. Tightened `rawInput` 149 → 147.** `primitiveAdoption.baseline.json`'s comment says
+  *"a NEW bespoke element turns CI red"* and *"The numbers may only shrink"*. Measured against the
+  regenerated audit: `rawButton` 265 vs baseline 265 (**zero slack, working as designed**), `rawDialog`
+  0 vs 0, but **`rawInput` 147 vs baseline 149 — two units of slack**. Two new raw
+  `<input>`/`<textarea>`/`<select>` could be added anywhere in the app with CI green.
+  **Not hypothetical — it had already absorbed one.** `pages/settings/ProjectionRulesPanel.tsx` went
+  from `5 raw-input` to `6` (audit score 9 → 10) and CI stayed green, because the slack covered it.
+  That is the drift this ratchet exists to catch, landing unnoticed.
+  **Falsified in BOTH directions, on a real `<input>` site:** with the baseline at **147**, adding one
+  raw input reds — *"New bespoke form element(s) detected (148 > 147)"*. With the same probe in place
+  and the baseline back at **149**, the suite is **5 passed**. So the slack was load-bearing, not
+  cosmetic, and the tightening restores the guarantee the file claims.
+  **A vacuous probe caught first, worth recording.** The initial falsification targeted
+  `settings/PromptsPanel.tsx` because the audit credits it with `raw-input: 1` — but that file contains
+  **no `<input`** at all (its one hit is a `<select>`/`<textarea>`), so the edit asserted, mutated
+  nothing, and the run reported "5 passed" against an UNMUTATED tree. A green falsification proves
+  nothing until the probe is confirmed present; the count was checked (`grep -c` → 0) rather than the
+  pass being trusted. Re-run against `ProjectionRulesPanel.tsx`, which has four real `<input`s.
+  **A `--root web` invocation also read as a pass** — `npx vitest run <path> --root web` reports
+  *"Tests no tests"*, an UNRUN leg. Run from `web/`.
+  **Recorded, not fixed: the audit artifact is inherently dirty-on-commit.**
+  `docs/design/consistency-audit.json` is written by `web/src/design/consistencyAudit.test.ts`
+  (a reporter that "never fails on drift") and carries a `generatedAt` timestamp, so **every**
+  `npm run test:web` leaves the tree modified. That is why the committed copy reads stale (its
+  `filesScanned` was 527 against a 547-file tree) and why passing sessions keep restoring it as stray
+  drift. Refreshing it would re-drift on the next test run, so the file is deliberately left at `HEAD`
+  here; the real fix is a design change to the artifact (drop the timestamp, or write only under an
+  explicit flag), which is a separate call.
+- **2026-08-22 — `consistency-audit.json` is now DETERMINISTIC, so the artifact can finally be kept
+  current.** The committed audit carried a `generatedAt: new Date().toISOString()`, so **every**
+  `npm run test:web` rewrote it. The consequence is written across three plans in this repo's own logs:
+  the diff was discarded as noise at least **seven** times — `PERSONALITY-THEMES` ×3 (*"regenerated to
+  a `generatedAt`-only delta and reverted rather than committed as noise"*, *"pure timestamp churn,
+  discarded, and still stale on `main`"*), this plan ×3 (*"timestamp-only … reverted, kept out of the
+  commit"*), and `SESSION-MANAGEMENT` ×1 — plus three more restores in the 2026-08-22 session before
+  the cause was traced.
+  **That churn is why the file went stale, and the staleness compounded.** Nobody commits a refresh
+  when a real data delta cannot be told apart from a timestamp, so `filesScanned` drifted
+  **310 → 442 → 518 → 520 → 523 → 527** across the logs while the tree grew to **547**. The record
+  meant to expose drift was itself the most drifted file.
+  **Fix: drop the timestamp.** Nothing read it — the only occurrence was the line that wrote it, and
+  `consistency-audit.md` cites the *generator*, not a date. Git already records when a file changed. A
+  committed generated artifact has to be a pure function of the tree it scans, or it cannot be
+  committed at all.
+  **Verified by running it three times:** with the timestamp gone, runs 2 and 3 produce a
+  **byte-identical** file (`cmp` clean), so a suite run now leaves the tree clean.
+  **Falsified:** with `generatedAt` put back, two consecutive runs differ by exactly that one line
+  (`"generatedAt": "…12:52:38.345Z"` vs `"…12:53:26.704Z"`) and nothing else — the timestamp was the
+  whole cause, not a symptom.
+  **The refresh rides along, now that it is meaningful:** `filesScanned` 527 → 547,
+  `ProjectionRulesPanel.tsx` `5 raw-input` → `6` (score 9 → 10), `outlineNoneCount` 141 → 142 over
+  67 files, `reducedMotionFiles` 12 → 13, `animatedFiles` 167 → 168. `totals.driftHits` stays 8 and
+  `filesWithDrift` stays 7 — the tree grew by 20 files without adding a NEW drifting file.
+  **Related, shipped separately (#1889):** that same regenerated data is what exposed the
+  `primitiveAdoption` ratchet's two units of `rawInput` slack. The two changes are independent; this
+  one is why the measurement was available to make.
