@@ -849,23 +849,62 @@ Ledger ids are `C…` so they never collide with `AAP-1`'s `O…`. `S1` = `chat-
 | `C17` | S1 re-bound, then: (a) a write card resolved with `{action:"trust"}`; (b) a second write with the poller disabled; (c) `task_mode=ask` set, then a third write | (a) `trust-a.txt` created; (b) **no card at all** — instead a second `tool_call` frame with `"auto": true` (and `tool: "unknown"`, `kind: ""`), and `trust-b.txt` created → session trust is live; (c) `trust-c.txt` was **never created** and SEL logged `unknown | denied | {"reason": "task_mode:ask"}` → **session trust does not bypass task mode** |
 | `C18` | S1: `sleep 45; echo DONE-AAP2` as one tool call, then `POST …/{S1}/stop` 40 s in; afterwards a turn asking the CLI to quote any context line containing "cancel"/"interrupted" | the stop returned `{"ok": true}` and emitted a `stop_event` (`state: stopping`), and one second later the turn ended with the error **`ACP prompt timed out`** rather than a cancellation notice. The follow-up turn could not resolve the preamble question: codex **declines to quote its context** ("I can't provide hidden context or instructions") |
 | `C19` | after the sweep: `find ~/.gideon ~/.codex -type f -mmin -120`, `sqlite3 -readonly ~/.codex/memories_1.sqlite`, then removal + re-verification by session id | `~/.gideon`: **zero** files written (the escaped cwd `~/.gideon/workspace` was entered but nothing was created there — every probe used absolute paths inside the isolated home). `~/.codex`: 7 conversation transcripts (`sessions/2026/08/17/rollout-…-<sid>.jsonl`) and 7 `shell_snapshots/<sid>.*.sh` keyed to this sweep's ACP session ids, plus codex's own sqlite WAL/otel/tmp churn. `memories_1.sqlite` was touched but is **empty** (`jobs: 0`, `stage1_outputs: 0`) — no memory was written. All 14 attributable files were deleted and re-verified: a `find ~/.codex -name "*<sid>*"` over all 16 sweep session ids now returns **0** |
+| `C40` | the combined prompt-side probe in ONE turn on a fresh codex session (agent carrying `system_prompt`+`voice`, `color_theme=lumon`, `meta.knowledge`, `meta.files`, a literal `@aap2-prompt`) | all six items answered, and the profile token came back as the reply's **first line** with the voice tag appended — **obeyed, not merely quoted**. `@prompt` alone returned `ABSENT`. Contra `C18`, codex answers readily when the probe asks it to *answer from* context rather than to *quote hidden instructions* |
+| `C41` | `@prompt` expansion, the STRONG form: `POST /api/prompts` (body key is **`content`**, not `body`) then `POST …/render` | render returned the body, but the persisted user message stores the literal `@aap2-prompt` and none of the body text, and codex answered `ABSENT`. **Third provider, same conclusion** — provider-independent |
+| `C42` | the naive control — a brand-new session with **no** `agent`, `color_theme` or `meta`, same question wording | **it failed to discriminate, and that is the finding.** It still returned the profile token, the knowledge codeword, the attachment altitude and the voice tag; only the persona went negative. Turn 1's *persisted reply* contains all four markers verbatim, so recall replayed them — and the persona is appended downstream of persistence, which is why it is the one thing absent from the corpus. `default_agent = Gideon`, so this is not a default-agent effect (`G84`) |
+| `C43` | the clean discriminator: **control-first A/B with virgin markers**, same prompt text, adjacent turns | control `NO-PROFILE`/`NO-DELTA`/`NO-D14`/`NO-VOICE`; positive arm `PROFILE-MARKER-YW83`/`ZANZIBAR-5502`/`7700 feet`/`VOICE-TAG-RR9-TERSE`. The items existed in the store for **both** turns — only the request parameters differed, which isolates delivery to `meta.*` and `agent` |
+| `C44` | mutation falsification of the delivery line `chat_runner.py:991` (`meta.get("knowledge")` → a nonexistent key), restart, identical request | echo went to **`NO-ECHO`** (red); restored from a file copy and re-driven → **`ZANZIBAR-6613`** (green). Line 991 is the delivery line |
+| `C50` | the per-agent approval floor, with a control profile, measured at `approval_mode: "interactive"` / `yolo: false` | the floor round-tripped and seeded (`mode_change:agent_floor_auto`), and the behavioural proof is an **escalated** `curl`: SEL `auto_approved` / `metadata.reason: "trust"` — not `"yolo"`, not `approved/interactive`. The control profile never got a card **because codex never asked** |
+| `C51` | the hard deny-list, on a plain session and again on the floor session | `git push origin HEAD` → `(blocked: Blocked by security policy: *git*push*)`, SEL `denied` / `error: "hook_deny"`, blocked on **both** — deny precedes trust. Vacuity floor: `printf`, `cat`, `od`, `curl` all passed in the same drive. Enforcement came via the **title** path; `command_probe` returned `""` because the title already carries the command, so the codex-motivated mechanism was **not** the enforcing path (`G90`) |
+| `C52` | PreToolUse blocking, both `K39` outcomes, plus a toggle control | in one turn: `(ungated: codex executed it without asking the host)` then, on codex's retry, `(hook blocked: c50-pretooluse:hook denied)`. Toggling the hook off and re-running the identical command gave **no block line and `run_count` unchanged**, so the block was the hook. `enforcement` tracked `not_enforcing` → `enforcing` → `not_enforcing` |
+| `C53` | the other five hook kinds, counted from each hook's own `run_count` | PreToolUse **5**, PostToolUse **5**, Stop **4**, UserPromptSubmit **4**, SessionStart **1**, **Error 0**. `PostToolUse` matches claude-code and **diverges from kiro's zero**. The `Error` zero is the known host defect — the specific-error branch appends to the transcript and returns without firing — **not re-filed** |
+| `C60` | unattended mode on a `cron:`-keyed session (`is_unattended_session` → True) asked to write a file | `[DONE]` in 27 s and **the file was created**. SEL: the documented `mode_change:unattended_auto_approve … mode=bypassPermissions` grant, then 3× `tool_invocation risk: destructive`, each **`ungated`**. Zero `denied`, zero `unattended_fail_fast` |
+| `C61` | the attended control, same gateway and provider | the file was created there too, with **identical `ungated` rows** and **no** `unattended_auto_approve` line. The two arms differ only by that audit row, so **the grant is a no-op** |
+| `C62` | the sharper arm — `rm`, the tool `C5` said reached a card | unattended `rm` **deleted** the file, `ungated`, no permission frame, no fail-fast. **`C5`'s "the `rm` reached a card" does not reproduce** |
+| `C63` | falsification: mutated the ungated-reason string at `chat_runner.py:1422` to a unique marker, restarted, re-drove `rm` | marker **2**, original string **0**. Restored from a file copy and verified |
+| `C64` | the T9 `dry_run` census | `0` occurrences in `acp/` and `llm/acp_agent.py`; `provider_bridge.py:614` pops the flag **unconditionally** before any non-native builder (its own comment says "native-only"), and the only honoring site is the native runtime an ACP session never builds. The live `dry_run` routes are session-cleanup preview and trigger manual-fire — **neither is T9** |
+| `C65` | `detect_backend`/`wrap_argv` on this host (macOS 26.6.1), all five modes | `backend=none`, argv **byte-identical**, cleanup `None`; `strict == off`; the `env -u` scrub (inside `sandbox_exec_argv`) never runs. Boot line: `No OS-level sandbox available — app-level checks only` |
+| `C66` | falsification **and** a positive control: guard moved to `major >= 99`, then a four-arm seatbelt test | `_probe_sandbox_exec()` returns **True on this host** and `strict` yields a real `env -u SSH_AUTH_SOCK sandbox-exec -f <profile>` argv. Apple-signed `/bin/cat ~/.aws/config` → `Operation not permitted` (bare → 0); and **decisively** the third-party signed `node` heading codex's ACP chain → **`BLOCKED EPERM`** under seatbelt vs `READ_OK` bare. **The guard's premise is false here** (`G94`) |
+| `C67` | the live three-way process tree under one gateway | codex `node codex-acp → codex → versioned codex`; claude-code `node claude-agent-acp → claude → versioned claude`; kiro `kiro-cli acp → **aim sandbox --client kiro-cli acp**`. **kiro brings a vendor sandbox; codex brings none**, so with the host wrap dead the net confinement for a codex ACP process is **zero — strictly worse than kiro**. `/usr/bin/sandbox-exec` exists; 0 host processes use it |
+| `C68` | writer/reader census for `options["sandbox_mode"]` | 2 readers, **0 production writers** (`connection_pool.py:277` only passes through) — confirms the claude-code census |
+| `C69` | the per-tool disable surface | `POST /api/mcp/toggle-tool` → `server '<x>' not found` for `gideon-core`, `acp:codex`, `codex` and `codex-agent`; `GET /api/mcp/servers` 404. It addresses configured MCP **registry** servers only |
+| `C70` | the M5d re-drive: one **correction-free** turn, four separate tool calls including a deliberately-failing read | `memory_events` **8 → 13**, `source='procedural'` **2 → 6**. Four procedural rows plus a `self_model` row |
+| `C71` | key cardinality | 4 events → **4 distinct keys**. Codex **fragments** like kiro rather than folding like claude-code, because its ACP `title` carries the real command **including arguments** |
+| `C72` | whether any row is signed `failed` | **yes** — the failing read is `→ failed`. Codex's ACP sends `status=="failed"`, so `translate.py` stamps `ok: False` and `outcomes.py:110` writes `failed`. **Diverges from kiro's `G76`: the bit that feeds the loop breaker IS set on codex** |
+| `C73` | the self-model row | records four real tool labels and `"succeeded": false` — **not** the `"tools": []` `C14` cited |
+| `C74` | reinforcement when titles repeat | an identical turn drove `recall_count` 1 → 2 with four `update` events. Codex's **MCP** tool titles are stable and do **not** fragment — only its built-in shell/file tools do |
+| `C75` | the gate that nearly read as a gap | a **3**-call turn produced 6 tool events and **zero** procedural rows — correct, because `min_tool_calls = 4` makes `decision.worthwhile` false and returns before the drain. The gate is load-bearing, not a defect |
+| `C76` | the skill-ladder pass on codex | `skill-ladder review: no_action in 6618 ms (session=p1-persist) — action=none`, `passed: true`, two independent correction turns, 4 `caller: "skill_ladder"` rows, queue still `[]`. **Load-bearing: those rows read `provider: Bedrock`, `model: global.anthropic.claude-opus-5` — the deciding model is not codex**, and the pass reads only `user_message` + `assistant_text` + `loaded_skills`, so the difference from `K60`/`O66` is verdict variance in a Bedrock-judged pass, not a provider difference |
+| `C77` | memory consolidation, read from the store rather than the route | `last_consolidated` **0 → 6** (matching `O29`), `updated_at` stamped, a lock created, two LLM calls, and durable output: `events 46 → 54` with an episodic `source=consolidation:…` row, a `pref.yaml.indentation` row, two `self_persona` rows and a `daily_digest` row |
+| `C78` | incognito, three arms with **identical** canary text | persistent **33 → 39**, incognito **39 → 39 (0)**, same text on a fresh persistent session **39 → 46**. Arm 2 genuinely ran (codex surfaced its own incognito notice) and arm 3 proves the text was write-worthy |
+| `C79` | where the incognito conversation actually went | `~/.codex/sessions/…jsonl` held it in full **plus the injected `[Learned corrections]` block carrying arm 1's lesson** — so an incognito session also **exports previously-learned host memory** outside the isolated home. Also present in `logs_2.sqlite`, `state_5.sqlite` and an OTEL telemetry log. **No `~/.claude/projects/*` dir was ever created: `G52`'s claude-code-shaped leak does not reproduce for codex; `~/.codex/sessions/` is the equivalent** (`G97`) |
+| `C80` | the cancel probe, ACP vs a native control on the same session and route | ACP: `stop` 200 after **8.36 s**, `stop_event {state:"stopping", outcome:null}`, **no terminal event ever**, and the next reply said there had been no previous task. Native: 200 in **0.07 s**, `outcome:"soft"`, and the reply opened `[PREVIOUS TURN WAS CANCELLED BY THE USER -- context restore]`. Preamble occurrences in the whole transcript: **1**, all native |
+| `C81` | what happens to the cancelled turn's output | codex **persists the partial as a normal completed `assistant` message** while the agent's next-turn view has no record of it — native persists no assistant row at all. Worse than claude-code, which at least raised an error card (`G101`) |
+| `C82` | the empty-turn probe (attempt **2 of 2**) | `user` frame at t=0.05, an **identical second `user` frame at t=3.41** (the silent re-queue — no card, no bubble), then `Empty response — please retry.` at t=6.06. Both legs of `chat_runner.py:3813-3846` in one drive |
+| `C83` | why attempt 1 failed | on a **cold adapter spawn** the codex CLI prepends its own *"Warning: Skill descriptions were shortened to fit the 2% skills context budget"* banner as **assistant text**, so `assistant_text.strip()` was non-empty. That string is the CLI's, not ours (`G85`) |
+| `C84` | auto-nudge fire, re-arm and cap | `cycle_count` 0 → 1 → **2 of 2** (+24.7 s, the re-arm) → `active` false at the cap, `error_count` 0; transcript `['nudge','assistant','nudge','assistant']`. **The plan's "blocked by the missing model provider" note is stale.** Note the API requires a `message` field — `{session_name, idle_secs, max_cycles}` alone is rejected |
+| `C85` | pipe-death killed **pre-text** (0 chunks seen) | `acp/client.py:460` logged `ACP init failed (ACP process pipe broken: Connection lost), retrying with fresh process...`, first chunk at t=17.99 s, **complete** 250-line answer, 0 error rows. **Recovery is at the client init-retry layer, not `chat_runner.py:4013`'s predicate** — which is why claude-code's dropped-message shape does not reproduce, and which corrects the mechanism story in `AAP-1`'s `G56` |
+| `C86` | pipe-death killed **mid-stream** (40 chunks in) | 0.58 s later a truncated `assistant` message + `[DONE]`, stopping mid-row, **444 chars vs 8,675**, 119 frames vs 3,309, transcript `['user','assistant']`, zero error rows, `followups: null`, **no loss signal anywhere** — matches claude-code (`G100`) |
+| `C87` | the cancel root cause, by mutation | `wait_turn_done` returns **`reason=''`** — codex's adapter sends no terminal frame on cancel, so the outcome is neither `CANCELLED` nor `END_TURN` → `"timeout"`, and `session.py:1883`'s `if outcome == "acked"` never runs. Forcing `"acked"` moved the next turn from "there was no previous task" to "the user cancelled the previous task mid-response". **Honest caveat: even forced, codex did not quote the preamble verbatim**, so that half rests on the native control plus the code read |
+| `C88` | which provider class codex actually uses | mutating `AcpSessionProvider.cancel` **never executed** (0 log hits) — that is the concurrent path, gated on `supports_concurrent_sessions`, which codex lacks. The real path is `AcpAgentProvider.cancel` (`llm/acp_agent.py:665`). **The cell's citation of `llm/acp_session_provider.py` is wrong, and cost a full mutate/restart cycle** |
+| `C89` | the real-home footprint | 9 codex rollouts written into the operator's real `~/.codex/sessions/` during the drive — codex's analogue of `G52`, at a different path |
 
 ### 4a. Prompt-side context — codex column
 
 | Feature | audit said | mark | runtime verdict | evidence |
 |---|---|---|---|---|
 | Memory recall injection (turn-0 context) | WIRED | CONFIRMED | WIRED | `C4`, `C7`, `C12` — `Injected 10,403 / 15,569 / 11,169 chars of context (memory, lessons, history, episodic)` on each fresh session, and `C6` shows an injected framing line quoted back verbatim |
-| Knowledge context (@-mention + picker `meta.knowledge`) | WIRED | NOT-EXERCISED | — | no `meta` payload was sent; the specific injector was never driven |
-| Attachments/paste (extracted text prepended) | WIRED | NOT-EXERCISED | — | as above |
-| @prompt expansion (+ typed vars, snippets) | WIRED | NOT-EXERCISED | — | as above |
+| Knowledge context (@-mention + picker `meta.knowledge`) | WIRED | **CONFIRMED** | WIRED | `C43` — control-first A/B with virgin markers, same prompt text, adjacent turns: the control (no `agent`, no `meta`) answered `NO-DELTA` while the positive arm echoed the knowledge codeword `ZANZIBAR-5502`. The items existed in the store for **both** turns; only the request parameters differed, which is what isolates delivery to `meta.*`. `C44` — mutation falsification of the delivery line `chat_runner.py:991` (`meta.get("knowledge")` → a nonexistent key): the echo went to `NO-ECHO`, and restoring it returned `ZANZIBAR-6613`. **Inspecting the persisted message alone would have produced a false ABSENT — the knowledge block is not persisted, so only the model's echo is decisive** |
+| Attachments/paste (extracted text prepended) | WIRED | **CONFIRMED** | WIRED | `C43` — the same control-first A/B: control `NO-D14`, positive arm echoed the attachment's `7700 feet`. Delivered via `meta.files`, and like knowledge it is **not persisted**, so the echo is the only sound evidence |
+| @prompt expansion (+ typed vars, snippets) | WIRED | **CONFIRMED** | WIRED, but **composer-side only** — nothing on the ACP path expands it | `C41` — `POST /api/prompts` then `…/render` returns the body, but the persisted user message stores the literal `@aap2-prompt` with none of the body text, and codex answered `ABSENT`. **Third provider, same conclusion** — reproduces the claude-code and kiro results, so this is provider-independent |
 | Skills index in context + `skill_invoke`/`skill_search` execution | PARTIAL | CONFIRMED | PARTIAL | `C4` — no `skill_invoke`/`skill_search` in the CLI's tool list, while SEL carries `skill_surface` / `surfaced` rows and `gateway.log` logs `Surfaced skills: task-and-project`: the index text goes in, the tools do not |
 | Session-live skill drafts (`skill_remember`) | PARTIAL | CONFIRMED | PARTIAL | `C4` — no `skill_remember` in the tool list |
 | Task-mode framing (Agent/Ask/Plan/Build suffix) | WIRED | CONFIRMED — presence only | the framing block IS injected; whether its value tracks the live mode was NOT separable | `C6` — the CLI quoted `## Task mode: Agent`, but on a session whose earlier turns ran in agent mode, so replayed history is an equally good explanation. `C7` (the fresh-session control) died on the tool denial before answering, and `C18` shows codex otherwise refuses to quote its context |
-| Agent profile system prompt / voice layer | PARTIAL | NOT-EXERCISED | — | no agent profile with a distinctive `system_prompt` was bound |
+| Agent profile system prompt / voice layer | WIRED | **CONFIRMED** | WIRED — both halves delivered **and obeyed** | `C40` — codex emitted the profile token as its **first line** and appended the voice tag, i.e. followed the instructions rather than merely quoting them. `C43`'s control arm returned `NO-PROFILE`/`NO-VOICE` on the same prompt text |
 | Project binding (context preamble + cwd) | WIRED | **DIVERGED** | the cwd half does not work | `C4` — `workspace_dir` was set to the scratch dir **before** binding and `pwd` inside the spawned CLI answered `~/.gideon/workspace`; `gateway.log` shows `cwd=…/.dev-home/scratch pool_cwd=/Volumes/workplace/gideon-workspace`, so neither the session's dir nor the pool's reaches the process. The preamble half was not separately measured (`C18`) |
 | project_id → artifact stamping | ABSENT | CONFIRMED | ABSENT (stronger) | `C4` — `artifact_save` is not reachable at all, so there is nothing to stamp |
-| Persona injection (Lumon theme) | WIRED | NOT-EXERCISED | — | the persona toggle was never enabled |
-| Cancelled-turn preamble re-injection | WIRED | NOT-EXERCISED | — | attempted: `C18` cancelled a turn mid-tool, but codex declines to quote its context, so no verdict on the re-injection |
+| Persona injection (Lumon theme) | WIRED | **CONFIRMED** | WIRED | `C40`/`C42` — delivered and described by the model. Side finding worth carrying: `_maybe_inject_persona` fires only when `is_new`, and `is_new` means *new adapter process*, not new conversation — since codex spawns one per turn, the persona re-injects on **every** codex turn rather than once per session as its docstring intends |
+| Cancelled-turn preamble re-injection | WIRED | **DIVERGED** | ABSENT on codex, WIRED on native — and codex is worse than claude-code | `C80` — `stop` returned 200 after **8.36 s** with `stop_event {state:"stopping", outcome:null}` and **no terminal event ever**; the native control on the same session and route returned in **0.07 s** with `outcome:"soft"` and the next reply opened `[PREVIOUS TURN WAS CANCELLED BY THE USER -- context restore]`. Preamble occurrences across the whole transcript: **1**, all from the native leg. `C81` — worse than claude-code: codex **persists the cancelled turn's partial output as a normal completed `assistant` message** while the agent's next-turn view has no record of it at all ("there was no previous task in this conversation"). `C87` root cause: `wait_turn_done` returns **`reason=''`** because codex's adapter sends no terminal frame on cancel, so the outcome is `"timeout"` and `session.py:1883`'s `if outcome == "acked"` never runs. `C88` — the mutation only applied on `AcpAgentProvider.cancel` (`llm/acp_agent.py:665`); `AcpSessionProvider` is the concurrent path codex does not use (`G101`) |
 | Compressed thread-history bootstrap (new process) | WIRED | CONFIRMED | WIRED | every turn spawns a NEW adapter process (`Session created` + a new PID each turn) and continuity held across 10 turns on S1; `C6` shows prior-turn text replayed into a later turn |
 
 ### 4b. Approvals / permissions / safety — codex column
@@ -875,16 +914,16 @@ Ledger ids are `C…` so they never collide with `AAP-1`'s `O…`. `S1` = `chat-
 | Interactive approval cards | WIRED | CONFIRMED | WIRED | `C5` (two cards in one turn, both resolvable), `C11` (a card rejected, the tool did not run) |
 | trust_reads (effective-safe auto-approve) | PARTIAL | CONFIRMED | PARTIAL | `C4`/`C5`/`C10` — `pwd`, a file read and six `cat` calls auto-resolved with `risk: safe`; the classification is title-driven (the adapter titles an `exec_command` "Read file '…'"), but `C11` shows a compound command that hides a mutation behind a read is still classified `execute`/`destructive` |
 | Trust (session) / YOLO (global) auto-approve | WIRED | CONFIRMED (session trust) | WIRED for session trust; YOLO not exercised | `C17` — after one `{action:"trust"}` the next write ran with no card, surfacing a `tool_call` frame with `"auto": true` |
-| Per-agent approval floor ("Always allow") | WIRED | NOT-EXERCISED | — | no agent profile with `approval_mode: auto` was bound |
+| Per-agent approval floor ("Always allow") | WIRED | **CONFIRMED** | WIRED — but observable only on the subset codex escalates | `C50` — `AgentProfile.approval_mode: "auto"` round-tripped and seeding fired (SEL `mode_change:agent_floor_auto`). The behavioural proof is an escalated `curl`: SEL `auto_approved` with `metadata.reason: "trust"` — not `"yolo"` (yolo was off) and not `approved/interactive`. The control profile never got a card **because codex never asked**. Measured with `approval_mode: "interactive"`, `yolo: false` |
 | Task-mode enforcement BEFORE approval (trust can't bypass) | PARTIAL | CONFIRMED | WIRED — and the bypass question is now closed | `C17` — with session trust ACTIVE, an ask-mode write was still denied (`reason: task_mode:ask`) and the file never appeared. Also `C6`, `C7`. Across the whole sweep no ACP tool executed without passing the host gate |
 | Plan mode → native backend plan | WIRED | **DIVERGED** | ABSENT — plan is enforced only by the host gate | `C7` — plan set BEFORE a fresh session's first turn; the CLI still called `apply_patch` and never called `update_plan`. This is the shape the audit predicted for kiro, not for codex |
-| Hard deny-list (`security.is_denied`) pre-execution | ABSENT | NOT-EXERCISED | — | no deny-listed command was driven on codex (the `rm` in `C5` reached a card rather than a pre-block, but `rm -f <file>` is not known to be on the list) |
-| PreToolUse hooks blocking execution | PARTIAL | NOT-EXERCISED | — | no hook was installed during the sweep |
-| PostToolUse / Stop / SessionStart / UserPromptSubmit / Error hooks | WIRED | NOT-EXERCISED | — | as above |
+| Hard deny-list (`security.is_denied`) pre-execution | WIRED | **CONFIRMED** | WIRED, and it correctly precedes trust | `C51` — `git push origin HEAD` → transcript `(blocked: Blocked by security policy: *git*push*)`, SEL `outcome: denied, error: "hook_deny"`; re-run on the **floor** session, still blocked. Vacuity floor: `printf`, `cat`, `od` and `curl` all passed the deny-list in the same drive. Sub-finding: enforcement came through the **title** path, not `command_probe` — codex titles the tool with the bare command, so `command_probe` returns `""` and the `denylist_command` path never fires, i.e. **the mechanism built for codex's truncated titles (`G18`) was not the enforcing path** (`G90`) |
+| PreToolUse hooks blocking execution | PARTIAL | **CONFIRMED** | both `K39` outcomes reproduce on codex | `C52` — in the same turn: `(ungated: codex executed it without asking the host)` and then, on codex's retry, `(hook blocked: c50-pretooluse:hook denied)` with SEL `invoked` → `hook_blocked`. Control: toggling the hook off and re-running the identical command produced **no block line and `run_count` unchanged at 5**, so the block was the hook. `enforcement` flipped `not_enforcing` → `enforcing` on binding to the agent profile and back on disable |
+| PostToolUse / Stop / SessionStart / UserPromptSubmit / Error hooks | WIRED | **DIVERGED** | 5 of 6 fire; `Error` is the known host defect | `C53` — counted from each hook's own `run_count`: PreToolUse **5**, PostToolUse **5**, Stop **4**, UserPromptSubmit **4**, SessionStart **1**, **Error 0**. **`PostToolUse` firing matches claude-code and diverges from kiro's zero** — per-provider divergence in this family is real. The `Error` zero is **not** a codex finding: the sole fire site is inside the generic `except Exception`, while the specific-error branch immediately above appends the error to the transcript and returns **without** firing the hook — the same defect `AAP-1` root-caused and fixed |
 | SEL audit of every executed tool + effective risk | WIRED | CONFIRMED | WIRED, with two blind spots | `C5`/`C10`/`C17` — hash-chained `tool_invocation` rows with `tool_kind` and `metadata.risk` for every executed tool plus `approved`/`denied` decisions. Blind spot 1: every permission/decision row is named **`unknown`** (`C5`, `C17`). Blind spot 2: a CLI-side refusal is invisible — `C9`'s `request_user_input` failure produced no row at all |
-| Unattended mode (strip interactive tools + fail-fast approvals, T5) | ABSENT | NOT-EXERCISED | — | same blocker as AAP-1: this isolated home has no model provider, so a loop fails on provider resolution (`C16`) before any ACP worker turn |
-| Dry-run replay (T9 observe mode) | ABSENT | NOT-EXERCISED | — | no dashboard entry point to drive as-a-user |
-| OS sandbox wrap of the agent process | WIRED | NOT-EXERCISED | — | sandbox mode left at its default; no confinement boundary probed |
+| Unattended mode (strip interactive tools + fail-fast approvals, T5) | WIRED | **DIVERGED** | **audited but behaviourally inert on codex** | `C60` — a `cron:`-keyed session (`is_unattended_session` → `True`) asked for a write: `[DONE]` in 27 s and **the file was created**. SEL shows the documented `mode_change:unattended_auto_approve … mode=bypassPermissions` grant, then 3× `tool_invocation` `risk: destructive`, each **`ungated`**. Zero `denied`, zero `unattended_fail_fast`. `C61` — the **attended control** created the file too, with identical `ungated` rows: the two arms differ only by that one audit line, so **the grant is itself a no-op**. `C62` — an unattended `rm` deleted the file, ungated, no permission frame. `C63` falsification: mutating the ungated reason string produced the marker twice and the original zero times. Both halves of T5 are inert — the fail-fast lives *inside* the `EVENT_PERMISSION` handler and needs `event.request_id`, which codex never emits, and "strip interactive tools" is vacuous because codex has no host-injected tools. **kiro's `K41` auto-deny does not reproduce** (`G92`) |
+| Dry-run replay (T9 observe mode) | ABSENT | **CONFIRMED** | ABSENT — structurally, for every ACP provider | `C64` — `dry_run` in `acp/` + `llm/acp_agent.py` = **0** occurrences. `providers/provider_bridge.py:614` pops it unconditionally (`"Pop unconditionally (native-only)"`) **before** any non-native builder, and the only honoring site is `agents/native/runtime.py`, which an ACP session never builds. Decoy distinguished: the live `dry_run` routes are stale-session-cleanup preview and trigger manual-fire — **neither is T9**, so a route-grep audit of this row marks it WIRED incorrectly. Nothing codex-specific: the flag dies at the bridge |
+| OS sandbox wrap of the agent process | WIRED | **DIVERGED** | inert **host-level**; the missing vendor fallback is **codex-specific** | `C65` — `sandbox.py:351` returns `False` for macOS major >= 26 before probing (host 26.6.1), so all five modes give `backend=none` with byte-identical argv and `strict == off`; the `env -u` credential scrub never runs. `C66` — falsification **plus** a positive control that sharpens the claude-code arm: with the guard moved to `>= 99`, `_probe_sandbox_exec()` returns **True on this host** and `strict` yields a real `env -u SSH_AUTH_SOCK sandbox-exec -f <profile>` argv. Four-arm seatbelt test: Apple-signed `/bin/cat ~/.aws/config` → `Operation not permitted`; and **decisively**, the third-party signed `node` that heads codex's ACP chain → **`BLOCKED EPERM`** under seatbelt versus `READ_OK` bare. **So the guard's premise — that macOS >= 26 refuses `sandbox_apply()` for third-party callers — is false here** (`G94`). `C67` — codex-specific delta: kiro's chain runs through a **vendor** sandbox (`aim sandbox`) while codex brings none, so with the host wrap dead **net confinement for a codex ACP process is zero — strictly worse than kiro**. `C68` — `options["sandbox_mode"]` has 2 readers and **0 production writers**, confirming the claude-code census |
 | Isolated CLI config hardening (`GIDEON_CC_ISOLATE`) | WIRED (opt-in) | **DIVERGED** | there is NO equivalent for codex — not opt-in, absent | `GideonApps/codex-agent/provider.py` states the bundle deliberately applies no config isolation, and the measured consequences are `C12` (all 12 of the operator's MCP servers live in-session), `C4` (the operator's skills/plugins loaded — the CLI said so in its own warning), `C14` (31 descendant processes per session) and `C19` (7 conversation transcripts + 7 shell snapshots written into the operator's real `~/.codex`) |
 
 ### 4c. Tools — codex column
@@ -893,7 +932,7 @@ Ledger ids are `C…` so they never collide with `AAP-1`'s `O…`. `S1` = `chat-
 |---|---|---|---|---|
 | Filesystem/shell tools (cwd-confined + extra_tool_roots) | PARTIAL | **DIVERGED** — worse | PARTIAL, and NOT cwd-confined | `C4` — the CLI's `exec_command`/`apply_patch` run in `~/.gideon/workspace` regardless of the session's `workspace_dir`, and reached arbitrary absolute paths under `/private/tmp` freely (`C5`, `C17`) |
 | Full native tool registry (knowledge/tasks/loops/inbox/memory/artifacts/workflows/subagents/web/schedule) | UNKNOWN | CONFIRMED (§5 gap 1 predicted "likely absent") | **ABSENT** | `C4` — the CLI's 14 tools are all its own; `knowledge_search` NO, `task_create` NO, `notify` NO, no `gideon-core` MCP server |
-| Tool disable prefs (PT3/UT4 per-tool + per-provider) | ABSENT | NOT-EXERCISED | — | no tool-disable pref was set |
+| Tool disable prefs (PT3/UT4 per-tool + per-provider) | ABSENT | **CONFIRMED** | ABSENT — provider-independent | `C69` — `POST /api/mcp/toggle-tool` returns `server '<x>' not found` for `gideon-core`, `acp:codex`, `codex` and `codex-agent` alike, and `GET /api/mcp/servers` is 404. The only per-tool disable surface addresses configured MCP **registry** servers; an ACP CLI's tools are not registry entries. Same named reason as the claude-code and kiro arms |
 | Per-turn tool retrieval + progressive disclosure (`tool_search`/`tool_schema`) | ABSENT | CONFIRMED | ABSENT | `C4` — the CLI enumerated only its OWN tools, including its own `tool_search_tool`; no host-injected retrieval tools |
 | Failure breaker (warn@3/block@5/circuit@30) | ABSENT | CONFIRMED | ABSENT | `C10` — six consecutive failing tool calls in one turn, zero warn/block/circuit output |
 | Structural loop detection (no-progress/ping-pong) | ABSENT | CONFIRMED | ABSENT | `C10` — six identically-shaped failures, no steering injection or abort |
@@ -911,10 +950,10 @@ Ledger ids are `C…` so they never collide with `AAP-1`'s `O…`. `S1` = `chat-
 |---|---|---|---|---|
 | Preference-facet capture (every turn) | WIRED | CONFIRMED | WIRED | `C13` — `activity_event` kind `learned`: "Learned: never more" (the same poor extraction as claude, from the same sentence shape) |
 | Correction→lesson review | WIRED | CONFIRMED | WIRED | `C13`, `C14` — "Learned: User correction to honor: …" plus a `per_turn|lesson` row in `learning.db staging` and two rows in `semantic_memory` (one superseding the facet) |
-| Procedural-outcome capture (M5d tool-outcome drain) | ABSENT | CONFIRMED | ABSENT | `C14` — after turns of 6 and 3 tool calls, `memory_events` was empty; the only rows appeared after the **0-tool** correction turn, and the self-model row that did land records `"tools": []` |
-| Skill-ladder review (4-tier, propose-only) | WIRED | NOT-EXERCISED | — | needs a model provider, which this isolated home lacks |
-| Memory consolidation on session end | WIRED | NOT-EXERCISED | — | same reason |
-| Incognito/restricted no-write guarantees | WIRED | NOT-EXERCISED | — | no incognito/restricted session was driven |
+| Procedural-outcome capture (M5d tool-outcome drain) | ABSENT | **DIVERGED** (re-drive, corrects `C14`) | **PRESENT, and codex signs failures correctly** | `C70` — one **correction-free** 4-tool turn moved `memory_events` **8 → 13** and `source='procedural'` **2 → 6**. `C73` — the self-model row records `"tools": ["List files in 'tmp'", "Read file '/definitely-not-a-real-file'", "echo M5D-PROBE-CODEX", "pwd"]` and `"succeeded": false`, **not** the `"tools": []` `C14` cited. `C72` — **one row is signed `failed`**, so codex **diverges from kiro's `G76`**: its ACP sends `status=="failed"`, `translate.py` stamps `ok: False`, and the bit that feeds the loop breaker **is** set. `C71` — 4 events → **4 distinct keys**: codex *fragments* like kiro rather than folding like claude-code, because its titles carry the real command including arguments. `C75` — the `min_tool_calls = 4` gate is load-bearing: a 3-call turn produced 6 tool events and **zero** rows, correctly, which nearly read as a gap. **`C14` was CORRECT WHEN MEASURED (2026-08-17) and superseded by `838abd29` (2026-08-21) — stale, not wrong** |
+| Skill-ladder review (4-tier, propose-only) | WIRED | **CONFIRMED** | WIRED — the pass runs clean and files nothing | `C76` — verdict line captured live: `skill-ladder review: no_action in 6618 ms (session=p1-persist) — action=none`, `passed: true`, `failure_mode: none`, across two independent codex correction turns with 4 `caller: "skill_ladder"` ledger rows. **Load-bearing: the ladder's deciding model is not codex.** Those rows read `"provider": "Bedrock", "model": "global.anthropic.claude-opus-5"`, and the pass reads only `user_message` + `assistant_text` + `loaded_skills` — so the difference from `K60`/`O66`, which each filed a proposal, is **verdict variance in a Bedrock-judged pass, not a provider difference** |
+| Memory consolidation on session end | WIRED | **CONFIRMED** | WIRED | `C77` — read from the **store**, not the route: `last_consolidated` **0 → 6** (matching `O29` exactly), `updated_at` stamped, a `consolidate_…` lock created, two LLM calls (7338 ms + 2607 ms), and durable output — `events 46 → 54` including an episodic row `source=consolidation:…`, a `pref.yaml.indentation` row, two `self_persona` rows and a `daily_digest` row |
+| Incognito/restricted no-write guarantees | WIRED | **CONFIRMED** | WIRED host-side; the guarantee is **HOST-SCOPED ONLY** | `C78` — three arms with **identical** canary text so the zero cannot be a dedup artifact: persistent **33 → 39**, incognito **39 → 39 (0)**, then the same text on a fresh persistent session **39 → 46**. Arm 2's turn genuinely ran (codex surfaced its own "Incognito mode — lessons are not saved" notice) and arm 3 proves the text was write-worthy. `C79` — **the leak reproduces and is broader than claude-code's**: `~/.codex/sessions/…jsonl` held the full incognito conversation **plus the injected `[Learned corrections]` block carrying arm 1's lesson**, so an incognito session also **exports previously-learned host memory** out of the isolated home — and it reached `logs_2.sqlite`, `state_5.sqlite` and an OTEL telemetry log, surfaces the claude-code transcript-only leak did not touch (`G97`) |
 
 ### 4e. Session / conversation mechanics — codex column
 
@@ -923,15 +962,15 @@ Ledger ids are `C…` so they never collide with `AAP-1`'s `O…`. `S1` = `chat-
 | Variants / regenerate (‹n/N› switcher) | WIRED | CONFIRMED | WIRED | `C15` — the regenerated assistant message carries `variants` (2) and `variant_idx: 1` |
 | Edit & resend, branch continuation (fork) | WIRED | CONFIRMED with a caveat | WIRED, but the branch loses the runtime | `C15` — the fork carries all 14 messages with `acp_provider: ""` |
 | Queued messages (merge/pop + live bubbles) | WIRED | CONFIRMED | WIRED end-to-end | `C10` — `queue_push` (with `queue_id`) during the turn, then `queue_pop` → `chat_user_message` → the queued message ran as its own turn. (This closes one of AAP-1's residuals) |
-| Empty-turn auto-retry | WIRED | NOT-EXERCISED | — | no empty turn occurred across 17 turns; not forceable as-a-user |
-| Auto-nudge re-arm (loops) | WIRED | NOT-EXERCISED | — | loop-only; blocked by the missing model provider |
+| Empty-turn auto-retry | WIRED | **CONFIRMED** | WIRED | `C82` — both legs of `chat_runner.py:3813-3846` in one drive (attempt **2 of 2**): the `user` frame at t=0.05, an **identical second `user` frame at t=3.41** (the silent re-queue, no card, no bubble), then `Empty response — please retry.` at t=6.06. `C83` — attempt 1 failed for a codex-specific reason worth recording: on a **cold adapter spawn** the CLI prepends its own *"Warning: Skill descriptions were shortened…"* banner as **assistant text**, so `assistant_text.strip()` was non-empty. That string is the codex CLI's, not ours (`G85`) |
+| Auto-nudge re-arm (loops) | WIRED | **CONFIRMED** | WIRED | `C84` — `cycle_count` 0 → 1 → **2 of 2** (+24.7 s, the re-arm) → `active` false at the cap, `error_count` 0 throughout; transcript `['nudge','assistant','nudge','assistant']` with `[auto-nudge cycle 1]`/`[auto-nudge cycle 2]`. Same verdict as `O28`/`K43`, so **the plan's "blocked by the missing model provider" note is stale** |
 | Context-% accounting | PARTIAL (UNKNOWN which backends emit) | **DIVERGED** | the chip is EMITTED but always reports a fabricated `0%` | `C4`, `C5`, `C10` — a `context_usage` frame with `pct: 0.0` and `Turn complete: … context 0%` on **every** one of 17 turns, including turns carrying 15 KB of injected context |
 | Compaction | WIRED (CLI-owned `/compact`) | **DIVERGED** | ABSENT via the host | `C8` — `/compact` errors `-32601`; nothing compacts |
 | Slash commands (via `stream_command`) | WIRED (protocol `commands/execute`) | **DIVERGED** | ABSENT — no plain-prompt fallback | `C8` — byte-identical failure to claude's, from a different adapter and a different CLI: `_vendor.dev/commands/execute` is not a method either adapter implements, so this is a host-side defect, not one adapter's gap |
 | Session resume across gateway restarts (`session/load`) | PARTIAL (falls to `session/new` + compressed history) | **DIVERGED** — worse | ABSENT, and the runtime silently changes | `C1` (the adapter advertises `loadSession`), `C16` — after a restart **every** session's `acp_provider`/`mode`/`workspace_dir`/`reasoning_effort` is cleared while the pinned `model` survives, `resume_sid=None` (no `session/load`), and the next turn resolves on the native axis |
 | Warm pool / instant start | WIRED | CONFIRMED (pool present, cold on this run) | WIRED-but-cold | `gateway.log` — `pool_size=0 pool_qsize=0` on every `Pool decision`, and a fresh `Spawned codex-acp` per turn |
 | Concurrent sessions on one process (P9) | ABSENT (dialect False) | CONFIRMED | ABSENT | `C14` — three concurrently-bound codex sessions hold three DIFFERENT adapter PIDs |
-| Pipe-death auto-retry / re-queue | WIRED | NOT-EXERCISED | — | no adapter process was killed mid-turn |
+| Pipe-death auto-retry / re-queue | WIRED | **DIVERGED** | split — recovery works pre-text, silent truncation mid-stream | `C85` — killed **pre-text** (0 chunks seen): `acp/client.py:460` logged `ACP init failed (ACP process pipe broken…), retrying with fresh process...` and the turn delivered the **complete** 250-line answer with 0 error rows. **So claude-code's "the message was dropped" does NOT reproduce, and the reason matters: recovery happens at the client init-retry layer, not at `chat_runner.py:4013`'s predicate** — which corrects the mechanism story in `AAP-1`'s `G56`. `C86` — killed **mid-stream** (40 chunks in): 0.58 s later a truncated `assistant` message + `[DONE]`, text stopping mid-row, **444 chars vs 8,675** for the complete run, transcript `['user','assistant']` with zero error rows, `followups: null` and **no loss signal anywhere** — matching claude-code (`acp/session.py:425`) (`G100`) |
 | Model override per session (composer picker) | WIRED | **DIVERGED** | applied on the session's FIRST turn only | `C12` — `ACP model: openai.gpt-5.4` on turn 1; `C13` — `ACP model: auto (from agent config)` on turn 2 of the same session, while the activity line kept printing `openai.gpt-5.4`. The CLI cannot self-report its model, so honoring was never verifiable from its side |
 | Reasoning effort per turn | WIRED | **DIVERGED** | the axis does not exist on codex, yet the host accepts a value | `C2` — discovery returns `supported_efforts: []`; `C12` — the bind still accepted, stored and echoed `reasoning_effort: "low"`, and the CLI reports its effort is "not exposed" |
 | Agent/persona selection | ABSENT (no persona axis) | CONFIRMED | ABSENT — and no dead UI | `C2` — exactly one agent with `provider_agent: ""` |
@@ -940,17 +979,50 @@ Ledger ids are `C…` so they never collide with `AAP-1`'s `O…`. `S1` = `chat-
 
 ### Mark counts (codex, the same 63 audit cells)
 
-| mark | count |
-|---|---|
-| CONFIRMED (runtime matched the audit's prediction) | 33 |
-| DIVERGED (runtime contradicted it) | 10 |
-| NOT-EXERCISED (no runtime observation obtained; reasons below) | 20 |
+| mark | first sweep | after the 2026-08-23 close |
+|---|---|---|
+| CONFIRMED (runtime matched the audit's prediction) | 33 | **47** |
+| DIVERGED (runtime contradicted it) | 10 | **16** |
+| NOT-EXERCISED (no runtime observation obtained) | 20 | **0** |
+
+`47 + 16 + 0 = 63`. **The codex column is closed**, and with it all three Phase 1 columns. The 20
+residual cells resolved as **15 CONFIRMED / 5 DIVERGED**; a twenty-first row moved because the sweep
+**corrected an existing mark** (`Procedural-outcome capture`, `C14` → DIVERGED), so CONFIRMED gains 15
+and loses 1 while DIVERGED gains 5 and 1.
+
+**`C14` was correct when measured.** The drain landed in `838abd29` (2026-08-21); `C14` was authored
+2026-08-17. **Stale, not wrong** — the same dating that `AAP-3` applied to `K17`, and the reason
+`AAP-1`'s original "wrong, not merely stale" wording had to be corrected. A mark citing a runtime
+observation carries an implicit as-of date.
 
 All four of the audit's literal `UNKNOWN` cells are now definite for codex (full native registry → ABSENT,
 AskUserQuestion → ABSENT, subagents → ABSENT, context-% → emitted-but-fabricated), as are the two the
 plan called out for codex specifically (compaction → ABSENT, slash commands → ABSENT-and-erroring).
 
-### Residual not-exercised cells (codex, and why)
+### Residual not-exercised cells (codex) — CLOSED 2026-08-23 (20 → 0)
+
+All twenty are driven. What the closure cost, and the three recipe corrections it forced, are the part
+worth keeping — every one of them is a claude-code recipe that **did not port**:
+
+* **`cat /nonexistent-…` does not gate on codex.** It rewrites the call into its own `Read file` tool
+  and self-executes. The reliable seam is different: **codex escalates on RETRY** — the same `curl` was
+  ungated on its first attempt and escalated after its sandboxed attempt failed. That retry-escalation
+  is what makes cells 686/687 measurable at all, and it means **any single-shot probe of a codex gate
+  can read either way** (`G91`).
+* **The prompt-side cells cannot be judged from the persisted transcript.** Knowledge, attachments and
+  persona are **not persisted** — reading the stored message alone yields a false ABSENT for all three.
+  Only the model's echo is decisive, and it needs a **control-first A/B with virgin markers**, because
+  a naive control still echoed a prior session's markers via recall (`G84`).
+* **The empty-turn probe needs a warm adapter.** On a cold spawn the codex CLI prepends its own
+  skills-budget warning as **assistant text**, so `assistant_text.strip()` is non-empty and the retry
+  never triggers (`G85`).
+
+**Two stale premises in the old list, both now disproved:** the auto-nudge cell was called blocked by a
+missing model provider (it drove fine, `C84`), and cell 690's own row said unattended mode was blocked
+because a loop fails on provider resolution — a `cron:`-keyed **chat** session bound to `acp:codex`
+resolves on the ACP axis and drove fine, so **cell 690 was drivable all along**.
+
+**Historical provenance, kept:**
 
 1. **Needs a model provider in the isolated home** (4): unattended mode, auto-nudge re-arm,
    skill-ladder review, memory consolidation. A loop/cron run fails on
@@ -1101,6 +1173,116 @@ tracking **does** reap the MCP fleet — after the gateway was killed, zero adap
 young MCP processes remained, and the ~120 `builder-mcp` processes on this machine are the
 operator's own pre-existing baseline, not a leak from the sweep (`C14`, `C19`); and codex wrote
 **nothing** into the real `~/.gideon` despite running with its cwd inside it (`C19`).
+
+### Gap inventory addendum — the 2026-08-23 codex close (`G84`-`G103`)
+
+Twenty findings from driving the last 20 cells and re-driving `C14`. Numbering continues from `AAP-3`'s
+`G83`. **Two of them are cross-column**, i.e. they falsify a claim this plan makes about a *different*
+provider, which is why they matter beyond this column.
+
+**P1 / HIGH — capability-dead or security**
+
+- **`G88` The registry declares codex universally gated; it gates almost nothing — and a green test
+  asserts the false claim.** `ProviderCoverage["codex"]` carries
+  `measurement="AAP-2 sweep — residual set measured EMPTY", entries=()`
+  (`permission_authority.py:251-255`), and `tests/test_acp_permission_authority.py:116-120`
+  (`test_measured_empty_is_a_positive_statement`) asserts `cov.gated_universally` for codex. Falsified
+  **without needing a mutation**: the runtime branch is
+  `outcome="ungated_declared" if entry is not None else "ungated"`, and every codex row logged plain
+  **`ungated`** — proving `not_gateable_entry("codex", …)` returned `None` for a read, an in-workspace
+  write, an **out-of-workspace** write, and a network call. **This is the same defect `AAP-3` filed as
+  `G72` for claude-code, so the "measured EMPTY" claim is now falsified for two of three providers, and
+  the same test re-asserts it for both.**
+  **Deliberately not fixed (E4).** The data model forces a bad trade: `gated_universally` is derived
+  from `entries`, so the only way to stop claiming universal gating is to add `NotGateable` entries —
+  which **suppresses** the loud `(ungated: …)` transcript line and downgrades SEL to
+  `ungated_declared`. For an out-of-workspace write executing with no host decision point, silently
+  relabelling that as a documented limitation is a legibility **downgrade**. The registry needs a third
+  state ("measured, residual non-empty, still loud") before this is expressible at all.
+- **`G89` A control reports enforcement it never achieved.** `c50-pretooluse` showed
+  `last_status: "blocked"` and `enforcement: "enforcing"` after firing on the **informational** path
+  (`fire_tool_hooks`, `chat_runner.py:2717`, whose own NOTE says *"hooks are informational only… Hook
+  results cannot block execution"*) — while the out-of-workspace write **landed**. Worse than inert: it
+  reports success. **Cross-provider** — claude-code's `K39` arm (a) is the same shape (fired 3×, write
+  landed).
+- **`G92` The unattended fail-fast is unreachable on codex, so the audited `bypassPermissions` grant is
+  bounded by nothing.** Every destructive tool ran `ungated`; an unattended run executed a write and a
+  delete with the host recording `ungated` (`C60`-`C62`). Both halves of T5 are inert: the fail-fast
+  lives inside the `EVENT_PERMISSION` handler and needs `event.request_id`, which codex never emits,
+  and "strip interactive tools" is vacuous because codex has no host-injected tools.
+- **`G93` `cron:` unattendedness is LOST across a gateway restart, silently.** The transcript is stored
+  as `dashboard_cron_<name>.jsonl` (`:`→`_`) and reload returns the key `cron_<name>`. Verified
+  directly: `is_unattended_session('cron:x')` is `True`, `is_unattended_session('cron_x')` is `False`,
+  and the prefix tuple is `('cron:', 'subagent:', 'channel:', 'inbox:', 'side:')` — **every one is
+  colon-suffixed, so the underscore form matches none of them**. A rehydrated unattended session
+  therefore becomes **ATTENDED**: it loses HEADLESS and its approvals park waiting for a human who is
+  not there. Affects every by-construction unattended class, and leaves a duplicate session in the
+  list. **This is the severity behind `AAP-3`'s `G83`, which was filed P3 on the duplicate listing
+  alone and has been re-classified there.**
+- **`G97` The incognito no-write promise is host-scoped only, and broader than claude-code's.** The
+  spawned codex CLI persisted the incognito turn **and the host lessons injected into its prompt** to
+  `~/.codex/sessions/`, `logs_2.sqlite`, `state_5.sqlite` and an OTEL telemetry log — so an incognito
+  session also **exports previously-learned host memory** outside `GIDEON_HOME`. Telemetry
+  surfaces that claude-code's transcript-only leak (`G52`) did not touch.
+- **`G100` A mid-stream adapter death yields a silently truncated answer marked complete** — no error,
+  no marker, no followup, `followups: null`, indistinguishable from a real answer (`C86`). Matches
+  claude-code's `acp/session.py:425` shape.
+- **`G101` A cancelled ACP turn is unrecoverable on codex**: no preamble, *and* the turn is absent from
+  the agent's next-turn view, while its partial output persists looking completed (`C80`/`C81`).
+
+**P2 / MEDIUM — fidelity**
+
+- **`G84` Cross-session recall replays another session's reply, and the new session OBEYS its
+  instructions.** A session that bound **no** agent profile emitted a different session's profile token
+  as its first line and appended that profile's voice tag. Content bleed is arguably the documented
+  recall feature; **instruction** bleed that gets obeyed is not. Retrieval-driven: it occurred with
+  identical question wording and vanished with different wording plus virgin markers (`C42`/`C43`).
+- **`G90` `command_probe` is dead on codex for the deny path.** It exists because codex titles are
+  truncated or `"unknown"` (`G18`); when the title carries the command verbatim it returns `""` and
+  self-disables, so the codex-motivated mechanism is unexercised **on codex** (`C51`).
+- **`G94` The `major >= 26` sandbox disable is over-broad on 26.6.1**, proven by positive control: the
+  third-party signed `node` heading codex's ACP chain is **`BLOCKED EPERM`** under seatbelt but
+  `READ_OK` bare (`C66`). The `env -u` credential scrub dies with it, because it lives inside
+  `sandbox_exec_argv`. **Sharpens `AAP-1`'s `G60`, which established the inertness but not that the
+  guard's stated premise is false for the exact binary in the chain.**
+- **`G96` Procedural priors are a per-call log on codex, so recurrence can never promote one.**
+  `after_turn_review.py:145` passes `task_shape=tool`, documented as "kept coarse for v1 — the value is
+  the tool×outcome prior, refined by recurrence/heat". With argument-bearing ACP titles it *is* a
+  per-call log. `outcomes.py:88-91` guards against fragmentation from tool_call_**UPDATE** titles, but
+  codex fragments at the **tool_call** title — **the guard targets the wrong event**. Also yields
+  stuttering labels (`pwd on 'pwd'`).
+- **`G98` `POST /api/memory/consolidate` returns `{"ok": true}` for a key it cannot use.** With an
+  unknown or unprefixed session key it creates a lock file, makes no LLM call and advances nothing — a
+  false-success envelope over a swallowed write. It needs the `dashboard_`-prefixed key; nothing
+  validates or reports that.
+- **`G102`** `927` × `ACP FrameRouter: session queue full — dropped oldest frame` on high-volume turns.
+  Final text stayed complete, so this is live-stream loss rather than answer loss, but it is unbounded
+  and silent.
+
+**P3 / LOW — cosmetic, legibility, informational**
+
+- **`G85` The codex CLI's operational warning is persisted as assistant message text.** Replies begin
+  *"Warning: Skill descriptions were shortened to fit the 2% skills context budget…"*, stored as the
+  leading content of the assistant message — so recall will later replay it as something the assistant
+  said. It also broke the empty-turn probe's first attempt (`C83`).
+- **`G86` `POST /api/prompts` silently drops unknown keys and reports success.** `{"body": …}` returned
+  `{"ok": true}` with `prompt.content: ""`; the field is `content`, read from a fixed allowlist
+  (`handlers/prompts.py:182`). Not fixed — strict-vs-alias is an owner call.
+- **`G91` Codex's escalation is retry-dependent and therefore nondeterministic.** The identical command
+  was ungated and then escalated **within one turn**. **Any single-shot probe of a codex gate can read
+  either way** — this is the measurement hazard that would have made a one-turn drive of cells 686/687
+  report the opposite verdict.
+- **`G95`** `gideon-tools/app.json` declares a `sandbox_mode` enum `auto|strict|permissive` while
+  `wrap_argv` accepts `auto|standard|cc|strict|off`; `permissive` falls through `else` → `standard`.
+- **`G99` A lingering `consolidate_*.lock` proves only that consolidation was *attempted*.**
+  `concurrency.single_flight` releases the `flock` but never deletes the file — which misled the exact
+  check `O29` used as evidence: two locks were held for minutes with `last_consolidated` stuck at 0
+  while the tasks had already exited.
+- **`G103`** the empty-turn retry leaves two single-space `chunk` rows that render as assistant-styled
+  `streaming` bubbles, contradicting the code's own "no card, no bubble". **In-memory only** — the
+  persisted transcript has no chunk rows, so it self-heals on reload.
+
+**Also seen on every turn, outside the cells:** `api_access | tool_policy.no_session_key | fail_open`.
 
 ### Incidental bugs fixed in-session (codex)
 
@@ -1796,6 +1978,162 @@ unblocked the four "needs a model provider" cells (`K29`).
 | `K92` | falsification of that gate, line-attributable | mutating the live `chat_runner.py:1981` (`"auto"` → `"auto__FALSIFICATION"`) and restarting gave `trust = False` with **both** `mode_change:agent_floor_auto` and `set_approval_policy auto` gone; restored from a file copy and re-driven → `trust = True`. Clean red/green on the exact observable `K36` cites |
 | `K93` | `K41` re-driven as-a-user on `cron:aap3d-unatt` with agent `aap3d-ctl` (deliberately **no** floor, since a floor would auto-approve before the fail-fast is reached) | reproduced almost to the second: `Running: @gideon-core/get_context (auto-denied: unattended run, no one to approve)`, `[DONE]` in **5.0 s** (`K41` said 5.2 s), **0** `permission` frames, the file never created. SEL `denied {"reason": "unattended_fail_fast"}` plus `mode_change:unattended_auto_approve … mode=bypassPermissions` — not a contradiction but the documented pairing at `acp/client.py:382`, which independently proves the host classified the session as unattended |
 | `K94` | what `GET /api/chat/sessions/{s}` actually exposes while a turn is parked | **`session.pending_approval` IS `True`** and the `approval_id` lives on the **`permission` message's** meta — so it is **not** SSE-only. What is null is `pending_approval_info`, which is exactly `G51` and nothing broader. This corrects `K87`/`G78` |
+
+## Phase 2 results — §2.1 MCP reachability (atom `AAP-4`) — **PARTIAL**
+
+Four fenced drives, 2026-08-23: one acceptance drive per provider plus a census resolving the
+delete-or-wire decision this atom owns. Observations `O76`-`O95`, `C90`-`C99`, `K100`-`K108`; findings
+`G104`-`G119`. **The atom stays `todo`** — two of its three `done_when` clauses are unsatisfiable as
+written, for reasons that are owner scope decisions rather than measurement failures.
+
+**§2.1's own text was stale before this work began.** It says both `session/new` call sites hardcode
+`"mcpServers": []` and that the pool parameter has no live caller. Neither has been true since
+`b62bd62e` ("feat(acp): AAP-4 make gideon-core reachable from ACP sessions"), whose content is on
+`main` even though its PR (#1626) reads **closed** — the merge train took the commit. Prong A was
+already implemented; this work is the behavioural verification the plan asked Phase 1 to supply.
+
+### Clause 1 — "'list your tools' shows gideon-core tools": **PASS on all three**
+
+| provider | result | evidence |
+|---|---|---|
+| claude-code | **PASS** — exact **set equality**, not a count match | `O76` enumerated 586 tools of which **68** carry `mcp__gideon-core__`; against `_aggregated_list_tools()` on the same home: `SET EQUAL: True`, nothing missing, nothing extra. `O77` falsified by mutating `core_mcp_servers` to `return []` → the model answered `COUNT=0`. The operator's real `~/.claude.json` has **no** `gideon-core` entry at any scope, so seeding cannot explain it |
+| kiro-cli | **PASS** — **68** | `K100` listed 68 `gideon-core.*`, cross-checked against an independent census of `"name"` literals in `src/gideon/mcp_*.py`. **This corrects `K51`'s "67"**: the authoritative count is 68 |
+| codex | **PASS**, though invisible in the flat list | `C90` — `gideon mcp-core` ran as pid `71445 ← 71236 ← 71233 (codex app-server) ← 71224 (codex-acp)` while `~/.codex/config.toml` holds **zero** `gideon` entries, so **the protocol frame was the only channel**. `C91` codex's verbatim list is 14 tools with 0 core, because codex 0.146.1 uses **deferred tool loading** (`tool_search`); asked to search it returned `mcp__gideon_core.notify`/`.notify_attachment`/`.subagent_run` (`C92`). **`C4`'s "codex has no host-injected tools at all" was reading the gate, not the surface** |
+
+**All three CLIs honour protocol-passed `mcpServers`** — settling what `O18` left open for claude-code and
+what was never established for codex. **Prong B is unnecessary for every provider.**
+
+### Clause 2 — the four named tools + inject-back: **FAIL**
+
+| item | result |
+|---|---|
+| `notify` | **PASS on all three**, verified by store effect rather than the returned string (`O78`, `K102`, `C93`) |
+| `subagent_run` | **claude-code PASS** — `O79` spawned `1f458f22` and a separate assistant message carrying `AAP4A-SUBAGENT-OK` arrived **in the originating session**. **kiro and codex FAIL** — receipt returned, then `_No result._` after 3 min / 695 s (`K105`, `C97`). **Provider-independent per `C97`'s control**: an invocation straight over MCP wedged identically while a native session answered the same prompt in 8.5 s. The divergence with claude-code is unresolved (`G110`) |
+| `knowledge_search`, `task_create` | **DO NOT EXIST on the MCP surface** — OWNER DECISION 1 |
+| session inject-back | **works only by fallback.** The pid tree walk resolves correctly (`O81`; `K106` ran the real `_resolve_session_key` walk over 5-6-level chains, and unclaimed pool spares fail **closed** to `''` rather than cross-session). The **env half is inert** — `G109` |
+
+### Clause 3 — "seeding is idempotent, marker-scoped and reversible on disable (SC #2)": **moot** — OWNER DECISION 2
+
+### 🔴 OWNER DECISION 1 — the criterion names two tools the platform deliberately excludes
+
+`knowledge_search` and `task_create` are **absent from the `gideon-core` MCP surface for every
+provider** — three independent drives (`O80`, `K101`, `C94`) plus an in-process census at integration:
+mcp-core advertises **68** tools with **zero** `knowledge_*` and **zero** `task_*`.
+
+**This is not an oversight; it is a designed, test-enforced boundary.** `mcp_core.py:1724`'s
+`_AGGREGATED_CATEGORY_MODULES` lists six modules (artifacts, prompts, memory, subagents, workflows,
+automation) with **no knowledge, tasks or inbox** (`C95`), and `tests/test_native_builtin_split.py`
+asserts the exclusion in as many words — *"platform must NOT carry the installable-app categories"* —
+via an explicit `assert not ({"knowledge_search", "task_create", "project_run_create",
+"post_to_inbox"} & plat)`. `K101a` adds that **`K53` was wrong** to retire the earlier ABSENT verdict as
+"a naming artifact": the `knowledge`/`todo_list` tools it scored are **kiro's own natives**, writing
+kiro's stores, not ours.
+
+So `AAP-4` cannot be satisfied as written without either breaking that split or adding the categories to
+the MCP aggregation — **28 native-registry tools are absent from the MCP surface in total** (`G112`).
+Both are architectural decisions outside a §2.1 reachability fix. **Either the criterion should name
+mcp-core tools that exist (`get_context`, `memory_remember`, `notify`, `subagent_run`), or a separate
+atom should own extending the surface.** Recorded, not decided here.
+
+### 🔴 OWNER DECISION 2 — delete or wire the prong-B seeder
+
+The census (`O86`-`O90`) found **three independent layers of inertness** plus a decisive constraint:
+
+1. **Nobody supplies `agent_config_dir`** (`_register.py:49`, default `None`; the seed block is
+   `if agent_config_dir:` at `:155`). The intended supplier is the **agent app bundle**, and
+   `grep -rn "agent_config_dir"` over the **entire apps repo** returns **0 hits**;
+   `src/gideon/acp_bundles/` contains no bundles at all. **The miss is cross-repo by
+   construction, so no core lint or core test could have caught it** — and all 28 existing tests supply
+   the argument themselves, which is exactly how it shipped described as landed: mechanism, not use.
+2. **The symlink source does not exist** on the real home, so even a wired bundle returns
+   `skipped_no_source` — proved at runtime (`O88`).
+3. **The only bundle-side suite is permanently dark**: `tests/test_acp_bundles.py` collects **zero
+   items**, because its skip needs `<workspace>/apps` and the clone is `GideonApps` (`G117`).
+
+**Decisive (`O90`/`G118`): prong B is kiro-shaped by construction, not by configuration.** It writes a
+symlink hardcoded to the filename `gideon.json` whose payload is a **kiro agent document**. codex
+reads TOML `[mcp_servers.*]` tables; claude-code's MCP artifact is named `gideon.mcp.json`
+(`dashboard/handlers/mcp.py`). **No provider verdict could have made this wirable** — and since all
+three honour protocol `mcpServers`, the premise is dead everywhere.
+
+**Recommendation: delete** — `config_seed.py`, the two `_register.py` call sites, the parameter, the
+`acp_seeds.json` receipt (nothing else reads it), `seed_status` (zero production callers) and 12 test
+items. **Not done here, because deleting it makes this atom's own clause 3 unsatisfiable**, and
+rewriting an atom's success criteria is the owner's call rather than an executor's. The plan's own later
+text (:1660) further contests even the kiro-only wiring, arguing the destination should be
+`<cwd>/.kiro/agents`.
+
+**One deletion hazard is already characterised.** `G116` (P1): `unregister_acp_cli_entry`'s `config_seed`
+import is **ungated and function-local**, so on a tree with the module removed `mypy` reports *"Success:
+no issues found"*, importing `_register` succeeds **2/2**, and the enable path stays green — **only
+calling the disable path raises `ModuleNotFoundError`**. Three cheaper checks all pass on a broken tree.
+The two rails added in this PR close exactly that.
+
+### Gap addendum — `G104`-`G119`
+
+**P1 / HIGH**
+
+- **`G104` The host omits `clientCapabilities` and serves no `terminal/*`, so a claude-code turn that
+  reaches for Terminal deadlocks** until the 90 s watchdog fires (`ACP prompt timed out`).
+  `client.py:485-493` sends `initialize` with only `protocolVersion` + `clientInfo` — no
+  `clientCapabilities` anywhere in `src/` — and the session dispatcher handles only
+  `session/request_permission`, `session/update` and four metadata notifications.
+- **`G108`/`G112` `knowledge_search`, `task_create` and 26 further native tools are unreachable over
+  `gideon-core` for every ACP provider** — OWNER DECISION 1.
+- **`G109` `GIDEON_SESSION_KEY` is never declared for any pooled ACP provider**, so the env half of
+  inject-back is **inert**. Falsified independently twice: `K107` added a probe var that **arrived**
+  while `session_key` read `EMPTY_AT_SESSION_NEW`, and `C96` measured `sentinel-None` on all three
+  pooled children. Both prove the same pair — the CLIs forward our env array faithfully, and
+  `session_key` is `None` at `session/new`. Since MCP children spawn once at `session/new`, the later
+  `rekey()` can never inject it: `mcp_servers.py` solved the *stale-key* case, not the
+  *no-key-at-warm-time* case.
+- **`G113` HTTP-bridged core tools outside the auth allowlist hard-fail `403 {"error":"Token required"}`**
+  (`server.py:1874-1897`) — including **`get_context`, the tool kiro calls first** — and `memory_recall`;
+  `memory_remember` 400s on the allowlisted path (`K104`).
+- **`G114`/`G110` `subagent_run` dispatches but never injects back** on kiro and codex, with a
+  provider-independent control showing it is not environmental — yet it **did** inject back on
+  claude-code (`O79`), so the divergence is unresolved.
+
+**P2 / MEDIUM**
+
+- **`G106` `GIDEON_HOME` isolation does not extend to the spawned CLI's tool surface.** **493 of
+  claude-code's 586 tools** come from the operator's real `~/.claude.json` global `mcpServers` — Slack,
+  calendar, AWS and more — so an isolated dev home still hands an ACP session live write access to
+  external systems. Same mechanism as P0 `G52`, on the tool surface rather than the transcript path.
+- **`G111`/`G115` Stale `session_pid_<pid>.txt` files are never removed on adapter death.** A respawn
+  *does* write a fresh correct entry — **correcting an earlier sibling claim that the map is not
+  refreshed** — but the dead file remains: unbounded growth, and on **pid reuse** any MCP server whose
+  chain crosses that pid resolves to the **wrong session**. The one path to a cross-session identity bind.
+- **`G117`** the only bundle-side suite collects zero items. **`G118`** prong B is kiro-only by
+  construction. **`G105`** is subsumed by OWNER DECISION 1.
+- **`G48` reproduces** (`K103a`): an artifact saved through the protocol MCP surface persists
+  `project_id: ""` and a created-event `session_id: ""` on a session bound to a project. Both fields
+  exist in the schema, so this is genuine loss — a direct hit on the "correct session inject-back"
+  clause: the tool runs, the identity does not arrive.
+
+**P3 / LOW** — **`G107`** the 586-tool surface forces a `ToolSearch` round-trip before each mcp-core
+call; fixing `G106` shrinks the surface and removes it. **`G119`** `seed_status` has zero production
+callers, a declared-but-unread reporter.
+
+### Recipe corrections for whoever drives §2.2 next
+
+- **The approve field is `action`, and it defaults to `"rejected"`** (`chat_handlers.py:2580`,
+  `action = body.get("action", "rejected")`). A body naming any other field returns `{"ok": true}` and
+  **silently denies** — naming the *verb* is not enough, the field is where the silent deny lives. One
+  rejected card also auto-rejects the remaining batch (`stop_reason 'refusal'`).
+- **`PATCH /api/config` is 404; the route is `PATCH /api/config/gideon`** with body
+  `{"path": "...", "value": ...}`.
+- **`GET /api/chat/sessions` returns a bare list**; the single-session GET returns a dict.
+- **`/api/approvals` never shows an ACP permission request.** They surface in the stream and, after
+  `_APPROVAL_MIRROR_GRACE_SECS = 90.0`, as an inbox `agent_request` with `refs.approval` — so an
+  inbox-polling approver cannot see one sooner than 90 s. One drive measured a uniform ~92 s per call and
+  **correctly declined to report it as product latency**, since it was its own harness.
+- **`session_pid_<pid>.txt` is not an MCP-reachability signal.** Under the `return []` mutation the file
+  was still written: `chat_runner.py:2031` writes it every turn keyed by ACP pid, with no reference to
+  `mcpServers`. It counts live ACP sessions.
+- **A backgrounded `curl` SSE stream dies with its subshell**, leaving a 0-byte transcript that reads
+  exactly like "no assistant output / no tools".
+
 
 ## Gap closure index (status as of 2026-08-22, verified against `origin/main` = `05bba66e`)
 
@@ -3628,3 +3966,117 @@ cited above.
   with a diff, so some configuration does expose writes — why this one did not was not established).
   `G78` is **partly retracted** by `K94`. And this column's closure says nothing about `AAP-2`, whose 20
   residual cells remain.
+## Execution log — `AAP-2` (Phase 1 validation, codex end-to-end sweep)
+
+- [2026-08-23][AAP-2] **DONE — and with it all three Phase 1 columns.** The codex column's **20
+  NOT-EXERCISED cells are driven to zero** (15 CONFIRMED / 5 DIVERGED), giving
+  **47 CONFIRMED / 16 DIVERGED / 0 NOT-EXERCISED = 63**. Counts move by 21 rows, not 20, because the
+  sweep also corrected `C14`. Five fenced drives, each on its own isolated home, scratch workspace and
+  port; observations `C40`-`C89`, findings `G84`-`G103`.
+- [2026-08-23][AAP-2] 🔴 **`C14` corrected, and dated: `Procedural-outcome capture (M5d)` → DIVERGED,
+  PRESENT.** One correction-free 4-tool turn moved `memory_events` **8 → 13** with four
+  `source='procedural'` rows and a self-model row carrying four real tool labels — not the `"tools": []`
+  `C14` cited. **`C14` was correct when measured** (2026-08-17); `838abd29` added the drain on
+  2026-08-21. **Stale, not wrong**, the same dating `AAP-3` applied to `K17`. **All three columns'
+  ABSENT marks for this cell are now corrected, and all three were right at the time.**
+- [2026-08-23][AAP-2] 🔴 **The three providers fail this cell in three different ways, which is why a
+  per-provider patch is the wrong fix.** claude-code **folds** (5 events → 3 keys, because the label
+  uses the *generic* ACP title, so every `Terminal` call collapses regardless of command). kiro and
+  codex **fragment** (their titles carry the real command, so keys are unbounded). And on the failure
+  bit they split the other way: **kiro signs nothing `failed`** even for exit 1 (`G76`, which makes
+  `G6`'s loop-breaker fix inert there) while **codex signs it correctly** (`C72`). `G67`/`G77`/`G96`
+  want **one label contract**, not three per-provider patches.
+- [2026-08-23][AAP-2] 🔴 **`G88`: the registry's "measured EMPTY" claim is now falsified for TWO of
+  three providers, and one green test asserts it for both.** `permission_authority.py` declares
+  `entries=()` with `gated_universally` for codex as it does for claude-code (`AAP-3`'s `G72`), while
+  runtime SEL logs plain `ungated` — including an **out-of-workspace write that executed with no host
+  decision point**. Deliberately not fixed (E4): the data model forces a bad trade, because the only way
+  to stop claiming universal gating is to add `NotGateable` entries, which **suppresses** the loud
+  transcript line and downgrades SEL. **The registry needs a third state before this is expressible.**
+- [2026-08-23][AAP-2] 🔴 **`G93`: `cron:` unattendedness is lost across a restart, silently.** Verified
+  directly — the unattended prefixes are all colon-suffixed, so the colon→underscore persistence
+  artifact makes the rehydrated key match **none** of them, and a rehydrated unattended session becomes
+  **ATTENDED**: it loses HEADLESS and its approvals park on a human who is not there. This is the
+  severity behind `AAP-3`'s `G83`, filed there as P3 on the duplicate-listing symptom alone and
+  re-classified in that PR.
+- [2026-08-23][AAP-2] **Three claude-code recipes did NOT port, which is the transferable lesson.**
+  (a) `cat /nonexistent-…` does not gate on codex — it rewrites the call into its own `Read file` tool
+  and self-executes; the measurable seam is that **codex escalates on RETRY**, so **any single-shot probe
+  of a codex gate can read either way** (`G91`). (b) The prompt-side cells cannot be judged from the
+  persisted transcript, because knowledge, attachments and persona are **not persisted** — only the
+  model's echo is decisive, and it needs a control-first A/B with **virgin** markers, since a naive
+  control still echoed a prior session's markers via recall (`G84`). (c) The empty-turn probe needs a
+  **warm** adapter, because a cold codex spawn prepends its own skills-budget banner as assistant text.
+- [2026-08-23][AAP-2] **A mechanism correction to `AAP-1`'s `G56`.** Killed pre-text, codex **recovers**
+  and delivers the complete answer — because `acp/client.py:460`'s init retry gets there first, **not**
+  because `chat_runner.py:4013`'s predicate matched. claude-code's dropped-message shape is real but the
+  predicate is not the whole story. Killed mid-stream, both providers silently truncate (`G100`).
+- [2026-08-23][AAP-2] **Two stale premises in this column disproved:** the auto-nudge cell was recorded
+  as blocked by a missing model provider (it drove fine, `C84`), and cell 690's own row said unattended
+  mode was blocked because a loop fails on provider resolution — a `cron:`-keyed **chat** session bound
+  to `acp:codex` resolves on the ACP axis, so **the cell was drivable all along**. Also: the cell citing
+  `llm/acp_session_provider.py` for the cancel path is **wrong** — codex uses `AcpAgentProvider`
+  (`llm/acp_agent.py:665`), and the wrong citation cost a drive a full mutate/restart cycle (`C88`).
+- **STILL UNVERIFIED / owed.** No incidental fix shipped in this PR: every finding that warranted code
+  was either an owner call (`G88`, `G92`, `G93`, `G97`) or on a file four concurrent drives were holding
+  (`G103`). The `verbatim` half of the cancelled-turn preamble rests on the native control plus a code
+  read, not on codex quoting it (`C87`). And the incognito canary persists in the operator's **shared**
+  codex state (`logs_2.sqlite`, `state_5.sqlite`, an OTEL log) which no drive would delete — flagged for
+  an owner decision rather than removed.
+## Execution log — `AAP-4` (§2.1 MCP reachability)
+
+- [2026-08-23][AAP-4] **PARTIAL — the atom stays `todo`.** Clause 1 (gideon-core tools reachable)
+  **PASSES on all three providers**, verified behaviourally and falsified. Clause 2 fails on two tools
+  that do not exist, and clause 3 is moot. Four fenced drives; observations `O76`-`O95`, `C90`-`C99`,
+  `K100`-`K108`; findings `G104`-`G119`. Two rails shipped (see below); **no deletion and no criteria
+  rewrite performed** — both are owner decisions, recorded in the results section above.
+- [2026-08-23][AAP-4] ✅ **Prong A works, and it was already implemented before this tick.** §2.1's text
+  claiming both `session/new` sites hardcode `"mcpServers": []` is **stale**: the content of `b62bd62e`
+  is on `main` even though PR #1626 reads *closed* — the merge train took the commit. All three CLIs
+  honour protocol-passed `mcpServers`: claude-code by **exact set equality** on 68 tools (`O76`,
+  falsified by zeroing `core_mcp_servers` → `COUNT=0`), kiro at 68 (`K100`, **correcting `K51`'s 67**),
+  and codex decisively — `gideon mcp-core` spawned four levels under `codex-acp` while
+  `config.toml` holds zero `gideon` entries, so **the protocol frame was the only channel**
+  (`C90`). **`C4`'s "codex has no host-injected tools at all" was reading codex's deferred-loading gate,
+  not its surface** (`C91`/`C92`).
+- [2026-08-23][AAP-4] 🔴 **BLOCKED — OWNER DECISION 1 (E6 scope): the acceptance criterion names two
+  tools the platform deliberately excludes.** `knowledge_search` and `task_create` are absent from the
+  MCP surface for **every** provider — three drives plus an integration census (68 tools, zero
+  `knowledge_*`, zero `task_*`). `mcp_core.py:1724` aggregates six modules with no knowledge/tasks/inbox,
+  and **`tests/test_native_builtin_split.py` asserts the exclusion explicitly** ("platform must NOT carry
+  the installable-app categories"). Satisfying the atom as written requires either breaking that
+  test-enforced split or adding 28 native tools to the MCP aggregation — architectural decisions outside
+  a reachability fix. **Needs: re-scope the criterion to mcp-core tools that exist, or a new atom for the
+  surface extension.** Also corrects `K53`, which had retired the ABSENT verdict as a naming artifact by
+  scoring kiro's *own* natives.
+- [2026-08-23][AAP-4] 🔴 **BLOCKED — OWNER DECISION 2 (E6 scope): delete or wire the prong-B seeder.**
+  Three independent inertness layers, and the decisive one is that **prong B is kiro-shaped by
+  construction** (hardcoded `gideon.json` + a kiro agent payload), so no provider verdict could
+  make it wirable for codex (TOML) or claude-code (`gideon.mcp.json`) — and all three honour
+  protocol `mcpServers` anyway. **Recommendation: delete.** Not done here because deleting it makes this
+  atom's own clause 3 unsatisfiable, and rewriting success criteria is the owner's call.
+- [2026-08-23][AAP-4] 🔴 **A defect class that no core gate can catch, recorded because it explains how
+  this shipped as "landed".** The prong-B supplier lives in the **apps** repo (0 hits for
+  `agent_config_dir` across every file there) while `src/gideon/acp_bundles/` holds no bundles at
+  all, so the missing argument was invisible to core lint and core tests — and all 28 existing tests
+  supply the argument themselves. Compounding it, `tests/test_acp_bundles.py` collects **zero items**
+  because its skip needs `<workspace>/apps` and the clone is `GideonApps` (`G117`): the only suite
+  that exercises the supplying side never runs.
+- [2026-08-23][AAP-4] **Two rails shipped, both falsified** (`tests/test_acp_mcp_reachability.py`, +96).
+  One censuses `src/**` for `agent_config_dir=` call sites and pins zero, with two vacuity floors — the
+  parameter must still exist with default `None` (else "no supplier" is trivially true) and the scan must
+  have read >100 files (a mistyped root scans nothing). The other deletes `gideon.acp.config_seed`
+  from `sys.modules`, calls `unregister_acp_cli_entry` and asserts it is back — the **only** automatic
+  detector of the deletion hazard in `G116`, where `mypy` reports "Success", both function-local imports
+  still succeed, and the enable path stays green on a tree with the module removed.
+- [2026-08-23][AAP-4] 🔴 **`G109`: the env half of session inject-back is inert**, falsified
+  independently by two drives — a probe var **arrived** in the child while `session_key` read
+  `EMPTY_AT_SESSION_NEW` / `sentinel-None`. So the CLIs forward our env faithfully and `session_key` is
+  `None` at `session/new`; because MCP children spawn once there, the later `rekey()` can never inject
+  it. Inject-back therefore rests entirely on the pid tree walk, which does resolve — and fails **closed**
+  for unclaimed pool spares rather than cross-session (`K106`).
+- **STILL UNVERIFIED.** `subagent_run` injected back on claude-code but wedged on kiro and codex with a
+  provider-independent control (`G110`/`G114`) — unresolved. `G113`'s 403 on `get_context` (the first
+  tool kiro calls) and `G115`'s stale-pid cross-session risk are filed unfixed: one needs an auth
+  allowlist widened, the other is session lifecycle, and both are escalate-not-improvise with four drives
+  live in the subsystem. No `web/` surface was touched.
