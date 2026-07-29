@@ -240,10 +240,46 @@ Every mark in the matrix below cites one of these. `S1` = `chat-1-…` (bound af
 | `O28` | auto-nudge re-arm on `acp:claude-code` (K43's recipe): `POST /api/autonudge {session_name, idle_secs: 20, max_cycles: 2}`, then silence | **armed, fired, re-armed, fired, capped** — `cycle_count` 0 → 1 → **2 of 2**, `active` true → **false** after the cap, `last_fire_ts` set twice, and the transcript carries BOTH injected `[auto-nudge cycle N]` turns with claude-code's own `NUDGED` reply after each. Same verdict as kiro's `K43` |
 | `O29` | memory consolidation (K42's recipe): 6-message session, then `POST /api/memory/consolidate {"key": "dashboard_<session>"}` | **CONFIRMED, read from the store rather than the reply.** The route answered `{"ok": true}`, a `locks/consolidate_dashboard_<session>` lock appeared, and the history metadata line moved `last_consolidated` **0 → 6**. `semantic_active` (4) and `episodic_active` (1) did **not** move, which is correct for six short probe turns — the pass is that the consolidation RAN and advanced its offset, not that it invented rows |
 | `O30` | tool-disable prefs: `POST /api/mcp/toggle-tool {"server":"gideon-core","tool":"get_context","enabled":false}` on a claude-code-bound home | **ABSENT, same named reason as kiro's `K45`** — `{"error": "server 'gideon-core' not found"}`. The only per-tool disable surface addresses *configured* MCP servers, and an ACP CLI's tools are not registry entries. Provider-independent, so this cell is decided for claude-code by the same mechanism |
-| `O31` | the skill ladder: `GET /api/skills/proposals` after the session's turns | `{"proposals": []}`, exactly as kiro's `K44`. The reason is provider-independent — there is no forced-run surface, so "the gate was not met" and "the review is inert" are the same observation from outside (`G44`). Stays NOT-EXERCISED for an INSTRUMENTATION reason, not a fixture gap |
+| `O31` | the skill ladder: `GET /api/skills/proposals` after the session's turns | `{"proposals": []}`, exactly as kiro's `K44`. The reason is provider-independent — there is no forced-run surface, so "the gate was not met" and "the review is inert" are the same observation from outside (`G44`). Stays NOT-EXERCISED for an INSTRUMENTATION reason, not a fixture gap. **↳ SUPERSEDED 2026-08-23 by `O66`:** the reasoning here is half wrong — indistinguishability bites only the NEGATIVE case, and a correction turn produces a *filed* proposal, which is unambiguous. The instrumentation was still worth building, for `O69`/`O70`'s reason |
 | `O32` | the combined prompt-side probe (K30's recipe) in ONE turn on a fresh claude-code session: `agent=aap1-probe` (a profile carrying `system_prompt` + `voice`), `color_theme=lumon`, `meta.knowledge=[<item id>]`, `meta.files=[<home>/uploads/aap1-brief.txt]`, and the literal `@aap1-prompt` in the message, asking for six verbatim quotes | **four cells CONFIRMED in one turn.** Reply quoted, verbatim: (1) `MANDATORY PROFILE MARKER: … PROFILE-MARKER-AAP1X …` — and it emitted the token at the top, i.e. it OBEYED the profile prompt; (2) `The AAP1 KIWI PROTOCOL states: the secret sweep codeword is ZANZIBAR-8821 …`; (3) `ATTACHMENT-CONTENT-MARKER-A77: … the sweep vehicle is a hovercraft.`; (6) `## Task mode: Agent`. So the agent-profile system prompt, the knowledge injector and the attachment extractor all reach claude-code, matching kiro's `K30` |
 | `O33` | item (5) of the same turn: the persona/voice line | **CONFIRMED, and it surfaced a conflict.** BOTH persona lines were delivered and the CLI quoted both: the profile's `voice` (`Use a terse operator voice…`) **in the agent system-prompt block**, and the `color_theme=lumon` line (`Use a Lumon-inspired persona…`) **appended to the user request**. The reply says so unprompted — *"a genuine conflict, not an ambiguity I can resolve from the payload"* — and picked the profile's. So Lumon persona injection reaches an ACP provider (the cell), and the two injection sites have no precedence rule (`G45`) |
 | `O34` | `@prompt` expansion, the STRONG form (K31's control): `PUT /api/prompts/aap1-prompt` with a body, `POST …/render` to prove it exists server-side, then one turn referencing `@aap1-prompt` | **ABSENT on the ACP path, provider-independently.** `/render` returned the body verbatim; the **persisted user message stored the literal `@aap1-prompt` with the expanded body absent**; claude-code replied exactly `ABSENT`. Expansion is composer-side (`ChatPage.tsx` calls `/render`), so nothing on the ACP path expands an `@name` — kiro's `K31` reproduced |
+| `O35` | global YOLO: four `cat /nonexistent-…` as separate tool calls, home as received | zero cards; four SEL `auto_approved` rows with `metadata.reason: "yolo"`. **Precondition surprise: the home arrived with `agent.yolo: true` + `approval_mode: "auto"` already persisted in `config.json`**, so YOLO was armed before the drive touched anything |
+| `O36` | `POST /api/chat/mode {"mode":"normal"}`, five tool calls, the FIRST card resolved `{"action":"trust"}` | session trust WIRED: one card for a five-tool turn. SEL `#4 approved / interactive`, then `#5-#8 auto_approved / "trust"`, plus `set_approval_policy '' → auto` on the session |
+| `O37` | a card on agent `aap1a-floor` (`approval_mode: ""`) resolved with `{"action":"trust_agent"}` | `config.json agents["aap1a-floor"].approval_mode` flipped `"" → "auto"` — **the floor is written by the card**, not only by hand-editing a profile as `K36` did |
+| `O38` | global set to `approval_mode: "interactive"`, `yolo: false`, gateway restarted; a **fresh** session on `aap1a-floor` vs the same command | per-agent floor WIRED and isolated from the global default: `set_approval_policy '' → auto` at open, then `auto_approved / "trust"`, **no card**; the `O36` control carded the identical command |
+| `O39` | six lifecycle hooks via `POST /api/triggers` (bash action), PreToolUse `exit 2`, on a session whose agent does **not** reference them | `K39` half (a) reproduces: PreToolUse fired **2x** and `run_count` climbed, but `hooked1.txt` contained `HOOKED` — **the write landed**. None of the other five fired on the unbound session |
+| `O40` | the same hooks bound to the session agent's `triggers` | `K39` half (b) reproduces: `Write hooked2.txt (hook blocked: aap1a-pretool:hook denied)`, the model's shell fallback **also** blocked, `hooked2.txt` never created |
+| `O41` | `GET /api/triggers`'s `enforcement` field across four states | `G40`'s legibility fix is live and correct: unbound → `not_enforcing`; bound+enabled → `enforcing`; bound+disabled (via `POST /api/triggers/{id}/toggle`) → `not_enforcing`; non-blocking events → `advisory` |
+| `O42` | PreToolUse disabled, fresh bound session, 3 turns x 1 executed tool, counted from each hook's own `run_count` | **4 of the other 5 fire when bound:** `PostToolUse` **+3**, `Stop` **+3**, `SessionStart` **+1**, `UserPromptSubmit` **+3**, `PreToolUse` **+0** (correctly disabled). **`PostToolUse` DIVERGES from `K40`'s zero on kiro** |
+| `O43` | ACP child SIGKILLed mid-turn on the bound session → a real `AcpError` | **`Error` fired ZERO** against `ConnectionError: ACP stdout EOF` (user-visible `ACP prompt timed out` card); `Stop` also **0** — an errored turn fires neither. Root cause: `HOOK_EVENT_ERROR` had exactly **one** fire site, the generic `except Exception` (`chat_runner.py:4062`), while the `except AcpError` terminal branch appended the card and fired nothing. Falsified by adding the one-line fire → the identical drive fires `Error` **1**. Fixed in this PR (`G50`) |
+| `O44` | `find ~/.gideon ~/.claude -newermt '-2 hours'` after the sweep | `~/.gideon`: **0** files — `G39`'s fix holds. But the spawned CLI wrote **8 transcript `.jsonl`** into the operator's real `~/.claude/projects/-private-tmp-aap1a-ws/`, session ids matching the `--session-id=` args in `ps`. Removed and verified (`G52`) |
+| `O45` | the in-flight window: a turn slow by **output volume** ("write 1..250 with word/square/cube, no tools", ~98 s, 644 events) plus polling `GET /api/chat/sessions` until `running` had been true for >=10 s, then three sends at t+14.1/14.2/14.4 s | window hit **1 of 1** attempts (and 1-of-1 again on the merge re-run). Each send answered `{"ok": true, "queued": true}` with `running: true` re-read after every one. **No fixed `sleep` anywhere** — that is what `O26` was missing, and a sleep here would be fragile |
+| `O46` | pop leg, `merge_queued_messages` at its **false** default | at turn end (t=148.26) three `queue_pop` frames in FIFO order, each paired with a **`chat_user_message` frame** (the live bubble), each followed by its own `Session continued · … · via acp:claude-code` turn answering `PINEAPPLE` → `MANGO` → `PAPAYA` in 5.7/2.9/3.3 s |
+| `O47` | explicit `queue_mode: "steer"` on a claude-code session | returned **`{"ok": true, "queued": true}`** and emitted a `queue_push`, with **no** `{"steered": true}` and **no** `Steering: …` activity frame; it ran 85 s later as its own full turn. Matches `chat_handlers.py:197` — `add_steer` refuses because `set_steer_drains` is False for a runtime with no drain seam |
+| `O48` | merge leg (`PUT /api/dashboard/config {"merge_queued_messages": true}`) | three `queue_pop` frames (one per card cleared) but **one** `chat_user_message` reading `[3 queued messages merged]\n\n<m1>\n\n<m2>\n\n<m3>`, and **one** follow-up turn. Flag restored to `false` afterwards |
+| `O49` | `POST /api/chat/sessions/{S}/stop` 14.6 s into a claude-code turn | `{"ok": true}` after **3.43 s**, one `stop_event {state: "stopping", outcome: null}` and **no** `stopped`/`soft` event; the turn died with error card **`ACP prompt timed out`** (log: *"turn ended with no result and no streamed text — timeout"*). The next turn's 4,299-char reply, which quotes everything preceding its marker verbatim, contains **zero** occurrences of `PREVIOUS TURN WAS CANCELLED`/`interrupt`/`cancel`. `prev_turn_cancelled` is set only on `outcome == "acked"` (`session.py:1886`) (`G55`) |
+| `O50` | **native control** — same session, same route, same probe | `stop` returned in 0.05 s with `stop_event {state: "stopped", outcome: "soft"}`, and the next reply opens `[PREVIOUS TURN WAS CANCELLED BY THE USER -- context restore] / … / Cancelled user request: …` — verbatim `config/prompt_snippets/cancelled-turn-preamble.md`. **So the mechanism and the probe are both sound; the divergence is ACP-specific** |
+| `O51` | empty turn forced as-a-user: *"your entire reply must be exactly one space character"* | forced on **attempt 1**. `assistant_text.strip()` empty → **silent re-queue** (`queue_pop` + `chat_user_message` at t+9.2 s, **no card, no assistant bubble**); the same prompt re-ran, complied again, and the second consecutive empty produced **`Empty response — please retry.`** Both legs of `chat_runner.py:3813-3846` in one drive. **The "not forceable as-a-user" note was wrong** |
+| `O52` | pipe-death **before any text streamed** (adapter found by `pgrep -P <own gateway pid>`, never by name) | the adapter died in 0.6 s, a replacement spawned in <1 s, and the turn produced error card **`ACP prompt timed out`** with **no `⟳ Connection lost — retrying...`, no `queue_push`/`queue_pop`, no retry — the user's message was dropped.** `AcpProcessDied` was raised **zero** times in either gateway log (`G56`) |
+| `O53` | pipe-death **mid-stream**, 48 chunks already delivered | the turn ended instantly and the **truncated answer** (stopped at `51 — fifty-one — 2601` of 250) was saved as a **normal assistant message** with `Turn complete: 76 events, 0 tool calls`, `chat_done`, and followups offering *"Continue from 52 through 250"*. **No error card, no retry, no queue frame.** `acp/session.py:425` — `stale_eligible` synthesizes `EVENT_COMPLETE stop_reason=end_turn` when the drain EOFs right after a text chunk (`G57`) |
+| `O54` | a runtime-provenance anomaly, reproduced **3x** | turns labelled `Session continued · … · via acp:claude-code` that **survive SIGKILL of every `claude-agent-acp` child of the gateway**, stream to completion with none present, report **`Turn complete: 0 events`** (genuine ACP turns reported 644/76/7/6), and carry `token_usage` + a real context %. A tool-identity probe answered `memory_remember: YES` and `read_file, write_file, edit_file, list_dir, glob` — the **native** tool set. On the first such session `acp_provider` still read `acp:claude-code` while the per-turn line had flipped to `via native`; on later ones the line still said `via acp:claude-code` (`G58`) |
+| `O55` | in-CLI `pwd`, asked of the agent itself rather than read from the gateway's `cwd=` log line | `/private/tmp/aap1c-ws` — **`G39`'s escape is fixed**: cwd resolves to `GIDEON_WORKSPACE`. `HOME` is **not** redirected, only cwd |
+| `O56` | confinement probe, one ACP turn, 7 commands, all outputs verbatim | write to `/private/tmp/aap1c-escape-default.txt` **succeeded**; write to ``~/.claude/aap1c-escape-probe.txt` (the operator's real home)` **succeeded**; `ls ~/.aws` returned 4 entries including `credentials`; `env | grep -c -E '^(AWS_SECRET|AWS_SESSION|SSH_AUTH_SOCK)'` = **1**. The agent volunteered the conclusion: "there is no filesystem confinement to `/private/tmp/aap1c-ws`" |
+| `O57` | `detect_backend`/`wrap_argv` census on the live module, all five modes | `mode=auto/standard/cc/strict/off` → `backend=none, wrapped=['node','X'], profile=None`. **`strict` is byte-identical to `off`.** Cause: `sandbox.py:351` returns `False` for `platform.mac_ver()` major >= 26 **before probing**; host is macOS 26.6.1 (`G60`) |
+| `O58` | falsification of that single guard (`if False and major >= 26:`, mutation confirmed applied at line 351, restored from a file copy) | backend flipped to `sandbox-exec` and `wrap_argv(mode='strict')` produced `['env','-u','SSH_AUTH_SOCK','sandbox-exec','-f',<profile>,…]` with a real profile file. **One guard is the cause of both** the missing confinement and the missing credential-env scrub — and `SSH_AUTH_SOCK` is exactly the var `O56` counted as still present in the child |
+| `O59` | three-arm seatbelt enforcement proof on this host with a third-party binary (mise `node` 24.18.0); non-vacuous — the first attempt used `~/.docker`, which does not exist, so all three arms returned `ENOENT` and it was redone on `~/.aws` | (A) unsandboxed → `READ_OK entries=4`; (B) sandboxed, allow-default → `READ_OK entries=4`; (C) sandboxed, deny `.aws` → **`READ_FAIL EPERM`**. So the `>= 26` disable is **over-broad**: seatbelt still enforces for third-party binaries here |
+| `O60` | writer/reader census for the sandbox level | `options["sandbox_mode"]` has **two readers** (`llm/acp_agent.py:925` main path, `session.py:656` concurrent path) and **zero production writers** — the only writer in the tree is `tests/test_acp_spawn_cwd_containment.py:54`. `options` comes from the LLM registry entry (`session.py:634`), so the ACP spawn is pinned to `"auto"` forever. Separately `agent.sandbox` is PATCH-editable (`dashboard/handlers/core.py:534`, enum `["auto","off"]`) with **no functional reader**. Vacuity control by the same grep shape: `agent.yolo` 7 readers, `agent.approval_mode` 6, `agent.max_subagents` 2, `agent.sandbox` 2 — and both of those two are the allowlist entry plus a docstring (`G61`/`G62`) |
+| `O61` | incognito no-write, **three** arms (`K33`'s shape extended so the zero cannot be a dedup artifact — correction B is fresh content) | arm 1, correction A on a **persistent** session: `memory_events` 6→7, `semantic_memory` 4→5. Arm 2, correction B on an **incognito** session: **7→7, 5→5, episodic 1→1, learning.staging 0→0**. Arm 3, correction B again on a persistent session: 7→**8**, 5→**6** (new row `lesson.549ab375c4cf`, `facet_veto`). **Arm 3 proves B was write-worthy, so arm 2's zero is a real refusal rather than an inextractable message** |
+| `O62` | `GET /api/chat/sessions` vs `GET /api/chat/sessions/{key}` for a live incognito session | the incognito session (`chat-2-1787486684`) is **absent from the list while still live** (only `chat-1` shown), yet its detail route returns full two-message content, and `dashboard_chat-2-….jsonl` (1.1k) persists in the isolated home carrying the incognito text and `"memory_mode": "incognito"` — matching `K33`'s "persists by design" nuance without needing a restart |
+| `O63` | grep for the incognito-only phrase in the operator's real home | the phrase appears **3x in each of two transcripts** the spawned CLI wrote into `~/.claude/projects/-private-tmp-aap1c-ws/` (129k + 194k); the `memory/` subdir was created but stayed empty. **The host wrote zero memory rows while the CLI persisted the whole incognito conversation outside the isolated home** (`G63`) |
+| `O64` | dry-run route census over 445 registered routes, plus an as-a-user falsification | `dry_run` reaches HTTP in exactly three places, **none of them T9 observe mode**: session cleanup (`chat_handlers.py:1672`), bulk-archive (`session_bulk.py:176`), and trigger manual-fire preview (`handlers/triggers.py:1315`, with a real dashboard button at `web/src/pages/schedule/ScheduleDetail.tsx:123` — a **different** `dry_run`). The T9 flag (`subagent.py:324`) is read **only** by `NativeAgentRuntime` (`provider_bridge.py:331/536`); `acp/**` and `llm/acp_agent.py` contain **0** occurrences. `subagent.py:1963` does set `extra_kwargs["dry_run"]=True` and `session.py:983 **extra_factory_kwargs` accepts it, but the ACP branch enumerates its kwargs and reads only `provider_kind`/`agent`/`unattended`/`acp_mode`/`reasoning_effort_override` — the non-vacuity control. `POST /api/chat {"dry_run":true,"observe":true}` → HTTP 200 and the requested write **executed** (`G64`) |
+| `O65` | `GET /api/skills/proposals` on the fresh isolated home | `{"proposals": []}` — reproduces `O31`/`K44` |
+| `O66` | two turns on an `acp:claude-code` session, turn 2 a correction ("No, that's wrong…") | the queue went 0 → 1: `memory-discipline-cc3da9e98f98`, `kind: "refine"`, `refine_target: "memory-discipline"`, `session_key` = the ACP session. **A real 4-tier ladder proposal off an ACP turn, needing no code change** — this alone marks the cell, and **supersedes `O31`** |
+| `O67` | real-home check during the ladder drive | the ACP CLI wrote its own state into `~/.claude/projects/-private-tmp-aap1d-ws/memory/` — the known isolation limit (`G52`/`G63`), not a new escape |
+| `O69` | `GET /api/skills/proposals` before vs after the marker, **empty queue in both** | before: `{"proposals": [], "lastReview": null}` (i.e. `O65`/`O31` exactly). After: `{"proposals": [], "lastReview": {"verdict": "no_action", "elapsed_ms": 8478, "session_key": "chat-1-1787488017", "detail": "action=none", "at": "2026-08-23T12:27:24+00:00"}}` — 8.5 s of real model work, zero proposals, and the surface now says which world it is in |
+| `O70` | `grep -c "skill-ladder review:" gateway.log` after a pass that returned `no_action` | **0**. `G47` maps the working verdicts (including `no_action`, the common one) to `INFO` while the shipped default `log_level` is `WARNING`, so the success case is invisible on every default install. Correct as spam control, but it means the log is not an operator surface for "did the ladder run" (`G66`) |
+| `O75` | **the M5d re-drive** (mine, coordinator): one isolated, correction-free turn on a session bound via `POST /api/chat/sessions/{s}/acp-agent`, asking for four shell commands as separate tool calls with a deliberately-failing fourth; verified ACP by adapter children of the gateway and 6 tool rows in the transcript | `memory_events` **8 → 11**: two rows with `source='procedural'` (`Terminal on 'Terminal' → success`, `→ failed`) plus a `self_model` row recording **`"tools": ["Terminal"]`**. **That is the exact signature `O12`/`C14`/`K17` used to conclude ABSENT**, so the M5d mark was wrong, not merely stale. The rows landed **70+ s before** any correction turn in that home, so they cannot be attributed to one. **But the drain is low-fidelity:** 5 procedural events across 13 tool calls collapse into **3 distinct keys**, because the key hashes a label built from the ACP *generic* tool title — every `Terminal` call folds into one success row and one failure row regardless of the command (`G67`) |
 
 ### 4a. Prompt-side context — claude-code column
 
@@ -260,7 +296,7 @@ Every mark in the matrix below cites one of these. `S1` = `chat-1-…` (bound af
 | Project binding (context preamble + cwd) | WIRED | **DIVERGED** | PARTIAL — preamble only | `O8`, `O17` — the preamble/context half works, but the cwd half does not: `cwd` reaches `get_or_create` and the ACP process still runs in `~/.gideon/workspace` |
 | project_id → artifact stamping | ABSENT | CONFIRMED | ABSENT (stronger) | `O4` — `artifact_save` is not reachable at all on claude-code, so there is nothing to stamp |
 | Persona injection (Lumon theme) | WIRED | **CONFIRMED** (re-drive) | WIRED | `O33` — `color_theme=lumon` on the turn; the CLI quoted the Lumon instruction verbatim. It ALSO carried the profile's `voice` and reported the clash itself (`G45`) |
-| Cancelled-turn preamble re-injection | WIRED | NOT-EXERCISED | — | no turn was interrupted mid-flight |
+| Cancelled-turn preamble re-injection | WIRED | **DIVERGED** | ABSENT on claude-code, WIRED on native | `O49` — `stop` 14.6 s into a turn returned after **3.43 s** with `stop_event {state: "stopping", outcome: null}` and no `stopped`/`soft`; the turn died with an `ACP prompt timed out` card and the next reply contained **zero** occurrences of `PREVIOUS TURN WAS CANCELLED`. `prev_turn_cancelled` is set only on `outcome == "acked"` (`session.py:1886`), so the one-shot flag never armed. Native control `O50`, same session and route, emitted `outcome: "soft"` and re-injected the preamble verbatim — the mechanism and the probe are both sound, the divergence is ACP-specific (`G55`) |
 | Compressed thread-history bootstrap (new process) | WIRED | CONFIRMED | WIRED | `O14`, `O15` — a brand-new session's context replayed prior turns verbatim, including sibling-session history |
 
 ### 4b. Approvals / permissions / safety — claude-code column
@@ -269,17 +305,17 @@ Every mark in the matrix below cites one of these. `S1` = `chat-1-…` (bound af
 |---|---|---|---|---|
 | Interactive approval cards | WIRED | CONFIRMED | WIRED | `O5` — four cards in one turn, each resolvable via `POST …/approve` |
 | trust_reads (effective-safe auto-approve) | PARTIAL | CONFIRMED | PARTIAL | `O8` — a read-only `pwd` auto-resolved with no card; `O7`/`O10` — the same heuristic labelled a read-only `pwd; ls` "destructive", so the downgrade is name/kind-based and coarse |
-| Trust (session) / YOLO (global) auto-approve | WIRED | NOT-EXERCISED | — | every card was resolved with `approved`/`rejected`; `trust` and YOLO were never used |
-| Per-agent approval floor ("Always allow") | WIRED | NOT-EXERCISED | — | no agent profile with `approval_mode: auto` was bound |
+| Trust (session) / YOLO (global) auto-approve | WIRED | **CONFIRMED** | WIRED (both halves) | `O35` global YOLO: four gated calls, zero cards, four SEL `auto_approved` rows with `metadata.reason: "yolo"`. `O36` session trust: one card for a five-tool turn, resolved `{"action":"trust"}` → SEL `#4 approved / interactive` then `#5-#8 auto_approved / "trust"`. **Precondition worth carrying: the dev home ships `agent.yolo: true` + `approval_mode: "auto"` persisted, so any drive on a copy of it measures zero cards for structural reasons** |
+| Per-agent approval floor ("Always allow") | WIRED | **CONFIRMED** | WIRED, and isolated from the global default | `O37` — resolving a card with `{"action":"trust_agent"}` flipped `config.json agents[…].approval_mode` `"" → "auto"`, so **the floor is written by the card, not only by hand-editing a profile** (`K36` created the profile manually; the button reaches the same field). `O38` — with the global at `interactive`/`yolo:false` and a **fresh** session, the floor agent auto-approved with no card while the `O36` control carded the identical command |
 | Task-mode enforcement BEFORE approval (trust can't bypass) | PARTIAL | CONFIRMED | PARTIAL — but the measured residual is narrow | `O13` (ask blocks `Write` AND a read-only `ls`), `O19`/`O24` (plan blocks every `Write`), and the SEL rows carry `reason: task_mode:ask` / `task_mode:plan`. Across 44 SEL-audited ACP tool events (24 `invoked`, 11 `denied`, 4 `approved`, 3 `surfaced`, 1 `rejected`, 1 `bypass`) **no tool executed without reaching the host gate**; the only non-surfacing case was a CLI-side *denial* (`O21`) |
 | Plan mode → native backend plan | WIRED | CONFIRMED | WIRED (with a caveat) | `O19` — the CLI itself reports "Claude Code's CLI plan mode" and substitutes `"Ready to code?"` for the edit. Caveat: honored only when plan is set BEFORE the session's first turn |
 | Hard deny-list (`security.is_denied`) pre-execution | ABSENT | CONFIRMED | ABSENT | `O21` — the host never pre-blocked; the denial that did occur came from the CLI and produced no SEL row |
-| PreToolUse hooks blocking execution | PARTIAL | NOT-EXERCISED | — | no PreToolUse hook was installed during the sweep |
-| PostToolUse / Stop / SessionStart / UserPromptSubmit / Error hooks | WIRED | NOT-EXERCISED | — | as above — no hooks were installed |
+| PreToolUse hooks blocking execution | PARTIAL | **DIVERGED** | it blocks ONLY when the session's agent profile references the hook | `O39` unbound: PreToolUse fired **2x**, `run_count` climbed, and `hooked1.txt` contained `HOOKED` — **the write landed anyway**. `O40` bound: `Write hooked2.txt (hook blocked: aap1a-pretool:hook denied)`, the model's shell fallback also blocked, file never created. Reproduces kiro's `K39` on both halves. `O41` — `GET /api/triggers`'s `enforcement` field (G40's fix) reads `not_enforcing` / `enforcing` / `not_enforcing` / `advisory` across unbound / bound+enabled / bound+disabled / non-blocking |
+| PostToolUse / Stop / SessionStart / UserPromptSubmit / Error hooks | WIRED | **DIVERGED** | 4 of 5 fire when bound; `Error` is unreachable | `O42` counted from each hook's own `run_count` over 3 turns: `PostToolUse` **+3**, `Stop` **+3**, `SessionStart` **+1**, `UserPromptSubmit` **+3**. **`PostToolUse` diverges from `K40`'s zero on kiro** — it fires on claude-code. `O43` — against a real `AcpError` (`ACP stdout EOF` → a user-visible error card) `Error` fired **0** and `Stop` **0**: `HOOK_EVENT_ERROR` had exactly one fire site, the generic `except Exception` (`chat_runner.py:4062`), while the `except AcpError` terminal branch fired nothing. **Root-caused and FIXED in this PR** (`G50`) |
 | SEL audit of every executed tool + effective risk | WIRED | CONFIRMED | WIRED (with one blind spot) | `O10` — hash-chained `tool_invocation` rows with `tool_kind` and `metadata.risk` for every ACP tool, plus `approved`/`denied`/`rejected` decisions. Blind spot: a CLI-side denial is invisible (`O21`) |
 | Unattended mode (strip interactive tools + fail-fast approvals, T5) | ABSENT | **DIVERGED** — the capability is PRESENT now | WIRED end to end | `O27` — an unattended Code loop bound to `acp:claude-code` reached `running`, SEL recorded `mode_change:unattended_auto_approve` `allowed` with `mode=bypassPermissions` against `dashboard:loop-961dcbd8`, the worker's write EXECUTED (`aap1-probe.txt` = `OK`) and `/api/approvals` stayed `[]` — it never wedged |
-| Dry-run replay (T9 observe mode) | ABSENT | NOT-EXERCISED | — | `dry_run` has no dashboard entry point to drive as-a-user |
-| OS sandbox wrap of the agent process | WIRED | NOT-EXERCISED | — | sandbox mode was left at its default; no confinement boundary was probed |
+| Dry-run replay (T9 observe mode) | ABSENT | **DIVERGED** | ABSENT — structurally, not merely unexposed | `O64` — census of 445 registered routes: `dry_run` reaches HTTP in exactly three places, **none of them T9 observe mode** (session cleanup, bulk-archive, and trigger manual-fire preview — which has a real dashboard button and is a *different* `dry_run`, so a route-grep audit of this row would mark it WIRED incorrectly). The T9 flag (`subagent.py:324`) is read **only** by `NativeAgentRuntime`; `acp/**` and `llm/acp_agent.py` contain **0** occurrences. As-a-user falsification: `POST /api/chat {"dry_run":true,"observe":true}` → 200 and the requested write **executed** (`G64`) |
+| OS sandbox wrap of the agent process | WIRED | **DIVERGED** | WIRED but **inert on this host — no boundary at any setting** | `O56` — the agent wrote to `~/.claude/…` and read `~/.aws` (4 entries incl. `credentials`) from a default session. `O57` — `detect_backend`/`wrap_argv` across all five modes returns `backend=none`, and **`strict` is byte-identical to `off`**: `sandbox.py:351` returns `False` for macOS major >= 26 **before probing** (host 26.6.1). `O58` — falsifying that one guard flips the backend to `sandbox-exec` with a real profile **and** restores the `env -u` credential scrub. `O59` — a three-arm seatbelt test with a third-party binary proves the disable is **over-broad**: deny-`~/.aws` returns `EPERM` here. `O60` — and the level is unsettable anyway: `options["sandbox_mode"]` has 2 readers and **0 production writers** (`G60`/`G61`/`G62`) |
 | Isolated CLI config hardening (`GIDEON_CC_ISOLATE`) | WIRED (opt-in) | CONFIRMED off-by-default, and the default measurably leaks | opt-in, and OFF is the shipped default | with the flag unset the spawned CLI loaded the operator's real `~/.claude` — it enumerated the operator's own MCP servers (`O4`) and wrote into `~/.claude/plans/` and `~/.claude/projects/…/memory/` (`O19`, `O22`) |
 
 ### 4c. Tools — claude-code column
@@ -298,7 +334,7 @@ Every mark in the matrix below cites one of these. `S1` = `chat-1-…` (bound af
 | AskUserQuestion card | UNKNOWN | CONFIRMED (audit: fires only if the CLI exposes an identically-named tool) | **ABSENT** | `O4` — the CLI's full tool list contains no `AskUserQuestion`, and the MCP route that could supply one is unreachable |
 | Subagents (`subagent_run` + completion inject-back) | UNKNOWN | CONFIRMED (audit: only via gideon-core MCP if reachable) | **ABSENT** — though its session-key precondition holds | `O4` — no `subagent_run` tool. `O11` — the `session_pid_<pid>.txt` file the inject-back depends on IS written for ACP sessions, so only the tool itself is missing |
 | MCP tools (external servers) | PARTIAL | CONFIRMED | PARTIAL — and the subset is the OPERATOR'S, not Gideon's | `O4` — the spawned CLI enumerated builder-mcp / slack-mcp / aws-mcp / chrome-devtools from the operator's own `~/.claude` config; nothing from Gideon's `mcp.json` |
-| Queue-steering mid-turn (#37) | ABSENT | NOT-EXERCISED | — | `O26` — the mid-turn send probe missed the window; neither steer nor queue was observed |
+| Queue-steering mid-turn (#37) | ABSENT | **CONFIRMED** | ABSENT | `O47` — explicit `queue_mode: "steer"` returned `{"ok": true, "queued": true}`, emitted a `queue_push`, produced **no** `{"steered": true}` and no `Steering: …` frame, and ran 85 s later as its own full turn. Matches `chat_handlers.py:197` — `add_steer` refuses because `set_steer_drains` is False for a runtime with no drain seam |
 
 ### 4d. Learning / memory — claude-code column
 
@@ -306,10 +342,10 @@ Every mark in the matrix below cites one of these. `S1` = `chat-1-…` (bound af
 |---|---|---|---|---|
 | Preference-facet capture (every turn) | WIRED | CONFIRMED | WIRED | `O22` — `activity_event` kind `learned`: "Learned: never more" (a poor extraction, but the path ran) |
 | Correction→lesson review | WIRED | CONFIRMED | WIRED | `O22` — "Learned: User correction to honor: …" fired on the correction turn, with no model provider needed |
-| Procedural-outcome capture (M5d tool-outcome drain) | ABSENT | CONFIRMED | ABSENT | `O12` — after a 6-tool-call ACP turn, `memory.db` (`semantic_memory`, `episodic_memories`, `memory_events`, `mem_*`) and `learning.db staging` were all `0` |
-| Skill-ladder review (4-tier, propose-only) | WIRED | NOT-EXERCISED | — | the ladder's expensive review needs a model provider, which this isolated home lacks |
+| Procedural-outcome capture (M5d tool-outcome drain) | ABSENT | **DIVERGED** (re-drive, corrects `O12`) | **PRESENT but low-fidelity** | `O75` — an isolated, correction-free 6-tool-call turn on a verified-ACP session (adapter children alive) moved `memory_events` **8 → 11**: two rows carry `source='procedural'` (`Terminal on 'Terminal' → success` / `→ failed`, the second from a deliberately-failing command) plus a `self_model` row recording **`"tools": ["Terminal"]`**. That is the exact signature all three columns used to conclude ABSENT — `O12` said "all 0", `C14`/`K17` said the self-model row asserts `tools: []`. **The drain works; the earlier marks were STALE, not wrong** — `838abd29` (2026-08-21) added the drain, four days after `O12`/`C14`/`K17` were authored (2026-08-17), so each was correct when measured. It is nearly useless as built, though: the memory key hashes a label built from the ACP *generic* tool title, so 5 procedural events across 13 tool calls collapse into **3 distinct keys** — every `Terminal` call folds into one success row and one failure row regardless of the command (`G67`). **`C14` and `K17` should be re-driven on this recipe** |
+| Skill-ladder review (4-tier, propose-only) | WIRED | **CONFIRMED** | WIRED | `O66` — two turns on an `acp:claude-code` session, the second a correction: the queue went 0 → 1 with a real `refine` proposal (`memory-discipline-cc3da9e98f98`, `refine_target: memory-discipline`, `session_key` = the ACP session). **The old reason was inverted, not merely stale** — the call site (`chat_runner.py:3885` → `after_turn_review.py:326`) is provider-agnostic and the gate is *a correction turn OR >=4 tool calls*, so no forced-run surface was ever needed for the POSITIVE case. Indistinguishability only bit the negative case, now closed by `lastReview` on `GET /api/skills/proposals` (`O69`/`O70`, `G65`/`G66`) |
 | Memory consolidation on session end | WIRED | **CONFIRMED** (re-drive) | WIRED | `O29` — `last_consolidated` **0 → 6** in the history metadata plus a `consolidate_…` lock. Read from the store, not from the route's `{"ok": true}` |
-| Incognito/restricted no-write guarantees | WIRED | NOT-EXERCISED | — | no incognito/restricted session was driven |
+| Incognito/restricted no-write guarantees | WIRED | **CONFIRMED** | WIRED for Gideon's own stores; **host-scoped only** | `O61` — three arms so the zero cannot be a dedup artifact: a correction on a persistent session wrote `memory_events` 6→7 / `semantic_memory` 4→5; the **same** correction on an incognito session wrote **7→7 / 5→5**; a control re-run on a persistent session wrote 7→**8** / 5→**6**, proving the message was write-worthy. `O62` — the live incognito session is absent from `GET /api/chat/sessions` while its detail route returns full content. `O63` — **but the spawned CLI persisted the whole incognito conversation into the operator's real `~/.claude/projects/…`** (the incognito-only phrase 3x in each of two transcripts), so the pill's promise holds only for this host's stores (`G63`; `G52` for the general case) |
 
 ### 4e. Session / conversation mechanics — claude-code column
 
@@ -317,8 +353,8 @@ Every mark in the matrix below cites one of these. `S1` = `chat-1-…` (bound af
 |---|---|---|---|---|
 | Variants / regenerate (‹n/N› switcher) | WIRED | CONFIRMED | WIRED | `O25` — the regenerated assistant message carries `variants` + `variant_idx` |
 | Edit & resend, branch continuation (fork) | WIRED | CONFIRMED with a caveat | WIRED, but the branch loses the runtime | `O25` — the fork carries all 24 messages and `acp_provider: ""` |
-| Queued messages (merge/pop + live bubbles) | WIRED | NOT-EXERCISED | — | `O26` — probe missed the in-flight window |
-| Empty-turn auto-retry | WIRED | NOT-EXERCISED | — | no empty turn occurred across ~14 turns; not forceable as-a-user |
+| Queued messages (merge/pop + live bubbles) | WIRED | **CONFIRMED** | WIRED | `O45`/`O46`/`O48` — window hit **1 of 1** attempts, using a turn slow by *output volume* rather than tool latency plus polling `running` for >=10 s before sending (no fixed `sleep`, which is what `O26` lacked). Pop leg (default): three `queue_pop` frames in FIFO order, each paired with a `chat_user_message` bubble and its own follow-up turn. Merge leg (`merge_queued_messages: true`): three pops but **one** bubble reading `[3 queued messages merged]` and one turn |
+| Empty-turn auto-retry | WIRED | **CONFIRMED** | WIRED | `O51` — forced on attempt 1 with *"your entire reply must be exactly one space character"*: `assistant_text.strip()` empty → **silent re-queue** (no card, no bubble), the prompt re-ran, and the second consecutive empty produced `Empty response — please retry.` Both legs of `chat_runner.py:3813-3846` in one drive. **The old "not forceable as-a-user" note was wrong** |
 | Auto-nudge re-arm (loops) | WIRED | **CONFIRMED** (re-drive) | WIRED | `O28` — `cycle_count` 0 → 1 → **2 of 2**, `active` true → false at the cap, both `[auto-nudge cycle N]` injections answered by the CLI |
 | Context-% accounting | PARTIAL (UNKNOWN which backends emit) | **DIVERGED** | the chip is EMITTED but always reports a fabricated `0%` | `O7` — a `context_usage` frame with `pct: 0.0` and `Turn complete: 106 events, 6 tool calls, context 0%`; every one of ~14 turns reported `0%`, including turns with 18 KB of injected context |
 | Compaction | WIRED (CLI-owned `/compact`) | **DIVERGED** | ABSENT via the host — the command path errors | `O23` — `/compact` returns `-32601 "Method not found": _vendor.dev/commands/execute` |
@@ -326,7 +362,7 @@ Every mark in the matrix below cites one of these. `S1` = `chat-1-…` (bound af
 | Session resume across gateway restarts (`session/load`) | PARTIAL (falls to `session/new` + compressed history) | **DIVERGED** — worse | ABSENT, and the runtime silently changes | `O1` — the adapter DOES advertise `loadSession`. `O16` — after a restart the session's `acp_provider`, `task_mode` and `workspace_dir` are all cleared, `resume_sid=None` (no `session/load` attempted), and the next turn resolves on the **native** axis |
 | Warm pool / instant start | WIRED | CONFIRMED (pool present, cold on this run) | WIRED-but-cold | `O17` — `Pool decision: … pool_size=0 pool_qsize=0`, so every turn cold-started; the pool path exists and was exercised, it just had nothing warm |
 | Concurrent sessions on one process (P9) | ABSENT (dialect False) | CONFIRMED | ABSENT | `O11` — two concurrently-bound claude-code sessions hold two DIFFERENT adapter PIDs |
-| Pipe-death auto-retry / re-queue | WIRED | NOT-EXERCISED | — | no adapter process was killed mid-turn |
+| Pipe-death auto-retry / re-queue | WIRED | **DIVERGED** | ABSENT — two distinct failure shapes | `O52` killed **before any text streamed**: error card `ACP prompt timed out`, no `⟳ Connection lost`, no queue frame, no retry — **the message was dropped**; `AcpProcessDied` was raised zero times, because `chat_runner.py:4013`'s predicate matches only `already in progress`/`process exited`/`not running` (`G56`). `O53` killed **mid-stream**: the truncated answer was saved as a **normal completed turn** (`Turn complete: 76 events`, `chat_done`, followups offering to continue) with nothing signalling the loss — `acp/session.py:425` synthesizes `stop_reason=end_turn` (`G57`) |
 | Model override per session (composer picker) | WIRED | CONFIRMED | WIRED | `O20` — the CLI named the exact pinned model id back |
 | Reasoning effort per turn | WIRED | CONFIRMED host-side only | host forwards it; CLI-honoring unobserved | `O2` — the adapter advertises five efforts, so the axis exists. `O20` — the host accepted and echoed `low`, but the CLI cannot self-report its effort, so "honored" was not measured |
 | Agent/persona selection | ABSENT (no persona axis) | CONFIRMED | ABSENT — and no dead UI | `O2` — discovery returns exactly one agent with `provider_agent: ""`, so the picker has no persona rows to offer |
@@ -335,55 +371,102 @@ Every mark in the matrix below cites one of these. `S1` = `chat-1-…` (bound af
 
 ### Mark counts (claude-code, 63 audit cells)
 
-| mark | count | after the 2026-08-19 residual re-drive |
-|---|---|---|
-| CONFIRMED (runtime matched the audit's prediction) | 35 | **43** |
-| DIVERGED (runtime contradicted it) | 6 | **7** |
-| NOT-EXERCISED (no runtime observation obtained; reasons below) | 22 | **13** |
+| mark | count | after the 2026-08-19 re-drive | after the 2026-08-23 residual close |
+|---|---|---|---|
+| CONFIRMED (runtime matched the audit's prediction) | 35 | 43 | **49** |
+| DIVERGED (runtime contradicted it) | 6 | 7 | **14** |
+| NOT-EXERCISED (no runtime observation obtained) | 22 | 13 | **0** |
 
-Both columns are counted from the rows above, not carried in prose — the second one is what the
-rows say today.
+Every column is counted from the rows above, not carried in prose — the last one is what the rows
+say today. `49 + 14 + 0 = 63`.
 
-All **four** cells the audit left literally `UNKNOWN` for claude-code are now definite:
-native tool registry → **ABSENT**, `AskUserQuestion` → **ABSENT**, subagents → **ABSENT**,
-context-% emission → **emitted but always 0%**. The sweep is therefore **PARTIAL against
-`AAP-1`'s "zero UNKNOWN cells"**: nothing is left un-decided that the audit flagged, but 13
-cells were not driven and are listed rather than guessed.
+All **four** cells the audit left literally `UNKNOWN` are definite (native tool registry →
+**ABSENT**, `AskUserQuestion` → **ABSENT**, subagents → **ABSENT**, context-% → **emitted but
+always 0%**), and as of **2026-08-23 the residual 13 are driven too**, so the claude-code column
+satisfies `AAP-1`'s "zero UNKNOWN cells" on the strict reading as well as the literal one. The 13
+resolved as **7 CONFIRMED / 6 DIVERGED**; a fourteenth row moved because the re-drive **corrected an
+existing mark** (see below).
 
-### Residual not-exercised cells (and why)
+**One earlier mark was SUPERSEDED — and my first wording of this was itself wrong.**
+`Procedural-outcome capture (M5d)` read ABSENT/CONFIRMED on the strength of `O12`'s "all 0". An isolated, correction-free 6-tool-call turn
+(`O75`) moves `memory_events` 8 → 11 with two `source='procedural'` rows and a self-model row
+carrying `"tools": ["Terminal"]` — the exact signature `O12`, `C14` and `K17` each used to conclude
+ABSENT. So that row is now **DIVERGED**, and the same re-drive is owed to `AAP-2`'s `C14`, whose
+column still carries the old verdict. This is the reason the count above moves by 14 rows rather than 13.
 
-**22 → 13, and the grouping below is now DERIVED FROM THE ROWS, not maintained beside them.**
-Re-deriving it caught two errors in the original list that had cancelled out in the total: it counted
-*the loop half of the failure-breaker check* as a cell (it is a sub-clause of a row already marked
-`CONFIRMED` by `O24`) and it omitted *incognito/restricted no-write guarantees*, which is a real
-`NOT-EXERCISED` row. Both are fixed here. 1 + 4 + 5 + 3 = 13, and 43 + 7 + 13 = 63.
+**↳ CORRECTED by `AAP-3`'s re-drive: the three old marks were STALE, not WRONG.** I first wrote that
+they were "wrong, not merely stale". That is refuted by the git record: the ACP outcome drain was added
+by **`838abd29` "fix(acp): G7 accumulate ACP tool outcomes for procedural memory" on 2026-08-21**,
+while `O12`, `C14` and `K17` were authored on **2026-08-17** (`a29fcef9`, `8352ca5f`, `3f9328ae`) —
+four days earlier. **All three were correct when measured**, and no observer could have seen otherwise.
+The lesson is about re-derivation, not accuracy: a mark citing a runtime observation has an implicit
+as-of date, and any sweep that re-reads one must date it against the code before calling it wrong.
+`AAP-3`'s `K17` is re-driven at line 1237 of its own column.
 
-1. **Needs a model provider in the isolated home** (~~5~~ **1**, and the original REASON is dead):
-   ~~unattended mode~~ (`O27`), ~~auto-nudge re-arm~~ (`O28`) and ~~memory consolidation~~ (`O29`)
-   are closed — a loop/cron run no longer dies on `no model provider resolves for use case
-   'chat'|'background'` (`O16`), because a local model serves both. The one survivor is not waiting
-   on a provider either: **skill-ladder review** reproduced kiro's `G44` exactly (`O31` —
-   `{"proposals": []}`, and the route census has accept/promote/verify but no forced-run surface),
-   so it needs *instrumentation*. Provider-independent.
-2. **Needs a fixture that was not built** (~~9~~ **4**): ~~knowledge @-mention~~ (`O32`),
-   ~~attachment/paste~~ (`O32`), ~~@prompt expansion~~ (`O34` — ABSENT, provider-independent),
-   ~~agent-profile system prompt~~ (`O32`), per-agent approval floor, PreToolUse hooks, the other
-   five hook kinds, incognito/restricted no-write guarantees, ~~tool-disable prefs~~ (`O30` —
-   ABSENT, provider-independent), ~~Lumon persona injection~~ (`O33`). **Three of the four have a
-   proven recipe** — `K36` for the approval floor, `K39` for PreToolUse blocking (six lifecycle
-   triggers, the PreToolUse one exiting non-zero), `K40` for the other five kinds counted from the
-   hooks' own log. The fourth, incognito, has kiro's `K33` as its recipe.
-3. **Needs a timing/failure injection that did not land** (5): queued messages and
-   queue-steering (`O26` — the probe turn finished 1.2 s early), cancelled-turn preamble,
-   empty-turn auto-retry, pipe-death auto-retry.
-4. **No as-a-user entry point** (3): dry-run replay, OS sandbox confinement probe, and
-   trust/YOLO auto-approve (deliberately not enabled — every card was resolved explicitly so
-   the gate itself stayed measurable).
+**Two premises in the residual list were also inverted rather than stale**, which is worth recording
+because both had survived a re-derivation: the skill ladder was said to need "a model provider this
+isolated home lacks" when the ladder is provider-agnostic and fires on any correction turn (`O66`);
+and the empty-turn cell was said to be "not forceable as-a-user" when a whitespace-only reply forces
+it on the first attempt (`O51`).
 
-Not a cell, but worth carrying: **the loop half of the failure-breaker check** needs six consecutive
-failing tool calls *inside a loop* (kiro's `K15` shape). Its chat half is already decided — `O24`
-found zero warn/block/circuit output after six failures in one turn (`G6`).
+### Residual not-exercised cells — CLOSED 2026-08-23 (13 → 0)
 
+The list that stood here grouped the 13 undriven cells into four buckets. All four are now driven, so
+the list is replaced by what closing them cost — which is the part worth keeping.
+
+**1. "Needs a model provider" (1 cell) — the reason was INVERTED, not stale.** The skill-ladder review
+is dispatched from a provider-agnostic call site (`chat_runner.py:3885` → `after_turn_review.py:326`)
+and its gate is *a correction turn OR >=4 tool calls* — nothing schedule- or threshold-based. Two turns
+on an `acp:claude-code` session, the second a correction, filed a real `refine` proposal (`O66`). The
+"needs instrumentation" framing was also only half right: indistinguishability between *ran and
+proposed nothing* and *never ran* bites only the **negative** case, so a filed proposal marks the cell
+outright. The marker shipped anyway, because `O70` measured that a genuine pass doing 8.5 s of model
+work logged **zero** visible lines on a default install (`G47`'s verdict line is `INFO`; the shipped
+level is `WARNING`).
+
+**2. "Needs a fixture that was not built" (4 cells) — all four built, and one recipe did not port.**
+`K36`'s `echo AUTOFLOOR-OK` probe is unusable here: claude-code executes `echo` itself without asking
+the host, so it never reaches the gate (`(ungated: claude-code executed it without asking the host)`).
+`cat /nonexistent-*` gates reliably and is what `O35`-`O38` used. Two further mechanics cost real time
+and are recorded so the next column does not rediscover them: **`GET /api/approvals` never shows an ACP
+chat card** (it returns `[]` while `pending_approval` is `true` — the working path is
+`GET /api/chat/sessions/{s}` → the **`permission` message's** `meta.approval_id` → `POST
+/api/chat/sessions/{s}/approve` **with the past-tense verb `approved`, not `approve`** — until `AAP-3`
+fixed it (`G80`), the sibling surface's `approve` silently DENIED the tool here while returning
+`200 {"ok": true}`; and `POST /api/approvals/{id}/{action}` has no `trust`/`trust_agent` vocabulary
+at all); and
+`POST /api/chat/sessions` takes the session name in **`name`**, not `session` — a request
+carrying `{"session": …}` has that key silently ignored and gets an auto-generated one, while
+`{"name": …}` is honoured (`chat_handlers.py:888`). Two later drives reported the opposite of the
+first precisely because they sent different fields, so the behaviour is the field, not the endpoint.
+
+**3. "Needs a timing/failure injection that did not land" (5 cells) — the fix was a slower turn, not a
+longer sleep.** `O26` missed the in-flight window by 1.2 s with a tool-latency-slow turn. A turn slow
+by **output volume** (~98 s of streaming, 644 events) plus **polling `running` until it has been true
+for >=10 s** hit the window **1 of 1** attempts, with no fixed `sleep` anywhere (`O45`). `O26`'s
+post-mortem was also incomplete: a perfectly-hit window would *still* have shown `queue: null`, because
+the sessions payload has no queue key at all (`G59`) — `_ChatSession.queue_depth()` exists with no
+serializer.
+
+**4. "No as-a-user entry point" (3 cells) — two were structural absences, one was reachable.** Trust and
+YOLO were driven simply by enabling them (`O35`/`O36`), and the precondition surprise was the opposite
+of the note here: **the dev home ships `agent.yolo: true` + `approval_mode: "auto"` persisted**, so a
+drive on a copy of it measures zero cards for structural reasons unless it flips them first. Dry-run
+replay and the sandbox wrap are genuine absences, now marked DIVERGED with route- and backend-level
+evidence rather than left blank (`O64`, `O56`-`O60`).
+
+**What the closure surfaced.** Eighteen findings (`G50`-`G67`), of which one **P0** (`G52`: the spawned
+CLI persists full transcripts into the operator's real `~/.claude/projects/…`, measured independently
+by two drives and undermining the incognito guarantee), seven **P1**, seven **P2** and three **P3**. One
+P1 was root-caused and fixed in the same PR (`G50`). One earlier mark was corrected (`M5d`, above), and
+two rows of evidence elsewhere were invalidated: `G51` shows `pending_approval_info: null` is not proof
+that no card was raised, which is exactly what **`K36` and `K41`** cite.
+
+**A methodology note that cost a measurement.** One drive forcing an ACP error killed adapters by
+name machine-wide, hitting 10 belonging to four concurrent gateways. Kill only children of your own
+gateway (`pgrep -P <gateway-pid>`). The affected window was identified, the one observation inside it
+was discarded, and both surviving pipe-death observations sit outside it — but the cheaper lesson is
+the filter.
 ### Gap inventory — severity-ranked (claude-code findings)
 
 **P0 — safety**
@@ -579,6 +662,118 @@ found zero warn/block/circuit output after six failures in one turn (`G6`).
   message), not grammar — "never violate these" is a well-formed prohibition and the tightened
   rule accepts it, correctly by its own terms. That row needs the capture path to distinguish
   the user's own words from injected content; filed here rather than half-fixed.
+
+### Gap inventory addendum — the 2026-08-23 residual close (`G50`-`G67`)
+
+Eighteen findings from driving the last 13 cells. Numbered continuing from `G49`; severities use the
+same scale (P0 safety / P1 capability-dead / P2 fidelity / P3 cosmetic).
+
+**P0 — safety**
+
+- **`G52` The spawned claude CLI persists full conversation transcripts outside `GIDEON_HOME`.**
+  It writes to the operator's **real** `~/.claude/projects/<workspace-slug>/` — measured
+  independently by two drives (`O44`: 8 `.jsonl` files whose session ids match the `--session-id=`
+  args in `ps`; `O63`: the incognito-only phrase 3x in each of two transcripts; `O67`: the same
+  again, plus CLI-side `memory/`). This is the **write** half of the `GIDEON_CC_ISOLATE` gap
+  the matrix records as "WIRED (opt-in)", and the mitigation is **off by default**. Two consequences
+  beyond the leak itself: it undermines the incognito no-write guarantee (`K33` and `O61` both
+  measured Gideon's own stores, not this one), and it breaks multi-tenant isolation. Every
+  drive in this sweep had to clean up after itself; one drive's directory **regenerated** after the
+  first removal because later turns were still running, so removal must follow the gateway kill.
+
+**P1 — capability-dead**
+
+- **`G50` The `Error` lifecycle hook is unreachable for the entire `AcpError` class.**
+  `HOOK_EVENT_ERROR` had exactly one fire site, the generic `except Exception`
+  (`chat_runner.py:4062`), so an `Error` hook bound to an ACP chat could never fire even as the user
+  saw an error card. Measured 0 on kiro (`K40`) and 0 on claude-code (`O43`) — the earlier zero was a
+  host defect, not a provider difference. **FIXED in this PR** with a falsified regression test.
+- **`G56` Adapter death mid-turn is not classified as process death, so the message is dropped.**
+  The transport surfaces it as `AcpTimeoutError("ACP prompt timed out")`, and
+  `chat_runner.py:4013`'s retry predicate matches only `already in progress` / `process exited` /
+  `not running`, so the documented re-queue never runs: no `⟳ Connection lost`, no queue frame, no
+  retry (`O52`). **Diagnosis rests on `O52`'s behaviour plus the code read, not on a mutation** — the
+  drive mutated the predicate and re-drove twice without reaching the branch (once recovering a layer
+  down at ACP init, once landing in `G57`'s mid-stream path), and reported that honestly.
+- **`G57` A dead pipe mid-stream is reported as a SUCCESSFUL turn with a silently truncated answer.**
+  `acp/session.py:425`'s `stale_eligible` synthesizes `EVENT_COMPLETE stop_reason=end_turn` when the
+  drain EOFs right after a text chunk, so the user gets `Turn complete: 76 events`, `chat_done`, and
+  followups offering to continue — with nothing signalling the loss (`O53`). Worse than an error.
+- **`G58` A session serves turns on the native runtime while still claiming `acp:claude-code`.**
+  Reproduced 3x: turns survive SIGKILL of every adapter child, report `Turn complete: 0 events`
+  (genuine ACP turns reported 644/76/7/6), and expose the **native** tool set to a tool-identity
+  probe — while `acp_provider`, and in three runs the per-turn provenance line itself, still read
+  `acp:claude-code` (`O54`). The only visible tell is the zero event count.
+- **`G60` The OS sandbox wrap is unconditionally inert on macOS 26+, and takes the credential scrub
+  with it.** One over-broad guard (`sandbox.py:351`) returns `False` for major >= 26 **before
+  probing**, so every mode including `strict` degrades to `off` behind a single `logger.warning` with
+  no UI signal (`O57`). Because the `env -u` scrub lives inside `sandbox_exec_argv`, `AWS_SECRET*` /
+  `AWS_SESSION*` / `SSH_AUTH_SOCK` also reach the agent CLI unscrubbed (`O56` counted one present).
+  `O59` proves the disable is over-broad: a three-arm seatbelt test with a third-party binary returns
+  `EPERM` on this very host. **Deliberately not fixed in-session** — re-enabling a dormant security
+  control across every ACP and native spawn is an owner call, and the scrub alone could break the
+  Bedrock and git-over-SSH paths a dev home depends on.
+- **`G61` `options["sandbox_mode"]` is a live reader of a key nothing writes.** Two production
+  readers, **zero** production writers — the only writer in the tree is a test (`O60`). So the ACP
+  spawn's sandbox level is permanently `"auto"` and unsettable by any surface.
+- **`G63` Incognito's no-write promise is host-scoped only.** The host wrote zero rows (`O61`) while
+  the spawned CLI persisted the entire incognito conversation into the operator's real home (`O63`).
+  Directly contradicts what the incognito pill promises; `G52` is the general mechanism.
+
+**P2 — fidelity**
+
+- **`G51` `pending_approval: true` and `pending_approval_info: null` at the same instant** on the ACP
+  path (`state.py:682-695`), so the Board's inline Approve/Trust/Reject buttons get no metadata.
+  **Methodology consequence: `K36` and `K41` both cite `pending_approval_info: null` as proof that no
+  card was raised — on this path that is not a sound signal, so both rows' evidence needs re-reading.**
+- **`G53` Every gated ACP tool emits two SEL rows that contradict each other.** `invoked` carries the
+  generic ACP title `Terminal` with `metadata.risk: "caution"` and an **empty `request_id`**;
+  `auto_approved`/`approved` carries the real command with `risk: "safe"`. Same call, two names, two
+  risks, and no joinable id. `K12`'s "one internal contradiction" is not a one-off — it is every row,
+  and it is inverted relative to kiro's.
+- **`G55` A user Stop on a claude-code turn never produces an acked soft cancel**, so the
+  cancelled-turn preamble can never re-inject and the user gets an `ACP prompt timed out` error card
+  instead of a clean stop (`O49`, against the native control `O50`).
+- **`G59` The sessions payload exposes no queue field at all.** `_ChatSession.queue_depth()` exists
+  with no serializer (`state.py:697`), so depth is knowable only from `queue_push`/`queue_pop` WS
+  deltas and a mid-turn reload loses the strip cards. **This is the second half of why `O26`
+  mismarked:** `queue` was not "null", the key never existed.
+- **`G62` `agent.sandbox` is a PATCH-editable config enum with zero functional readers** — an inert
+  security control the user can toggle to no effect; and its enum is only `["auto","off"]`, so
+  `strict`/`cc` are not offered at all (`O60`).
+- **`G64` T9 observe mode is silently accepted and dropped on every ACP path.** No surface sets it,
+  `/api/chat` swallows the key and executes writes anyway, and the two distinct `dry_run` notions
+  (trigger preview vs agent observe mode) share a name — so the trigger button reads like a T9 entry
+  point and is not (`O64`).
+- **`G65` The skill ladder has no forced-run surface.** Census-confirmed against the registered
+  routes: `accept`/`promote`/`verify`/reject exist, no forced run. `lastReview` makes the *result*
+  observable, but a tester still cannot *trigger* a pass — you must manufacture a qualifying turn (a
+  correction, or >=4 tool calls) and wait ~10-60 s. Deliberately not built: the mechanism is live, so
+  a forced-run route would be a new surface for convenience, not to close an unknown.
+- **`G67` Procedural memory collapses every tool call of a given kind into one row.** The M5d drain
+  works (`O75`, correcting `O12`), but the memory key hashes a label built from the ACP **generic**
+  tool title, so 5 procedural events across 13 tool calls produced **3 distinct keys** — every
+  `Terminal` invocation folds into one success row and one failure row regardless of the command. So
+  procedural memory on the ACP path can never distinguish `pwd` from `rm -rf`. Shares a root cause
+  with `G53`: both consume the generic title where the real command was available.
+
+**P3 — cosmetic / legibility**
+
+- **`G54` A bogus model override is accepted and silently ignored.**
+  `POST /api/chat/sessions/{s}/model {"model":"<bogus>"}` returns `{"ok": true}`; the next turn
+  succeeds on the real model. No validation against the discovered model list, no error.
+- **`G66` `G47`'s per-pass verdict line is level-gated out of the default install.** A real
+  skill-ladder pass logged **zero** visible lines because `no_action` is `INFO` while the shipped
+  `log_level` is `WARNING` (`O70`). Correct as spam control, but it means the log is not an operator
+  surface for "did the ladder run"; after this PR only the API marker is.
+
+Two smaller findings were left without gap ids as an owner's call: the empty-turn card is broadcast
+**twice** (`chat_runner.py:3840-3846` — a `session.append` echo plus an explicit `broadcast_ws`, so
+two identical `chat_message` frames reach the client; UI dedupe unverified), and
+`session_pid_<pid>.txt` is **not refreshed on respawn** — after an adapter kill both map files named
+dead pids while the live adapter had no entry, which breaks the pid→session resolution that subagent
+inject-back depends on (`O11`).
+
 
 ### Incidental bugs fixed in-session
 
@@ -1017,7 +1212,7 @@ Ledger ids are `K…` so they never collide with `AAP-1`'s `O…` or `AAP-2`'s `
 | Interactive approval cards | WIRED | CONFIRMED | WIRED | `K5` (a card raised, resolved, the tool then ran), `K12` (three cards in one turn, all resolvable) |
 | trust_reads (effective-safe auto-approve) | PARTIAL | **DIVERGED** | it does not fire on kiro at all — reads are carded | `K5` — `pwd` arrived `risk: "safe"`, `is_read_only: "1"` and **still blocked on a card**; `K12` — a plain file read did too. The auto-approve is title-driven, and kiro's honest `Running: pwd` / `Reading probe.txt:1` titles land as `execute`/`read` without triggering it, where codex's mislabelled `Read file '…'` title for a shell `exec_command` did |
 | Trust (session) / YOLO (global) auto-approve | WIRED | CONFIRMED (session trust) | WIRED for session trust; YOLO not exercised | `K15` — one `{action:"trust"}` and the next five tool calls surfaced `"auto": true` with no card; `trust: true` persists on the session |
-| Per-agent approval floor ("Always allow") | WIRED | **CONFIRMED** (follow-up) | WIRED | `K36` — a profile with `approval_mode: auto`, with the auto-approver **off**: `echo AUTOFLOOR-OK` executed with no card at all (`pending_approval_info: null`, no `permission` frame) and the session came back `trust: true` |
+| Per-agent approval floor ("Always allow") | WIRED | **CONFIRMED** (follow-up) | WIRED | `K36` **↳ RE-ESTABLISHED 2026-08-23 (`K91`/`K92`): the mark STANDS, but it was right for a partly wrong reason.** Of its two proofs, `pending_approval_info: null` is **void** under `G51` (reproduced live), while "no `permission` frame" was always sound and now has a control arm plus a line-attributable falsification. Also, the `trust: true` quoted here is emitted by the **list** endpoint, not the detail endpoint, which exposes a computed `approval: "trust"` — imprecise, not wrong. Original evidence: a profile with `approval_mode: auto`, with the auto-approver **off**: `echo AUTOFLOOR-OK` executed with no card at all (`pending_approval_info: null`, no `permission` frame) and the session came back `trust: true` |
 | Task-mode enforcement BEFORE approval (trust can't bypass) | PARTIAL | CONFIRMED | WIRED | `K14` (ask-mode write denied, file never created, SEL `denied | task_mode:ask`), `K22` (plan-mode write denied). The *trust-can't-bypass* half was established on codex (`C17`) and not separately re-driven here, because kiro's trust and its ask-mode probes ran on different sessions |
 | Plan mode → native backend plan | WIRED | CONFIRMED | ABSENT — enforced only by the host gate, exactly as the audit predicted **for kiro** | `K22` — plan set before a fresh session's first turn; the CLI called its write tool anyway, the host blocked it, and the reply carried the host's `[SWITCH_TO_AGENT: …]` marker |
 | Hard deny-list (`security.is_denied`) pre-execution | ABSENT | **DIVERGED** | WIRED — it covers ACP tools | `K25` — `git … push` was blocked pre-execution with the pattern named to the user (`blocked: Blocked by security policy: *git*push*`) and a SEL `denied` row. The first positive result for this cell across all three sweeps |
@@ -1034,7 +1229,7 @@ Ledger ids are `K…` so they never collide with `AAP-1`'s `O…` or `AAP-2`'s `
 | Feature | audit said | mark | runtime verdict | evidence |
 |---|---|---|---|---|
 | Filesystem/shell tools (cwd-confined + extra_tool_roots) | PARTIAL | **DIVERGED** — worse | PARTIAL, and NOT cwd-confined | `K4` — the CLI's own `shell`/`read`/`write` work, but its cwd is the real `~/.gideon/workspace`, not the session's `workspace_dir` |
-| Full native tool registry (knowledge/tasks/loops/inbox/memory/artifacts/workflows/subagents/web/schedule) | UNKNOWN | **DIVERGED** (re-drive) | **REACHABLE** — over the protocol, not the config | `K51`/`K53` — the earlier ABSENT was a naming artifact: `K4` scored two strings (`knowledge_search`, `task_create`) that exist in no provider's registry. Re-measured against the CLI's own enumeration, `knowledge`, `todo_list`, `memory_*`, `artifact_*`, `workflow_*`, `subagent_*` and `notify` are all present, delivered by protocol-passed `mcpServers` (`K54`) |
+| Full native tool registry (knowledge/tasks/loops/inbox/memory/artifacts/workflows/subagents/web/schedule) | UNKNOWN | **DIVERGED** (re-drive) | **REACHABLE** — over the protocol, not the config | `K51`/`K53` — the earlier ABSENT was a naming artifact: `K4` scored two strings (`knowledge_search`, `task_create`) that exist in no provider's registry. Re-measured against the CLI's own enumeration, `knowledge`, `todo_list`, `memory_*`, `artifact_*`, `workflow_*`, `subagent_*` and `notify` are all present, delivered by protocol-passed `mcpServers` (`K54`) **↳ third confirmation 2026-08-23 (`K71`-`K75`), on kiro-cli 2.19.1:** 151 tools enumerated (builder-mcp 37 + creds-agent 3 + chrome-devtools 30 + kiro natives 14 + gideon-core 67), `pwd` inside the CLI = the session's own `workspace_dir` so **`K4`'s cwd escape does not reproduce**. The condition is now named: **every kiro session parks on its first call `@gideon-core/get_context` (3/3)** — reject that card and the turn emits zero assistant output, approve it and the full registry appears (`G73`). Both standing hypotheses are falsified: `~/.kiro`'s 3 enabled MCP servers contributed exactly 70 of the 151 tools, so the fleet **does** start under the gateway (`K74`), and 167 builder-mcp / 696 mcp / 52 kiro-cli processes ran concurrently with no contention (`K75`). The `NO_TOOLS` string has **never existed in the repo** (`git log -S` finds no commit) — it was the agent's own reply text, not a host sentinel (`K70`/`K77`) |
 | Tool disable prefs (PT3/UT4 per-tool + per-provider) | ABSENT | **CONFIRMED** (follow-up) | ABSENT — the only per-tool surface cannot address an ACP CLI's tools | `K45` — `POST /api/mcp/toggle-tool {"server":"gideon-core","tool":"get_context","enabled":false}` → `{"error": "server 'gideon-core' not found"}`. The pref keys on *configured* MCP servers; neither kiro's natives nor the protocol-injected `gideon-core` is one |
 | Per-turn tool retrieval + progressive disclosure (`tool_search`/`tool_schema`) | ABSENT | CONFIRMED | ABSENT | `K4` — all 57 tools were enumerated up front; kiro ships no `tool_search`-style tool (codex did) |
 | Failure breaker (warn@3/block@5/circuit@30) | ABSENT | CONFIRMED | ABSENT | `K15` — six consecutive failing tool calls in one turn, zero warn/block/abort |
@@ -1053,8 +1248,8 @@ Ledger ids are `K…` so they never collide with `AAP-1`'s `O…` or `AAP-2`'s `
 |---|---|---|---|---|
 | Preference-facet capture (every turn) | WIRED | CONFIRMED | WIRED | `K16` — `activity_event` kind `learned`: `Learned: never more` (the same bad extraction as on both other providers) |
 | Correction→lesson review | WIRED | CONFIRMED | WIRED | `K16`, `K17` — `Learned: User correction to honor: …` plus `facet_veto` + `after_turn_review` rows in `memory.db` |
-| Procedural-outcome capture (M5d tool-outcome drain) | ABSENT | CONFIRMED | ABSENT | `K17` — after turns of 13, 8 and 3 tool calls, every `memory_events` row came from the **0-tool** correction turn, and the self-model row asserts `tools: []` |
-| Skill-ladder review (4-tier, propose-only) | WIRED | NOT-EXERCISED (re-drive: still, new reason) | — | `K56` — the gate is drivable (a correction signal OR >=4 tool calls) and the ladder DOES run: with a 60 s provider timeout its pass dies as `provider_error` at 60,010 ms, logged only at DEBUG; with 900 s the background passes complete and `proposals` stays `[]`. What blocks the cell now is ATTRIBUTION — no surface ties a model call to its caller and the success path emits only a transient chip (`G47`), superseding `G44`'s "no forced-run surface" |
+| Procedural-outcome capture (M5d tool-outcome drain) | ABSENT | **DIVERGED** (re-drive) | **PRESENT but mis-signed** | `K80` — one correction-free turn moved `memory_events` **8 → 19**, `source='procedural'` **2 → 12**, distinct procedural keys **1 → 11**. ACP provenance verified four ways (readback, `kiro-cli → aim sandbox --client kiro-cli acp` as a child of the drive's own gateway pid, 15 `tool` + 5 `permission` rows, and **no `Turn complete` line** — the native tell absent). `K84` — **`"tools": []` does NOT reproduce**: the self-model row records ten labels. **`K17` was CORRECT WHEN MEASURED (2026-08-17) and superseded by `838abd29` (2026-08-21) — stale, not wrong.** Two defects remain: every row is signed `success`, including `cat /definitely-not-a-real-file` which the assistant itself reported as `exit 1` (`G76`), and only **5 of 10** rows are tool calls at all — `Completing #1`-`#4` and `Creating task list: …` are kiro's task-list progress updates arriving as their own `tool_call` ids, the last being model prose whose key cardinality is unbounded by construction (`G77`) |
+| Skill-ladder review (4-tier, propose-only) | WIRED | **CONFIRMED** | WIRED | `K60` — a real proposal was **FILED, twice**, on two `acp:kiro-cli` sessions with two distinct correction shapes: `capability-gap-response-bf1d7555b3f2` in 19,077 ms and `naming-advice-before-after-29d6f0822f7f` in 20,184 ms, both `kind: new`, `status: pending`, with the correct `session_key`. **The mark rests on the filed proposals alone** — they are visible through `origin/main`'s bare `{"proposals": […]}`, so it carries no dependency on unmerged work. `K64` falsification: `learning.skill_ladder = False` still detected the correction but produced **zero** ladder lines and froze the queue; restored → the second filing landed, which separates the ladder from the generic after-turn review. `K61` — **`K56`'s 60 s `provider_error` does not reproduce** (no timeout was raised); a pass costs two model calls, ~2.1 s classify + ~18-19 s synthesis, ~2.4k tokens. `K62`/`K63` — **`K56`'s blocking reason was already closed on main** by `70660460`, which added both `caller: "skill_ladder"` on the model call and one INFO verdict line per pass; and the success path is not "only a transient chip" — each filing also wrote a durable `notifications.jsonl` row |
 | Memory consolidation on session end | WIRED | **CONFIRMED** (follow-up) | WIRED | `K42` — `POST /api/memory/consolidate {"key": "dashboard_<session>"}` on a kiro session: `last_consolidated` 0 → 33, `semantic_memory` 3 → 5, `episodic_memories` 2 → 5. The per-turn cadence has a 30-message threshold (`src/gideon/history.py:38`), which is why thirteen short turns had not tripped it |
 | Incognito/restricted no-write guarantees | WIRED | **CONFIRMED** (follow-up) | WIRED | `K33` — an `incognito` session ran the SAME correction turn that wrote three rows on a persistent session and wrote **zero** (`memory_events` 3→3, `semantic_memory` 3→3, `episodic` 0→0); the CLI itself knew ("for the rest of this incognito session"); the transcript persists with `memory_mode: incognito` by design, and the session is not restored after a gateway restart |
 
@@ -1082,12 +1277,17 @@ Ledger ids are `K…` so they never collide with `AAP-1`'s `O…` or `AAP-2`'s `
 
 ### Mark counts (kiro-cli, the same 63 audit cells)
 
-| mark | first sweep | after the follow-up sweep | after the 2026-08-19 residual re-drive |
-|---|---|---|---|
-| CONFIRMED (runtime matched the audit's prediction) | 31 | 44 | **43** |
-| DIVERGED (runtime contradicted it) | 12 | 16 | **18** |
-| ENV (environment limit, never a capability verdict) | 0 | 1 | **1** |
-| NOT-EXERCISED (no runtime observation obtained; reasons below) | 20 | 2 | **1** |
+| mark | first sweep | after the follow-up sweep | after the 2026-08-19 re-drive | after the 2026-08-23 close |
+|---|---|---|---|---|
+| CONFIRMED (runtime matched the audit's prediction) | 31 | 44 | 43 | **43** |
+| DIVERGED (runtime contradicted it) | 12 | 16 | 18 | **19** |
+| ENV (environment limit, never a capability verdict) | 0 | 1 | 1 | **1** |
+| NOT-EXERCISED (no runtime observation obtained) | 20 | 2 | 1 | **0** |
+
+`43 + 19 + 1 + 0 = 63`. **The kiro-cli column is closed**: the last NOT-EXERCISED cell (skill-ladder
+review) is CONFIRMED by a *filed* proposal (`K60`), and one CONFIRMED cell moved to DIVERGED on a
+re-drive (`Procedural-outcome capture`, `K80`), so the totals move by two rows in opposite directions
+and the CONFIRMED count is unchanged by coincidence rather than by nothing happening.
 
 Every column is counted from the rows above rather than carried in prose. The follow-up sweep resolved
 **18 of the 20** first-sweep NOT-EXERCISED cells; the residual re-drive then resolved one of the two
@@ -1116,7 +1316,28 @@ ABSENT-and-erroring) **and the three unknowns this atom was scoped to close**:
 `gideon.json` discovery → **NOT honored** (`K6`), the effort pill → **a silent no-op that
 round-trips** (`K10`), concurrent sessions → **declared and absent** (`K7`).
 
-### Residual not-exercised cells (kiro-cli, and why)
+### Residual not-exercised cells (kiro-cli) — CLOSED 2026-08-23 (1 → 0)
+
+**The single survivor (skill-ladder review) is now CONFIRMED (`K60`), so this column has no
+NOT-EXERCISED cells.** What closing it cost is the part worth keeping, because two of the three
+blockers recorded below had already been resolved by code that shipped *before* the re-drive began:
+
+* **`K56`'s "attribution is missing" was closed on `main` by `70660460` (2026-08-21)**, which added
+  both `caller: "skill_ladder"` on the model call and one INFO verdict line per pass. **A blocker
+  recorded against a moving codebase expires**, and nothing re-checked it for two days.
+* **"The success path emits only a transient chip" was stale** — each filing writes a durable
+  `notifications.jsonl` row (`K63`), so there were three durable surfaces before this work, four after.
+* **The route that actually marked the cell needed none of that.** A *filed* proposal is unambiguous
+  positive evidence; indistinguishability only ever bit the negative case. Two correction shapes filed
+  two proposals (`K60`), visible through `origin/main`'s bare `{"proposals": […]}`.
+
+**Two things make this cell genuinely expensive to drive, and neither is about the ladder.**
+`K65` — kiro-cli opens its ACP sessions **read-only** (`allowed_write_paths: []` on 25/25 session
+files, and Gideon sets none of it), so the gate's `tool_calls >= 4` leg cannot be driven with
+filesystem work and the correction leg is the reliable driver. `K85` — kiro intermittently exposes **no
+shell tool at all** (3 of 5 turns), which can silently invalidate a drive; `G81` is the likely cause.
+
+**Historical provenance, kept:**
 
 **First sweep (20 cells) — all but two are now closed; kept for provenance.** The groups were:
 needs a model provider (4: unattended mode, auto-nudge re-arm, skill-ladder review, memory
@@ -1374,6 +1595,104 @@ kiro (`K12`, `K13`); and the on-disk `~/.aws/sso/cache/kiro-auth-token.json` `ex
 auth-freshness signal (five weeks expired beside a working refresh token), so a future sweep must
 prove auth with a live call rather than by reading that file.
 
+### Gap inventory addendum — the 2026-08-23 kiro close (`G68`-`G83`)
+
+Sixteen findings from closing the last cell and re-driving three marks. Numbering continues from
+`AAP-1`'s `G67`; severities use the same scale (P0 safety / P1 capability-dead / P2 fidelity / P3
+cosmetic).
+
+**P0 — safety**
+
+- **`G69` kiro-cli writes per-session transcripts into the operator's real `~/.kiro/sessions/cli/`,**
+  outside `GIDEON_HOME` — the kiro analogue of `G52`. `GIDEON_HOME` confines the host, not
+  the CLI. Measured at scale: **7 prompts produced 26 session files** (`K66`), every one created with
+  `session_created_reason: "subagent"`. Nothing leaked to `~/.kiro/session-index`, `workspace-roots`
+  or `logs`. Two drives removed 26 and 62 entries of their own respectively, each attributing by `cwd`
+  and by probe marker with an explicit zero-foreign-hit check before deleting.
+
+**P1 — capability-dead**
+
+- **`G72` A registry and its own test positively assert that claude-code gates every tool; it gates
+  nothing.** `acp/permission_authority.py:246-250` declares `entries=()`, documented at `:186-190` as
+  a *positive* statement and exposed as `gated_universally` (`:198`). Refuted by **7 persisted SEL
+  records** with `outcome="ungated"`, `provider="claude-code"`, across 4 sessions and 2 tool titles,
+  each carrying `reason="no session/request_permission for this tool_call"`. Falsified properly:
+  baseline `not_gateable_entry('claude-code','Terminal')` → `None`; mutated → matched,
+  `gated_universally=False`, and `tests/test_acp_permission_authority.py:119` went **RED**.
+  **It cannot be seen to rot, because that test re-asserts the claim and nothing reads SEL.**
+  Reported rather than fixed: declaring those holes is a policy call on `AAP-1`'s column (E4).
+- **`G76` On kiro the ACP failure bit is never set, so a failed tool call is stored as a `success`
+  prior, painted as success in the UI, and invisible to the loop breaker.** `acp/translate.py:303`
+  only stamps `ok: False` on ACP `status=="failed"`, and kiro reports a non-zero-exit shell command as
+  a completed tool call. One unset bit, three wrong consumers (`acp/outcomes.py:110`,
+  `chat_runner.py:2915` the loop breaker, `:2824` the card colour) — so **`G6`'s landed
+  failure-breaker fix is inert on kiro**. Falsified live by inverting `:110`: all 10 rows flipped to
+  `failed`, including `pwd` (`K81`). Not fixed here: the repair is a cross-provider decision on the
+  same seam as `G67`/`G77`, i.e. owner scope rather than an incidental fix.
+- **`G81` After a gateway restart, freshly created and freshly bound `acp:kiro-cli` sessions come up
+  with no tools at all — silently.** The model answers that no shell tool is exposed, while
+  `acp_provider` still reads `acp:kiro-cli`, with no error, no log line, and the `session_pid_*.txt`
+  count dropping to 0 (against `K37`'s one-per-session). Confirmed **not** an artifact of the drive's
+  own mutation: it persisted after restore while floor seeding kept working, which cleanly separates
+  "the floor works" from "tools are absent". Very likely the cause of `K85`'s intermittent
+  no-shell-tool, and plausibly of `K17`'s original ABSENT. Same family as `G5`/`G30`.
+
+**P2 — fidelity**
+
+- **`G68` kiro-cli ACP sessions receive a read-only filesystem grant**, so the write half of its
+  toolset is unreachable and file-shaped tasks are refused (`K65`). *Caveat recorded by the drive
+  rather than smoothed over:* `K12` shows a kiro edit card with a unified diff, so some configuration
+  does expose writes — why this one did not was not established.
+- **`G73` A denied first tool call yields a turn with zero assistant output.** Every kiro session
+  parks on `@gideon-core/get_context`; reject it and nothing comes back. An unattended prober
+  cannot distinguish "no tools" from "first call denied" — this is what manufactured the `NO_TOOLS`
+  reading that stood for four days (`K72`).
+- **`G77` Procedural memory keys hash ACP progress prose.** kiro's titles carry the real command, so
+  nothing folds and every distinct command mints a key forever — the exact **mirror** of `G67`'s
+  collapse on claude-code. Worse, only 5 of 10 rows are tool calls: `Completing #1`-`#4` and
+  `Creating task list: …` are kiro's task-list progress updates arriving as their own `tool_call` ids,
+  and that last label is **model prose**, so its cardinality is unbounded by construction. `G67` and
+  `G77` want **one label contract, not two per-provider patches**.
+- **`G79`** — kiro's transcript leak, folded into `G69` above.
+- **`G80` (FIXED in this PR)** `POST /api/chat/sessions/{s}/approve` collapsed **every** unrecognised
+  action verb to `rejected` while returning `200 {"ok": true}`. The vocabulary is past-tense
+  (`approved`) but the sibling `/api/approvals/{id}/{action}` surface takes `approve` — so the obvious
+  verb silently **denied** the tool and read as success. It cost one drive a 212-second turn and a
+  wasted control arm. The shipped frontend sends `approved`, so there is no user impact; this is an
+  API-client footgun plus a real cross-surface incoherence. Fixed with 3 tests including a vacuity
+  check that reverting the guard goes red.
+- **`G82`** mechanism candidate for `G81`: `gideon.acp.transport: PID … did not exit after force
+  kill` (5 PIDs). ACP children are wrapped in `aim sandbox`, survive the gateway's force-kill, and
+  outlive the restart.
+
+**P3 — cosmetic / legibility**
+
+- **`G70` `G47`'s `caller` field is populated by exactly one call site.** Across the ledger: 4 rows
+  `skill_ladder`, **33 rows `caller: ""`**, and 53 pre-`G47` rows with the key absent. The field exists
+  everywhere; attribution is opt-in, so "which subsystem made this call" is answerable for one
+  subsystem.
+- **`G71` A parked ACP permission leaves the `/api/chat` SSE stream silent with no keepalive or
+  deadline** — a 420 s read died with the turn still pending. A notification *is* written, so the
+  mechanism works, but an unattended driver cannot tell "waiting on you" from "hung".
+- **`G78`** — **partly retracted.** It claimed a pending ACP permission is invisible to
+  `session.pending_approval` and that the id is SSE-only. `K94` measured otherwise:
+  `pending_approval` **is** `True` while parked and the `approval_id` lives on the `permission`
+  message's meta inside `GET /api/chat/sessions/{s}`. What is null is `pending_approval_info` — which
+  is `G51`, already filed. Kept as a record of the retraction rather than deleted.
+- **`G83` After a restart a `cron:`-keyed session exists twice**: the list endpoint reports
+  `cron_aap3d-unatt` while the detail endpoint serves `cron:aap3d-unatt`, both returning 200 with the
+  same 3 messages and each echoing its own key. A colon→underscore persistence artifact. Does not
+  affect `K41`/`K93`, whose runtime key was `cron:…`, proven by the SEL resource string.
+  **↳ RE-CLASSIFIED 2026-08-23 — this is NOT cosmetic. `AAP-2`'s sweep found the security
+  consequence, filed there as `G93`, and I have verified it directly:**
+  `is_unattended_session` matches on the colon-suffixed prefixes `('cron:', 'subagent:', 'channel:',
+  'inbox:', 'side:')`, so the underscore form matches **none** of them —
+  `is_unattended_session('cron:x')` is `True` while `is_unattended_session('cron_x')` is `False`
+  (measured for `cron`, `subagent` and `channel`). **A rehydrated unattended session therefore
+  silently becomes ATTENDED**: it loses HEADLESS, and its approvals park waiting for a human who is
+  not there. That affects every by-construction unattended class, not just `cron`. Filed here as P3
+  because the duplicate listing was all this drive measured; the severity belongs with `G93`.
+
 ### Incidental bugs fixed in-session (kiro-cli)
 
 **None.** Every defect this sweep localised is structural and shared, so the plan's own rule applies
@@ -1432,10 +1751,10 @@ unblocked the four "needs a model provider" cells (`K29`).
 | `K38` | pipe death: `kill -9` on the session's `kiro-cli acp` tree mid-turn (during an approved `sleep 40`), then the same session's next turn, then the pid files | **no retry.** The stream ended `ACP prompt timed out`; nothing was re-queued and no replacement process appeared for that turn. The **next** turn respawned transparently (fresh tree, `RECOVERED` in 2.5 s) — but `session_pid_*.txt` still named the **dead** pid and no file was written for the live one, so the inject-back file is stale exactly after the event that makes it wrong |
 | `K39` | PreToolUse blocking, both halves: six lifecycle hooks created via `POST /api/triggers` (`trigger_type: lifecycle`, `action.provider: bash`), the PreToolUse one `exit 2`; a write driven (a) while no agent referenced the hook, (b) with the hook ids bound to the session's agent profile | **the same hook blocks or does not, depending on who references it.** (a) it fired three times and the write still landed — `hooked.txt` contained `HOOKED`. (b) the tool line read `Running: @gideon-core/get_context (hook blocked: aap3-pretool:hook denied)` and `hooked2.txt` was **never created**. `chat_runner`'s `_fire` is agent-scoped by design ("there is no global firing path"); `fire_tool_hooks` is the informational path whose docstring says results "cannot block execution". Filed `G40` |
 | `K40` | the other five hook kinds, same fixture, counted from the hooks' own log file over 25+ turns | `SessionStart` **1**, `UserPromptSubmit` **17**, `Stop` **15** — and `PostToolUse` **0**, `Error` **0**. The Error miss is not for lack of errors: `/compact` produced `-32601` and one turn produced a real `-32603` `MODEL_TEMPORARILY_UNAVAILABLE`, and neither fired it. Filed `G41`. (An auto-nudge injection also fires `UserPromptSubmit`, which is why that count exceeds the human turns) |
-| `K41` | unattended mode as-a-user: a session keyed `cron:aap3-unattended` (the `is_unattended_session` prefix rule), auto-approver **off**, asked for a write | **fail-fast, not parking:** `Running: @gideon-core/get_context (auto-denied: unattended run, no one to approve)`, `[DONE]` in 5.2 s, `pending_approval_info: null`, and the requested file never created. The audit predicted ABSENT for this cell; `AAP-6` built it and this is its as-a-user measurement on kiro |
+| `K41` | **↳ RE-DRIVEN 2026-08-23 (`K93`): the mark STANDS and needed no rescue** — its primary evidence (the `auto-denied: unattended run` tool line) was already `G51`-proof, so the `pending_approval_info: null` it also cites was redundant decoration rather than load-bearing. Reproduced to within 0.2 s. — unattended mode as-a-user: a session keyed `cron:aap3-unattended` (the `is_unattended_session` prefix rule), auto-approver **off**, asked for a write | **fail-fast, not parking:** `Running: @gideon-core/get_context (auto-denied: unattended run, no one to approve)`, `[DONE]` in 5.2 s, `pending_approval_info: null`, and the requested file never created. The audit predicted ABSENT for this cell; `AAP-6` built it and this is its as-a-user measurement on kiro |
 | `K42` | memory consolidation: 13 short turns to cross the threshold (it did not fire), then `POST /api/memory/consolidate {"key": "dashboard_<session>"}` | **CONFIRMED** — `last_consolidated` 0 → **33**, `semantic_memory` 3 → 5, `episodic_memories` 2 → 5. The per-turn cadence's gate is a 30-message threshold on the *history log* (`src/gideon/history.py:38`) and its offset is process-local, so a short session never reaches it; the explicit endpoint is the only way a user can force it |
 | `K43` | auto-nudge re-arm: `POST /api/autonudge {"session_name": <kiro session>, "idle_secs": 20, "max_cycles": 2}`, then 75 s of silence | **armed, fired, re-armed, fired, capped** — `cycle_count: 2`, `active: false`, `last_fire_ts` set; the transcript carries both injected `NUDGE-PROBE` turns and kiro's `NUDGED` replies. First runtime demonstration of the loop-side nudge on an ACP provider |
-| `K44` | the skill ladder, with a live model provider and 25+ turns (corrections included): `GET /api/skills/proposals` | `{"proposals": []}` throughout, and the route census shows accept/promote/verify but **no forced-run surface**. So the cell stays NOT-EXERCISED for a reason that is not a fixture — it needs instrumentation. Filed `G44` |
+| `K44` | the skill ladder, with a live model provider and 25+ turns (corrections included): `GET /api/skills/proposals` | **↳ SUPERSEDED 2026-08-23 by `K60`** (two proposals filed on kiro; `K44`'s empty list was the *negative* case, which no observation from outside could distinguish from "never ran" until `70660460` shipped the `caller` field). `{"proposals": []}` throughout, and the route census shows accept/promote/verify but **no forced-run surface**. So the cell stays NOT-EXERCISED for a reason that is not a fixture — it needs instrumentation. Filed `G44` |
 | `K45` | tool-disable prefs: `POST /api/mcp/toggle-tool {"server":"gideon-core","tool":"get_context","enabled":false}` | `{"error": "server 'gideon-core' not found"}` — the only per-tool disable surface addresses *configured* MCP servers, and an ACP CLI's tools are neither (kiro's 57 natives come from its own config; `gideon-core` is injected through the protocol field, not the registry). ABSENT with a named reason |
 | `K46` | dry-run replay: a census of what a user can actually reach — routes matching dry-run/observe, config fields, and where the `dry_run` argument is accepted | the only `dry_run` on any surface is session-cleanup's unrelated preview flag; the T9 argument exists solely on the native runtime constructor, which an ACP session never builds. ABSENT by entry-point census rather than by interception, which is stated so nobody reads it as a driven negative |
 | `K47` | the OS sandbox wrap: the gateway's own boot line, and the sandbox module's surface | `WARNING gideon.sandbox: No OS-level sandbox available — app-level checks only`. There is no host wrap engaged on this platform, so no confinement boundary exists to probe — **ENV**, not a capability verdict in either direction |
@@ -1446,11 +1765,37 @@ unblocked the four "needs a model provider" cells (`K29`).
 | `K53` | the `Full native tool registry` verdict, re-measured against the ACTUAL tool names | **the ABSENT verdict was a NAMING artifact.** `K4` asked YES/NO for `knowledge_search` and `task_create`; neither string exists in the registry under any provider. The capabilities do: `knowledge`, `todo_list` / `automation_create`, `memory_*`, `artifact_*`, `workflow_*`, `subagent_*`, and `notify` (which `K4` itself scored YES). Registry rows must be scored against a censused name list, never against three remembered ones |
 | `K54` | §2.1 prong B (the `gideon.json` config seed) end to end: does it run, and is it needed | **inert, and its premise is false.** (a) INERT — `register_acp_cli_entry` only seeds when a bundle passes `agent_config_dir`, and **zero of the three ACP bundles passes it** (`grep -c` = 0 each); the drive's log has no `agent-config seed` line, `$HOME/acp_seeds.json` was never written, and `~/.kiro/agents/` has no `gideon.json` — kiro's discovery returned the same 27 agents as `K2`, none of them ours. (b) NOT NEEDED — `~/.kiro/mcp.json` does not exist and no agent file mentions `gideon`, yet `K51`'s session listed the full `gideon-core` surface, so those tools arrived over the protocol's `mcpServers` at `session/new`. kiro does NOT ignore protocol-passed servers. `G46` |
 | `K55` | the empty-turn cell, driven instead of declared unreachable: one turn saying *"Reply with absolutely nothing. Emit zero characters…"* | **CONFIRMED — no stream injection required.** The session shows the user row **twice** and then `error: Empty response — please retry.`, which is exactly `chat_runner`'s contract (`:3623-3652`): first empty → silent re-queue of the same prompt, second consecutive empty → the card. The duplicate user row IS the retry's fingerprint; the INFO line naming it is invisible only because the home's log level was WARNING |
-| `K56` | the skill-ladder cell, driven against its real gate. Gate read from code first: `learning_decision_for_turn` → `LearningGate._worthwhile(PER_TURN)` = **a correction signal OR `tool_calls >= learning.min_tool_calls` (4)** — both drivable as-a-user, so `G44`'s "no forced-run surface" is not the obstacle. Drove a correction turn (heuristic verified offline: `is_correction_signal(msg) is True`) with `chat`+`background` bound to `Ollama:gemma4:12b` | **the ladder RUNS and it dies silently on a local model.** Under DEBUG the log reads `skill-ladder review: completion failed` → `after_turn_review.py:483` → `httpcore.ReadTimeout`, and `model_calls.jsonl` carries the matching row: `use_case=background, failure_mode=provider_error, latency_ms=60010` — the ollama bundle's 60 s default read timeout (`GideonApps#47`, merged upstream, absent from this machine's clone). With `options.timeout_secs=900` the background passes complete (86.6 s / 94.1 s / 83.5 s, 5.7k-11k tokens in) and `GET /api/skills/proposals` still returns `[]`. **Still NOT-EXERCISED** — but for a new and fixable reason: nothing attributes a model call to its caller (`model_calls.jsonl` and `/api/models/telemetry` key on `use_case`, not subsystem) and the ladder's success path emits only a transient WS chip, so "the ladder declined" and "another background pass ran" stay indistinguishable. `G47` |
+| `K56` | **↳ SUPERSEDED 2026-08-23 by `K60`-`K64`: the cell is CONFIRMED, and this row's two blockers were both already resolved on `main` before the re-drive began.** `70660460` (2026-08-21) added the `caller` attribution AND promoted the per-pass verdict to one INFO line, and the success path writes a durable `notifications.jsonl` row — so "attribution missing" and "only a transient chip" were both stale. The 60 s `provider_error` did not reproduce with `chat` on Bedrock opus-5 and no timeout raised. — the skill-ladder cell, driven against its real gate. Gate read from code first: `learning_decision_for_turn` → `LearningGate._worthwhile(PER_TURN)` = **a correction signal OR `tool_calls >= learning.min_tool_calls` (4)** — both drivable as-a-user, so `G44`'s "no forced-run surface" is not the obstacle. Drove a correction turn (heuristic verified offline: `is_correction_signal(msg) is True`) with `chat`+`background` bound to `Ollama:gemma4:12b` | **the ladder RUNS and it dies silently on a local model.** Under DEBUG the log reads `skill-ladder review: completion failed` → `after_turn_review.py:483` → `httpcore.ReadTimeout`, and `model_calls.jsonl` carries the matching row: `use_case=background, failure_mode=provider_error, latency_ms=60010` — the ollama bundle's 60 s default read timeout (`GideonApps#47`, merged upstream, absent from this machine's clone). With `options.timeout_secs=900` the background passes complete (86.6 s / 94.1 s / 83.5 s, 5.7k-11k tokens in) and `GET /api/skills/proposals` still returns `[]`. **Still NOT-EXERCISED** — but for a new and fixable reason: nothing attributes a model call to its caller (`model_calls.jsonl` and `/api/models/telemetry` key on `use_case`, not subsystem) and the ladder's success path emits only a transient WS chip, so "the ladder declined" and "another background pass ran" stay indistinguishable. `G47` |
 | `K57` | the second wave the census forced: **are the core tools merely LISTED, or callable?** One turn on a project-bound kiro session asking for four real calls — `skill_search`, `artifact_save`, `subagent_run`, `knowledge` | **all four executed, each behind its own approval card** (six cards in the turn). Raw results: `skill_search` → *"No skills matched. Try broader terms"*; `artifact_save` → *"Saved artifact 'AAP3-STAMP-PROBE' (slug: aap3-stamp-probe, version 1)"*; `knowledge` → *"No knowledge base entries found"*; `subagent_run` → **`<urlopen error [Errno 61] Connection refused>`**. So `K4`'s ABSENT verdicts on the skills tools, `artifact_save` and subagents were all artifacts of an enumeration that missed the protocol-delivered surface |
 | `K58` | the one failure in `K57`, root-caused rather than reported | **a real host defect, found by driving and FIXED in this commit.** `mcp_core._resolve_api_base()` builds the API base from `dashboard.url` and falls back to **10000**; neither `--port` nor the `--port auto` that `--test-mode` uses writes that config, and nothing exported the bound port — so the MCP server POSTed to a dead port while the in-process tools beside it worked. The gateway now exports `GIDEON_PORT` after binding (both the dashboard and API-only paths) and `core_mcp_servers()` declares it in the child's env. **Before/after on the same home and CLI:** `1 task(s) queued (at capacity): … Connection refused` → `Spawned 1 subagent(s) … 6c6039b3` |
 | `K59` | the artifact and subagent halves the calls exposed, read from the store rather than the reply | **two attribution losses.** (a) The artifact saved by the CLI on a session bound to project `p-14b92d4c` persisted with **`project_id: ""`** *and* `events[0].session_id: ""` — so the ABSENT verdict for `project_id → artifact stamping` is right, but for the opposite reason to the one recorded (`G48`). (b) The spawned subagent produced **no `[Subagent completion event]` injection** in ~4 minutes, and the gateway logged `_spawn_session_resolver: rid=spawn:6c6039b3 … session=` — an **empty** originating session, which is exactly the inject-back's precondition (`G49`) |
 | `K49` | two cross-checks worth keeping: the lesson extractor on an injected-context turn, and one turn's vendor error | **`G16` is worse than "bad extraction":** the lesson row written for `K30`'s turn is `User correction to honor: The user referenced the following item(s) from their knowledge library. Their content is included below …` — the extractor swallowed the *injected knowledge block* as if it were the user's correction, alongside a second row `Never: never violate these):` clipped from prompt boilerplate. Separately, one turn failed with kiro's `-32603` `MODEL_TEMPORARILY_UNAVAILABLE` ("unexpectedly high load"); that is recorded as **ENV** and no cell rests on it |
+| `K60` | the skill-ladder cell via the POSITIVE case: two `acp:kiro-cli` sessions, each given a different correction shape (a leading "No, that's wrong…" + directive; a leading "Never…" + "too abstract to act on") | **a real proposal FILED both times** — `capability-gap-response-bf1d7555b3f2` in 19,077 ms and `naming-advice-before-after-29d6f0822f7f` in 20,184 ms, both `kind: new`, `status: pending`, correct `session_key`, each carrying full `triggers` + `procedure_preview`. Queue `[]` → 1 → (falsified, frozen) → 2. **Visible through `origin/main`'s bare `{"proposals": […]}`**, so the mark needs no instrumentation |
+| `K61` | the cost and timeout profile of one ladder pass, with `chat` bound to `Bedrock:global.anthropic.claude-opus-5` and **no timeout raised** | **`K56`'s 60 s `provider_error` does not reproduce.** A pass is **two** model calls: a ~2.1 s classify (985-1043 tok in / 79-82 out) then a ~18-19 s synthesis (1292-1521 in / 1213-1295 out) — ~21 s and ~2.4k tokens total. Note `providers[0].options.timeout_secs` is the **string** `"120"` |
+| `K62` | `model_calls.jsonl` after the passes | rows carry **`caller: "skill_ladder"`** — the exact attribution `K56` said was absent. It landed on `main` in **`70660460` "feat(guardrails): G47 attribute a model call to its calling subsystem"** together with `_log_ladder_verdict` (one INFO line per pass, 11 verdicts). **`G47` is closed on main**, and was already closed before this re-drive began |
+| `K63` | what the success path leaves behind | not "only a transient chip": each filing also wrote a durable `notifications.jsonl` row `{"kind":"proposal","title":"New skill proposed", …}`. **Four durable surfaces**: the queue entry, the notification, the INFO verdict line, and `lastReview` |
+| `K64` | falsification at the config level (restore-and-reobserve, not a source mutation) | `learning.skill_ladder = False` → the correction was **still** detected (`after-turn review: learned a correction`) but **zero** ladder log lines, the queue frozen at 1 and `lastReview` unchanged; restored to `True` → the second filing landed. This separates the ladder from the generic after-turn review, which the queue count alone would not |
+| `K65` | the fs grant on 25 parseable kiro session-state files | **kiro-cli opens its ACP sessions READ-ONLY**: every file shows `allowed_write_paths: []` with `allowed_read_paths: [<the workspace>]`, and kiro refused a file-creation task ("no file-write, directory-listing, or shell tools are exposed to me"). **Gideon sets none of this** — `grep -rn "allowed_write_paths" src/` hits only the unrelated `workflows/scope.py`. So the gate's `tool_calls >= 4` leg is not drivable with filesystem work on kiro; **the correction leg is the reliable driver** (`G68`) |
+| `K66` | how kiro labels the sessions it creates | every one is created with `session_created_reason: "subagent"` (25/25), and **7 prompts produced 26 session files** in the operator's real home (`G69`) |
+| `K70` | `grep -rn "NO_TOOLS" src/ tests/ web/src/` plus `git log -S"NO_TOOLS" --all -- src tests web` | **0 hits in code and no commit, ever** — all 9 repo hits are in two `.md` files. The `NO_TOOLS` reading was the *agent's own reply text*, not a host sentinel, so there is no condition to read off code and the runtime drive was the only route (`K77` re-confirms) |
+| `K71` | `K4`'s recipe re-driven on **kiro-cli 2.19.1**, after resolving the first permission card with `{"action":"trust"}` | the turn completed in 113.5 s enumerating **151 tools** — builder-mcp 37 + creds-agent 3 + chrome-devtools 30 + kiro natives 14 + **gideon-core 67**. `pwd` → the session's own `workspace_dir`, so **`K4`'s `~/.gideon/workspace` cwd escape does not reproduce**. Independently matches `K51`'s "~150" |
+| `K72` | the same drive with the first card REJECTED instead | every kiro session parks on its first call `@gideon-core/get_context` (3/3 sessions). Rejected → the turn ends having emitted only `user / tool / permission / get_context (rejected)`, **zero assistant output**. Approved → 151 tools. **One variable, opposite outcomes** — this is what manufactured the `NO_TOOLS` reading (`G73`) |
+| `K73` | why the earlier same-gateway claude-code control looked healthy | it was **structurally exempt, not lucky**: its transcript row reads literally `Terminal (ungated: claude-code executed it without asking the host)`. **kiro asks, claude-code does not** — that asymmetry, not tool exposure, produced the misleading comparison |
+| `K74` | the first standing hypothesis — does kiro's MCP fleet start under the gateway? | **falsified.** `~/.kiro/settings/mcp.json` declares 12 servers with only 3 enabled, and those 3 contributed exactly **70 of the 151** tools. The fleet starts |
+| `K75` | the second — is there contention with a concurrent MCP fleet? | **falsified.** 167 builder-mcp / 696 mcp / 52 kiro-cli processes were running concurrently while kiro returned the full registry |
+| `K76` | an accidental third reproduction of `K53`'s naming artifact | guessed names `memory_search`/`artifact_create`/`workflow_run`/`subagent_spawn` all scored NO, while the real `memory_recall`/`artifact_save`/`workflow_start`/`subagent_run` are all present. **Scoring a tool by a guessed name measures the guess** |
+| `K80` | the M5d re-drive: one correction-free turn, four shell commands as separate tool calls with a deliberately-failing fourth | `memory_events` **8 → 19**, `source='procedural'` **2 → 12**, distinct procedural keys **1 → 11**. Ten procedural rows + one `self_model` row recording ten labels. ACP provenance verified four ways, incl. **no `Turn complete` line** (the native tell absent) |
+| `K81` | falsification of the failure-bit claim: inverted `acp/outcomes.py:110` (`outcome = "failed" if meta.get("ok") is False else "success"`), restarted, re-drove in a fresh session | **all 10 rows flipped to `→ failed`**, including `pwd` and `echo`, which plainly succeeded. That proves the line is live **and** that `meta["ok"]` is **never `False`** on kiro — `acp/translate.py:303` only stamps it on ACP `status=="failed"`, and kiro reports a non-zero-exit shell command as a completed tool call (`G76`) |
+| `K83` | who else reads that same unset bit | `chat_runner.py:2915` `_acp_failed = _tool_ok is False` (the **loop breaker**) and `:2824` (the tool-card colour). **So `G6`'s landed failure-breaker fix is inert on kiro** — no warn, no block, no circuit trip, ever |
+| `K84` | whether `K17`'s signature reproduces | **it does not.** The self-model row records ten tool labels, not `"tools": []`. And **10 events → 10 distinct keys**: `G67`'s claude-code collapse does not reproduce — kiro is the *mirror* failure, because its titles carry the real command (`Running: pwd`) so nothing folds and every distinct command mints a key forever (`G77`) |
+| `K85` | turn-to-turn stability of kiro's toolset | kiro intermittently has **no shell tool**: 3 of 5 turns produced zero tool calls, once answering "`echo M5D-MUT` — exit `0`" **without running anything**, and once stating it had no shell tool. This makes the cell expensive to measure and can silently invalidate a drive. Very likely the same defect as `G81` |
+| `K86` | dating the three ABSENT marks against the code | **the marks were STALE, not WRONG.** The ACP drain was added by **`838abd29` "fix(acp): G7 accumulate ACP tool outcomes for procedural memory" (2026-08-21)**, while `O12`, `C14` and `K17` were authored **2026-08-17** (`a29fcef9`, `8352ca5f`, `3f9328ae`). All three were correct when measured, and `AAP-1`'s "wrong, not merely stale" wording was itself wrong — corrected there |
+| `K88` | provenance of the 8 pre-existing rows in the drive's home | they are **`AAP-1`'s**, so their 2 procedural rows are claude-code's — keyed `user.procedural.a9bc74f09a19` = `"Terminal on 'Terminal' → success"`, reused across two turns (id 3 create, id 5 update). `G67`'s collapse and `G77`'s fragmentation are visible in one database |
+| `K90` | does kiro self-execute `echo`, which would explain `K36`'s "no card" without any floor working? | **No.** On an interactive no-floor kiro session, `echo AUTOFLOOR-OK` raised a real `permission` frame with a `request_id`, parked, and produced output only after approval. So `K36`'s probe **does** reach the gate on kiro — **the claude-code `(ungated)` finding is provider-specific and does not transfer** |
+| `K91` | `K36` re-established on a control arm, with purpose-built profiles (`aap3d-floor` = `approval_mode: auto`, `aap3d-ctl` = `""`), identical prompt and command, same gateway and global state (`agent.yolo: false`, `approval_mode: "interactive"`, both read from `config.json` first) | control: **2** `permission` frames, parked 28 s, `approved {"reason": "interactive"}`, 212 s wall-clock. Floor: **0** frames, `auto_approved {"reason": "trust"}`, **11.2 s with no human input**, session `approval: trust`. SEL chain `mode_change:agent_floor_auto` → `set_approval_policy "" → auto` → `auto_approved {"reason": "trust"}`. `"trust"` and not `"yolo"` separates the floor from global YOLO independently of config, and `mode_change:agent_floor_auto` naming the agent proves the **floor** set `_trust` rather than a user pressing Trust |
+| `K92` | falsification of that gate, line-attributable | mutating the live `chat_runner.py:1981` (`"auto"` → `"auto__FALSIFICATION"`) and restarting gave `trust = False` with **both** `mode_change:agent_floor_auto` and `set_approval_policy auto` gone; restored from a file copy and re-driven → `trust = True`. Clean red/green on the exact observable `K36` cites |
+| `K93` | `K41` re-driven as-a-user on `cron:aap3d-unatt` with agent `aap3d-ctl` (deliberately **no** floor, since a floor would auto-approve before the fail-fast is reached) | reproduced almost to the second: `Running: @gideon-core/get_context (auto-denied: unattended run, no one to approve)`, `[DONE]` in **5.0 s** (`K41` said 5.2 s), **0** `permission` frames, the file never created. SEL `denied {"reason": "unattended_fail_fast"}` plus `mode_change:unattended_auto_approve … mode=bypassPermissions` — not a contradiction but the documented pairing at `acp/client.py:382`, which independently proves the host classified the session as unattended |
+| `K94` | what `GET /api/chat/sessions/{s}` actually exposes while a turn is parked | **`session.pending_approval` IS `True`** and the `approval_id` lives on the **`permission` message's** meta — so it is **not** SSE-only. What is null is `pending_approval_info`, which is exactly `G51` and nothing broader. This corrects `K87`/`G78` |
 
 ## Gap closure index (status as of 2026-08-22, verified against `origin/main` = `05bba66e`)
 
@@ -3158,3 +3503,128 @@ cited above.
   symbol: the import fails first, so the test reds as an **ImportError (a collection error)** rather than
   through that assertion. Still a red, but a different signal — worth knowing before treating the floor
   as proven.
+
+## Execution log — `AAP-1` (Phase 1 validation, claude-code end-to-end sweep)
+
+- [2026-08-23][AAP-1] **DONE.** The claude-code column's residual **13 NOT-EXERCISED cells are driven
+  to zero** (7 CONFIRMED / 6 DIVERGED), so the column now satisfies the atom's "zero UNKNOWN cells"
+  on the strict reading as well as the literal one it already met. Counts move by **14** rows, not 13,
+  because the re-drive corrected an existing mark. Driven by four fenced drives, each on its own
+  worktree, isolated home, scratch workspace and port; observations `O35`-`O75`, findings
+  `G50`-`G67`. Gate: `make lint` 0 (mypy 960 files), `make test` full suite green, web
+  typecheck/test/build green.
+- [2026-08-23][AAP-1] 🔴 **A CORRECTED MARK, not a stale one — and it is owed to two sibling
+  columns.** `Procedural-outcome capture (M5d)` read ABSENT/CONFIRMED on `O12`'s "all 0". An isolated,
+  correction-free 6-tool-call turn on a verified-ACP session (`O75`) moved `memory_events` **8 → 11**
+  with two `source='procedural'` rows and a self-model row carrying **`"tools": ["Terminal"]`** — the
+  exact signature `O12`, `AAP-2`'s `C14` and `AAP-3`'s `K17` each used to conclude ABSENT. The rows
+  landed 70+ s before any correction turn, so they cannot be attributed to one. **The drain works and
+  three columns were wrong.** But it is low-fidelity: the key hashes a label built from the ACP
+  *generic* tool title, so 5 procedural events across 13 tool calls collapse into **3 distinct keys** —
+  every `Terminal` call folds into one success and one failure row regardless of command (`G67`).
+  `C14` and `K17` should be re-driven on this recipe.
+- [2026-08-23][AAP-1] 🔴 **P0 `G52`, corroborated independently by two drives: the spawned CLI
+  persists full transcripts into the operator's REAL `~/.claude/projects/…`.** This is the write half
+  of the `GIDEON_CC_ISOLATE` gap the matrix recorded as "WIRED (opt-in)", with the mitigation off
+  by default. It makes the incognito no-write guarantee host-scoped only (`G63`) — `K33` and `O61` both
+  measured Gideon's own stores, not this one — and breaks multi-tenant isolation. Every drive
+  cleaned up after itself; one drive's directory **regenerated** after its first removal because later
+  turns were still running, so removal has to follow the gateway kill.
+- [2026-08-23][AAP-1] **P1 `G50` root-caused and FIXED in this PR.** The `Error` lifecycle hook was
+  unreachable for the entire `AcpError` class: `HOOK_EVENT_ERROR` had exactly one fire site, the
+  generic `except Exception`, while the terminal `except AcpError` branch appended a user-visible error
+  card and fired nothing. So kiro's earlier zero (`K40`) was a **host** defect, not a provider
+  difference. Falsified by replacing the new fire with `pass` → `AssertionError: assert 'Error' in
+  ['UserPromptSubmit']`.
+- [2026-08-23][AAP-1] **DEVIATION — one cell's fix shipped as instrumentation, and the cell did not
+  need it.** `G44` framed the skill-ladder cell as blocked on a forced-run surface. Wrong twice: the
+  call site is provider-agnostic and the gate is *a correction turn OR >=4 tool calls*, so a correction
+  turn files a real proposal in two turns (`O66`); and indistinguishability bites only the negative
+  case. The marker (`lastReview` on `GET /api/skills/proposals`) shipped anyway because `O70` measured
+  that a genuine pass doing 8.5 s of model work logs **zero** visible lines on a default install
+  (`G47`'s line is `INFO`, the shipped level is `WARNING`) — so the negative case really was
+  unobservable. No forced-run surface was built (`G65`), because the mechanism is live.
+- [2026-08-23][AAP-1] **Two residual-list premises were INVERTED, not stale**, having each survived a
+  prior re-derivation: the ladder was said to need "a model provider this isolated home lacks" when it
+  is provider-agnostic, and the empty-turn cell was said to be "not forceable as-a-user" when a
+  whitespace-only reply forces it on attempt 1 (`O51`). A third correction: `K36`'s `echo
+  AUTOFLOOR-OK` probe does not port, because claude-code executes `echo` itself without asking the
+  host — `cat /nonexistent-*` gates reliably.
+- [2026-08-23][AAP-1] **Recipe notes worth more than the marks, for whoever drives `AAP-2`/`AAP-3`.**
+  (a) The in-flight window is hit with a turn slow by **output volume**, not tool latency, plus polling
+  `running` until it has been true for >=10 s — **no fixed `sleep`** (`O45`, 1 of 1 attempts, against
+  `O26`'s 1.2 s miss). (b) `GET /api/approvals` never shows an ACP chat card; use
+  `GET /api/chat/sessions/{s}` → the `permission` message's `meta.approval_id` → `POST
+  /api/chat/sessions/{s}/approve`, which is also the only route with `trust`/`trust_agent` vocabulary.
+  **Its verb is `approved`, not `approve`** (`AAP-3`'s `G80`). (c) The shared dev home ships
+  `agent.yolo: true` + `approval_mode: "auto"` **persisted**, so any drive on a copy measures zero
+  approval cards for structural reasons unless it flips them first. (d) `pending_approval_info: null`
+  does **not** prove no card was raised (`G51`), which invalidates how `K36` and `K41` read their
+  evidence. (e) Kill adapters only by `pgrep -P <own gateway pid>` — one drive killed 12 machine-wide,
+  10 of them belonging to four concurrent gateways; the affected window was identified and the single
+  observation inside it discarded.
+- [2026-08-23][AAP-1] ⚠️ **`G60` left OPEN as an owner call, deliberately.** The OS sandbox wrap is
+  unconditionally inert on macOS 26+ — one over-broad guard short-circuits before probing, so `strict`
+  is byte-identical to `off`, and the `env -u` credential scrub dies with it. A three-arm seatbelt test
+  with a third-party binary proves the disable is over-broad (`EPERM` on this host). Not fixed
+  in-session because re-enabling a dormant security control across every ACP and native spawn is not an
+  incidental fix, and the scrub alone could break the Bedrock and git-over-SSH paths a dev home depends
+  on.
+- **STILL UNVERIFIED.** `G56`'s diagnosis rests on observed behaviour plus a code read, not on a
+  mutation — two attempts to reach that branch landed elsewhere, and the drive reported that rather
+  than claiming the mutation. `AAP-2` and `AAP-3` keep their own residual cells; only the claude-code
+  column is closed here.
+## Execution log — `AAP-3` (Phase 1 validation, kiro-cli end-to-end sweep)
+
+- [2026-08-23][AAP-3] **DONE.** The kiro-cli column's **last NOT-EXERCISED cell is closed** (skill-ladder
+  review → CONFIRMED, `K60`), all four of its audit UNKNOWNs were already definite, and its three named
+  `done_when` clauses (`gideon.json` discovery, the effort pill, concurrent sessions) were already
+  resolved by `K6`/`K7`/`K10`. **mwinit freshness checked first**, as the atom requires: `kiro-cli` at
+  `/Users/…/.toolbox/bin/kiro-cli`, midway cookie fresh the same day, so **no cell is recorded as ENV**.
+  Counts: **43 CONFIRMED / 19 DIVERGED / 1 ENV / 0 NOT-EXERCISED = 63**. Four fenced drives, each on its
+  own isolated home, scratch workspace and port. Observations `K60`-`K94`, findings `G68`-`G83`.
+- [2026-08-23][AAP-3] 🔴 **STARTABILITY: `acp:kiro-cli` was absent from `/api/agent-providers` entirely,
+  and it was NOT auth.** The binary was on `PATH` and the cookie was fresh; the provider simply does not
+  exist unless the **`kiro-cli-agent` app is installed in that home**. Installing it returned
+  `ready: true` immediately. This is the second time this plan's area has looked owner-gated and measured
+  otherwise (the first: the ACP adapters live under `<home>/acp-adapters`, not on `PATH`). **A provider
+  absence is an app-install question before it is an auth question.**
+- [2026-08-23][AAP-3] 🔴 **The `K4`-vs-`NO_TOOLS` contradiction is CONDITIONAL, and `REACHABLE` stands.**
+  151 tools on kiro-cli **2.19.1** after resolving the first card (`K71`); reject that same card and the
+  turn emits **zero assistant output** (`K72`). The earlier claude-code control was **structurally
+  exempt, not lucky** — claude-code never asks (`K73`). Both standing hypotheses are falsified: the
+  `~/.kiro` MCP fleet **does** start under the gateway, contributing exactly 70 of the 151 tools (`K74`),
+  and 900+ concurrent MCP processes caused no contention (`K75`). **And the `NO_TOOLS` string has never
+  existed in this repo** — `git log -S` finds no commit, so it was the agent's own reply text, not a host
+  sentinel (`K70`). A verdict that reads like a machine-emitted code can be prose.
+- [2026-08-23][AAP-3] 🔴 **A mark corrected, and the correction is dated: `Procedural-outcome capture
+  (M5d)` → DIVERGED, PRESENT but mis-signed.** An isolated correction-free turn moved `memory_events`
+  **8 → 19** with ten `source='procedural'` rows and a self-model row carrying ten labels, so `K17`'s
+  `"tools": []` signature is gone (`K80`/`K84`). **`K17` was CORRECT WHEN MEASURED** — `838abd29`
+  (2026-08-21) added the drain, four days after `K17` was authored (2026-08-17). **Stale, not wrong**, and
+  `AAP-1`'s "wrong, not merely stale" wording was itself wrong; corrected there (`K86`). **A mark citing
+  a runtime observation carries an implicit as-of date, and a sweep re-reading one must date it against
+  the code before calling it wrong.**
+- [2026-08-23][AAP-3] **Two re-read marks STAND, one of them for a partly wrong reason.** `AAP-1`'s `G51`
+  voided `pending_approval_info: null` as evidence, and **both `K36` and `K41` cite it.** `K36`'s *other*
+  proof ("no `permission` frame") was always sound and now has a control arm — 2 frames and a 28 s park
+  versus 0 frames and 11.2 s with no human input — plus a line-attributable falsification of
+  `chat_runner.py:1981` (`K91`/`K92`). `K41` needed no rescue: its `auto-denied` tool line was already
+  `G51`-proof and the null was decoration (`K93`). **Also: kiro does NOT self-execute `echo`** (`K90`), so
+  `K36`'s probe does reach the gate and the claude-code `(ungated)` finding is provider-specific.
+- [2026-08-23][AAP-3] **`G80` FIXED in this PR** — `POST /api/chat/sessions/{s}/approve` collapsed every
+  unrecognised verb to `rejected` while returning `200 {"ok": true}`; the vocabulary is `approved` while
+  the sibling `/api/approvals/{id}/{action}` takes `approve`, so the obvious verb silently **denied** the
+  tool and read as success. No user impact (the shipped FE sends `approved`), but it cost a drive a 212 s
+  turn and a wasted control arm. Fixed with 3 tests including a vacuity check.
+- [2026-08-23][AAP-3] ⚠️ **`G76` and `G81` left OPEN as owner scope.** `G76` (the never-set ACP failure
+  bit, which makes `G6`'s landed loop-breaker fix inert on kiro) wants a cross-provider decision on
+  deriving the failure bit from tool-result content when the CLI will not set `status: "failed"` — the
+  same seam as `G67`/`G77`, which together want **one label contract, not two per-provider patches**.
+  `G81` (freshly bound kiro sessions come up with no tools after a restart, silently) needs its own
+  drive; `G82` is its mechanism candidate.
+- **STILL UNVERIFIED / owed elsewhere.** `AAP-2`'s `C14` is still owed the M5d re-drive on this recipe.
+  `G68`'s read-only-grant finding carries the drive's own recorded caveat (`K12` shows a kiro edit card
+  with a diff, so some configuration does expose writes — why this one did not was not established).
+  `G78` is **partly retracted** by `K94`. And this column's closure says nothing about `AAP-2`, whose 20
+  residual cells remain.
