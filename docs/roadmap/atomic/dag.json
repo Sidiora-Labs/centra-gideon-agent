@@ -2225,7 +2225,7 @@
         {
           "id": "AS-8",
           "title": "Mission Control preset: four attention lanes with inline resolution",
-          "status": "todo",
+          "status": "done",
           "scope": "Amendment 2026-07-26 round 2 (a) Dashboard-as-views, task A2-2 (Mission Control preset over the unified attention store).",
           "done_when": "a locked \"Mission Control\" view renders four attention lanes (Needs-approval / Your-turn / Working / Idle) sourced from the unified attention store; approving from a lane resolves the approval via the existing /api/approvals actions; a pending question answered from a card (options as actionable buttons) unblocks its loop.",
           "deps": [
@@ -4782,7 +4782,7 @@
         {
           "id": "AAP-1",
           "title": "Phase 1 validation \u2014 claude-code end-to-end sweep",
-          "status": "todo",
+          "status": "done",
           "scope": "Phase 1 \u2014 VALIDATION (\u00a76 12-step checklist, claude-code column)",
           "done_when": "Checked-in verified matrix column for claude-code with every audit cell re-marked CONFIRMED or DIVERGED at runtime (zero UNKNOWN cells) and its findings entered in the severity-ranked (P0/P1/P2/P3) gap inventory; incidental in-session bugs fixed per campaign doctrine.",
           "deps": []
@@ -4798,7 +4798,7 @@
         {
           "id": "AAP-3",
           "title": "Phase 1 validation \u2014 kiro-cli end-to-end sweep",
-          "status": "todo",
+          "status": "done",
           "scope": "Phase 1 \u2014 VALIDATION (\u00a76 12-step checklist, kiro-cli column; incl. concurrent-sessions step 12)",
           "done_when": "mwinit freshness checked first (auth failures recorded as ENV not capability); checked-in verified matrix column for kiro-cli with every cell CONFIRMED or DIVERGED (gideon.json discovery, effort-pill, concurrent-sessions resolved) and findings in the gap inventory.",
           "deps": []
@@ -7485,18 +7485,8 @@
   "dag": {
     "ready_frontier": [
       {
-        "id": "AAP-1",
-        "title": "Phase 1 validation \u2014 claude-code end-to-end sweep",
-        "plan": "AAP"
-      },
-      {
         "id": "AAP-2",
         "title": "Phase 1 validation \u2014 codex end-to-end sweep",
-        "plan": "AAP"
-      },
-      {
-        "id": "AAP-3",
-        "title": "Phase 1 validation \u2014 kiro-cli end-to-end sweep",
         "plan": "AAP"
       },
       {
@@ -7527,11 +7517,6 @@
       {
         "id": "AS-7",
         "title": "macOS menu-bar tray companion (thin client app)",
-        "plan": "AS"
-      },
-      {
-        "id": "AS-8",
-        "title": "Mission Control preset: four attention lanes with inline resolution",
         "plan": "AS"
       },
       {
@@ -9728,9 +9713,9 @@
         "code": "AS",
         "plan": "AMBIENT-SURFACES",
         "total_atoms": 9,
-        "done": 6,
+        "done": 7,
         "in_progress": 0,
-        "todo": 3,
+        "todo": 2,
         "blocked": 0
       },
       {
@@ -9962,9 +9947,9 @@
         "code": "AAP",
         "plan": "ACP-AGENT-PARITY",
         "total_atoms": 10,
-        "done": 1,
+        "done": 2,
         "in_progress": 0,
-        "todo": 9,
+        "todo": 8,
         "blocked": 0
       },
       {
