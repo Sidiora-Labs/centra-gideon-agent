@@ -103,7 +103,7 @@ from gideon.ledger.outcomes import (
     dormancy_verdict,
     open_questions,
 )
-from gideon.ledger.reader import read_events, run_totals
+from gideon.ledger.reader import journal_only_kinds, read_events, read_journal, run_totals
 from gideon.ledger.redaction import is_binary_payload, redact
 from gideon.ledger.writer import (
     EVENTS_FILE,
@@ -127,6 +127,8 @@ __all__ = [
     "hash_value",
     "stable_json",
     "read_events",
+    "read_journal",
+    "journal_only_kinds",
     "run_totals",
     # outcomes (PP-9)
     "OutcomeLedger",
