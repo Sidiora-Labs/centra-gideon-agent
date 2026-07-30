@@ -4,7 +4,7 @@ import logging
 
 from aiohttp import web
 
-from gideon.dashboard.chat_persistence import _save_session_to_history
+from gideon.dashboard.chat_persistence import save_session_to_history
 from gideon.dashboard.chat_utils import _history_key_for
 from gideon.dashboard.state import DashboardState
 from gideon.security import redact_and_truncate
@@ -117,7 +117,7 @@ async def api_chat_session_handoff(request: web.Request) -> web.Response:
         return web.json_response({"error": "no conversation log"}, status=500)
 
     try:
-        _save_session_to_history(state, session)
+        save_session_to_history(state, session)
     except Exception:
         pass
 
