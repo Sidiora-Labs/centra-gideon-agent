@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from gideon.dashboard.chat_runner import _run_chat
+from gideon.dashboard.chat_runner import run_chat
 from gideon.dashboard.state import DashboardState, _ChatSession
 from gideon.history import ConversationLog
 from gideon.hooks import ToolHookResult
@@ -149,7 +149,7 @@ async def _one_turn(tmp_path, *, provider_id: str, is_new: bool, resumed: bool) 
     session = _ChatSession("chat-1-g1415")
     session._trust = True
     with patch("gideon.dashboard.chat_runner.sel", MagicMock()):
-        await _run_chat(state, session, "hello")
+        await run_chat(state, session, "hello")
     return _session_lines(state)
 
 

@@ -1,4 +1,4 @@
-"""Core LLM runner — _run_chat, segment flushing, prompt expansion."""
+"""Core LLM runner — run_chat, segment flushing, prompt expansion."""
 
 import asyncio
 import json
@@ -24,7 +24,7 @@ from gideon.constants import CHAT_TURN_TIMEOUT
 from gideon.context_engine import assemble_context, check_headroom
 from gideon.context_headroom import HeadroomState
 from gideon.dashboard.chat_followups import _maybe_followups, maybe_offer_check_work
-from gideon.dashboard.chat_persistence import _build_history_prefix, _save_session_to_history
+from gideon.dashboard.chat_persistence import _build_history_prefix, save_session_to_history
 from gideon.dashboard.chat_title import _maybe_auto_title
 from gideon.dashboard.chat_utils import (
     _BLOCKED_SLASH_COMMANDS,
@@ -496,23 +496,38 @@ def _turn_complete_line(
     context_pct: float | None,
     input_tokens: int,
     output_tokens: int,
-    cache_tokens: int,
     cost_usd: float,
     priced: bool,
+    cache_read_tokens: int = 0,
+    cache_creation_tokens: int = 0,
+    cache_hit_pct: float | None = None,
+    cache_saved_usd: float | None = None,
 ) -> str:
-    """Compose the live-only "Turn complete" telemetry line (CATO-6).
+    """Compose the live-only "Turn complete" telemetry line (CATO-6, PCS-7).
 
     Appends a real cost + in/out token fragment to the existing events/tool-calls/
     context summary. Honest-unpriced: a model with no price row renders ``unpriced``,
-    NEVER ``$0.00`` — so a missing price is never mistaken for a free turn. The cache
-    fragment is present only when cache tokens are non-zero (absent until
-    PROMPT-CACHE-SUBSTRATE lands and a provider actually reports them).
+    NEVER ``$0.00`` — so a missing price is never mistaken for a free turn.
 
     Honest-unmeasured (G8): ``context_pct=None`` OMITS the context fragment entirely.
     It used to be a bare float, so a provider that reported nothing printed
     ``context 0%`` — a number the backend never supplied, which is worse than a
     missing chip. A measured ``0.0`` still renders ``context 0%``, because an empty
     context is a real answer.
+
+    The cache fragment (PCS-7) follows exactly that rule, and renders only when the
+    provider reported cache activity — so a turn with no cache is byte-identical to
+    the pre-PCS-7 line. It used to collapse reads and writes into one pre-summed
+    ``N cached`` count, which destroyed the split the whole surface exists to show:
+    a cache READ is the saving, a cache WRITE is what you paid for it.
+
+    * ``cache_hit_pct=None`` omits the ``NN% hit`` piece — never print ``0% hit``
+      for a turn nobody measured. A measured ``0.0`` DOES print ``0% hit``.
+    * ``cache_saved_usd=None`` (unpriced model) renders ``saved unpriced``, never
+      ``$0.0000`` — a missing price must not read as "saved nothing".
+    * A NEGATIVE saving renders WITH its sign (``saved -$0.0004``). That is the
+      normal first turn, which only writes the cache and so costs more than an
+      uncached one. Clamping or ``abs()``-ing it here would be a lie, not a nicety.
     """
     line = f"Turn complete: {events} events, {tool_calls} tool calls"
     if context_pct is not None:
@@ -520,8 +535,19 @@ def _turn_complete_line(
     if input_tokens or output_tokens:
         cost_str = f"${cost_usd:.4f}" if priced else "unpriced"
         line += f" · {cost_str} · {input_tokens:,} in / {output_tokens:,} out tokens"
-        if cache_tokens:
-            line += f" · {cache_tokens:,} cached"
+    if cache_read_tokens or cache_creation_tokens:
+        frag = "cache"
+        if cache_hit_pct is not None:
+            frag += f" {round(cache_hit_pct)}% hit"
+        frag += f" ({cache_read_tokens:,} read / {cache_creation_tokens:,} written)"
+        line += f" · {frag}"
+        if cache_saved_usd is None:
+            line += " · saved unpriced"
+        else:
+            # The sign sits OUTSIDE the "$" so a negative saving reads "-$0.0004"
+            # rather than "$-0.0004"; it is formatted, never clamped.
+            amount = f"{cache_saved_usd:.4f}"
+            line += f" · saved -${amount[1:]}" if amount.startswith("-") else f" · saved ${amount}"
     return line
 
 
@@ -1439,7 +1465,7 @@ def _report_ungated_tool_call(
     return abort
 
 
-async def _run_chat(
+async def run_chat(
     state: DashboardState,
     session: _ChatSession,
     message: str,
@@ -1447,11 +1473,18 @@ async def _run_chat(
     _prompt_depth: int = 0,
     regenerate_hint: str = "",
 ) -> None:
-    """Stream LLM response into *session*.  Survives browser disconnect."""
+    """Stream LLM response into *session*.  Survives browser disconnect.
+
+    Public because it is the core↔channel seam every channel app drives: an inbound
+    message becomes a turn here, and core mirrors the reply back out through the app's
+    registered delivery. Re-exported as `gideon.sdk.channel.run_chat`, so the
+    signature above (positional `state, session, message`) is a published contract —
+    `_prompt_depth` stays private because it is this function's own recursion counter.
+    """
     # Reset the per-turn error flag; the except block sets it True on a crash.
     session._last_turn_errored = False
     # Phase 1 of the turn checkpoint (EXECUTION-ISOLATION §6): open a numbered turn and
-    # record the identity set. Only at depth 0 — a nested `_run_chat` (prompt expansion,
+    # record the identity set. Only at depth 0 — a nested `run_chat` (prompt expansion,
     # auto-continue) is the SAME user turn, and numbering it separately would make
     # /rewind-to-turn N mean something the transcript's turn N does not.
     if _prompt_depth == 0:
@@ -1602,7 +1635,7 @@ async def _run_chat(
     needs_session_reset = False
     saw_compaction = False
     # Reset the per-turn file-change accumulator here — all dispatch paths
-    # (handler, orchestrator, queued re-dispatch) funnel through _run_chat.
+    # (handler, orchestrator, queued re-dispatch) funnel through run_chat.
     session._file_changes = []
     # Same for the per-turn episodic-citation manifest: populated from the assembled
     # context below (new session only), attached to each assistant message's meta.
@@ -1667,8 +1700,8 @@ async def _run_chat(
                     outcome="ok",
                     metadata={"mention": f"@{name}", "session": session.key, "via": "/prompts get"},
                 )
-                # Re-enter _run_chat with the expanded message (depth=1, no further expansion)
-                await _run_chat(state, session, expanded, _prompt_depth=1)
+                # Re-enter run_chat with the expanded message (depth=1, no further expansion)
+                await run_chat(state, session, expanded, _prompt_depth=1)
             elif status == "blocked":
                 sel().log_tool_invocation(
                     session_key="",
@@ -1785,7 +1818,7 @@ async def _run_chat(
             # bridge cannot map back to the profile to re-derive the kind.
             provider_kind = getattr(bindings, "provider", "") or ""
         except Exception:
-            logger.warning("Failed to resolve agent bindings in _run_chat", exc_info=True)
+            logger.warning("Failed to resolve agent bindings in run_chat", exc_info=True)
 
         # Task-mode framing — a LAYER on the resolved system prompt, threaded as
         # system_prompt_suffix (NOT folded into the override): for the default
@@ -2448,7 +2481,7 @@ async def _run_chat(
         # exists yet at the attachment-injection point. Skipped for slash commands —
         # `/compact` is not a question about the user's screen, and the drain would
         # burn the frame the next real turn wants. Never re-entrant: a depth>0
-        # prompt-expansion re-dispatch reaches its own `_run_chat`, whose drain finds
+        # prompt-expansion re-dispatch reaches its own `run_chat`, whose drain finds
         # the slot already empty (one-shot), so the frame can attach only once.
         if not is_slash:
             try:
@@ -2528,7 +2561,14 @@ async def _run_chat(
         # row AND the provider reported no cost → render "unpriced", never $0.00.
         _turn_input_tokens = 0
         _turn_output_tokens = 0
-        _turn_cache_tokens = 0
+        # Kept SPLIT, never pre-summed (PCS-7): reads are the saving, writes are what
+        # it cost — one total can express neither the hit rate nor the saved USD.
+        _turn_cache_read_tokens = 0
+        _turn_cache_creation_tokens = 0
+        # The model the cache saving is priced against. `_record_model` is resolved
+        # INSIDE the EVENT_COMPLETE branch, so it is unbound on a turn that never
+        # reported usage — this carries it out to the broadcast without that hazard.
+        _turn_model = ""
         _turn_cost_usd = 0.0
         _turn_priced = False
         # Which ACP CLI (if any) is serving this turn — the key the per-provider
@@ -3713,11 +3753,11 @@ async def _run_chat(
 
                     _turn_input_tokens = int(event.input_tokens or 0)
                     _turn_output_tokens = int(event.output_tokens or 0)
-                    _turn_cache_tokens = int(event.cache_read_tokens or 0) + int(
-                        event.cache_creation_tokens or 0
-                    )
+                    _turn_cache_read_tokens = int(event.cache_read_tokens or 0)
+                    _turn_cache_creation_tokens = int(event.cache_creation_tokens or 0)
                     _turn_cost_usd = float(event.cost_usd or 0.0)
                     _turn_priced = bool(_turn_cost_usd) or _has_pricing(_record_model)
+                    _turn_model = _record_model or ""
                 _stop_reason = event.stop_reason
                 _turn_event_count = event.event_count
                 _turn_tool_call_count = event.tool_call_count
@@ -3852,7 +3892,7 @@ async def _run_chat(
         if assistant_text:
             _flush_segment(state, session, assistant_text, broadcast=False)
         # Save to history and trigger memory consolidation
-        _save_session_to_history(state, session)
+        save_session_to_history(state, session)
         session._prompt_busy_retries = 0
         session._acp_pipe_death_retries = 0
 
@@ -3911,6 +3951,14 @@ async def _run_chat(
         # terminal complete event — populated identically by the native loop and
         # the ACP client — so both agent paths render the same chip.
         if _turn_event_count or _turn_tool_call_count or _turn_input_tokens or _turn_output_tokens:
+            # PCS-7: both derived cache numbers come from the shared primitives — no
+            # second counter store here. Local imports match the `has_pricing` idiom
+            # above, and both helpers answer None rather than guessing: an unpriced
+            # model has no saving to state, and a turn with no denominator has no
+            # hit rate. The renderer keeps those Nones honest.
+            from gideon.pricing import cache_savings_usd
+            from gideon.stats import cache_hit_pct
+
             state.broadcast_ws(
                 "activity_event",
                 {
@@ -3922,9 +3970,22 @@ async def _run_chat(
                         context_pct=pct,
                         input_tokens=_turn_input_tokens,
                         output_tokens=_turn_output_tokens,
-                        cache_tokens=_turn_cache_tokens,
                         cost_usd=_turn_cost_usd,
                         priced=_turn_priced,
+                        cache_read_tokens=_turn_cache_read_tokens,
+                        cache_creation_tokens=_turn_cache_creation_tokens,
+                        cache_hit_pct=cache_hit_pct(
+                            cache_read_tokens=_turn_cache_read_tokens,
+                            cache_creation_tokens=_turn_cache_creation_tokens,
+                            input_tokens=_turn_input_tokens,
+                        ),
+                        cache_saved_usd=cache_savings_usd(
+                            _turn_model,
+                            cache_read_tokens=_turn_cache_read_tokens,
+                            cache_creation_tokens=_turn_cache_creation_tokens,
+                            input_tokens=_turn_input_tokens,
+                            output_tokens=_turn_output_tokens,
+                        ),
                     ),
                 },
             )
@@ -4191,7 +4252,7 @@ async def _run_chat(
                 )
 
             task = asyncio.create_task(
-                asyncio.wait_for(_run_chat(state, session, next_msg), timeout=CHAT_TURN_TIMEOUT)
+                asyncio.wait_for(run_chat(state, session, next_msg), timeout=CHAT_TURN_TIMEOUT)
             )
             session.task = task
             state._background_tasks.add(task)
@@ -4216,7 +4277,7 @@ async def _run_chat(
                 t.add_done_callback(state._background_tasks.discard)
             # Follow-up chips (CHAT-CRAFT S3): suggest 2-3 next messages via one cheap
             # background call. Fire-and-forget — never blocks the turn; the handle is
-            # stored so the next _run_chat dispatch cancels a still-pending generation.
+            # stored so the next run_chat dispatch cancels a still-pending generation.
             # "Check this work" offer (HARNESS-CRAFT §3.3): deterministic, model-free,
             # OFFER-only — the skill runs when the user clicks the chip, never here.
             maybe_offer_check_work(state, session, _turn_tool_call_count)
@@ -4225,7 +4286,7 @@ async def _run_chat(
             # session so its review gate opens on real content. A single sidecar read
             # and a no-op for every chat that never opened a walkthrough, so a quick
             # task is untouched. Imported here (not at module scope) because chat_plan
-            # dispatches back into _run_chat on approval.
+            # dispatches back into run_chat on approval.
             from gideon.dashboard.chat_plan import maybe_submit_plan_draft
 
             maybe_submit_plan_draft(state, session)
