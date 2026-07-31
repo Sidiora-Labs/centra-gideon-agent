@@ -4827,7 +4827,9 @@ cited above.
   §2.1 Prong B is required"* is the origin of this entire doubt. `G31`'s generator half is separately
   **closed by fix** (no literal tilde remains, 3 rails).
 
-- ⚠️ **WHY THE ATOM STAYS `todo`.** Reachability is met on all three. What is not freshly measured:
+- ⚠️ **WHY THE ATOM STAYS `todo`.** *(SUPERSEDED 2026-08-24 — all three gaps named here were closed by a
+  re-drive; see the `AAP-4` DONE entry at the end of this log. Kept verbatim as the record of what was
+  outstanding.)* Reachability is met on all three. What is not freshly measured:
   claude-code's **as-a-user** arm is **VACUOUS** — the turn hit the 90 s watchdog (`ACP prompt timed out`),
   reproducing `G104`/`G107`, so its reachability rests on the process chain and the wire flag rather than
   an answered turn. Model-reported tool counts are **NOT TRUSTED**: kiro and codex returned the *identical*
@@ -4851,3 +4853,230 @@ cited above.
   ACP natively; only claude-code and codex go through `acp-adapters/.bin/`. And `C90`'s measurement must be
   stated as *"zero `[mcp_servers.gideon*]` tables"*: a bare `grep -ci gideon
   ~/.codex/config.toml` returns 1, matching a `trust_level` line, not an MCP server.
+- [2026-08-24][AAP-4] ✅ **DONE — the three arms re-driven live, and the atom flips.** This closes the
+  three gaps the previous tick left open (its ⚠️ *"WHY THE ATOM STAYS `todo`"* entry above is superseded
+  by this one). Drove a real gateway on the isolated dev home (`GIDEON_HOME=./.dev-home`,
+  `GIDEON_AUTH_MODE=none`, port 10777) with `PYTHONPATH` pointed at the worktree, one chat session
+  per provider bound through `POST /api/chat/sessions/{s}/acp-agent` and driven through `POST /api/chat`
+  with the `agent` field omitted — the recipe correction recorded at the end of the previous tick, which
+  worked verbatim. `kiro-cli-agent` was installed through the real Store path
+  (`POST /api/apps` with a local source; scanner verdict `clean`, tier `community`), not hand-dropped into
+  `apps/`: a copied directory without an `installed.json` is invisible to `/api/apps` and never registers
+  its provider, so the shortcut would have measured nothing.
+  Per provider — `notify` then `subagent_run`, each verified by the STORE and not by the model's sentence:
+
+  | provider | tool event on the wire | `notifications.jsonl` row | subagent | inject-back |
+  |---|---|---|---|---|
+  | `acp:codex` | `mcp.gideon-core.notify` | `AAP4-codex` @ 05:59:35.903 | `70d9d212` → `PONG` | `session_pid_71473.txt` → `dashboard:aap4-codex-drive` |
+  | `acp:claude-code` | `mcp__gideon-core__notify` | `AAP4-claude` @ 06:01:28.794 | `da5b7646` → `PONG` | `session_pid_72648.txt` → `dashboard:aap4-claude-drive` |
+  | `acp:kiro-cli` | `@gideon-core/notify` | `AAP4-kiro` @ 06:04:35.917 | `a4409b02` → `PONG` | `session_pid_87449.txt` → `dashboard:aap4-kiro-drive` |
+
+  Each notification row's timestamp trails its own tool event by ~150-300 ms, and PID 71473 was the live
+  `codex-acp` adapter process, so the `session_pid_<pid>.txt` file is the adapter's own PID mapped to the
+  exact session key — inject-back is exact rather than resting on an ancestor walk. SEL confirms the path:
+  `operation: notify, outcome: completed, tool_kind: mcp_core` with the verbatim arguments, then
+  `subagent_run outcome: spawned` and `subagent_status outcome: completed agent_id: 70d9d212`.
+- [2026-08-24][AAP-4] **`G104`/`G107` do not reproduce — the claude-code as-a-user arm is no longer
+  VACUOUS.** The prior tick's claude arm died on the 90 s `ACP prompt timed out` watchdog, so its
+  reachability rested on the process chain and the wire flag. Re-driven here it ANSWERED twice: 18 s for
+  the `notify` turn and 37 s for the `subagent_run` turn. Recorded as a non-reproduction on this host and
+  these versions (`claude 2.1.241.694`, `codex 0.146.1.378`, `kiro-cli 2.19.1`), not as a fix — nothing in
+  this change touches the watchdog.
+- [2026-08-24][AAP-4] **The distrusted `CORE=17; TOTAL=107` count is now moot, and the reason it was
+  right to distrust it is visible.** Two providers cannot independently produce an identical enumeration,
+  so this drive never asked for a count. It asked for an EFFECT, and the three providers rendered the same
+  tool in three different dialects — `mcp.gideon-core.notify` (codex), `mcp__gideon-core__notify`
+  (claude-code), `@gideon-core/notify` (kiro-cli). Three namespacing shapes for one server is
+  positive evidence that each CLI enumerated the surface through its own protocol path.
+- [2026-08-24][AAP-4] **Falsified, with a positive control.** Inserted `return []` at the top of
+  `core_mcp_servers()` (the documented pre-AAP-4 behaviour), restarted the gateway and re-drove the codex
+  arm: **zero tool events**, the assistant answered exactly `NO CORE TOOLS`, and
+  `grep -c AAP4-FALSIFY notifications.jsonl` → `0`. Restored the file from a pre-mutation copy
+  (`/tmp/mcp_servers.py.pristine`, never `git checkout --`), restarted, re-drove the same arm →
+  `mcp.gideon-core.notify` fired and `AAP4-RESTORED` wrote exactly 1 row. The mutation also proves
+  the gateway was executing the worktree's code and not the editable install from the main checkout.
+- [2026-08-24][AAP-4] **Observation for `AAP-5`, filed not fixed:** claude-code's turns emitted
+  `ToolSearch (ungated: claude-code executed it without asking the host)` and `Terminal (ungated: ...)`.
+  That is the host reporting its own non-authority over CLI-proprietary tools, which is §2.2's
+  "residual not-gateable set" rather than a regression of this atom — `AAP-5` is `done` and enumerates it.
+  No action taken here; recorded so the parity doc's residual list can cite a live instance.
+
+## Execution log — `AAP-8` (§2.5 Learning capture + tool-card fidelity + risk plumbing)
+
+- [2026-08-24][AAP-8] **PARTIAL — gaps 7 and 8 closed, the atom stays `todo` on clause 1.**
+  Gap 7 (typed tool-result meta / structured input + diff chips) and gap 8 (risk plumbing) are
+  implemented, railed and driven live on two providers. Clause 1 — *"after an ACP turn a procedural
+  outcome row exists"* — is **not verified this tick** and is recorded below rather than assumed.
+- [2026-08-24][AAP-8] **Gap 7a — the object was being thrown away one line after it was parsed.**
+  `translate.py` receives a real `rawInput` object and `json.dumps`-ed it into `tool_input`, so
+  `chat_runner._redact_tool_input_obj` was handed a `str`, returned `None` *by contract*, and every ACP
+  card fell back to the flat string preview no matter how well the CLI described its call. The object
+  now travels BESIDE the string (`AcpEvent.tool_input_obj` → `AgentEvent.tool_input_obj`), deliberately
+  not INSTEAD of it: flattening the object into `tool_input` would have changed every existing ACP
+  card's preview as a side effect of buying the fields. Read on the update frame as well as the opening
+  one, because an adapter that opens with `rawInput: {}` names its arguments only in the update.
+  **Live (claude-code):** the update frames carried
+  `{"replace_all": false, "file_path": …, "old_string": "    return \"hello\"", "new_string": …}` —
+  real schema-driven fields where `main` broadcast `input: null`.
+- [2026-08-24][AAP-8] ⚠️ **The structured-input arm is VACUOUS on codex, and that is a fact about
+  codex.** Measured on the same drive: codex sends **no `rawInput` at all** — its `Read file '…'` call
+  carried `input_preview: ""` and its edit calls put everything in the title plus a `diff` content
+  block. So `tool_input_obj is None` there is correct, not a miss, and the fields arm is claude-code's
+  (and any adapter that populates `rawInput`). Recorded so a later reader does not read the null as a
+  regression.
+- [2026-08-24][AAP-8] **Gap 7b — the diff chip now comes from the DECLARATION.** The native chip is
+  inferred three ways (a write-tool NAME set, a workspace path resolution, a disk read) and none of it
+  transfers to a CLI whose edit tool is named and shaped however its vendor chose. An ACP `diff` content
+  block states path, old text and new text outright, so `_capture_declared_file_change` files the chip
+  with no inference and no filesystem access. Both frame positions are live: codex declares its diff on
+  the opening `tool_call`, claude-code on the updates.
+  **`strReplace` deliberately files NO chip** — `oldStr`/`newStr` are the replaced FRAGMENTS, not the
+  file's contents, and filing one as `before` renders a chip asserting the file contained only that
+  fragment. The unified-diff preview still shows the change; only the chip is withheld.
+- [2026-08-24][AAP-8] 🔴 **A progressive re-declaration produced a lying chip, found live and fixed.**
+  First claude-code drive: `before='    return "hello"'` (one line) with
+  `after='def greet():\n    return "goodbye"'` (whole file) — a diff asserting the file used to contain
+  only that line. Cause: `_flush_file_changes` keeps the **earliest** `before` and the **latest**
+  `after`, which is right for real disk snapshots and wrong for a streaming adapter that re-declares
+  the same edit as its arguments fill in, so the partial first declaration got pinned. Declared chips
+  now do **last-declaration-wins on BOTH sides**, keyed per path (`_ChatSession.
+  _declared_file_change_idx`, reset alongside `_file_changes` — an index into an emptied list is what
+  would overwrite slot 0 of the next turn). Re-driven after the fix: whole file on both sides. Native
+  merge semantics are untouched, and the pre-existing `test_file_change_capture.py` rails still pass.
+- [2026-08-24][AAP-8] **Negative control on `main` — the chip is genuinely new.** Same edit
+  instruction, same provider, same dev home, gateway run WITHOUT `PYTHONPATH` so it executed the
+  editable install from the main checkout at `5f7f0b0e`: the file changed on disk, the tool cards
+  rendered, and the session recorded **`TOTAL file_changes = 0`**. With the worktree on `PYTHONPATH`:
+  one whole-file chip. `_file_changes` had exactly one writer before this change (the native
+  `_WRITE_FILE_TOOLS` snapshot), so an ACP edit turn produced no chip at all.
+- [2026-08-24][AAP-8] **Gap 8 needed NO plumbing, and the census is why.** §2.1's design asked for
+  gideon-core's declared `risk_level`s to be threaded through the MCP listing. Measured: **no core
+  tool dict declares an explicit `risk_level`** (`mcp_core` + the six aggregated category modules), so
+  `agents/native/tools.py` derives the declaration from `infer_risk_from_name`, which is the same
+  function `resolve_effective_risk` already falls back to. Probed directly: `artifact_delete` and
+  `memory_forget` resolve `destructive`, `notify` `caution`, in **all three measured name dialects**
+  (`mcp.gideon-core.X`, `mcp__gideon-core__X`, `@gideon-core/X`) — prefixes do not
+  break inference. Building the resolver would have returned the value it was handed: dead code, the
+  same trap `ET-4`'s polarity helper recorded. A rail pins the equivalence AND the census instead, so
+  the day a core tool declares an explicit level the divergence fails loudly rather than mislabeling an
+  approval card. That rail carries a vacuity floor (it asserts the module files exist and that there
+  are at least six of them) because a mistyped path would have scanned nothing and passed.
+- [2026-08-24][AAP-8] ⚠️ **WHY THE ATOM STAYS `todo`: clause 1 is unmeasured, not met.** After four
+  live ACP turns across codex and claude-code, the dev home's `memory.db` held **0 rows whose
+  `category` is procedural** (`by category: [(None, 11), ('decision', 18)]`). This is NOT filed as gap 4
+  regressing: gap 4's wiring is on `main` with its own rails (`tests/test_acp_procedural_outcomes.py`
+  drives real frames through `translate` → provider → adapter → accumulator), and
+  `_maybe_after_turn_review` is gated by ONE `LearningGate` decision
+  (`learning_decision_for_turn`) which a one-line edit turn may legitimately decline. What is missing is
+  the measurement, and the next tick can force it two ways: read the gate's decision for the turn
+  directly, or drive a turn the gate accepts and re-count. Until then the clause is open and the atom is
+  `todo` — a criterion whose only evidence is a unit test is exactly what §2.1's re-drive was for.
+- [2026-08-24][AAP-8] **Falsified twice, restored from file copies.** Deleting
+  `tool_input_obj=e.tool_input_obj` from the adapter reds three tests (`assert None == {...}`) — the
+  field-for-field mapper is load-bearing, the same lesson `tool_meta` taught in `G6`/`G7`. Deleting
+  `file_change=upd_file_change` from the update path reds the two chip tests. Both restored from
+  `/tmp/*.pristine` copies, never `git checkout --`; suite green again at 33 passed and
+  `git status --porcelain` empty.
+- [2026-08-24][AAP-8] ✅ **CLAUSE 1 CLOSED, and the entry above it was wrong for TWO reasons — the
+  atom flips to `done`.** The "0 procedural rows" measurement was a **bad probe**: it filtered
+  `semantic_memory` on `category like '%procedur%'`, but the discriminator is the KEY prefix
+  (`user.procedural.<hash>`) and the `category` column reads `decision` for those rows. Corrected count
+  at the time of that claim: **18 rows already existed**, the earliest stamped
+  `2026-08-24T06:00:34.857` — which is `AAP-4`'s codex `subagent_run` turn to the millisecond. So ACP
+  turns had been feeding procedural memory the whole time and the probe could not see it.
+  The gate finding is still real and still worth having: `learning.min_tool_calls = 4`, and
+  `learning_decision_for_turn` returns `GateReason.NOT_WORTHWHILE: below_threshold` at 0/1/3 tool calls
+  and `GateReason.ALLOWED` at 4/6 — which is why the three-tool EDIT turns produced nothing. Two
+  independent reasons for one zero; either alone would have been a wrong conclusion.
+- [2026-08-24][AAP-8] **Clause 1 driven as a PAIRED comparison, both arms on codex.** Persistent
+  session, one turn instructed as six separate shell tool calls (12 tool events on the wire):
+  `user.procedural.*` **24 → 30**, the six new rows reading `"pwd on 'pwd' → success"`,
+  `"whoami on 'whoami' → success"`, `"date …"`, `"uname -s …"`, `"echo one …"`, `"echo two …"`.
+  Then an **incognito** session (`memory_mode: "incognito"` confirmed on the create response), the SAME
+  six-call instruction, the same 12 tool events: **24 → 24, zero new rows.** The negative arm uses the
+  identical turn shape as the positive one, so "none under incognito" is a comparison rather than an
+  absence of evidence.
+- [2026-08-24][AAP-8] **All four clauses now met.** (1) procedural row after an ACP turn, none under
+  incognito — live, paired, above. (2) an ACP edit turn renders a diff chip and structured input fields —
+  live on claude-code with a negative control on `main` (`TOTAL file_changes = 0`). (3) the approval card
+  shows a core destructive tool's declared risk — measured equal to the inferred one BY CONSTRUCTION
+  (no core tool dict declares `risk_level`), pinned by a rail with a census and a vacuity floor rather
+  than by dead plumbing. (4) native-only meta stays empty, not fabricated, where frames are empty —
+  railed (`tool_input_obj is None`, never `{}`). `dag.json` + `AAP.md` flip to `done` with `pr` 1957.
+
+## Execution log — `AAP-9` (§2.6 Dialect asymmetry closure + project stamping)
+
+- [2026-08-24][AAP-9] ✅ **DONE — one clause needed code, three were already true and had never
+  been measured, and one was an owner call.** Taken after the four owner-priority areas held no
+  startable atom (eight candidates, each gated) and the fall-through tie at unblock=1.
+- [2026-08-24][AAP-9] **Gap 10 (clause 1) — the stamp was structurally unreachable for ACP, not
+  merely unset.** `artifact_save` stamps `project_id=_current_project_id()`, which read ONLY the
+  native runtime's per-turn contextvar; an ACP CLI's tools run in a separate `gideon mcp-core`
+  process where that contextvar is empty by construction. `provider_bridge.py` pops `project_id`
+  **unconditionally** ("meaningful only to the native builder"), so nothing about the binding crossed
+  into the ACP branch either — two independent reasons the stamp could never arrive.
+  Resolved SERVER-SIDE from the session key, which already crosses as `GIDEON_SESSION_KEY` (or
+  the `session_pid_<pid>.txt` ancestor walk `AAP-4` verified live): new
+  `GET /api/chat/sessions/bound-project`, keyed off `X-Session-Key` **only** — the caller must prove
+  which session it IS, or a stamping helper becomes a cross-session read of someone else's binding.
+  It answers `{"project_id": ""}` with a **200** for absent/unknown/unscoped (all three mean
+  "nothing to stamp" to its one caller, and a 404 would make a normal unscoped save look like a
+  failure), and deliberately does NOT fall back to the Personal default the way `/api/context` does:
+  filing work under a project the user never chose is worse than an unstamped artifact.
+- [2026-08-24][AAP-9] 🔴 **The in-process guard is load-bearing, and the first cut lacked it.** The
+  native runtime lives INSIDE the gateway, so an unscoped native turn — empty project contextvar,
+  live session key — would have issued a blocking `urllib` GET against the gateway from within the
+  gateway. `mcp_core._CURRENT_SESSION_KEY` being set is the exact "I am in-process" signal (the ACP
+  child has no such contextvar; its key comes from the env or the PID walk), so that is the guard,
+  with a rail that fails if a self-request is ever issued.
+- [2026-08-24][AAP-9] **Proven by a PAIRED live drive of the real process, and the first attempt
+  measured the wrong tree — worth recording as a harness finding.** Driving a genuine codex ACP turn
+  through `POST /api/chat` produced `aap9-stamp-probe` with `project_id=''` **even with the fix in the
+  worktree**: `acp/mcp_servers.core_mcp_servers` declares the MCP child's env explicitly
+  (`GIDEON_HOME`, `GIDEON_PORT`, `GIDEON_SESSION_KEY`) and a CLI is free to spawn its
+  MCP servers with a filtered environment, so **`PYTHONPATH` does not reach the child** and it imported
+  `main`'s editable install. Any core-tool change is therefore invisible through a real ACP turn in a
+  worktree drive. So the drive was re-run against `gideon mcp-core` over stdio directly — the
+  same process the CLI spawns, same three declared env vars, same session key
+  (`dashboard:aap9-proj-codex`, bound to project `p-15282411`), differing ONLY in `PYTHONPATH`:
+  · **control, main's code** → `aap9-main-control`, `project_id=''`
+  · **fix, worktree on PYTHONPATH** → `aap9-worktree-fix`, `project_id='p-15282411'`
+  The endpoint itself answered `{"project_id": "p-15282411"}` with the header and `{"project_id": ""}`
+  without it. Falsified by restoring the pre-fix `return ""`: the stamping rail reds
+  (`assert '' == 'p-acp'`), then restored from a file copy.
+- [2026-08-24][AAP-9] **Clause 4 (slash commands labelled "sent as text") was ALREADY SHIPPED.**
+  `chat_utils.stream_slash_command` notifies verbatim: *"`{command}` isn't a command this agent can
+  run — sent as a plain message."* on the not-negotiated path, and `chat_runner` reports the
+  substitution so "a user is never handed a plain-prompt answer while believing a command ran". No
+  code needed; recorded so the clause is not re-implemented.
+- [2026-08-24][AAP-9] **Clause 5 (no dead persona UI for Zed dialects) — measured live, with a
+  positive control.** `GET /api/agent-providers/<id>/agents`: claude-code returns **1** agent with
+  `provider_agent: ''`, codex **1** with `provider_agent: ''` — so the picker has no persona rows to
+  offer for either. kiro-cli returns **27** named personas, which is the control proving the axis is
+  rendered where it is real rather than always empty. Matches `O2` in the parity doc.
+- [2026-08-24][AAP-9] **Clause 3 (Kiro plan mode enforced by the host gate) — driven live.**
+  kiro-cli declares `permission_modes: []` (no mode axis at all, exactly as §2.6 predicted). With
+  `POST /api/chat/task-mode {"mode":"plan"}` on a kiro session and an explicit instruction to edit a
+  file and write to disk, the tool card came back annotated *"Plan mode — inspection only, nothing is
+  exec…"* and **the file on disk was byte-identical afterwards**. The host is the only enforcement,
+  and it held.
+- [2026-08-24][AAP-9] ⚖️ **DEVIATION (owner call): the effort pill stays HIDDEN, not greyed.** §2.6
+  asked that it "greys out (not silently no-ops)". Measured: kiro-cli declares
+  `supported_efforts: []` for all 27 agents and codex for its one, while claude-code declares five —
+  so `effortsForAgent` returns `[]` and `ReasoningPill` renders nothing. The clause's END is "the UI
+  tells the truth", and the truth is told twice already: the pill is absent, and both write paths
+  refuse an effort outside the declared set (`G21`, `tests/test_acp_effort_declaration.py`, including
+  `test_a_runtime_declaring_none_refuses_an_effort`). A greyed control would instead assert that the
+  axis exists for this runtime — the "dead UI" the same plan calls a defect one clause later for
+  personas. Ruling: hidden is correct; the machine-readable capability (`supported_efforts: []`) is
+  where a reader learns why. Railed in `web/src/ui/composer/pillDimension.test.tsx` so the ruling
+  outlives this session, with a vacuity floor (claude-code's declared set must still come back).
+- [2026-08-24][AAP-9] **NOTE — `docs/design/consistency-audit.json` came back `filesScanned` 550 →
+  551 with `driftHits`/`filesWithDrift` unchanged (8/7).** That is `main`'s baseline being stale, not
+  drift from this change: the diff against `origin/main` under `web/src` is a single **modified** file
+  and no additions, so nothing here could add a scanned file. The build's recompute is included rather
+  than reverted.
+- [2026-08-24][AAP-9] **Gate:** `make lint` clean (992 source files, mypy Success) · new rails 13
+  passed · offline reference re-rendered with the pinned interpreter for the new route (`761 of 765`,
+  `test_agent_reference` 7 passed) · web typecheck clean, **474 test files / 4980 tests passed**,
+  `npm run build` succeeded.
