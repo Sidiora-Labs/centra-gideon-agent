@@ -230,8 +230,16 @@ def inbound_cmd(args) -> int:
     unattended process can also exfiltrate, and rotation is cheap.
     """
     action = getattr(args, "inbound_command", None)
+    if action == "confirm":
+        # Delegated rather than implemented here: the pending intent lives in the
+        # GATEWAY's memory, so the only honest way to redeem it is over the bridge's
+        # own authenticated route — one confirmation path, not two.
+        from gideon.inbound.bridge import confirm_cli
+
+        return confirm_cli(str(getattr(args, "confirm_token", "") or ""))
     if action != "token":
         print("Usage: gideon inbound token create <surface> [--rotate]")
+        print("       gideon inbound confirm <confirm_token>")
         return 2
 
     known = surfaces()
