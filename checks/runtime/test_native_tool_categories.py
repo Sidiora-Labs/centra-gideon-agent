@@ -34,6 +34,10 @@ _CATEGORY_MODULES = [
     "gideon.mcp_subagents",
     "gideon.mcp_workflows",
     "gideon.mcp_automation",
+    # Desktop computer use (`DCU-4`). Not named `mcp_computer_use` because the module is also
+    # `DCU-4`'s tool-surface DECLARATION, which `computer_use/service.py` reads — it lives
+    # inside the package whose chain it declares rather than beside the other adapters.
+    "gideon.computer_use.tools",
 ]
 _CATEGORY_PROVIDERS = {
     "gideon-core",
@@ -43,6 +47,7 @@ _CATEGORY_PROVIDERS = {
     "gideon-prompts",
     "gideon-workflows",
     "gideon-automation",
+    "gideon-computer-use",
 }
 # The cross-cutting tools that stay in residual core (not a single entity category).
 # skill_invoke + skill_search + skill_remember are the skill-library-spanning trio

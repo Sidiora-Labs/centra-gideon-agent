@@ -43,6 +43,7 @@ The extension-provider taxonomy (the capability types an app can contribute) and
 - **gideon-artifacts** — type `tool` / `` (enabled); capabilities: artifacts
 - **gideon-automation-tools** — type `tool` / `` (enabled); capabilities: automation_management
 - **gideon-code-map** — type `tool` / `` (enabled); capabilities: code_map
+- **gideon-computer-use-tools** — type `tool` / `` (enabled); capabilities: desktop_automation
 - **gideon-inbox-tools** — type `tool` / `` (enabled); capabilities: inbox
 - **gideon-knowledge-tools** — type `tool` / `` (enabled); capabilities: knowledge
 - **gideon-memory** — type `tool` / `` (enabled); capabilities: memory
