@@ -1728,6 +1728,12 @@ _AGGREGATED_CATEGORY_MODULES = (
     "gideon.mcp_subagents",
     "gideon.mcp_workflows",
     "gideon.mcp_automation",
+    # Desktop computer use (`DCU-4`). The category module is the THIN SHIM: it declares the
+    # seven tools and forwards each call to the gateway's in-gateway dispatch. It is aggregated
+    # here rather than served by a second `gideon mcp-computer` stdio server because this
+    # process is already the shim the plan describes — one composition root, one identity
+    # resolver, and a process that never imports a driver.
+    "gideon.computer_use.tools",
 )
 
 
