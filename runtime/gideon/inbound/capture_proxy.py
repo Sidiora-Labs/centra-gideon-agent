@@ -343,13 +343,13 @@ def _provider_upstream(name: str) -> tuple[str, str]:
     provider 401 at first use (see that function's docstring).
     """
     from gideon.config import config_dir
-    from gideon.llm.credentials import CredentialStore
-    from gideon.llm.registry import get_default_registry
-    from gideon.sdk.provider_helpers import (
+    from gideon.llm.branded_specs import (
         _resolve_credential,
         _resolve_spec_secret,
         registered_spec,
     )
+    from gideon.llm.credentials import CredentialStore
+    from gideon.llm.registry import get_default_registry
 
     entry = get_default_registry().get_entry(name)
     spec = registered_spec(entry.type)
