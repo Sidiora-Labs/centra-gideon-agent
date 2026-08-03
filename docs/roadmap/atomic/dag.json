@@ -1358,7 +1358,8 @@
           "done_when": "rsync-sync (subprocess over ssh) and s3-sync (signed PUT/GET/LIST via net.fetch with a derived SYNC EgressPolicy through egress_policy_for(), host-pinned + raised max_bytes, never hand-rolled aiohttp) shipped as first-party apps; AES-256-GCM per shard with per-shard HKDF key from passphrase + first-write-wins salt object, routing/metadata fields kept plaintext, plaintext-in-encrypted-store rejected on send AND receive as permanent skip, missing salt = hard setup error; per-transport encryption defaults (ON for s3/dir, OFF for git); secret=True entries excluded before any transport; criteria 7-8 met",
           "deps": [
             "DAS-6"
-          ]
+          ],
+          "pr": 2008
         },
         {
           "id": "DAS-9",
@@ -5754,13 +5755,14 @@
         {
           "id": "APE-11",
           "title": "UI SDK exports design-system shell primitives + tokens + uiCapabilities block + generative-widget path",
-          "status": "todo",
+          "status": "done",
           "scope": "Sessions 3-4 T4.1 + V3-4 (contributed-page half); Contract C1 (uiCapabilities)",
           "done_when": "a fixture app page renders using host Button/Surface/tokens via @gideon/app-sdk and is indistinguishable from a native page; generative-widget contribution path works",
           "deps": [
             "EXT:DESIGN-SYSTEM-CONSISTENCY:shell primitives/tokens to export",
             "EXT:AMBIENT-SURFACES:generative-UI layer"
-          ]
+          ],
+          "pr": 2008
         },
         {
           "id": "APE-12",
@@ -7510,8 +7512,8 @@
         "plan": "APE"
       },
       {
-        "id": "APE-11",
-        "title": "UI SDK exports design-system shell primitives + tokens + uiCapabilities block + generative-widget path",
+        "id": "APE-6",
+        "title": "Migrate Minutes + Growth backend+UI apps to the current design system",
         "plan": "APE"
       },
       {
@@ -10048,9 +10050,9 @@
         "code": "APE",
         "plan": "APP-PLATFORM-EVOLUTION",
         "total_atoms": 12,
-        "done": 9,
+        "done": 10,
         "in_progress": 0,
-        "todo": 3,
+        "todo": 2,
         "blocked": 0
       },
       {
