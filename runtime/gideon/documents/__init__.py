@@ -19,6 +19,7 @@ from gideon.documents.model import (
     Run,
     SheetModel,
 )
+from gideon.documents.model_json import document_from_dict, document_to_dict
 from gideon.documents.registry import (
     available_formats,
     get_writer,
@@ -34,6 +35,8 @@ __all__ = [
     "PageSetup",
     "ParagraphStyle",
     "Run",
+    "document_from_dict",
+    "document_to_dict",
     "register_writer",
     "get_writer",
     "available_formats",
