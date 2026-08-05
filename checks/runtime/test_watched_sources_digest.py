@@ -41,10 +41,30 @@ INJECTION = (
 
 @pytest.fixture(autouse=True)
 def _isolated_home(tmp_path, monkeypatch):
+    """Redirect the home via ``GIDEON_HOME`` AND repair the import-bound copy.
+
+    🔴 MEASURED (2026-08-24), and the reason this fixture does NOT patch
+    ``config.loader.config_dir``: a `monkeypatch.setattr` on that name that is live when a
+    consumer module is imported for the FIRST time gets baked into the consumer permanently —
+    ``providers/entity_routes.py:22`` does ``from gideon.config.loader import config_dir``,
+    so the consumer keeps the LAMBDA and monkeypatch's undo (which restores only the loader
+    module's attribute) cannot reach it. Under xdist that made
+    ``test_mute_all_suppresses_the_digest_notification`` read the PREVIOUS test's home in the
+    same worker: env=`…/test_mute_all…/home`, actual=`…/test_digest_makes_ONE_item…/home`, so
+    ``mute_all`` was never seen and the notification was delivered.
+
+    So: the env var is the lever (``config_dir()`` reads it per call and caches nothing), and
+    ``entity_routes.config_dir`` is re-pointed at the REAL live function to undo any bake-in a
+    sibling suite performed. Both, plus an assertion that the redirect actually binds.
+    """
+    from gideon.config.loader import config_dir as live_config_dir
+    from gideon.providers import entity_routes
+
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(home))
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: home)
+    monkeypatch.setattr(entity_routes, "config_dir", live_config_dir)
+    assert entity_routes._entity_settings_path("notifications").parent.parent == home
     return home
 
 
@@ -198,9 +218,16 @@ async def test_mute_all_suppresses_the_digest_notification(store, tmp_path, _iso
 
     Only possible if `notification_allowed()` is genuinely in the path — a digest that pushed
     its own notification would deliver here and the clause would be satisfied by a bypass."""
+    from gideon import notification_kinds
+    from gideon.providers import entity_routes
+
     settings_dir = _isolated_home / "entity_settings"
     settings_dir.mkdir(parents=True, exist_ok=True)
     (settings_dir / "notifications.json").write_text(json.dumps({"mute_all": True}))
+    # PRECONDITION, asserted rather than assumed: the gate must actually be closed. Without
+    # this line a home-isolation leak reads as "the digest bypassed the gate" — a confusing red
+    # pointing at the wrong file (measured; see `_isolated_home`).
+    assert entity_routes.notification_allowed(notification_kinds.INFO) is False
 
     spool = SourceEventSpool(tmp_path / "events.jsonl")
     await _ingest(store, spool, [SourceItem(guid="g1", title="Release 2.0", content="stable")])
@@ -399,3 +426,71 @@ def _fenced_spans(text: str) -> list[str]:
         inside, _, rest = rest.partition("</untrusted_content>")
         spans.append(inside)
     return spans
+
+
+@pytest.mark.asyncio
+async def test_no_model_still_produces_an_honest_digest_and_advances_the_cursor(
+    store, tmp_path, _isolated_home
+):
+    """The degraded-mode floor `resilience/degraded.py` registers for ``source_digest``.
+
+    This is the shape a raised failure never had: ``one_shot_completion`` returns a FALSY value
+    rather than raising when nothing is bound, so the original ``or ""`` handed an empty string
+    onward — the digest wrote an empty note, notified with an empty body, and advanced the cursor
+    anyway. ``_synthesise``'s docstring already promised a plain-text digest; only the ``except``
+    branch delivered one.
+
+    The cursor SHOULD still advance: the items are durable in the library before the narrative is
+    attempted, so a re-run would re-summarise things the user already has. That is why this
+    surface is not ``research_report`` — nothing here is deferred.
+    """
+
+    async def _returns_nothing(prompt: str, **kw: object) -> str:
+        return ""
+
+    spool = SourceEventSpool(tmp_path / "events.jsonl")
+    await _ingest(
+        store,
+        spool,
+        [SourceItem(guid="n1", title="Only item", content="body")],
+    )
+    state = _state(tmp_path)
+    cursor = tmp_path / "cursor.json"
+
+    result = await sd.run_morning_digest(
+        knowledge_store=store,
+        spool=spool,
+        state=state,
+        completion_fn=_returns_nothing,
+        cursor_file=cursor,
+    )
+
+    # The digest ARRIVES, with a body that names the gap rather than an empty string.
+    assert result.item_id
+    body = store.get_item(result.item_id)["content"]
+    assert body == sd.UNSYNTHESISED_BODY
+    assert body.strip(), "an empty digest body is the defect this test exists for"
+
+    # And it is the same string the registered contract's floor describes, so the contract
+    # cannot drift from the behaviour without one of these two assertions failing.
+    from gideon.resilience.degraded import get_contract
+
+    contract = get_contract("source_digest")
+    assert contract is not None, "the surface must be registered, or the floor claim is vacuous"
+    floor = contract.floor
+    assert "still arrives" in floor and "already in the library" in floor
+
+    # The notification carries that real body, not "".
+    assert result.notified is True
+    assert len(state._notification_log) == 1
+
+    # Cursor advanced — the window is genuinely consumed, the items are in the library.
+    assert sd.read_cursor(cursor) == result.cursor > 0
+    second = await sd.run_morning_digest(
+        knowledge_store=store,
+        spool=spool,
+        state=state,
+        completion_fn=_returns_nothing,
+        cursor_file=cursor,
+    )
+    assert second.skipped_reason == "no new items"
