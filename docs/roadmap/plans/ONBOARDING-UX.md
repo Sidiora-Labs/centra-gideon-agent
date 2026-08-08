@@ -897,3 +897,181 @@ Owner rulings, mapped onto the existing sessions honestly:
   `page.route` interception installed BEFORE boot, plus a real `page.reload()`, plus a mounted-ness
   floor (`main.querySelectorAll('*').length`) produced a trustworthy measurement. Add the mount floor to
   any empty-state probe: an empty page and an unmounted page are indistinguishable by text alone.
+- [2026-08-25][OU-9] **PARTIAL (S3 T3.3 / C2) — core half DONE, apps-repo renderer NOT DONE.**
+  New `src/gideon/approval_brief.py` composes C2's brief backend-side and
+  `gateway.py:591` stamps it onto the approval event before the channel call, so
+  `ChannelDelivery.request_approval` payloads now carry
+  `tool_meta["approval_brief"] = {tool, risk, blastRadius?, blastRadiusLine?}`. The fields
+  are OU-7's, not a second shape: `BlastRadius` is C2's `{writes, network, shell, readOnly}`
+  verbatim, the four facet labels are `approvalMeta.ts`' `FACET_COPY` verbatim, and the
+  name-evidence tuples are **derived from `task_modes`' own** `_DESTRUCTIVE_NAME_HINTS` /
+  `_READ_VERB_HINTS` / `_MUTATING_NAME_HINTS` (the same tuples the TypeScript mirrors), so a
+  hint added to the gate flows into the brief automatically. A test parses
+  `approvalMeta.ts` and asserts all five hint lists, the facet order and every label still
+  agree — cross-language drift is a red test, not a third vocabulary.
+- [2026-08-25][OU-9] **Why the seam grew no argument.** "Additive meta" is the whole
+  constraint, and the apps repo ships a `SlackDelivery.request_approval` with an explicit
+  keyword-only signature. A new `brief=` kwarg would raise `TypeError` there until the apps
+  repo caught up — and because the call site sits inside `except Exception: falling back to
+  dashboard`, the failure mode is silent: channel approval would just stop working. So the
+  brief rides `tool_meta`, the additive-meta bag both event dataclasses already carry
+  (`AcpEvent.tool_meta` is documented as its mirror, and the adapter maps it field-for-field,
+  so no event field and no adapter changed). Every tool_meta consumer reads named keys with
+  `.get` — none enumerates — and a permission-request event's `tool_meta` is empty in practice
+  (the runtimes populate it on tool RESULTS), so the stamp only ever adds. Asserted both
+  ways: a channel written against the ORIGINAL signature (no `**kwargs`, no knowledge of the
+  brief) is still called and still decides, and the same object reds with `TypeError` when
+  handed a `brief=` kwarg — so the additive rail is not vacuously green.
+- [2026-08-25][OU-9] **DEVIATION (`readOnlyCommand` pass-through deliberately NOT wired —
+  OU-8 was right, and wiring it was actively WRONG).** OU-8 left this for OU-9 having measured
+  it redundant. Wiring it measured *worse* than redundant. Feeding
+  `classify_invocation`'s verdict in as the screening input made **every unrecognized tool
+  claim "reads only"**: its name-fallback branch is `MUTATING if any(mutating hint) else
+  READ_ONLY` (`task_modes.py:264`), so a name matching nothing resolves to `READ_ONLY` — a
+  positive read claim minted from zero evidence, on the surface least able to check it. Caught
+  by the honesty-contract test on `frobnicate_xyzzy`, not by review. Deny-by-default holds for
+  the GATE that consumes that verdict (its consumers deny `UNCLASSIFIED`); it does not make the
+  verdict evidence for a brief. The brief now takes ONE classification,
+  `resolve_effective_risk`, which already routes a readable command through
+  `is_read_only_bash` and floors an unknown name at `caution`, never `safe` — so `risk ==
+  'safe'` is genuine positive evidence, exactly as OU-7's `RISK_ESTABLISHES_READ_ONLY`
+  assumed. The `read_only_command` parameter stays on `derive_blast_radius` for parity with
+  the frontend, with no caller, as in OU-7.
+- [2026-08-25][OU-9] **DISCOVERY (a pre-existing over-claim, shared with OU-7's shipped
+  frontend — pinned, not fixed).** The hint tuples match by SUBSTRING (`task_modes`' own
+  scheme), and the read-verb check short-circuits BEFORE the write hints. `widget` contains
+  the read verb `get`, so `artifact_widget_create` derives
+  `{writes: false, …, readOnly: true}` → "reads only" for a tool that CREATES. This is not
+  introduced here: the identical precedence ships today in `approvalMeta.ts`, so the chat
+  chips and the approval toast already say it. Fixing it means word-boundary matching in BOTH
+  languages, i.e. changing a shipped frontend surface OU-7 owns — a follow-up atom, not a
+  silent divergence from the drift rail. Pinned as
+  `test_known_limitation_hint_matching_is_substring_not_word`, which should be inverted when
+  that atom lands.
+- [2026-08-25][OU-9] **UNMET — the apps-repo slack renderer (one session, no core work).**
+  `done_when` asks for a minimal Slack render too. `GideonApps` is a different
+  repository and this session had no worktree for it, so the atom lands PARTIAL and stays
+  `todo`. Nothing in core blocks it: the data is on the payload today and any channel that
+  ignores the key is unaffected. The change is `SlackDelivery.request_approval` in
+  `GideonApps/apps/slack/` — read
+  `event.tool_meta.get("approval_brief")` and, when `blastRadiusLine` is present, add ONE
+  context line under the existing command block (e.g. `⚠️ Can: runs a command, uses the
+  network`); show `risk` beside it if the block has room. Two renderer rules, both already
+  documented on the Protocol: omit the line entirely when `blastRadiusLine` is absent
+  (absence is C2's unknown channel — "nothing established" reads as "nothing happens"), and
+  render only the `True` facets, never all four with on/off states. The dashboard stays the
+  rich surface; no rendering logic moved into core.
+- [2026-08-25][OU-9] **Gate.** `make lint` clean (black/isort/flake8 + mypy, 1025 files).
+  `pytest tests/test_approval_brief.py` 36/36. Seam neighbours green:
+  `test_approval_threading` + `test_gateway` + `test_channel_conformance_kit` +
+  `test_approval_timeout_policy` + `test_task_modes` + `test_acp_agent_event_mapping` =
+  203 passed, 9 xfailed (xfails pre-existing). `scripts/gate_report.py` 6/6. No `web/` change,
+  so no npm legs. Falsified twice, both directions: (1) replacing the live
+  `attach_approval_brief(event)` call with `pass` → 6 red, all `KeyError: 'approval_brief'`
+  at the seam; restored → 36 green on the same invocation. (2) making the stamp REPLACE
+  `tool_meta` instead of adding a key → exactly the two additive rails red with
+  `KeyError: 'ok'`; restored → 36 green. Each mutation grepped back before running.
+- [2026-08-25][OU-9] **No CHANGELOG entry.** Nothing a user can perceive changed yet: the
+  payload carries the brief but the only channel renderer lives in the apps repo and is
+  untouched. The entry belongs to the renderer session, which is the first point a user sees
+  a blast-radius line on their phone.
+- [2026-08-25][OU-11] **PARTIAL (S4 T4.1 + the dry-run only). Atom stays `todo`.** New
+  [`docs/maintainers/usability-kit.md`](../../maintainers/usability-kit.md) — self-contained in the
+  literal sense the done_when asks for: a facilitator who has never opened this repo can run a
+  session from that one file, and it says so and then earns it. Eight sections: what you are running,
+  before-the-session prerequisites, the consent note (read verbatim), the facilitator script, the
+  observation sheet, after-the-session triage, the dry-run record, and the kit's own limits. Four
+  parts against the done_when's list — **facilitator script** (four tasks written as goals, plus a
+  fixed may-say list and a never-say list, so the script cannot lead the witness), **consent note**
+  (what is recorded, what is not, stop at any time, where the notes go, plus a throwaway-credential
+  request — no invented retention policy, because the project has none), **observation sheet**
+  (hesitation log / expected-vs-happened / their exact words / dead ends, an eleven-row vocabulary
+  table, an unblock log, five closing questions), and the **dry-run on self**, recorded below.
+- [2026-08-25][OU-11] **The S1 baseline exists but is not a human baseline — the V4 clause cannot be
+  satisfied by comparison against it.** The only recorded figure is in this log's OU-4 entry of
+  2026-08-16: **9.3 s** of *driven* (scripted-browser) interaction for name → essentials → three
+  try-one cards → done, and that same entry marks the leg **PARTIAL** because "the provider segment
+  (install → key → Test → bind) was NOT exercised: it needs a real credential." OU-3's entry of the
+  same date adds per-card click→outcome latencies (0.94–1.38 s) against a 2 min budget. So the
+  number is a machine floor for the click path with the most expensive human segment excluded —
+  comparing a stranger's wall clock against 9.3 s would manufacture a two-orders-of-magnitude
+  "regression" with no defect behind it. **Ruling recorded in the kit §6:** session 1 *establishes*
+  the human baseline; the delta V4 asks for is measurable only from the post-fix re-run onward. If
+  the owner wants a delta against S1 specifically, the missing ingredient is a *human* S1 run, not a
+  new instrument.
+- [2026-08-25][OU-11] **Dry-run on self, driven for real (the deliverable, not a formality).** Fresh
+  isolated home (`GIDEON_HOME=$PWD/.dev-home-ou11`), `AUTH_MODE=none` (loopback-only), gateway
+  on `:10411` from this worktree, SPA built from this tree and asserted serving before anything was
+  observed (2.6 MB bundle, HTTP 200) — a missing `dist` would have made every observation vacuous.
+  Isolated browser context, per OU-4's stale-cache warning. Gateway killed by PID. Backend confirmed
+  `first_success: {knowledge:true, trigger:true, loop:true}`. **Zero console errors, zero warnings.**
+  **The dry-run's job was to find the kit's bugs before a stranger did, and it found four:**
+  · **Task 4 named a label the product does not use.** T4.1 specifies the task as "tell us what
+    *Loops* means from the UI alone." Measured: "Loops" appears in **neither** the starter rail
+    (`Home · Chat · Inbox · Store · Everything+13 · Settings`) **nor** the expanded 18-item rail, and
+    `#/projects` — the only rail item that mentions loops at all, and only in its a11y description
+    ("Projects, 1 active loop") — renders the substring "loop" **zero** times. The task as written
+    would have sent a participant hunting for a word that does not exist and a facilitator would
+    have logged a finding the kit invented. Rewritten as a three-step probe that takes the
+    participant's word first and reveals ours last.
+  · **Task 3 had an unstated, hard prerequisite.** Approving a tool call needs a bound model. With no
+    provider the dashboard reports "11 degraded — 11 surface(s) running without a model" and zero
+    approvals are reachable, so task 3 does not run at all. Now a decision in the kit's §2 with three
+    named options, one of which explicitly records task 3 as not run.
+  · **The kit assumed a stranger can satisfy the required provider step.** Often they cannot: the
+    four cards shown by default (Alibaba Model Studio, Amazon Bedrock, Anthropic,
+    Anthropic-Compatible) all need a paid key or an AWS account, and the keyless option (Ollama) is
+    **12th of 16**, behind "Show all 16 model provider apps". Now the session's headline logistical
+    risk.
+  · **My own timing harness produced a number I threw away.** Card 1 measured 29 s because the
+    polling loop's deadline dominated the result; re-measured tightly, cards 2 and 3 were **112 ms**
+    and **235 ms** click→outcome. Hence the kit's instruction to split hands-on from machine time and
+    to trust the participant's declaration over any instrument. Wall clock for the whole dry-run was
+    **4m 04s**, essentially all of it operator deliberation — a lower bound on the operator's path,
+    not a target, and stated as such.
+- [2026-08-25][OU-11] **DISCOVERY (three product defects, reported not fixed — each is a different
+  atom's work).** (1) The **"Set a reminder" try-one card contradicts itself in one view**: "Cadence:
+  At 09:00 AM" beside "Next time: 8/26/2026, 2:00:00 AM". `GET /api/triggers` shows
+  `schedule:clock:daily-check-in` with `cron_expr "0 9 * * *"`, `timezone: null`, `next_run_ts` =
+  `2026-08-26T09:00:00Z` = 02:00 local (PDT). The cron is evaluated in UTC while the label reads as a
+  local wall-clock time, so the first reminder a new user creates fires at their UTC offset — and the
+  card shows them the discrepancy. `schedule:system:notification-digest` has the identical shape
+  (`0 8 * * *`, `timezone: null`). (2) The **Projects rail item advertises "1 active loop" but
+  `#/projects` lists no loops** — only the two built-in projects (Personal, Repeatable, "0 lists");
+  the running loop is reachable only from the dashboard, and opening it lands on **`#/chat/loop-…`**,
+  a chat session. One concept, four namings across four surfaces. (3) The try-one step opens with
+  **two consecutive sentences that both say "runs for real"** — redundant copy in the flow's
+  highest-attention position.
+- [2026-08-25][OU-11] **OWNER-GATED — the clauses this session did NOT satisfy, named precisely.**
+  (a) *"3 sessions run (OWNER recruits/hosts strangers)"* — not run; recruiting and hosting three
+  people who have never seen the product is Owner task 1 and cannot be simulated. No results section
+  was written, deliberately: an invented findings table would be worse than an empty one.
+  (b) *"fix-now list (<=1 day) empty by session close"* — vacuous until (a); there is no session
+  close. The kit records the budget as ≤1 day **across all three sessions**, not per session, because
+  the clause reads the other way at a glance.
+  (c) *"issues filed labeled `ux-finding`"* — none filed (agents do not file on the owner's behalf).
+  The label itself may not exist: `.github/` carries `ISSUE_TEMPLATE/{bug,feature}.yml` and no
+  tracked label definition, so labels live in the GitHub UI. **What I would file, verbatim, if
+  authorized:** (i) *"Onboarding: the required model-provider step has no keyless option in view"* —
+  4 default cards all need a paid key or AWS; Ollama is 12th of 16 behind "Show all 16". (ii) *"A
+  reminder created in onboarding fires at the user's UTC offset, and the card says both times"* —
+  the timezone defect above; this one is arguably a plain bug, not a `ux-finding`. (iii) *"The rail
+  badges Projects with '1 active loop'; the Projects page shows none, and the loop opens as a chat"*
+  — the naming/IA split. (iv) *"'Loops' is a product concept with no navigation label"* — the finding
+  that came out of fixing the kit's own task 4. (v) *"Try-one step: two adjacent sentences both say
+  'runs for real'"* — copy, fix-now sized.
+  (d) *"first-success timing delta vs S1 baseline recorded"* — no delta, and the reason is the
+  baseline ruling above, not a missed measurement.
+- [2026-08-25][OU-11] **Falsified (prose has no unit test, so the checkable claim is that every path
+  the kit cites resolves).** Repointed the kit's `../guides/getting-started.md` link at
+  `../guides/getting-started-FALSIFY.md`, confirmed the mutation with plain `grep` (an untracked
+  working-tree edit is invisible to `git grep`) and confirmed the target absent. `gate_report.py` →
+  **docs-lint FAIL, 1 failure**, naming it exactly:
+  `docs/maintainers/usability-kit.md: docs-lint findings rose 0 -> 1; new finding(s):
+  ['dead_link:docs/guides/getting-started-FALSIFY.md']`. Restored from a pristine copy at a literal
+  path, verified byte-identical by `shasum -a 256` (`42f6e5b1…be32` both sides) — **the same
+  invocation then returned all 6 gates PASS** and `git status --porcelain` was empty, so the restore
+  was byte-identical rather than merely re-green. Both directions, one gate. Note for later citations
+  here: `find_dead_links` runs on text with inline code spans blanked, so a **backticked** path is
+  invisible to that gate while a markdown link is enforced — the kit uses markdown links for exactly
+  this reason.
