@@ -24,6 +24,7 @@ from gideon.llm.base import (  # noqa: F401
     LLMEvent,
     ModelProvider,
 )
+from gideon.llm.branded_specs import BrandedProviderSpec  # noqa: F401
 from gideon.llm.capabilities import Capability, ProviderCapability  # noqa: F401
 from gideon.llm.catalog import (  # noqa: F401
     ConnectionResult,
@@ -74,6 +75,15 @@ from gideon.model_windows import model_context_window  # noqa: F401
 # for its provider WITHOUT core knowing the vendor. See gideon.providers.media_scanners.
 from gideon.providers.media_scanners import register_scanner  # noqa: F401
 
+# ``register_branded_app`` is the one name here that a SIBLING SDK module owns rather than
+# core. Re-exported so an app uses the single stable ``gideon.sdk.model`` path. This is
+# a plain top-of-file import and MUST stay one: ``sdk.provider_helpers`` imports its core
+# machinery straight from ``gideon.llm.*``, so the edge runs one way only. Reversing
+# that (importing ``sdk.model`` from ``provider_helpers``) reinstates a module-scope cycle in
+# which whichever module is imported first from a cold interpreter decides whether the SDK
+# loads at all. tests/test_sdk_import_cycle.py drives both orders and fails if it comes back.
+from gideon.sdk.provider_helpers import register_branded_app  # noqa: F401
+
 __all__ = [
     "ModelProvider",
     "LLMEvent",
@@ -114,11 +124,3 @@ __all__ = [
     # Media-capability config scanner registration (app-owned extension point).
     "register_scanner",
 ]
-
-# Imported LAST (after the names above are defined) — provider_helpers imports from
-# this module, so a top-of-file import would be circular. Re-exported so an app uses
-# the single stable `gideon.sdk.model` path.
-from gideon.sdk.provider_helpers import (  # noqa: E402,F401
-    BrandedProviderSpec,
-    register_branded_app,
-)

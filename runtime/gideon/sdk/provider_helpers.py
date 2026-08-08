@@ -24,38 +24,48 @@ from __future__ import annotations
 from typing import Any, Callable
 
 # ── Re-exported from CORE ────────────────────────────────────────────────────
+# Every name below comes from ``gideon.llm.*`` DIRECTLY — never from the sibling SDK
+# facade ``gideon.sdk.model``. That facade re-exports this module's
+# ``register_branded_app``, so importing it back from here is a module-scope CYCLE: it made
+# ``import gideon.sdk.provider_helpers`` from a cold interpreter fail outright, and
+# only ``import gideon.sdk.model`` first happened to work. The two SDK modules are
+# both thin re-export surfaces over the same core layer, so there is nothing to gain by
+# routing one through the other — one direction only (``sdk.model`` → here), pinned by
+# tests/test_sdk_import_cycle.py.
+#
 # The spec dataclass, the registry it lands in, and the credential ladder live in
 # ``gideon.llm.branded_specs`` — below this boundary, because they are core state and
 # core policy that four core modules read. They are re-exported here so an app's import path
 # is unchanged; only the direction of the dependency moved. See that module's docstring.
 from gideon.llm import branded_specs  # noqa: E402
+from gideon.llm.anthropic import AnthropicProvider  # noqa: F401
+from gideon.llm.base import ModelProvider  # noqa: F401
 from gideon.llm.branded_specs import (  # noqa: E402,F401
     BrandedProviderSpec,
     resolve_credential,
     resolve_spec_secret,
 )
+from gideon.llm.capabilities import Capability, ProviderCapability  # noqa: F401
+from gideon.llm.catalog import (  # noqa: F401
+    ConnectionResult,
+    ModelCatalog,
+    ModelInfo,
+    infer_capabilities,
+    openai_compatible_list_models,
+)
+from gideon.llm.credentials import Credential  # noqa: F401
+from gideon.llm.openai import OpenAIProvider  # noqa: F401
+from gideon.llm.prompt_cache import PromptCache  # noqa: F401
+from gideon.llm.registry import (  # noqa: F401
+    CredentialMissing,
+    ProviderEntry,
+    ProviderResolutionError,
+    get_default_registry,
+)
 from gideon.llm.subscription_credentials import (  # noqa: F401
     SubscriptionSource,
     register_subscription_source,
     resolve_subscription_credential,
-)
-from gideon.sdk.model import (  # noqa: F401
-    AnthropicProvider,
-    Capability,
-    ConnectionResult,
-    Credential,
-    CredentialMissing,
-    ModelCatalog,
-    ModelInfo,
-    ModelProvider,
-    OpenAIProvider,
-    PromptCache,
-    ProviderCapability,
-    ProviderEntry,
-    ProviderResolutionError,
-    get_default_registry,
-    infer_capabilities,
-    openai_compatible_list_models,
 )
 
 
