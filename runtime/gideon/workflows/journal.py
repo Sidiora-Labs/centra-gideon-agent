@@ -84,6 +84,7 @@ from gideon.ledger import (  # noqa: F401 — re-exported for this module's impo
     MUTATION_REJECTED,
     OUTCOME_RESOLVED,
     PENDING_OUTCOME,
+    REVIEW_FINDING,
     RUN_ABANDONED,
     RUN_FINISHED,
     RUN_STARTED,
