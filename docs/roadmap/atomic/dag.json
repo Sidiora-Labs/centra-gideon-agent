@@ -887,7 +887,7 @@
             "PR2-5",
             "EXT:WORKFLOWS-V2-AUTOMATION-SUBSTRATE:triggers.json + adaptive-clock trigger kind + runs-inbox digest"
           ],
-          "pr": 2099
+          "pr": 2105
         },
         {
           "id": "PR2-9",
@@ -2234,7 +2234,8 @@
           "status": "todo",
           "scope": "\u00a77 Menu-Bar Companion (\u00a77.1 what it shows, \u00a77.2 how it connects \u2014 thin shell/no new backend, \u00a77.3 packaging through the app platform).",
           "done_when": "a first-party app with platform:{os:[darwin], installMode:client} renders live run rows (GET /api/loops), pending approvals (GET /api/approvals) with one-click Approve/Deny (POST /api/approvals/{id}/{action}), and needs-input deep links (#/loops/<id>); ONE /api/ws connection consumed as refetch signals (never payloads) with backoff-reconnect; a badge = pending approvals + needs-input; muting notifications in Settings mutes the tray (single notification_allowed gate); gateway-offline renders a grey \"gateway offline\" state; install drops the native menu-bar binary + a login LaunchAgent and uninstall removes both; manifest permissions.api/events scope it, with no provider block and no new PROVIDER_TYPES entry.",
-          "deps": []
+          "deps": [],
+          "blocked_reason": "PARTIAL 2026-08-26 (GideonApps#53, rebase-merged 754030cc) - the menu-bar-companion bundle ships (20 files, 49 tests green, platform client-install manifest) and its own PR declares PARTIAL. The bundle declares no quality block, so APE-4's verifier does not reach it. Unmet clauses to re-measure against the done_when before flipping: the ONE /api/ws connection consumed as refetch signals only (never payloads) with backoff-reconnect, the badge = pending approvals + needs-input, and the Settings mute. Not blocked on another plan."
         },
         {
           "id": "AS-8",
@@ -5707,12 +5708,13 @@
         {
           "id": "APE-4",
           "title": "quality manifest block + Store card rendering + first-party CI verification",
-          "status": "todo",
+          "status": "done",
           "scope": "Session 2 T2.1 + V2; Contract C1 (quality block)",
           "done_when": "a dishonest first-party quality declaration turns apps-repo CI red (tested=CI green, designSystem=token-lint pass, a11y=axe pass); Store cards render honest badges",
           "deps": [
             "EXT:DESIGN-SYSTEM-CONSISTENCY:token-lint + axe a11y verification"
-          ]
+          ],
+          "pr": 53
         },
         {
           "id": "APE-5",
@@ -5732,7 +5734,8 @@
           "deps": [
             "APE-11",
             "EXT:DESIGN-SYSTEM-CONSISTENCY:tokens/primitives to consume"
-          ]
+          ],
+          "blocked_reason": "PARTIAL 2026-08-26 (GideonApps#53, rebase-merged 754030cc) - the criterion says BOTH apps and only GROWTH was migrated. Growth's migration is real and CI-backed rather than asserted: it is the one bundle in the repo declaring quality {tested:true, designSystem:'v2', a11y:false}, and APE-4's new quality-declarations job re-checks that designSystem claim against token-lint on every push (falsified locally: flipping growth's a11y to true, a claim with no axe report behind it, exits 1). MINUTES declares no quality block and was not touched. Remaining work is exactly the same migration for minutes/ plus its declaration; nothing blocks it."
         },
         {
           "id": "APE-7",
@@ -7260,12 +7263,13 @@
         {
           "id": "PEP-3",
           "title": "App Store persistent category/source rail + card polish",
-          "status": "todo",
+          "status": "done",
           "scope": "Add a StoreSideRail with a CATEGORIES block (canonical categories derived from installed+catalog tags, live counts, select-to-filter, 'All' resets) and a SOURCES block (Built-in badge + each registered source with app count + Add-source into the existing sources flow), reusing the existing filter state; the current dropdown FilterMenu/SourcesPopover become the narrow-screen fallback. The rail is always open on wide screens and collapses on narrow, with category/source selection deep-linked in the URL (hash-router). Polish app cards to an art-forward shape: hero-image column with a deterministic gradient+icon fallback, name / 2-line-clamp description / category / action; render the quality/permission badge from the app-platform quality manifest block rather than inventing a second badge. No hardcoded colors (token-lint passes).",
           "done_when": "Wide viewport shows the rail persistently and narrow falls back to the dropdown; selecting a category/source filters the grid and survives reload via the URL; cards render art-forward with and without hero art; rail is keyboard-navigable with aria-pressed category buttons.",
           "deps": [
             "EXT:APP-PLATFORM-EVOLUTION:quality-manifest-block"
-          ]
+          ],
+          "pr": 2065
         },
         {
           "id": "PEP-4",
@@ -7534,11 +7538,6 @@
   "dag": {
     "ready_frontier": [
       {
-        "id": "APE-4",
-        "title": "quality manifest block + Store card rendering + first-party CI verification",
-        "plan": "APE"
-      },
-      {
         "id": "APE-6",
         "title": "Migrate Minutes + Growth backend+UI apps to the current design system",
         "plan": "APE"
@@ -7792,11 +7791,6 @@
         "id": "PCS-7",
         "title": "Aggregate cache hit-rate + saved-USD into turn telemetry (the proof surface, V2)",
         "plan": "PCS"
-      },
-      {
-        "id": "PEP-3",
-        "title": "App Store persistent category/source rail + card polish",
-        "plan": "PEP"
       },
       {
         "id": "PEP-5",
@@ -10032,9 +10026,9 @@
         "code": "APE",
         "plan": "APP-PLATFORM-EVOLUTION",
         "total_atoms": 12,
-        "done": 10,
+        "done": 11,
         "in_progress": 0,
-        "todo": 2,
+        "todo": 1,
         "blocked": 0
       },
       {
@@ -10158,9 +10152,9 @@
         "code": "PEP",
         "plan": "PRODUCT-EXPERIENCE-PARITY",
         "total_atoms": 11,
-        "done": 7,
+        "done": 8,
         "in_progress": 0,
-        "todo": 4,
+        "todo": 3,
         "blocked": 0
       },
       {
