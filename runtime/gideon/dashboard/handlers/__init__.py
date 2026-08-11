@@ -309,6 +309,12 @@ from gideon.dashboard.handlers.messaging import (  # noqa: E402, F401
 from gideon.dashboard.handlers.optimizer import (  # noqa: E402, F401
     handle_optimize,
 )
+from gideon.dashboard.handlers.proactive import (  # noqa: E402, F401
+    TRIAGE_TRIGGER_ID,
+    api_proactive_digest,
+    api_proactive_install,
+    api_proactive_reply,
+)
 from gideon.dashboard.handlers.prompts import (  # noqa: E402, F401
     MAX_PROMPT_BYTES,
     _list_provider_prompts,
