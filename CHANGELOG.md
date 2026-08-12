@@ -577,6 +577,21 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
 
 ### Fixed
 
+- **A loop interrupted by a restart could stay stuck "running" forever, with nothing working on it.**
+  Bringing loops back after a crash or a restart was a one-shot step during startup, and if anything
+  at all went wrong in it the failure was written to the log and startup carried on. There was no
+  second attempt: for the rest of that session every loop the step should have picked up sat there
+  saying *running*, which reads as "still working" when in fact nothing was. **Loops are now brought
+  back by the supervisor that watches them, on its first pass**, so an attempt that fails is simply
+  retried on the next one a few seconds later — the same way workflow runs have always been recovered.
+  A loop with a workspace that went missing while you were away is still parked with a question rather
+  than restarted against a folder that is no longer there.
+  **Two related fixes came with it.** Starting up no longer waits for that recovery, so a restart with
+  several half-planned loops is not held behind however long it takes to resume them — the dashboard
+  comes up immediately and the loops catch up on their own. And a healthy loop resting between cycles
+  is no longer mistaken for a dead one: it used to be possible to restart work that was perfectly
+  fine, which also silently reset the approval window you had granted it.
+
 - **Restarting Gideon quietly moved a chat onto a different agent.** If you had pointed a chat
   at an external coding CLI, or put it in Ask or Plan mode, a restart threw both away and the next
   message you sent ran on the built-in agent instead — with a different set of tools and a different
@@ -1578,6 +1593,23 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
   the only thing chosen for you is the narrowest scope, which remembers nothing.
 
 ### Security
+
+- **A record id can no longer address a file outside its own store.** Projects, task lists, tasks,
+  task comments, learning proposals, skill proposals and attribution records were each stored as a
+  file named by putting an id into a directory — and in Python that expression is not a join: hand it
+  an absolute path and the directory is discarded entirely. So a URL could name any file on the disk.
+  Measured, not theorised: deleting a "project" removed an arbitrary **directory and everything under
+  it**, and reading or deleting a "task" reached any `.json` file on the machine.
+  **The refusal lives in the store, not at the door.** The tools, the workflow actions and the CLI all
+  reach these stores without passing through an HTTP handler, so a check on the way in would have left
+  three ways around it. One resolver now owns the question for every store, which is also what makes
+  the next store inherit the answer instead of having to remember it.
+  **A refused id says so, instead of looking like a missing record.** These stores answer a read they
+  cannot complete with "not found", which is how this survived being looked for — a rejected path and
+  a file that isn't there were indistinguishable. A malformed id is now a `400` naming the parameter
+  it came from, and the refusal is deliberately built so those "not found" fallbacks cannot swallow it.
+  **What changes for you:** an id containing a `/`, a `\`, a `..`, or more than 200 characters is
+  refused. No id Gideon has ever generated looks like that, so ordinary use is unaffected.
 
 - **Ways *in* now share one gate instead of each inventing their own.** The read-only MCP endpoint
   used to be the only inbound surface, and it carried its own answer to "am I allowed to serve
