@@ -94,7 +94,7 @@ class TestSurfaceToken:
         (which no longer exists): the token is retrievable through `get_credential`, and
         the `.env` the fallback backend writes is 0600 — never briefly world-readable.
         """
-        from gideon.config.loader import get_credential
+        from gideon.config.credentials import get_credential
 
         token = auth.create_surface_token("mcp")
         assert len(token.encode()) >= auth.MIN_TOKEN_BYTES

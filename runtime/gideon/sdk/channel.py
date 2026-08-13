@@ -65,6 +65,7 @@ from gideon.channel_trust import (
 # CRED_SLACK_* are the slack app's credential KEYS in the generic cred store;
 # they are defined in config/loader.py (the store's home) and re-exported here
 # as the surface apps import — see the definition site for the layering note.
+from gideon.config.credentials import save_credential
 from gideon.config.loader import (
     CRED_OWNER_ID,
     CRED_SLACK_APP_TOKEN,
@@ -72,7 +73,6 @@ from gideon.config.loader import (
     AppConfig,
     config_dir,
     config_path,
-    save_credential,
 )
 from gideon.context import (
     ContextBuilder,

@@ -12,12 +12,8 @@ from pathlib import Path
 from gideon import __version__ as _pc_version
 from gideon.agent import AGENT_FILENAME, AGENTS_DIR
 from gideon.config import AppConfig
-from gideon.config.loader import (
-    config_dir,
-    credential_backend,
-    credential_backend_warning,
-    env_path,
-)
+from gideon.config.credentials import credential_backend, credential_backend_warning
+from gideon.config.loader import config_dir, env_path
 from gideon.dashboard.origin import (
     auth_is_off,
     is_local_bind,
