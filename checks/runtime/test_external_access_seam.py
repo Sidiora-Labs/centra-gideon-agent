@@ -21,6 +21,7 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
+from gideon.config import credentials as cred_store
 from gideon.inbound import audit as audit_mod
 from gideon.inbound import auth
 from gideon.inbound import caps as caps_mod
@@ -334,11 +335,10 @@ class TestSurfaceTokens:
     def test_token_goes_through_save_credential(self, monkeypatch):
         """The clause names `save_credential` specifically, so assert the CALL."""
         calls: list[tuple[str, str]] = []
-        import gideon.config.loader as loader
 
-        real = loader.save_credential
+        real = cred_store.save_credential
         monkeypatch.setattr(
-            loader, "save_credential", lambda k, v: (calls.append((k, v)), real(k, v))[1]
+            cred_store, "save_credential", lambda k, v: (calls.append((k, v)), real(k, v))[1]
         )
         token = auth.create_surface_token("a2a")
         assert calls == [("GIDEON_INBOUND_A2A_TOKEN", token)]

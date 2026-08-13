@@ -86,7 +86,7 @@ def run_app_setup_steps(only_app: str = "") -> None:
     ``only_app`` restricts the run to that one app (``gideon setup --app``).
     A step that raises prints ``⚠️ <app>: <err>`` and setup continues.
     """
-    from gideon.config.loader import get_credential, save_credential
+    from gideon.config.credentials import get_credential, save_credential
     from gideon.providers.settings import ProviderSettings
     from gideon.sel import sel
 
