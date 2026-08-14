@@ -10,6 +10,22 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
 
 ### Added
 
+- **Notification rules can now deliver as real OS notifications.** The **Desktop** delivery target in
+  Settings → Notifications was accepted and stored from the day the rules matrix shipped, but nothing
+  acted on it — it was dimmed and labelled as needing the desktop app, and ticking it changed nothing
+  even when the desktop app was running. It works now: a rule set to **Notify** with Desktop ticked
+  raises a native notification whenever the desktop app is connected, and clicking it brings
+  Gideon forward on the surface the note came from (an inbox alert opens Inbox, a loop's progress
+  opens Loops, a skill proposal opens Skills).
+  It is deliberately per-kind and never global. A kind set to **Badge** or **Digest** raises nothing
+  even with Desktop ticked — those modes mean "do not interrupt me", and a banner is an interruption.
+  And the dashboard stays the record: a native notification is an addition, not a replacement, so
+  closing the desktop app loses nothing. The rule falls back to the dashboard bell it would have used
+  anyway, and the stored note says why.
+  macOS never reports whether notifications are authorized, so Gideon does not claim a state it
+  cannot read — if you have turned them off in System Settings, ticking Desktop will do nothing, and
+  that is the OS's answer rather than a broken toggle.
+
 - **A reviewer's findings now get triaged by you before anything touches your code.** When a workflow
   review stage reports problems in the `Finding` shape it has always been asked for
   (`severity / location / problem / why / recommended_fix`), those findings are recorded against the
@@ -702,6 +718,25 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
   of protected built-in agents rather than three hard-coded filenames (it covered one of five), and
   edits to the live agent configuration are written atomically and recorded in the audit log — this
   was the one path that did neither.
+
+- **Switching an automation off now survives a restart.** Turning one off worked, and stayed off on
+  disk. Then the next start-up read the old scheduling file, which still said the automation was on,
+  and put it back — enabled *and* armed, so it went straight back to counting down to its next run. A
+  stop button that a restart undoes is not a stop button. Whether an automation is switched on is a
+  record of something a person did, so it now travels with the rest of that history instead of being
+  re-derived from a file that predates the decision.
+  **The subtlety that made this two lines rather than one:** the code that carries this history
+  forward skipped any value it considered empty, and in Python `False` counts as empty. So simply
+  listing "switched on/off" alongside the rest would have carried *on* and quietly dropped *off* — the
+  one value that needed carrying. A yes-or-no answer is never missing; `False` is an answer.
+
+- **Asking for an automation to be created switched off now creates it switched off.** The request was
+  accepted, the field was dropped, and you got a live automation already scheduled for its next run.
+  It is honoured now, it is not armed while off, and asking for it in a way that isn't a plain
+  yes-or-no is refused rather than guessed at — because the text `"false"` counts as *true* in the
+  language this is written in, so guessing would have turned the request into its opposite. When
+  Gideon creates one for you and tells you about it, that message also stops claiming a
+  switched-off automation is "active now".
 
 - **Restarting Gideon quietly moved a chat onto a different agent.** If you had pointed a chat
   at an external coding CLI, or put it in Ask or Plan mode, a restart threw both away and the next
