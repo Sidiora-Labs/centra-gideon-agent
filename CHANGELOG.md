@@ -593,6 +593,19 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
 
 ### Fixed
 
+- **When the model was unavailable, knowledge enrichment told you it had found nothing.** Every failure
+  and timeout in the knowledge model pool was turned into an empty answer, and an empty answer is
+  indistinguishable from a model that ran perfectly well and found nothing to say. So a model that was
+  still warming up, or unreachable, or too slow, was reported to you as a clean result with nothing in
+  it. Three places already knew how to say the truthful thing and none of them could be reached:
+  running an intent over your library said *"No matches in your existing items"* instead of *"Couldn't
+  evaluate N items — the model may still be warming up"*; an item finished as fully enriched instead of
+  being flagged **Incomplete** with *"insights: model unavailable"*; and the live progress view showed
+  entity extraction as done rather than failed.
+  The pool now says which of the two happened, and all three surfaces report accordingly. A model that
+  genuinely answers nothing is still just that — nothing is now reported as a failure that wasn't one,
+  which is the distinction the whole fix rests on.
+
 - **Creating a knowledge intent could silently delete one you already had.** An intent is identified by
   a name derived from the goal you type, so two goals worded almost the same — "track homelab drive
   health" and "Track homelab drive health!" — resolved to the same one. The second replaced the first
@@ -1770,6 +1783,24 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
   the only thing chosen for you is the narrowest scope, which remembers nothing.
 
 ### Security
+
+- **Gideon's own keys were protected in the files area and nowhere else.** The file browser
+  refuses to read them — the key that signs your security log, the loopback auth secret, the session
+  signing key. The guard that the agent's shell commands and the terminal both consult had never been
+  told about any of them, so it allowed what the file browser refused. An agent running an ordinary
+  `cat` on the key that signs the security log was not stopped, and with that key a log entry can be
+  forged and still pass verification, which is the one record here that cannot be repaired afterwards.
+  All of them are now refused by name wherever they are, so the two agree.
+  **If you moved your Gideon folder, the protections were weaker still.** The list was written
+  relative to your home directory, so pointing `GIDEON_HOME` somewhere else — which every
+  development setup does — left even `.env` and the governance ceiling unprotected. The ceiling is the
+  hard limit you set on what any run may spend and do, and it is meant to be one thing the agent cannot
+  rewrite. It is resolved against wherever your folder actually is now.
+  **One honest limit.** A terminal session is a real shell running as you, so it can read any file you
+  can, and no change here alters that. What changed is that a credential directory can no longer be
+  used as a terminal's starting directory, and every path an *agent* reads through is now covered.
+  Your own projects are untouched: a `.pem`, a private key or a `sessions.json` of your own is still
+  yours to read.
 
 - **A password inside a URL was invisible to every place Gideon redacts secrets.** The
   redaction knows what a secret *looks like* — the key formats the big providers use, and lines of the
