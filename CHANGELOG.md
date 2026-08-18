@@ -60,6 +60,27 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
   cannot read — if you have turned them off in System Settings, ticking Desktop will do nothing, and
   that is the OS's answer rather than a broken toggle.
 
+- **Your phone can wake you when a run is blocked on your approval — and the notification carries
+  nothing but two ids.** A tool call waiting on a decision now sends a push whose entire payload is
+  `{"kind": "approval", "item_id": "<id>"}`. Tap it and the companion screen opens on *that* card,
+  scrolled to and focused, with the whole decision on screen: tool, full arguments, where the request
+  came from, how long it has been waiting. Approve, and the run continues. If it timed out while your
+  phone was in your pocket, the screen says so instead of leaving you hunting for a card that no
+  longer exists.
+  **No push service ever sees what is being approved.** Not the tool, not its arguments, not the
+  session, not even a title — the words you read in the notification are composed on your phone from
+  the `kind`, out of a fixed table. Your phone fetches the actual decision from your own gateway.
+  That is the only claim that holds for both transports, since one of them is not encrypted at all.
+  Two transports, in **Settings → Companion apps → Phone push**: **web push** (your browser's own
+  subscription, one-time `gideon push init` to generate the keypair, stored per device) or
+  **ntfy** (fully self-hosted — paste your topic's https URL and no third party is involved at all;
+  plain http is refused, because an unencrypted ping would put the id on the wire in the clear).
+  `gideon push test` sends one ping and prints the exact payload, so you can read the ids-only
+  promise rather than take it on trust. Which notifications reach the phone is yours to set in
+  **Settings → Notifications** — *Approval needed* is a row there like everything else, and it ships
+  with the phone among its targets. On iOS the dashboard has to be installed to your home screen
+  first; the companion screen says that rather than showing a button that cannot work. Setup is in
+  [Reaching your dashboard from outside your home network](docs/guides/remote-access.md).
 - **A reviewer's findings now get triaged by you before anything touches your code.** When a workflow
   review stage reports problems in the `Finding` shape it has always been asked for
   (`severity / location / problem / why / recommended_fix`), those findings are recorded against the
@@ -626,6 +647,21 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
   only: this is your machine, with no tunnel and nothing shared.
 
 ### Fixed
+
+- **The Doctor's "backfill missing knowledge embeddings" repair could not repair anything, and said it
+  had.** It always reported *re-embedded 0 item(s)* — in every install, whatever your library held. Two
+  independent faults: it handed the re-index a plain function where an embedding model was expected, so
+  every item was left without a vector, and it then read a count that was never reported, so the number
+  it printed was always zero. Nothing was ever corrupted, but the items stayed keyword-only and the
+  message implied there had been nothing to do. Both are fixed, so the repair now drains the backlog and
+  the number it reports is the number of items it actually embedded.
+  **It also no longer re-embeds your whole library.** It ran over every item every time, which on a large
+  library is a lot of work to redo every six hours; it now touches only the items that are missing a
+  vector, which is what the repair has always been named for.
+  **And a repair that achieves nothing now says so.** Reporting a clean zero also took the repair's
+  six-hour cooldown, so a failure hid itself and then declined to retry. A pass that embeds nothing is
+  reported as a failure and will try again; a pass that embeds some but not all keeps its progress and
+  tells you how many are still waiting.
 
 - **Two settings saved at the same moment could lose one of them.** Both ways Gideon writes its
   config file read the whole file, change one thing, and write it all back. One of the two took a lock
