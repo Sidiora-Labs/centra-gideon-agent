@@ -847,7 +847,8 @@ def _no_surface_tokens(monkeypatch: pytest.MonkeyPatch):
 
 def _enable_capture(monkeypatch: pytest.MonkeyPatch, *, enabled: bool = True) -> None:
     """Point `AppConfig.load()` at an external-access config without writing config.json."""
-    from gideon.config.loader import AppConfig, CaptureSurfaceConfig, ExternalAccessConfig
+    from gideon.config.external_access import CaptureSurfaceConfig, ExternalAccessConfig
+    from gideon.config.loader import AppConfig
 
     cfg = AppConfig()
     cfg.external_access = ExternalAccessConfig(

@@ -48,8 +48,9 @@ def _enable(monkeypatch, *, enabled=True, allow_remote=False, public_url="", mas
     are about the per-surface behaviour; the master layer has its own tests in
     `test_external_access_seam.py`.
     """
-    from gideon.config.loader import AppConfig, ExternalAccessConfig
-    from gideon.config.loader import ExternalAccessSurfaceConfig as Surface
+    from gideon.config.external_access import ExternalAccessConfig
+    from gideon.config.external_access import ExternalAccessSurfaceConfig as Surface
+    from gideon.config.loader import AppConfig
 
     cfg = AppConfig()
     cfg.external_access = ExternalAccessConfig(

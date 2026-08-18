@@ -26,7 +26,7 @@ from typing import Any
 
 import pytest
 
-from gideon.config.loader import LoopsConfig
+from gideon.config.learning import LoopsConfig
 from gideon.guardrails import ceiling as C
 from gideon.guardrails.budgets import Budget
 from gideon.guardrails.policy import (

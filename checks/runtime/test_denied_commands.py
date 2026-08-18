@@ -70,7 +70,8 @@ class TestUserDenylistMerge:
 def test_config_round_trips_security_section(tmp_path: Path, monkeypatch):
     """SecurityConfig (denied_commands + egress) survives load → to_dict round-trip."""
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.config.loader import AppConfig, SecurityConfig
+    from gideon.config.loader import AppConfig
+    from gideon.config.safety import SecurityConfig
 
     c = AppConfig()
     assert isinstance(c.security, SecurityConfig)

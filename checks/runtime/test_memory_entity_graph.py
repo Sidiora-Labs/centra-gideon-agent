@@ -831,7 +831,8 @@ class TestConfigWiring:
         does arrive. Both must land on "still enabled".
         """
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-        from gideon.config.loader import AppConfig, _guard_flag, config_path
+        from gideon.config.coercion import _guard_flag
+        from gideon.config.loader import AppConfig, config_path
 
         for raw, expected in ((True, True), (False, False), ("garbage", True), (None, True)):
             config_path().write_text(

@@ -79,8 +79,9 @@ class _State:
 
 
 def _configure(monkeypatch, *, persistent: bool):
-    from gideon.config.loader import AgentConfig, AppConfig, ExternalAccessConfig
-    from gideon.config.loader import ExternalAccessSurfaceConfig as Surface
+    from gideon.config.external_access import ExternalAccessConfig
+    from gideon.config.external_access import ExternalAccessSurfaceConfig as Surface
+    from gideon.config.loader import AgentConfig, AppConfig
     from gideon.inbound.clients import InboundClient
 
     cfg = AppConfig()

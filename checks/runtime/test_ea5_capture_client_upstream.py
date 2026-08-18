@@ -66,8 +66,9 @@ def _isolate(tmp_path, monkeypatch):
 
 def _enable(monkeypatch, *, allowlist=()):
     """Point ``AppConfig.load()`` at an enabled capture surface with ``allowlist``."""
-    from gideon.config.loader import AppConfig, ExternalAccessConfig
-    from gideon.config.loader import ExternalAccessSurfaceConfig as Surface
+    from gideon.config.external_access import ExternalAccessConfig
+    from gideon.config.external_access import ExternalAccessSurfaceConfig as Surface
+    from gideon.config.loader import AppConfig
 
     cfg = AppConfig()
     surface = Surface(enabled=True, allow_remote=False)
