@@ -68,8 +68,9 @@ def _enable(
     Both are exercised because this module reads whichever exists and neither field is
     owned here.
     """
-    from gideon.config.loader import AppConfig, ExternalAccessConfig
-    from gideon.config.loader import ExternalAccessSurfaceConfig as Surface
+    from gideon.config.external_access import ExternalAccessConfig
+    from gideon.config.external_access import ExternalAccessSurfaceConfig as Surface
+    from gideon.config.loader import AppConfig
 
     cfg = AppConfig()
     surface = Surface(enabled=enabled, allow_remote=allow_remote)

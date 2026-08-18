@@ -16,7 +16,8 @@ from unittest.mock import patch
 
 import pytest
 
-from gideon.config.loader import AppConfig, SandboxConfig
+from gideon.config.loader import AppConfig
+from gideon.config.safety import SandboxConfig
 
 FIELD_NAME = "cgroup_scopes"
 

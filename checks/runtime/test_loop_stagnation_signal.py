@@ -382,7 +382,7 @@ class TestWindowIsConfigurable:
         label it rather than showing a bare key."""
         from dataclasses import fields
 
-        from gideon.config.loader import LoopsConfig
+        from gideon.config.learning import LoopsConfig
 
         meta = {f.name: f.metadata for f in fields(LoopsConfig)}["stagnation_window"]
         assert meta.get("label") == "Stagnation Window"
