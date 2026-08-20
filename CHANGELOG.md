@@ -10,6 +10,24 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
 
 ### Added
 
+- **Proposals can now show whether they would have helped on YOUR work.** When Gideon suggests
+  a new skill or template, the card in **Learning → Proposals** can now carry a second measurement
+  beside the existing gate: it replays a few real turns from your own captured coding sessions twice
+  — once without the candidate, once with it — and shows both scores. So instead of only "here is
+  where this idea came from", the card can say "on three of your own turns this scored 4.2 before and
+  1.5 after". Each replayed case links back to the exact captured turn it came from, so a claim about
+  your work is checkable against the turn that produced it.
+  **It is evidence, never a veto.** A "made things worse" verdict is a sentence on the card and
+  nothing more — Accept stays enabled, because you may know something three replayed turns do not.
+  Nothing is ever installed without you.
+  **It is off until you fund it, and it never guesses a number.** Two new settings turn it on:
+  *Replay Evidence On Proposals* and a *Replay Budget (USD)* ceiling. A budget of 0 means it does not
+  run at all, deliberately — an unbounded background pass that spends money is the one thing this must
+  never be. If the budget runs out mid-pass, the remaining proposals say "deferred on the replay
+  budget" and get replayed later, rather than quietly showing nothing. And if nothing could be
+  measured — no captured turns to replay, or the scoring model returned something unreadable — the
+  card says "not measured" or "not replayed" and why. It never draws an unmeasured score as 0.0.
+
 - **Automations can now read a web page.** A new **Fetch a URL** action (`net-fetch`) is selectable
   wherever an action is — a workflow's action node, a schedule or event trigger, a lifecycle hook —
   so a monitor or ingest automation can pull a page without a browser and without a script. Before
@@ -671,6 +689,14 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
   anything is saved, and if what you typed is not a valid list the save stops and tells you which
   field, instead of succeeding and dropping it. This applies to every action setting of that kind, on
   both the trigger and the lifecycle-hook forms.
+
+- **Editing an artifact and navigating away lost the edit.** Typing in an artifact's editor and then
+  clicking anywhere else in the app discarded the change: no prompt on the way out, nothing restored on
+  return. The editor already knew the text was unsaved — the Save button had enabled — and the buffer was
+  dropped anyway. Unsaved artifact edits are now kept for the rest of the session, so leaving the page
+  and coming back brings them with you, and saving clears them as you would expect.
+  Viewing an older version of an artifact is unaffected: it shows that version, never a pending edit to
+  the current one. And the recovery is held in memory only, so reloading the page still starts clean.
 
 - **The Doctor's "backfill missing knowledge embeddings" repair could not repair anything, and said it
   had.** It always reported *re-embedded 0 item(s)* — in every install, whatever your library held. Two
