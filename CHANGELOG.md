@@ -666,6 +666,15 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
 
 ### Fixed
 
+- **Searching the skill store said "No results" when there was nothing to search.** The store installs
+  skills from a catalogue, and none ships by default — so every search came back empty and told you to
+  try a different search term, which blamed your query for the absence of anything to look in. It now
+  says that no catalogue is set up and what to do about it, and it keeps saying "No results" in the case
+  that actually means that. A failed search still reads as a failed search rather than claiming anything
+  about your configuration.
+  Your own skills and the bundled ones are unaffected, and the integrity badge on installed skills is
+  unchanged.
+
 - **The check that keeps installed apps off Gideon's internals had never actually run.** Apps are
   meant to reach core only through the published SDK, and one test enforces that. It looked for the apps
   folder in a place that does not exist — in a clone, in a git worktree, or in a development workspace
@@ -697,6 +706,19 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
   and coming back brings them with you, and saving clears them as you would expect.
   Viewing an older version of an artifact is unaffected: it shows that version, never a pending edit to
   the current one. And the recovery is held in memory only, so reloading the page still starts clean.
+
+- **`gideon snapshot` left your custom themes behind.** A theme you save from Settings › Design is
+  kept on the server, and the manifest that decides what a snapshot contains did not know that folder
+  existed — so every theme you had authored was missing from the backup, and restoring brought back an
+  instance without them. This matters more than an ordinary gap: the release notes tell you to run
+  `gideon snapshot` before upgrading, so the one command offered as the safety net was not covering
+  this. Themes are now part of it, and of an export, and two instances syncing keep both sides' themes
+  rather than one replacing the other.
+  **A check now walks the source and fails if a new location is added without deciding whether it
+  belongs in a backup.** The nine folders fixed before this one, and this tenth, were all found by
+  somebody noticing. That is what the check replaces. It also records, out loud, roughly twenty further
+  locations that are still missing from backups — each needs its own decision about how two copies should
+  be merged, and guessing that is worse than leaving it visible.
 
 - **The Doctor's "backfill missing knowledge embeddings" repair could not repair anything, and said it
   had.** It always reported *re-embedded 0 item(s)* — in every install, whatever your library held. Two
