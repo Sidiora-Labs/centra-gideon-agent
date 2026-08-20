@@ -99,6 +99,8 @@ HTTP_ERROR_CODES: dict[str, str] = {
     "device_pair_origin_rejected": "The request origin is not allowed to pair a device.",
     "device_pair_locked_out": "Too many failed pairing attempts; try again later.",
     "device_unknown": "No such paired device.",
+    # ── channel sender trust (handlers/channel_trust.py) ──
+    "channel_trust_sender_unknown": "That sender is not on this channel's allowlist.",
     # ── push subscriptions (handlers/push.py) ──
     "push_subscription_invalid": "The push subscription is missing an https endpoint or its keys.",
     "push_not_subscribed": "That device has no push subscription.",
@@ -396,6 +398,14 @@ HTTP_ERROR_CODES: dict[str, str] = {
     # turned it off, which is a policy answer, and a 404 would read as "no such tool" to a
     # cron script whose next move is to reinstall something.
     "tool_disabled": "The tool is disabled on the Tools page and will not be executed.",
+    # Speech synthesis refused because the owner turned it off. Same family as `tool_disabled`:
+    # a switched-off capability, not a malformed request. 503 rather than 403 to match the
+    # sibling refusal on the same route ("no TTS voice selected"), which is also a
+    # configuration-absent answer (#651).
+    "tts_disabled": (
+        "Text-to-speech is switched off. Fix: turn on “Speak replies aloud” in "
+        "Settings → Speech & Transcription."
+    ),
     # ── capture telemetry import (inbound/capture_proxy.py — EXTERNAL-ACCESS §8) ──
     # ONE code, for the store failing under the import — NOT for a file that parsed badly.
     # A malformed export is a 200 whose `reasons` name each skipped line (§8's
