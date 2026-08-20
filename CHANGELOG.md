@@ -688,6 +688,15 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
   loaded. The two screens send exactly the same thing; only the create path knew what to do with it.
   Editing now resolves it the same way, into the project's General list, and an explicit list you
   picked yourself still wins over the project.
+- **A crash no longer explains itself to you as "Server got itself in trouble."** When something broke
+  on the server in a way it had not anticipated, the web framework's own diagnostic page was pasted
+  into the red line under whatever field you were filling in — and, since that line is announced to
+  screen readers, read out loud. It was not a sentence written for anyone; it just happened to be
+  short enough and plain enough to slip past the checks that already caught proxy error pages and
+  walls of markup. You now see the status instead, which is less colourful and considerably more
+  true: it tells you the request reached the server and the server failed, which is the actionable
+  part. Messages the backend deliberately writes are untouched, including on a server error — "could
+  not read the document" still says that, rather than hiding behind a number.
 
 - **A list-typed action setting is no longer thrown away without a word.** A trigger action's Labels
   field advertises a list — its badge says `string[]` and its placeholder is `[ … ]` — and a value
@@ -719,6 +728,16 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
   somebody noticing. That is what the check replaces. It also records, out loud, roughly twenty further
   locations that are still missing from backups — each needs its own decision about how two copies should
   be merged, and guessing that is worse than leaving it visible.
+
+- **Renaming a file you were editing asked permission after the fact, then stranded the tab.** The
+  rename went to disk first, and only then did a dialog ask whether to discard your unsaved changes —
+  so Cancel cancelled the wrong thing. It left the editor open on a name that no longer existed, and
+  the next Save failed against a file that was gone, silently: no message, nothing on screen, the
+  edits still in front of you with nowhere to go. Now the question comes first and Cancel means what
+  it says — nothing is renamed and your edits are where you left them. It names the files at risk,
+  including when you rename a whole folder with several open. And a file with no unsaved changes is
+  no longer closed at all: the tab follows it to its new name, because wanting to rename something is
+  not a reason to stop looking at it.
 
 - **The Doctor's "backfill missing knowledge embeddings" repair could not repair anything, and said it
   had.** It always reported *re-embedded 0 item(s)* — in every install, whatever your library held. Two
