@@ -61,6 +61,23 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
   where the OS left it. On Windows and Linux the switch is visible but disabled, with the reason.
   In a browser tab there is no switch at all: registering a login item needs the desktop app, and a
   toggle that could not do anything would be worse than an honest absence.
+- **You can put your own note in your inbox.** Everything the inbox held until now was put there by
+  something else — a rule fired, a run needed an answer, a source polled a message in, an app raised
+  a proposal. There was no way to add a thought of your own. The menu-bar app has offered
+  **Quick Capture Note…** for a while, and it was not doing anything: it opened the Inbox and wrote
+  nothing, because the endpoint behind it did not exist yet.
+  It exists now, and both doors lead to it. Pick **Quick Capture Note…** from the menu bar, or press
+  **Capture a note** in the Inbox header, and you get one box to type into. The first line becomes the
+  note's subject in your list; everything after it is the body. Notes land as their own **Notes** kind,
+  so they filter apart from messages and requests, and they stay until you handle or dismiss them like
+  anything else in the queue.
+  Your notes do **not** toast at you — you just wrote them, so there is nothing to tell you. They
+  appear in the queue and count toward your unread badge, and if you would rather be pinged anyway,
+  Settings → Notifications has a **Note you captured** row you can switch to Notify. A note is also
+  never second-guessed by the verification pass: it is what you said, not a claim to check.
+  A note is saved before you are told it was saved. If the write fails, the box keeps your text and
+  says so rather than closing on an empty promise — and a note too long to store is refused with the
+  actual length, never silently trimmed.
 
 - **Notification rules can now deliver as real OS notifications.** The **Desktop** delivery target in
   Settings → Notifications was accepted and stored from the day the rules matrix shipped, but nothing
@@ -775,6 +792,15 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
   including when you rename a whole folder with several open. And a file with no unsaved changes is
   no longer closed at all: the tab follows it to its new name, because wanting to rename something is
   not a reason to stop looking at it.
+- **Workflow controls no longer answer confidently about a run that is not there.** Asking to skip or
+  dismiss an approval on a run id that did not exist — a typo, or a run already deleted — came back
+  reporting success, and even said the approval was still waiting. Rewinding, re-running from a step,
+  or editing such a run reported that it was not running and told you to resume it first, which you
+  could not do because there was nothing to resume; previewing an edit reported a server fault. All
+  four now say plainly that there is no such run, which is what the other eight controls already did.
+  **And a finished run can no longer be "resumed."** Answering a gate on a workflow that had already
+  completed, failed, or been cancelled reported success and quietly wrote to the finished run on the
+  way through. It now refuses and says the run is already complete, matching cancel, pause and steer.
 
 - **The Doctor's "backfill missing knowledge embeddings" repair could not repair anything, and said it
   had.** It always reported *re-embedded 0 item(s)* — in every install, whatever your library held. Two
