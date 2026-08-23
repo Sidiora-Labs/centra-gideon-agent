@@ -17,7 +17,7 @@ import logging
 
 from gideon.config.loader import AppConfig
 from gideon.loop import kinds, store
-from gideon.loop.loop import Loop, LoopStatus
+from gideon.loop.loop import Loop, LoopStatus, LoopStopReason
 
 logger = logging.getLogger(__name__)
 
@@ -279,7 +279,7 @@ async def stop(state, svc, loop_id: str) -> Loop:
     """Stop (terminal): tear down + drop the STOP sentinel."""
     await _teardown(svc, loop_id)
     store.write_stop_sentinel(loop_id)
-    return store.update_status(loop_id, LoopStatus.STOPPED)
+    return store.update_status(loop_id, LoopStatus.STOPPED, stop_reason=LoopStopReason.USER)
 
 
 async def nudge(state, svc, loop_id: str, text: str, task_id: str = "") -> Loop | None:
