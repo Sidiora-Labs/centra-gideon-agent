@@ -718,6 +718,33 @@ The in-app Updates panel reads this file (`GET /api/changelog`) to show "what's 
   could browse *and* edit the real home rather than the active one. Both roots now resolve through the
   active home (`config_dir()`), so an instance on a custom home stays inside its own tree. (#294)
 
+- **The audit log's "Rotate" control described a key rotation it never performed.** The confirm dialog
+  asked to "Rotate the audit-log signing key?" and promised that "past entries stay verifiable under the
+  old key" — but the action only archives the current log to a timestamped file beside it and starts a
+  fresh hash-chain: the signing key is created once and never rewritten, and the archived entries leave
+  the dashboard's verify and browse views entirely, so nothing stayed "verifiable" there. The control now
+  says what it does — it offers to "Archive the audit log and start a new chain", notes that the existing
+  entries move to a timestamped archive and that the signing key is unchanged, and on success it names the
+  archive file the log was moved to. The behaviour did not change, only the words did — and they are now
+  true. (#534)
+
+- **Regenerating a project's agent-instruction files could destroy your own notes, or write them
+  to the wrong place entirely.** Gideon can keep a managed block inside a project's
+  `CLAUDE.md` / `AGENTS.md` / `.cursorrules`, fenced by markers so everything you write around it is
+  left alone. Three faults broke that promise. The splice found its markers by plain text search, so
+  a marker shown as an example inside a code block — or a second managed block — was mistaken for the
+  real fence, and the content between the wrong pair was overwritten on the next regeneration. The
+  block's own contents were written out verbatim, so a project name, brief, memory or document title
+  that happened to contain a marker line silently closed the block early and set up the same
+  corruption. And the destination directory was never checked, so a project bound to `/` or to your
+  home directory would have had agent files planted at the filesystem root or straight into `$HOME`.
+  All three are fixed: a marker now counts only as a whole line outside any code fence, a marker
+  inside a value is escaped so it can never close the block, and an unsafe destination (a relative
+  path, the home directory itself, a credential directory, or an OS/system root) is refused — both
+  when the workspace is bound and again before any file is written. When the markers are genuinely
+  malformed the regeneration refuses rather than guess, and every write is now atomic, so a crash
+  mid-write can no longer leave a half-written file. (#358)
+
 - **The check that keeps installed apps off Gideon's internals had never actually run.** Apps are
   meant to reach core only through the published SDK, and one test enforces that. It looked for the apps
   folder in a place that does not exist — in a clone, in a git worktree, or in a development workspace
