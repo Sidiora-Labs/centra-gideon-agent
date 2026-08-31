@@ -9,6 +9,7 @@ behavior ports from the legacy ``loops/`` engine in Slice 2.
 
 from __future__ import annotations
 
+from gideon.loop import files as loop_files
 from gideon.loop.goal_meta import GOAL_TYPES as _GOAL_TYPES
 from gideon.loop.goal_meta import GRANULARITIES as _GRANULARITIES
 from gideon.loop.kinds import LoopKindStrategy, register
@@ -49,9 +50,7 @@ class GoalKind(LoopKindStrategy):
         plan = list((loop.kind_config or {}).get("execution_plan", []) or [])
         if not plan:
             return -1
-        from gideon.loop import store
-
-        cycles = store.cycles_completed(loop.id)
+        cycles = loop_files.cycles_completed(loop.id)
         elapsed = 0
         for i, phase in enumerate(plan):
             try:

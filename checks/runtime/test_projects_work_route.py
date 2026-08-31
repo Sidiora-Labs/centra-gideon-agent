@@ -33,7 +33,7 @@ async def _client(tmp_path):
         patch("gideon.workflows.store.config_dir", return_value=tmp_path),
         patch("gideon.workflows.leases.config_dir", return_value=tmp_path),
         patch("gideon.concurrency.config_dir", return_value=tmp_path),
-        patch("gideon.loop.store.config_dir", return_value=tmp_path),
+        patch("gideon.loop.files.config_dir", return_value=tmp_path),
     ):
         app = web.Application()
         register_task_routes(app)

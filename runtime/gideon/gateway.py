@@ -74,6 +74,7 @@ from gideon.llm_helpers import (
     PromptBusyExhaustedError,
     stream_and_collect,
 )
+from gideon.loop import files as loop_files
 from gideon.memory import MemoryStore
 from gideon.schedule_history import ScheduleRunStore
 from gideon.security import redact_credentials, redact_exfiltration_urls
@@ -2311,14 +2312,13 @@ class GatewayOrchestrator:
 
             def _finding_count(_key: str) -> int:
                 try:
-                    from gideon.loop import store as _lstore
 
                     # loop-<id> (main) or loop-<id>-<taskid> (parallel task-worker);
                     # findings live on the parent loop in both cases.
                     _lid = _key.split("loop-", 1)[-1]
-                    if _lstore.loop_dir(_lid) is None and "-" in _lid:
+                    if loop_files.loop_dir(_lid) is None and "-" in _lid:
                         _lid = _lid.rsplit("-", 1)[0]
-                    return len(_lstore.get_findings(_lid))
+                    return len(loop_files.get_findings(_lid))
                 except Exception:
                     return 0
 

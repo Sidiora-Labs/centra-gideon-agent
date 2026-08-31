@@ -39,7 +39,7 @@ from gideon.workflows.models import (
 
 @pytest.fixture(autouse=True)
 def _tmp_config(monkeypatch, tmp_path):
-    monkeypatch.setattr("gideon.loop.store.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.loop.files.config_dir", lambda: tmp_path)
     return tmp_path
 
 
