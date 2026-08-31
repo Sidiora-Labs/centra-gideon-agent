@@ -56,12 +56,12 @@ def _isolated_homes(tmp_path, monkeypatch):
     sweeps would read the real home."""
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.loop.store.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.loop.files.config_dir", lambda: home)
     monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
-    from gideon.loop import store as loop_store
+    from gideon.loop import files as loop_files
     from gideon.workflows import store as run_store
 
-    assert loop_store.config_dir() == home, "loop store still points at another home"
+    assert loop_files.config_dir() == home, "loop store still points at another home"
     assert run_store.config_dir() == home, "run store still points at another home"
     return home
 

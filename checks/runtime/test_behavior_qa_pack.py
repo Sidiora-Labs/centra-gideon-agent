@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import pytest
 
+from gideon.loop import files as loop_files
+
 # Fake secret markers — shaped to match the real credential detectors but
 # obviously synthetic, so a leak surfacing in a failure message is harmless.
 FAKE_AWS_KEY = "AKIA" + "QA0000FAKE000TEST"  # AKIA + 16 chars → AWS access key shape
@@ -177,7 +179,7 @@ class TestWorkerNeverCertifiesOwnWork:
 
     def test_brief_instructs_worker_not_to_self_certify(self, tmp_path, monkeypatch):
         # The worker's brief explicitly forbids self-certifying done-ness.
-        monkeypatch.setattr("gideon.loop.store.config_dir", lambda: tmp_path)
+        monkeypatch.setattr("gideon.loop.files.config_dir", lambda: tmp_path)
         from gideon.loop import manager, store
         from gideon.loop.loop import Loop
 
@@ -191,7 +193,7 @@ class TestWorkerNeverCertifiesOwnWork:
             )
         )
         manager.write_brief(store.get(c.id))
-        brief = (store.loop_dir(c.id) / "brief.md").read_text()
+        brief = (loop_files.loop_dir(c.id) / "brief.md").read_text()
         assert "never you" in brief or "separate check" in brief
 
 

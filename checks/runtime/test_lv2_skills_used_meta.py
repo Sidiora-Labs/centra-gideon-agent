@@ -368,7 +368,7 @@ def test_the_loop_detail_view_serves_the_session_key_the_cockpit_reads(monkeypat
     from gideon.loop import store as loop_store
     from gideon.loop.loop import Loop
 
-    monkeypatch.setattr("gideon.loop.store.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.loop.files.config_dir", lambda: tmp_path)
     loop_store.create(Loop(id="abc12345", name="n", kind="goal", task="t"))
     # Vacuity floor: BEFORE the writer runs the field is empty, so the assertion below
     # cannot be riding a hardcoded value — and this also pins that the cockpit's honest

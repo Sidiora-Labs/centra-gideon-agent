@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import pytest
 
+from gideon.loop import files as loop_files
 from gideon.loop import kinds, store
 from gideon.loop.loop import Loop
 from gideon.planning.session import PlanSession, PlanStep, StepStatus
@@ -12,7 +13,7 @@ from gideon.planning.session import PlanSession, PlanStep, StepStatus
 
 @pytest.fixture(autouse=True)
 def _tmp_config(monkeypatch, tmp_path):
-    monkeypatch.setattr("gideon.loop.store.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.loop.files.config_dir", lambda: tmp_path)
     # on_finalize → decompose_sub_goals writes to the Tasks hierarchy store; isolate it.
     monkeypatch.setattr("gideon.tasks.hierarchy.config_dir", lambda: tmp_path)
     import gideon.tasks.native as nat
@@ -256,7 +257,7 @@ class TestStepPassRetry:
                 ),
             ],
         )
-        store.write_plan_session(session)
+        loop_files.write_plan_session(session)
         return loop
 
     def test_retries_once_then_succeeds(self, monkeypatch):
@@ -314,5 +315,5 @@ class TestStepPassRetry:
         )
         assert calls["n"] == 2, "tries the original + exactly one retry, then gives up"
         assert step is None
-        session = store.read_plan_session(loop.id)
+        session = loop_files.read_plan_session(loop.id)
         assert session.steps[0].status == StepStatus.PENDING.value  # honest revert

@@ -19,7 +19,7 @@ def _run(coro):
 
 @pytest.fixture(autouse=True)
 def _tmp_config(monkeypatch, tmp_path):
-    monkeypatch.setattr("gideon.loop.store.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.loop.files.config_dir", lambda: tmp_path)
     # Artifact provider writes under config_dir too — keep it isolated.
     import gideon.artifacts.native as nat
 
