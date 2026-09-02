@@ -32,11 +32,6 @@ from aiohttp import web
 from gideon import notification_kinds, shutdown_event
 from gideon.acp.errors import AcpError, AcpProcessDied
 from gideon.approval_brief import attach_approval_brief
-from gideon.autonudge import (
-    AutoNudgeService,
-    NudgeLoop,
-)
-from gideon.autonudge import enabled as autonudge_enabled
 from gideon.channel_history import ChannelHistory
 from gideon.config import AppConfig
 from gideon.config.loader import (
@@ -89,6 +84,11 @@ from gideon.subagent import (
     resolve_max_subagents,
 )
 from gideon.triggers.models import Outcome
+from gideon.triggers.nudge import (
+    AutoNudgeService,
+    NudgeLoop,
+)
+from gideon.triggers.nudge import enabled as autonudge_enabled
 
 if TYPE_CHECKING:
     from gideon.channel_delivery import ChannelDelivery
@@ -2340,12 +2340,18 @@ class GatewayOrchestrator:
                 run_chat,
             )
 
-            if session.running:
-                # Turn still active — drop this nudge. Next idle-timer tick will
-                # schedule again once the turn ends. Queueing would stack
+            if session.running or getattr(session, "_suppress_autonudge_rearm", False):
+                # Turn still active — drop this nudge. The next idle poll will
+                # try again once the turn ends. Queueing would stack
                 # identical 3KB+ nudges and blow up the context window.
                 # Returning False keeps cycle_count accurate (only delivered
                 # nudges count toward max_cycles).
+                #
+                # The suppression flag matters HERE now (WF2AUT-11): the timer world armed no
+                # timer mid-cycle, so nothing could fire in a re-prompt GAP (running briefly
+                # False between re-prompts). The poll world stays due the whole cycle, so the
+                # flag the re-prompt loop already sets is the fence that keeps a competing
+                # next-cycle nudge out of the gap.
                 logger.info(
                     "AutoNudge skip: session %s is running (loop %s cycle %d)",
                     session.key,
@@ -2472,7 +2478,7 @@ class GatewayOrchestrator:
                     _sess._suppress_autonudge_rearm = False
                     # Re-arm the idle timer ONCE now the logical cycle is done.
                     try:
-                        from gideon.autonudge import get_instance as _an_get
+                        from gideon.triggers.nudge import get_instance as _an_get
 
                         _an = _an_get()
                         if _an is not None:
