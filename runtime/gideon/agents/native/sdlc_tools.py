@@ -45,7 +45,7 @@ def _state():
 
 def _svc():
     """The autonudge service that drives loop workers, or None."""
-    from gideon.autonudge import get_instance
+    from gideon.triggers.nudge import get_instance
 
     return get_instance()
 

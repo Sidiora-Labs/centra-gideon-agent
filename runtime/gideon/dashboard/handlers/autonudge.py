@@ -7,11 +7,11 @@ from typing import Any
 
 from aiohttp import web
 
-from gideon.autonudge import get_instance as _autonudge_get
 from gideon.config.loader import config_dir, workspace_root
 from gideon.dashboard.state import DashboardState
 from gideon.security import is_sensitive_path
 from gideon.sel import sel
+from gideon.triggers.nudge import get_instance as _autonudge_get
 
 logger = logging.getLogger(__name__)
 

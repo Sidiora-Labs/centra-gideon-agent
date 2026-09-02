@@ -438,7 +438,7 @@ async def api_campaign_template_launch(request: web.Request) -> web.Response:
             {"error": reason, "loop_id": loop.id, "started": False}, status=422
         )
 
-    from gideon.autonudge import get_instance
+    from gideon.triggers.nudge import get_instance
 
     svc = get_instance()
     if svc is None:

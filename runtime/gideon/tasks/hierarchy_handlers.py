@@ -611,9 +611,9 @@ async def _teardown_bound_loops(pid: str) -> None:
     branches littering the user's repo (the exact harm the 409 guard warns about, done
     anyway on force). Best-effort per loop; never raises."""
     try:
-        from gideon.autonudge import get_instance
         from gideon.loop import manager as loop_manager
         from gideon.loop import store as loop_store
+        from gideon.triggers.nudge import get_instance
 
         svc = get_instance()
         bound = [
