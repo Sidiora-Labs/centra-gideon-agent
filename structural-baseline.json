@@ -215,12 +215,6 @@
   },
   "structural-import-direction": {
     "per_file": {
-      "src/gideon/acp/mcp_servers.py": {
-        "edges": 1,
-        "violations": [
-          "core-must-not-import-the-http-surface -> gideon.dashboard.origin"
-        ]
-      },
       "src/gideon/action_providers/services.py": {
         "edges": 1,
         "violations": [
@@ -372,16 +366,9 @@
         ]
       },
       "src/gideon/mcp_core.py": {
-        "edges": 2,
-        "violations": [
-          "core-must-not-import-the-http-surface -> gideon.dashboard",
-          "core-must-not-import-the-http-surface -> gideon.dashboard.origin"
-        ]
-      },
-      "src/gideon/mcp_shared.py": {
         "edges": 1,
         "violations": [
-          "core-must-not-import-the-http-surface -> gideon.dashboard.origin"
+          "core-must-not-import-the-http-surface -> gideon.dashboard"
         ]
       },
       "src/gideon/packs/import_.py": {
@@ -486,11 +473,11 @@
     "totals": {
       "by_rule": {
         "core-must-not-import-its-own-published-facade": 7,
-        "core-must-not-import-the-http-surface": 57,
+        "core-must-not-import-the-http-surface": 54,
         "ledger-is-a-leaf": 0
       },
-      "edges": 64,
-      "files": 33
+      "edges": 61,
+      "files": 31
     }
   },
   "structural-size": {
