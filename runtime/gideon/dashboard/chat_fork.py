@@ -5,7 +5,11 @@ import logging
 from aiohttp import web
 
 from gideon.dashboard.chat_persistence import save_session_to_history
-from gideon.dashboard.chat_utils import _history_key_for, _sync_dashboard_sessions
+from gideon.dashboard.chat_utils import (
+    _history_key_for,
+    _sync_dashboard_sessions,
+    persisted_history_key,
+)
 from gideon.dashboard.state import DashboardState
 from gideon.security import redact_credentials, redact_exfiltration_urls
 from gideon.sel import sel
@@ -105,7 +109,9 @@ async def api_chat_session_fork(request: web.Request) -> web.Response:
     async with session._fork_lock:
         all_messages: list[dict] = []
         if state.conversation_log:
-            all_messages = state.conversation_log.read_messages(_history_key_for(session.key))
+            all_messages = state.conversation_log.read_messages(
+                persisted_history_key(state.conversation_log, session.key)
+            )
         if all_messages and session._dirty:
             new_msgs = session.messages[session._resumed_count :]
             if new_msgs:
