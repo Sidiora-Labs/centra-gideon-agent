@@ -43,7 +43,7 @@ class TestSaveSessionToHistory:
         mock_state.conversation_log = MagicMock()
 
         with patch(
-            "gideon.dashboard.chat_persistence.resolve_history_key",
+            "gideon.dashboard.chat_persistence.persisted_history_key",
             side_effect=RuntimeError("reached"),
         ):
             from gideon.dashboard.chat import save_session_to_history
@@ -62,7 +62,7 @@ class TestSaveSessionToHistory:
         mock_state = MagicMock()
         mock_state.conversation_log = MagicMock()
         with patch(
-            "gideon.dashboard.chat_persistence.resolve_history_key",
+            "gideon.dashboard.chat_persistence.persisted_history_key",
             side_effect=RuntimeError("reached"),
         ):
             from gideon.dashboard.chat import save_session_to_history

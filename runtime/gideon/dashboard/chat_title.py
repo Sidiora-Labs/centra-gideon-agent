@@ -4,7 +4,7 @@ import logging
 
 from aiohttp import web
 
-from gideon.dashboard.chat_utils import _history_key_for
+from gideon.dashboard.chat_utils import persisted_history_key
 from gideon.dashboard.state import DashboardState, _ChatSession
 from gideon.llm.base import EVENT_COMPLETE, EVENT_PERMISSION_REQUEST, EVENT_TEXT_CHUNK
 from gideon.security import redact_credentials, redact_exfiltration_urls
@@ -204,7 +204,7 @@ def _persist_title(state: DashboardState, session: _ChatSession) -> None:
     """Save the session title to the conversation history file."""
 
     if state.conversation_log:
-        history_key = _history_key_for(session.key)
+        history_key = persisted_history_key(state.conversation_log, session.key)
         try:
             state.conversation_log.set_title(history_key, session.title)
             logger.debug("Persisted title %r for session %s", session.title, session.key)
