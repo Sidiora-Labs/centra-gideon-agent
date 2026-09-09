@@ -46,8 +46,8 @@ App bundles come in three tiers:
 
 | Tier | Location | Examples |
 |---|---|---|
-| Native | `src/gideon/apps/native/` (26 bundles, shipped in-package, seeded and locked on) | `native-agents`, `gideon-memory`, `bash-action` |
-| First-party | `apps/` at the workspace root (36 bundles) | `slack-channel`, `anthropic-models`, `faster-whisper` |
+| Native | `src/gideon/apps/native/` (shipped in-package, seeded and locked on) | `native-agents`, `gideon-memory`, `bash-action` |
+| First-party | `apps/` at the workspace root ([GideonApps](https://github.com/Gideon/GideonApps)) | `slack-channel`, `anthropic-models`, `faster-whisper` |
 | Third-party | user-installed into `~/.gideon/apps/` | `third-party-apps/hello-search`, `demo-dashboard` (fixtures) |
 
 ## Process model: the gateway
