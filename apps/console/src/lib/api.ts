@@ -888,8 +888,16 @@ export interface AppDepClassification {
  *  entries:0` means it has a data dir that happens to be empty. A dialog that
  *  renders both as "nothing to keep" promises the wrong thing in one of the cases.
  *  `path` is where a keep-data uninstall parks it — the recovery information the
- *  screen owes the user. */
-export interface AppDataFacts { present: boolean; entries: number; path: string }
+ *  screen owes the user.
+ *
+ *  `unconsumed` (issue #2585) is earlier copies of this app's `data/` still on disk that
+ *  nothing consumed — a park a failed restore left behind, or a stage a failed park left
+ *  behind. Non-empty means the keep-data uninstall WILL refuse, so the dialog has to say
+ *  so and name them: `DELETE ?remove=1` reports every refusal as `404 app not installed`,
+ *  which is both false and the opposite of actionable. Optional on the wire because an
+ *  older gateway does not send the key — read `undefined` as "not reported", never as
+ *  "none", or the dialog goes back to promising a removal that will be refused. */
+export interface AppDataFacts { present: boolean; entries: number; path: string; unconsumed?: string[] }
 export interface AgentDef { name: string }
 export interface ChatSession {
   key: string; title: string; agent: string; model: string; reasoning_effort: string
@@ -3968,7 +3976,12 @@ export interface ProviderSchemaProp {
 export interface ProviderSchema { type?: string; properties?: Record<string, ProviderSchemaProp>; required?: string[] }
 // One configured instance of a multiInstance=true provider (generic store —
 // extensions/{name}/instances/{id}.json). Each carries its own config dict.
-export interface ProviderInstance { id: string; extension_name: string; display_name: string; config: Record<string, unknown>; enabled: boolean }
+// `_secret_set` names the sensitive fields of THIS instance that already hold a stored
+// secret. Its config arrives MASKED (write-only over the API — apps/secret_fields.py), so the
+// editor blanks those inputs and says "saved — leave blank to keep" instead of offering a row
+// of bullets for editing. Per-instance, not per-response: a list carries N configs, so a
+// single top-level list could not say which instance a named field belongs to.
+export interface ProviderInstance { id: string; extension_name: string; display_name: string; config: Record<string, unknown>; enabled: boolean; _secret_set?: string[] }
 export interface ModelProvider { name: string; type: string; model?: string; capabilities: string[]; credential_status: string }
 /** An installable model-provider type, from an installed model app's manifest.
  *  ``settingsSchema`` is JSON Schema (+ x-meta) describing the instance config
@@ -5516,7 +5529,10 @@ export const api = {
   settingsProviders: () => get<{ providers: SettingsProvider[] }>('/api/providers').then((d) => d.providers),
   // per-extension config: schema (for the dynamic form) + current values + save.
   providerSchema: (name: string) => get<{ schema: ProviderSchema }>(`/api/providers/${encodeURIComponent(name)}/schema`).then((d) => d.schema),
-  providerConfig: (name: string) => get<{ config: Record<string, unknown> }>(`/api/providers/${encodeURIComponent(name)}/config`).then((d) => d.config),
+  // `_secret_set` names the sensitive fields that already hold a stored secret. The GET
+  // masks those values (they are write-only), so the form needs this list to tell "saved"
+  // from "empty" — without it a masked field is indistinguishable from an unset one.
+  providerConfig: (name: string) => get<{ config: Record<string, unknown>; _secret_set?: string[] }>(`/api/providers/${encodeURIComponent(name)}/config`),
   saveProviderConfig: (name: string, config: Record<string, unknown>) =>
     patch<{ config: Record<string, unknown> }>(`/api/providers/${encodeURIComponent(name)}/config`, config),
   enableProvider: (name: string) => post<{ enabled: boolean }>(`/api/providers/${encodeURIComponent(name)}/enable`),
