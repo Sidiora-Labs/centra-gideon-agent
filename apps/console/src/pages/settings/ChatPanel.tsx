@@ -121,7 +121,7 @@ function StartersSection() {
           </p>
         ) : items.map((t) => (
           <Row key={t.id} label={t.name} hint={[t.agent, t.model, t.reasoning_effort].filter(Boolean).join(' · ') || 'Uses your defaults'}>
-            <IconButton icon={Trash2} label={`Delete ${t.name}`} iconSize={16} size={32} onClick={() => remove(t)} />
+            <IconButton icon={Trash2} label={`Delete ${t.name}`} iconSize={16} size={32} tone="danger" onClick={() => remove(t)} />
           </Row>
         ))}
       </RowGroup>
@@ -308,9 +308,6 @@ function MessagesSection({ cfg, setCfg }: { cfg: DashboardConfig; setCfg: (c: Da
         <Row label="Widget density" hint="How aggressively the agent uses inline widgets for visual content.">
           <SegPills ariaLabel="Widget density" value={cfg.widget_density} onChange={(v) => save({ widget_density: v as 'more' | 'less' })}
             options={[{ key: 'more', label: 'More' }, { key: 'less', label: 'Less' }]} />
-        </Row>
-        <Row label="Confirm before closing a session" hint="Ask for confirmation when closing a session from the sidebar.">
-          <Toggle on={cfg.confirm_close_session} onChange={(v) => save({ confirm_close_session: v })} label="Confirm before closing a session" />
         </Row>
       </RowGroup>
     </Section>
