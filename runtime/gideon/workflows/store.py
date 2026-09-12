@@ -24,12 +24,22 @@ from pathlib import Path
 from typing import Any
 
 from gideon.atomic_write import atomic_write
-from gideon.config.loader import config_dir
+from gideon.config import loader as config_loader
 from gideon.workflows.models import (
     NodeInstance,
     RunStatus,
     WorkflowRun,
 )
+
+
+def config_dir() -> Path:
+    """The active home, re-resolved per call — see :func:`gideon.config.loader.config_dir`.
+
+    DEFINED here rather than imported: this module can be imported lazily, and an
+    import-time binding captures whatever the name pointed at on first use (#2443).
+    """
+    return config_loader.config_dir()
+
 
 logger = logging.getLogger(__name__)
 

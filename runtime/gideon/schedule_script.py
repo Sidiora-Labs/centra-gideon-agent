@@ -32,10 +32,20 @@ import tempfile
 from pathlib import Path
 
 from gideon import gateway_base
-from gideon.config.loader import config_dir
+from gideon.config import loader as config_loader
 from gideon.hooks import validate_file_path
 from gideon.mcp_core import _internal_secret
 from gideon.sandbox import PROFILE_TOOL, build_child_env, spawn_shim_argv, wrap_argv
+
+
+def config_dir() -> Path:
+    """The active home, re-resolved per call — see :func:`gideon.config.loader.config_dir`.
+
+    DEFINED here rather than imported: this module can be imported lazily, and an
+    import-time binding captures whatever the name pointed at on first use (#2443).
+    """
+    return config_loader.config_dir()
+
 
 logger = logging.getLogger(__name__)
 

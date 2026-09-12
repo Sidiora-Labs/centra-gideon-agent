@@ -44,7 +44,7 @@ from typing import Any
 from aiohttp import web
 
 from gideon.atomic_write import atomic_write
-from gideon.config.loader import config_dir
+from gideon.config import loader as config_loader
 from gideon.dashboard.chat_utils import _history_key_for, apply_task_mode
 from gideon.dashboard.state import DashboardState, _ChatSession
 from gideon.history import _safe_key
@@ -52,6 +52,16 @@ from gideon.http_errors import json_error
 from gideon.planning import session as PS
 from gideon.planning.session import PlanSession, PlanStep, StepStatus
 from gideon.sel import sel
+
+
+def config_dir() -> Path:
+    """The active home, re-resolved per call — see :func:`gideon.config.loader.config_dir`.
+
+    DEFINED here rather than imported: this module can be imported lazily, and an
+    import-time binding captures whatever the name pointed at on first use (#2443).
+    """
+    return config_loader.config_dir()
+
 
 logger = logging.getLogger(__name__)
 

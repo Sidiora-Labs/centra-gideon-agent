@@ -6,9 +6,19 @@ import sys
 
 from gideon.acp.errors import AcpError, AcpTimeoutError
 from gideon.config import AppConfig
-from gideon.config.loader import config_path
+from gideon.config import loader as config_loader
 from gideon.constants import DATA_WARNING
 from gideon.llm.base import EVENT_COMPLETE, EVENT_TEXT_CHUNK, ModelProvider
+
+
+def config_path():
+    """The active home, re-resolved per call — see :func:`gideon.config.loader.config_path`.
+
+    DEFINED here rather than imported: this module can be imported lazily, and an
+    import-time binding captures whatever the name pointed at on first use (#2443).
+    """
+    return config_loader.config_path()
+
 
 BANNER = r"""
    __  __         _    ___ _

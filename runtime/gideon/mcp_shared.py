@@ -12,9 +12,19 @@ from pathlib import Path
 from typing import Any, Callable
 
 from gideon import gateway_base
-from gideon.config.loader import config_dir
+from gideon.config import loader as config_loader
 from gideon.constants import JSONRPC_METHOD_NOT_FOUND
 from gideon.sel import sel
+
+
+def config_dir() -> Path:
+    """The active home, re-resolved per call — see :func:`gideon.config.loader.config_dir`.
+
+    DEFINED here rather than imported: this module can be imported lazily, and an
+    import-time binding captures whatever the name pointed at on first use (#2443).
+    """
+    return config_loader.config_dir()
+
 
 logger = logging.getLogger(__name__)
 

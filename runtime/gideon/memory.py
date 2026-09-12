@@ -16,8 +16,18 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from gideon.atomic_write import atomic_write
-from gideon.config.loader import config_dir
+from gideon.config import loader as config_loader
 from gideon.sqlite_compat import FTS5_REMEDY, probe, sqlite3
+
+
+def config_dir() -> Path:
+    """The active home, re-resolved per call — see :func:`gideon.config.loader.config_dir`.
+
+    DEFINED here rather than imported: this module can be imported lazily, and an
+    import-time binding captures whatever the name pointed at on first use (#2443).
+    """
+    return config_loader.config_dir()
+
 
 if TYPE_CHECKING:
     from gideon.vector_memory import VectorMemoryStore

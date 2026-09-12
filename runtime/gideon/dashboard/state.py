@@ -18,7 +18,8 @@ from aiohttp import web
 from gideon import trace_recorder as _trace
 from gideon import trust_mode
 from gideon.atomic_write import atomic_write
-from gideon.config.loader import DASHBOARD_PORT, config_dir
+from gideon.config import loader as config_loader
+from gideon.config.loader import DASHBOARD_PORT
 from gideon.dashboard.desktop_registry import DesktopRegistry
 from gideon.dashboard.sse import SseRegistry
 from gideon.guardrails.loop_breaker import LoopBreaker
@@ -30,6 +31,16 @@ from gideon.task_modes import (  # noqa: F401,E501 — re-exported for dashboard
     resolve_effective_risk,
     shell_command,
 )
+
+
+def config_dir() -> Path:
+    """The active home, re-resolved per call — see :func:`gideon.config.loader.config_dir`.
+
+    DEFINED here rather than imported: this module can be imported lazily, and an
+    import-time binding captures whatever the name pointed at on first use (#2443).
+    """
+    return config_loader.config_dir()
+
 
 if TYPE_CHECKING:
     from gideon.dashboard._types import (  # noqa: F401

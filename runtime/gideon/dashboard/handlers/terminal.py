@@ -18,7 +18,17 @@ from typing import TYPE_CHECKING
 from aiohttp import web
 
 from gideon import tmux_substrate
-from gideon.config.loader import config_path
+from gideon.config import loader as config_loader
+
+
+def config_path():
+    """The active home, re-resolved per call — see :func:`gideon.config.loader.config_path`.
+
+    DEFINED here rather than imported: this module can be imported lazily, and an
+    import-time binding captures whatever the name pointed at on first use (#2443).
+    """
+    return config_loader.config_path()
+
 
 if TYPE_CHECKING:
     from gideon.dashboard.state import DashboardState

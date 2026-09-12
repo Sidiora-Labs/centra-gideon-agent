@@ -17,11 +17,8 @@ from gideon.acp.types import (
     STOP_REASON_END_TURN,
     is_cancelled_stop,
 )
-from gideon.config.loader import (
-    AppConfig,
-    config_dir,
-    resolve_agent_bindings,
-)
+from gideon.config import loader as config_loader
+from gideon.config.loader import AppConfig, resolve_agent_bindings
 from gideon.constants import CHAT_TURN_TIMEOUT
 from gideon.context_engine import assemble_context, check_headroom
 from gideon.context_headroom import HeadroomState
@@ -99,6 +96,16 @@ from gideon.sel import sel
 from gideon.skills.allocation import SkillLoadState
 from gideon.stats import Stats
 from gideon.validation import ValidationError, validate_ask_user_question
+
+
+def config_dir() -> Path:
+    """The active home, re-resolved per call — see :func:`gideon.config.loader.config_dir`.
+
+    DEFINED here rather than imported: this module can be imported lazily, and an
+    import-time binding captures whatever the name pointed at on first use (#2443).
+    """
+    return config_loader.config_dir()
+
 
 logger = logging.getLogger(__name__)
 
