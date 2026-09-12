@@ -25,10 +25,20 @@ from uuid import uuid4
 from snowballstemmer import stemmer as _snowball_stemmer
 
 from gideon import memory_holder, memory_slots
-from gideon.config.loader import config_dir
+from gideon.config import loader as config_loader
 from gideon.identity import current_username
 from gideon.memory_providers.base import MemoryProvider
 from gideon.sqlite_compat import sqlite3
+
+
+def config_dir() -> Path:
+    """The active home, re-resolved per call — see :func:`gideon.config.loader.config_dir`.
+
+    DEFINED here rather than imported: this module can be imported lazily, and an
+    import-time binding captures whatever the name pointed at on first use (#2443).
+    """
+    return config_loader.config_dir()
+
 
 if TYPE_CHECKING:
     from gideon.memory_graph import AliasIndex, MemoryGraph

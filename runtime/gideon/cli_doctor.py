@@ -12,8 +12,9 @@ from pathlib import Path
 from gideon import __version__ as _pc_version
 from gideon.agent import AGENT_FILENAME, AGENTS_DIR
 from gideon.config import AppConfig
+from gideon.config import loader as config_loader
 from gideon.config.credentials import credential_backend, credential_backend_warning
-from gideon.config.loader import config_dir, env_path
+from gideon.config.loader import env_path
 from gideon.dashboard.origin import (
     auth_is_off,
     is_local_bind,
@@ -23,6 +24,16 @@ from gideon.dashboard.origin import (
     tailnet_ip,
 )
 from gideon.transcribe import ensure_ffmpeg_in_path
+
+
+def config_dir() -> Path:
+    """The active home, re-resolved per call — see :func:`gideon.config.loader.config_dir`.
+
+    DEFINED here rather than imported: this module can be imported lazily, and an
+    import-time binding captures whatever the name pointed at on first use (#2443).
+    """
+    return config_loader.config_dir()
+
 
 _MIN_NODE_VERSION = 18
 

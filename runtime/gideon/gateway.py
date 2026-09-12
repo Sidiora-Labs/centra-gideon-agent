@@ -34,12 +34,8 @@ from gideon.acp.errors import AcpError, AcpProcessDied
 from gideon.approval_brief import attach_approval_brief
 from gideon.channel_history import ChannelHistory
 from gideon.config import AppConfig
-from gideon.config.loader import (
-    CRED_OWNER_ID,
-    CRED_SLACK_APP_TOKEN,
-    CRED_SLACK_BOT_TOKEN,
-    config_dir,
-)
+from gideon.config import loader as config_loader
+from gideon.config.loader import CRED_OWNER_ID, CRED_SLACK_APP_TOKEN, CRED_SLACK_BOT_TOKEN
 from gideon.constants import CHAT_TURN_TIMEOUT, DATA_WARNING
 from gideon.context import ContextBuilder
 from gideon.dashboard import start_dashboard
@@ -89,6 +85,16 @@ from gideon.triggers.nudge import (
     NudgeLoop,
 )
 from gideon.triggers.nudge import enabled as autonudge_enabled
+
+
+def config_dir() -> Path:
+    """The active home, re-resolved per call — see :func:`gideon.config.loader.config_dir`.
+
+    DEFINED here rather than imported: this module can be imported lazily, and an
+    import-time binding captures whatever the name pointed at on first use (#2443).
+    """
+    return config_loader.config_dir()
+
 
 if TYPE_CHECKING:
     from gideon.channel_delivery import ChannelDelivery

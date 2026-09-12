@@ -68,10 +68,20 @@ from uuid import uuid4
 from croniter import croniter  # type: ignore[import-untyped]
 
 from gideon.atomic_write import atomic_write
-from gideon.config.loader import config_dir
+from gideon.config import loader as config_loader
 from gideon.knowledge.semantics import RESEARCH_FINDING_KIND as _RESEARCH_FINDING_KIND
 from gideon.schedule import ScheduleDefinition, validate_cron_expr
 from gideon.security import redact_credentials, redact_exfiltration_urls
+
+
+def config_dir() -> Path:
+    """The active home, re-resolved per call — see :func:`gideon.config.loader.config_dir`.
+
+    DEFINED here rather than imported: this module can be imported lazily, and an
+    import-time binding captures whatever the name pointed at on first use (#2443).
+    """
+    return config_loader.config_dir()
+
 
 logger = logging.getLogger(__name__)
 

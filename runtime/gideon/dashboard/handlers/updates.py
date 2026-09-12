@@ -18,9 +18,20 @@ from gideon import __version__ as _local_version
 from gideon import self_update, shutdown_event
 from gideon.atomic_write import atomic_write
 from gideon.cancellation import kill_timed_out
-from gideon.config.loader import AppConfig, config_path
+from gideon.config import loader as config_loader
+from gideon.config.loader import AppConfig
 from gideon.dashboard.state import DashboardState
 from gideon.frontend import build_frontend_async
+
+
+def config_path() -> Path:
+    """The active home, re-resolved per call — see :func:`gideon.config.loader.config_path`.
+
+    DEFINED here rather than imported: this module can be imported lazily, and an
+    import-time binding captures whatever the name pointed at on first use (#2443).
+    """
+    return config_loader.config_path()
+
 
 logger = logging.getLogger(__name__)
 

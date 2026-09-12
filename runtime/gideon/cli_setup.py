@@ -10,19 +10,36 @@ from gideon.app_cli import run_app_setup_steps
 from gideon.atomic_write import atomic_write
 from gideon.cli_chat import _ensure_default_agent_in_config
 from gideon.config import AppConfig
+from gideon.config import loader as config_loader
 from gideon.config.loader import (  # noqa: F401 — re-exported for test patch seam
     _WORKSPACE_DIR_NAME,
     DASHBOARD_PORT,
     _default_workspace_base,
     _workspace_dir_file,
-    config_dir,
-    config_path,
     env_path,
 )
 from gideon.constants import DATA_WARNING
 from gideon.env import browser_available
 from gideon.orchestrator_skill import generate_orchestrator_skill
 from gideon.skills import SkillsLoader
+
+
+def config_dir() -> Path:
+    """The active home, re-resolved per call — see :func:`gideon.config.loader.config_dir`.
+
+    DEFINED here rather than imported: this module can be imported lazily, and an
+    import-time binding captures whatever the name pointed at on first use (#2443).
+    """
+    return config_loader.config_dir()
+
+
+def config_path() -> Path:
+    """The active home, re-resolved per call — see :func:`gideon.config.loader.config_path`.
+
+    DEFINED here rather than imported: this module can be imported lazily, and an
+    import-time binding captures whatever the name pointed at on first use (#2443).
+    """
+    return config_loader.config_path()
 
 
 def _ask(prompt: str) -> str:

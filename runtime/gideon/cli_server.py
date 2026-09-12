@@ -14,7 +14,8 @@ from pathlib import Path
 
 from gideon import __version__, self_update
 from gideon.config import AppConfig
-from gideon.config.loader import _DEFAULT_PORT, config_dir, config_path
+from gideon.config import loader as config_loader
+from gideon.config.loader import _DEFAULT_PORT
 from gideon.constants import DATA_WARNING
 from gideon.dashboard.origin import dashboard_origin, parse_dashboard_url
 from gideon.dashboard.token_auth import parse_duration
@@ -30,6 +31,24 @@ from gideon.service.common import SERVICE_NAME, Platform, current_platform
 from gideon.session import SessionManager
 from gideon.skills import SkillsLoader
 from gideon.vector_memory import VectorMemoryStore
+
+
+def config_dir() -> Path:
+    """The active home, re-resolved per call — see :func:`gideon.config.loader.config_dir`.
+
+    DEFINED here rather than imported: this module can be imported lazily, and an
+    import-time binding captures whatever the name pointed at on first use (#2443).
+    """
+    return config_loader.config_dir()
+
+
+def config_path() -> Path:
+    """The active home, re-resolved per call — see :func:`gideon.config.loader.config_path`.
+
+    DEFINED here rather than imported: this module can be imported lazily, and an
+    import-time binding captures whatever the name pointed at on first use (#2443).
+    """
+    return config_loader.config_path()
 
 
 def resolve_client_port(cli_port: int | None) -> int:
