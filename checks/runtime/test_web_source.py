@@ -29,10 +29,10 @@ import json
 
 import pytest
 
-from gideon.knowledge.source_engine import SourceEngine
-from gideon.knowledge.store import KnowledgeStore
-from gideon.knowledge_providers.base import HEALTH_NEEDS_RENDER, HEALTH_OK
-from gideon.knowledge_providers.web_source import (
+from gideon.cognition.knowledge.source_engine import SourceEngine
+from gideon.cognition.knowledge.store import KnowledgeStore
+from gideon.integrations.knowledge_providers.base import HEALTH_NEEDS_RENDER, HEALTH_OK
+from gideon.integrations.knowledge_providers.web_source import (
     DEFAULT_MIN_WORDS_TITLE,
     DETECTOR_JSON_LD,
     DETECTOR_JSON_STATE,
@@ -60,9 +60,6 @@ def _isolated_home(tmp_path, monkeypatch):
 @pytest.fixture()
 def store(tmp_path):
     return KnowledgeStore(str(tmp_path / "knowledge.db"))
-
-
-# ── recorded responses + seams ──────────────────────────────────────────────────────
 
 
 class _Resp:
@@ -98,7 +95,7 @@ class _Fetcher:
 
 
 class _Render:
-    """A scripted render seam standing in for ``web/render.py::render_url``."""
+    """A scripted render seam standing in for ``apps/console/render.py::render_url``."""
 
     def __init__(self, html="", *, ok=True, unavailable=False, error=""):
         self.html = html
@@ -135,7 +132,7 @@ class _FakeQueue:
 
 
 def _cfg(**over):
-    from gideon.config.loader import SourcesConfig
+    from gideon.core.config.loader import SourcesConfig
 
     base = dict(
         enabled=True,
@@ -149,7 +146,9 @@ def _cfg(**over):
     return SourcesConfig(**base)
 
 
-def _setup(store, fetcher, *, spec=None, budget=None, render=None, browse=None, url=PAGE_URL):
+def _setup(
+    store, fetcher, *, spec=None, budget=None, render=None, browse=None, url=PAGE_URL
+):
     sid = store.create_source(
         name="page",
         provider="watched-page",
@@ -158,9 +157,13 @@ def _setup(store, fetcher, *, spec=None, budget=None, render=None, browse=None, 
         budget=budget or {},
         item_type="bookmark",
     )
-    provider = WebSourceProvider(store, fetch_fn=fetcher, render_fn=render, browse_fn=browse)
+    provider = WebSourceProvider(
+        store, fetch_fn=fetcher, render_fn=render, browse_fn=browse
+    )
     queue = _FakeQueue()
-    engine = SourceEngine(store, queue, providers_lister=lambda: [provider], config_loader=_cfg)
+    engine = SourceEngine(
+        store, queue, providers_lister=lambda: [provider], config_loader=_cfg
+    )
     return sid, provider, engine, queue
 
 
@@ -173,8 +176,6 @@ def _items(store, sid):
         "SELECT * FROM items WHERE source_id = ? ORDER BY guid", (sid,)
     ).fetchall()
 
-
-# ── page fixtures ───────────────────────────────────────────────────────────────────
 
 _PROSE = (
     "Acme is the fastest way to ship your product to the people who need it, with a "
@@ -295,7 +296,8 @@ def _card_grid() -> str:
 
 def _homepage() -> str:
     """A marketing homepage: navigation, a hero, feature sections, a footer, and a script —
-    everything a naive detector mistakes for items, and prose well past the JS-shell floor."""
+    everything a naive detector mistakes for items, and prose well past the JS-shell floor.
+    """
     return (
         "<html><head><title>Acme</title></head><body>"
         '<script src="/analytics.js"></script>'
@@ -332,9 +334,6 @@ def _js_shell() -> str:
     )
 
 
-# ── SC#1: auto-detection on a real listing page, and WHICH detector won ─────────────
-
-
 @pytest.mark.asyncio
 async def test_a_changelog_yields_three_items_via_semantic_html(store):
     fetcher = _Fetcher(_Resp(_changelog()))
@@ -349,16 +348,15 @@ async def test_a_changelog_yields_three_items_via_semantic_html(store):
         "Version 2.0.9 released today",
         "Version 2.1.0 released today",
     ]
-    # Relative hrefs resolved against the page, so identity is a real URL.
     assert all(r["url"].startswith("https://app.example.com/changelog/v") for r in rows)
     assert len(queue.enqueued) == 3
     assert store.get_source(sid)["health_status"] == HEALTH_OK
-    # WHICH detector won is part of the clause: three items is also what a lucky frequency
-    # match looks like, and the user tunes a NAMED detector.
     provider = WebSourceProvider(store, fetch_fn=_Fetcher(_Resp(_changelog())))
     preview = await provider.preview({"url": PAGE_URL})
     assert preview.detector == DETECTOR_SEMANTIC_HTML
-    assert [i.metadata["detector"] for i in preview.items] == [DETECTOR_SEMANTIC_HTML] * 3
+    assert [i.metadata["detector"] for i in preview.items] == [
+        DETECTOR_SEMANTIC_HTML
+    ] * 3
 
 
 @pytest.mark.asyncio
@@ -379,7 +377,9 @@ async def test_a_spec_detector_list_filters_the_stack_but_cannot_reorder_it(stor
     """A spec narrows the stack; it never promotes a heuristic above a declaration."""
     body = _json_ld_listing()
     prov = WebSourceProvider(store, fetch_fn=_Fetcher(_Resp(body)))
-    narrowed = await prov.preview({"url": PAGE_URL, "detectors": [DETECTOR_SEMANTIC_HTML]})
+    narrowed = await prov.preview(
+        {"url": PAGE_URL, "detectors": [DETECTOR_SEMANTIC_HTML]}
+    )
     assert narrowed.detector == DETECTOR_SEMANTIC_HTML
     assert len(narrowed.items) == 3
 
@@ -387,12 +387,16 @@ async def test_a_spec_detector_list_filters_the_stack_but_cannot_reorder_it(stor
     both = await prov2.preview(
         {"url": PAGE_URL, "detectors": [DETECTOR_SEMANTIC_HTML, DETECTOR_JSON_LD]}
     )
-    assert both.detector == DETECTOR_JSON_LD, "order is the provider's, not the config's"
+    assert (
+        both.detector == DETECTOR_JSON_LD
+    ), "order is the provider's, not the config's"
 
 
 @pytest.mark.asyncio
 async def test_wordpress_api_detector_pulls_structured_posts(store):
-    fetcher = _Fetcher(routes={"wp-json": _Resp(_WP_POSTS), "changelog": _Resp(_wordpress_page())})
+    fetcher = _Fetcher(
+        routes={"wp-json": _Resp(_WP_POSTS), "changelog": _Resp(_wordpress_page())}
+    )
     provider = WebSourceProvider(store, fetch_fn=fetcher)
     preview = await provider.preview({"url": PAGE_URL})
     assert preview.detector == DETECTOR_WORDPRESS_API
@@ -418,20 +422,22 @@ async def test_a_wordpress_title_is_decoded_not_left_html_escaped(store):
                 "id": 7,
                 "link": "https://app.example.com/2026/07/dont-stop",
                 "title": {"rendered": "Don&#8217;t stop early: case-folding at speed"},
-                "excerpt": {"rendered": "<p>An escaped &lt;script&gt; tag, shown as code.</p>"},
+                "excerpt": {
+                    "rendered": "<p>An escaped &lt;script&gt; tag, shown as code.</p>"
+                },
                 "date_gmt": "2026-07-03T10:00:00",
             }
         ]
     )
-    fetcher = _Fetcher(routes={"wp-json": _Resp(posts), "changelog": _Resp(_wordpress_page())})
+    fetcher = _Fetcher(
+        routes={"wp-json": _Resp(posts), "changelog": _Resp(_wordpress_page())}
+    )
     provider = WebSourceProvider(store, fetch_fn=fetcher)
 
     preview = await provider.preview({"url": PAGE_URL})
 
     assert preview.detector == DETECTOR_WORDPRESS_API
     assert preview.items[0].title == "Don\u2019t stop early: case-folding at speed"
-    # The excerpt keeps its escaping: decoding it would turn shown code back into live markup
-    # before `sanitize_html` ever saw it.
     assert "&lt;script&gt;" in preview.items[0].content
 
 
@@ -442,10 +448,7 @@ async def test_json_state_detector_reads_an_spa_state_blob(store):
     assert preview.detector == DETECTOR_JSON_STATE
     assert len(preview.items) == 3
     assert preview.items[0].title == "State post number 1"
-    # The slug was resolved against the page, so the item has a usable link + identity.
     assert preview.items[0].url == "https://app.example.com/blog/state-1"
-    # A state blob that yields items must NOT trigger a render escalation even though the
-    # page is markup-empty: the outcome was items, and outcome is what §2.3 escalates on.
     assert preview.escalations == []
     assert preview.requests_used == 1
 
@@ -464,7 +467,9 @@ async def test_a_declared_state_blob_outranks_a_frequent_selector(store):
     both = _next_data_page().replace("</body>", _card_grid().split("<body>")[1])
     provider = WebSourceProvider(store, fetch_fn=_Fetcher(_Resp(both)))
     preview = await provider.preview({"url": PAGE_URL})
-    assert preview.detector == DETECTOR_JSON_STATE, "a heuristic must not outrank a declaration"
+    assert (
+        preview.detector == DETECTOR_JSON_STATE
+    ), "a heuristic must not outrank a declaration"
     assert [i.title for i in preview.items] == [
         "State post number 1",
         "State post number 2",
@@ -484,13 +489,11 @@ async def test_selector_frequency_detector_wins_on_a_bare_card_grid(store):
     ], "the repeated card signature won, not the equally-frequent inner heading"
 
 
-# ── SC#1: a homepage yields the pick-a-listing-page guidance ────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_a_homepage_yields_zero_items_and_the_listing_page_guidance(store):
     """Zero items is never a bare empty result. The guidance STRING is asserted, because an
-    empty list with no remediation is the failure §2.1's diagnosis UX exists to prevent."""
+    empty list with no remediation is the failure §2.1's diagnosis UX exists to prevent.
+    """
     fetcher = _Fetcher(_Resp(_homepage()))
     sid, provider, engine, queue = _setup(store, fetcher)
 
@@ -513,23 +516,19 @@ def test_a_homepage_with_scripts_is_not_classed_as_a_js_shell():
     """The discrimination is MEASURED text volume, not the presence of script. Without this
     the homepage and the JS shell would both be reported as 'needs render tier' and the user
     would be sent to a browser to re-read the same nothing."""
-    from gideon.knowledge_providers.html_dom import parse_html
+    from gideon.integrations.knowledge_providers.html_dom import parse_html
 
     home = _homepage()
     shell = _js_shell()
     assert not looks_like_js_shell(home, parse_html(home))
     assert looks_like_js_shell(shell, parse_html(shell))
-    # And the floor is really the discriminator, not an accident of these two fixtures.
-    from gideon.knowledge_providers.html_dom import parse_html as _p
+    from gideon.integrations.knowledge_providers.html_dom import parse_html as _p
 
     body = _p(home)
     visible = next(n for n in body.iter_descendants() if n.tag == "body")
     assert len(visible.text) > JS_SHELL_MAX_TEXT_CHARS
     shell_body = next(n for n in _p(shell).iter_descendants() if n.tag == "body")
     assert len(shell_body.text) < JS_SHELL_MAX_TEXT_CHARS
-
-
-# ── SC#1: a manual selector config rescues a JS-lite failure ────────────────────────
 
 
 _MANUAL_EXTRACTION = {
@@ -551,8 +550,12 @@ async def test_a_manual_selector_config_rescues_a_page_auto_detection_misses(sto
     """
     page = _linkless_table()
 
-    auto = await WebSourceProvider(store, fetch_fn=_Fetcher(_Resp(page))).preview({"url": PAGE_URL})
-    assert auto.items == [], "no links, no semantics, no JSON — every detector must miss"
+    auto = await WebSourceProvider(store, fetch_fn=_Fetcher(_Resp(page))).preview(
+        {"url": PAGE_URL}
+    )
+    assert (
+        auto.items == []
+    ), "no links, no semantics, no JSON — every detector must miss"
     assert auto.guidance == LISTING_PAGE_GUIDANCE
 
     fetcher = _Fetcher(_Resp(page))
@@ -577,11 +580,16 @@ async def test_a_manual_selector_config_rescues_a_page_auto_detection_misses(sto
 @pytest.mark.asyncio
 async def test_a_manual_config_replaces_the_stack_rather_than_falling_back_to_it(store):
     """A broken selector must FAIL VISIBLY on a page the detectors could have handled —
-    silently falling back would hide the user's real mistake behind a lucky auto match."""
+    silently falling back would hide the user's real mistake behind a lucky auto match.
+    """
     prov = WebSourceProvider(store, fetch_fn=_Fetcher(_Resp(_changelog())))
-    got = await prov.preview({"url": PAGE_URL, "extraction": {"items": {"selector": "div.nope"}}})
+    got = await prov.preview(
+        {"url": PAGE_URL, "extraction": {"items": {"selector": "div.nope"}}}
+    )
     assert got.items == []
-    assert got.detector == DETECTOR_MANUAL, "not semantic_html — the config is authoritative"
+    assert (
+        got.detector == DETECTOR_MANUAL
+    ), "not semantic_html — the config is authoritative"
 
 
 @pytest.mark.asyncio
@@ -625,10 +633,11 @@ async def test_post_process_chain_runs_in_order_with_the_declared_extractors(sto
     assert len(got.items) == 1
     item = got.items[0]
     assert item.title == "[A real headline here]"
-    assert item.url == "https://app.example.com/deep/one", "href resolved without asking"
+    assert (
+        item.url == "https://app.example.com/deep/one"
+    ), "href resolved without asking"
     assert item.published_at.startswith("2026-06-01T"), item.published_at
     assert "with" in item.content and "markup" in item.content
-    # §2.2's sanitize_html default-ON, prepended ahead of the config's own chain.
     assert "alert(1)" not in item.content
     assert "<script" not in item.content
 
@@ -651,19 +660,17 @@ async def test_sanitize_html_is_on_by_default_for_the_html_extractor(store):
     script, so that test would still pass with the default turned off. Here the extracted
     value stays HTML, so the default is the only thing standing between a page's script and
     the stored item."""
-    on = await WebSourceProvider(store, fetch_fn=_Fetcher(_Resp(_SCRIPTY_PAGE))).preview(
-        {"url": PAGE_URL, "extraction": _HTML_EXTRACTION}
-    )
+    on = await WebSourceProvider(
+        store, fetch_fn=_Fetcher(_Resp(_SCRIPTY_PAGE))
+    ).preview({"url": PAGE_URL, "extraction": _HTML_EXTRACTION})
     assert len(on.items) == 1
     assert "Body copy." in on.items[0].content
     assert "alert(1)" not in on.items[0].content
     assert "onerror" not in on.items[0].content
 
-    off = await WebSourceProvider(store, fetch_fn=_Fetcher(_Resp(_SCRIPTY_PAGE))).preview(
-        {"url": PAGE_URL, "extraction": _HTML_EXTRACTION, "sanitize_html": False}
-    )
-    # The vacuity counterpart: opting out is a VISIBLE decision, and it proves the sanitizer
-    # is what removed the script above rather than the extractor never having seen it.
+    off = await WebSourceProvider(
+        store, fetch_fn=_Fetcher(_Resp(_SCRIPTY_PAGE))
+    ).preview({"url": PAGE_URL, "extraction": _HTML_EXTRACTION, "sanitize_html": False})
     assert "alert(1)" in off.items[0].content
 
 
@@ -689,11 +696,10 @@ async def test_the_static_and_attribute_extractors_are_wired(store):
     assert got.items[0].metadata["author"] == "The Editors"
 
 
-# ── SC#2: escalation is outcome-driven, budgeted, and recorded ──────────────────────
-
-
 @pytest.mark.asyncio
-async def test_a_js_heavy_page_succeeds_only_after_the_render_tier_and_records_it(store):
+async def test_a_js_heavy_page_succeeds_only_after_the_render_tier_and_records_it(
+    store,
+):
     fetcher = _Fetcher(_Resp(_js_shell()))
     render = _Render(_changelog())
     sid, _p, engine, queue = _setup(
@@ -706,7 +712,6 @@ async def test_a_js_heavy_page_succeeds_only_after_the_render_tier_and_records_i
     assert await _poll(engine, store, sid) == 3
     assert len(_items(store, sid)) == 3
     assert len(queue.enqueued) == 3
-    # ONE budget across both tiers: exactly one plain fetch and one render, no retry storm.
     assert len(fetcher.requests) == 1
     assert len(render.calls) == 1
     row = store.get_source(sid)
@@ -726,13 +731,15 @@ async def test_tier_one_alone_extracts_nothing_from_the_same_js_heavy_page(store
 
 
 @pytest.mark.asyncio
-async def test_allow_render_false_degrades_to_needs_render_tier_and_never_renders(store):
+async def test_allow_render_false_degrades_to_needs_render_tier_and_never_renders(
+    store,
+):
     """``render_fn`` RAISES, so the tier is proven unreachable rather than merely unhelpful."""
     fetcher = _Fetcher(_Resp(_js_shell()))
     sid, _p, engine, queue = _setup(
         store,
         fetcher,
-        budget={"max_requests": 5},  # allow_render omitted → default false (§2.3)
+        budget={"max_requests": 5},
         render=_Exploding("the render tier"),
     )
 
@@ -742,7 +749,9 @@ async def test_allow_render_false_degrades_to_needs_render_tier_and_never_render
     row = store.get_source(sid)
     assert row["health_status"] == HEALTH_NEEDS_RENDER
     assert row["health_status"] == "needs render tier"
-    assert row["last_escalations"] == ["render tier needed but budget.allow_render is false"]
+    assert row["last_escalations"] == [
+        "render tier needed but budget.allow_render is false"
+    ]
     assert "allow_render" in (row["last_error_summary"] or "")
     assert len(fetcher.requests) == 1, "the refusal costs one request, not a retry"
 
@@ -782,8 +791,11 @@ async def test_the_render_escalation_is_refused_when_the_poll_budget_is_spent(st
 @pytest.mark.asyncio
 async def test_a_wordpress_sub_request_draws_on_the_same_poll_budget(store):
     """§2.3's "all attempts in one poll draw on a single max_requests", made falsifiable: with
-    a budget of 1 the REST call cannot happen, so the stack falls through to semantic_html."""
-    fetcher = _Fetcher(routes={"wp-json": _Resp(_WP_POSTS), "changelog": _Resp(_wordpress_page())})
+    a budget of 1 the REST call cannot happen, so the stack falls through to semantic_html.
+    """
+    fetcher = _Fetcher(
+        routes={"wp-json": _Resp(_WP_POSTS), "changelog": _Resp(_wordpress_page())}
+    )
     prov = WebSourceProvider(store, fetch_fn=fetcher)
     got = await prov.preview({"url": PAGE_URL}, budget={"max_requests": 1})
     assert len(fetcher.requests) == 1, "the sub-request had no budget to spend"
@@ -798,16 +810,22 @@ async def test_an_unavailable_render_tier_is_still_needs_render_tier(store):
         store,
         _Fetcher(_Resp(_js_shell())),
         budget={"allow_render": True},
-        render=_Render("", ok=False, unavailable=True, error="Playwright is not installed."),
+        render=_Render(
+            "", ok=False, unavailable=True, error="Playwright is not installed."
+        ),
     )
     assert await _poll(engine, store, sid) == 0
     row = store.get_source(sid)
     assert row["health_status"] == HEALTH_NEEDS_RENDER
-    assert row["last_escalations"] == ["render tier unavailable; install gideon[js-render]"]
+    assert row["last_escalations"] == [
+        "render tier unavailable; install gideon[js-render]"
+    ]
 
 
 @pytest.mark.asyncio
-async def test_a_render_that_still_finds_nothing_records_the_attempt_and_the_guidance(store):
+async def test_a_render_that_still_finds_nothing_records_the_attempt_and_the_guidance(
+    store,
+):
     sid, _p, engine, _q = _setup(
         store,
         _Fetcher(_Resp(_js_shell())),
@@ -816,7 +834,9 @@ async def test_a_render_that_still_finds_nothing_records_the_attempt_and_the_gui
     )
     assert await _poll(engine, store, sid) == 0
     row = store.get_source(sid)
-    assert row["last_escalations"] == ["escalated to render tier; still no items after JS render"]
+    assert row["last_escalations"] == [
+        "escalated to render tier; still no items after JS render"
+    ]
     assert "LISTING pages" in (row["last_error_summary"] or "")
 
 
@@ -833,13 +853,8 @@ async def test_escalations_are_overwritten_per_poll_not_appended(store):
     assert len(store.get_source(sid)["last_escalations"]) == 1
 
 
-# ── §(d) tier 3: the gateway browse escalation (BA-6) ───────────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_browse_tier_extracts_when_the_render_is_still_a_shell(store):
-    # Plain fetch is a shell, the render tier ALSO returns a shell, so the poll escalates to one
-    # gateway browse tick — which finally renders the entries.
     browse = _Render(_changelog())
     sid, _p, engine, _q = _setup(
         store,
@@ -859,8 +874,6 @@ async def test_browse_tier_extracts_when_the_render_is_still_a_shell(store):
 
 @pytest.mark.asyncio
 async def test_browse_tier_needed_but_not_allowed_is_a_distinct_status(store):
-    # Render tier exhausted on a still-shell page with browse not licensed: a distinct, actionable
-    # status, and the browser is never launched.
     browse = _Render(_changelog())
     sid, _p, engine, _q = _setup(
         store,
@@ -876,12 +889,11 @@ async def test_browse_tier_needed_but_not_allowed_is_a_distinct_status(store):
         "browse tier needed but budget.allow_browse is false",
     ]
     assert "browse tier" in (row["last_error_summary"] or "")
-    assert browse.calls == []  # not licensed → the browser is never launched
+    assert browse.calls == []
 
 
 @pytest.mark.asyncio
 async def test_browse_tier_that_still_finds_nothing_records_both_attempts(store):
-    # The browse tick ran but the page is genuinely empty: both escalation notes are recorded.
     sid, _p, engine, _q = _setup(
         store,
         _Fetcher(_Resp(_js_shell())),
@@ -898,9 +910,6 @@ async def test_browse_tier_that_still_finds_nothing_records_both_attempts(store)
 
 @pytest.mark.asyncio
 async def test_browse_tier_soft_fails_when_no_gateway_is_configured(store):
-    # No injected seam: the REAL gateway-backed tick runs (the poll's `execute_tick` → the content
-    # runner → the gateway opener). With no budget.cdp_url it fails soft (empty render, no browser
-    # launched), proving the production wiring is connected end to end without a live browser.
     sid, _p, engine, _q = _setup(
         store,
         _Fetcher(_Resp(_js_shell())),
@@ -912,9 +921,6 @@ async def test_browse_tier_soft_fails_when_no_gateway_is_configured(store):
         "escalated to render tier; still no items after JS render",
         "escalated to browse tier; still no items after browse render",
     ]
-
-
-# ── §2.2 output hygiene: one adversarial case per default ───────────────────────────
 
 
 @pytest.mark.asyncio
@@ -948,7 +954,9 @@ async def test_a_subdomain_of_the_same_site_is_not_off_domain(store):
         "<p>Body.</p></article>"
         "</main></body></html>"
     )
-    got = await WebSourceProvider(store, fetch_fn=_Fetcher(_Resp(page))).preview({"url": PAGE_URL})
+    got = await WebSourceProvider(store, fetch_fn=_Fetcher(_Resp(page))).preview(
+        {"url": PAGE_URL}
+    )
     assert len(got.items) == 2
 
 
@@ -963,9 +971,9 @@ async def test_a_two_word_title_is_rejected_and_a_bare_nav_link_is_dropped(store
         '<article><h2><a href="/p/nothing">Read more</a></h2></article>'
         "</main></body></html>"
     )
-    got = await WebSourceProvider(store, fetch_fn=_Fetcher(_Resp(page))).preview({"url": PAGE_URL})
-    # Three articles in, two items out: the sub-three-word title is discarded, so the one
-    # with a body survives titled by its URL and the one with NEITHER is dropped entirely.
+    got = await WebSourceProvider(store, fetch_fn=_Fetcher(_Resp(page))).preview(
+        {"url": PAGE_URL}
+    )
     assert len(got.items) == 2
     assert got.items[0].title == "A properly worded headline"
     assert got.items[1].title == "https://app.example.com/p/short"
@@ -1005,10 +1013,12 @@ async def test_an_item_with_no_derivable_identity_is_dropped(store):
     )
     assert got.items == []
 
-    # Vacuity floor: the same row WITH a date is keyable (title+published_at hash), so the
-    # drop above is the identity guard rather than the extraction simply not working.
-    keyable = page.replace("<h4>   </h4>", '<h4>   </h4><time datetime="2026-06-01">x</time>')
-    with_date = await WebSourceProvider(store, fetch_fn=_Fetcher(_Resp(keyable))).preview(
+    keyable = page.replace(
+        "<h4>   </h4>", '<h4>   </h4><time datetime="2026-06-01">x</time>'
+    )
+    with_date = await WebSourceProvider(
+        store, fetch_fn=_Fetcher(_Resp(keyable))
+    ).preview(
         {
             "url": PAGE_URL,
             "extraction": {
@@ -1044,22 +1054,21 @@ async def test_hygiene_runs_per_detector_so_the_stack_falls_through(store):
         + _card_grid().replace("<html><body>", "").replace("</body></html>", "")
         + "</body></html>"
     )
-    got = await WebSourceProvider(store, fetch_fn=_Fetcher(_Resp(page))).preview({"url": PAGE_URL})
-    assert got.detector == DETECTOR_SELECTOR_FREQUENCY, "the stack must not stop at the ads"
+    got = await WebSourceProvider(store, fetch_fn=_Fetcher(_Resp(page))).preview(
+        {"url": PAGE_URL}
+    )
+    assert (
+        got.detector == DETECTOR_SELECTOR_FREQUENCY
+    ), "the stack must not stop at the ads"
     assert [i.title for i in got.items] == [
         "Alpha release notes published",
         "Beta release notes published",
         "Gamma release notes published",
     ]
-    # And the earlier detector really did produce raw candidates, so this measures fall-through
-    # rather than a detector that simply never matched.
-    from gideon.knowledge_providers.html_dom import parse_html
-    from gideon.knowledge_providers.web_source import detect_semantic_html
+    from gideon.integrations.knowledge_providers.html_dom import parse_html
+    from gideon.integrations.knowledge_providers.web_source import detect_semantic_html
 
     assert len(detect_semantic_html(parse_html(page))) == 2
-
-
-# ── SC#2/§2.4: preview is a dry run that still spends budget ────────────────────────
 
 
 @pytest.mark.asyncio
@@ -1073,7 +1082,9 @@ async def test_preview_persists_nothing_but_still_spends_the_budget(store):
     assert len(got.items) == 3, "a dry run still extracts"
     assert got.requests_used == 1, "and still costs a real request at a third party"
     assert store.db.execute("SELECT COUNT(*) AS n FROM items").fetchone()["n"] == before
-    assert store.db.execute("SELECT COUNT(*) AS n FROM source_seen").fetchone()["n"] == 0
+    assert (
+        store.db.execute("SELECT COUNT(*) AS n FROM source_seen").fetchone()["n"] == 0
+    )
     assert store.get_source_cursor(sid) == ""
     assert store.get_source(sid)["last_poll_at"] is None
     assert queue.enqueued == []
@@ -1081,8 +1092,10 @@ async def test_preview_persists_nothing_but_still_spends_the_budget(store):
 
 @pytest.mark.asyncio
 async def test_preview_refuses_an_invalid_spec_without_fetching(store):
-    fetcher = _Fetcher()  # unrouted: any fetch raises
-    got = await WebSourceProvider(store, fetch_fn=fetcher).preview({"url": "file:///etc/passwd"})
+    fetcher = _Fetcher()
+    got = await WebSourceProvider(store, fetch_fn=fetcher).preview(
+        {"url": "file:///etc/passwd"}
+    )
     assert got.error and got.items == []
     assert fetcher.requests == []
 
@@ -1097,14 +1110,12 @@ async def test_a_zero_request_budget_refuses_before_the_first_fetch(store):
     assert "budget spent" in got.error
 
 
-# ── conditional GET (the cheap steady state) ────────────────────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_conditional_get_validators_round_trip_through_the_cursor(store):
     fetcher = _Fetcher(
         _Resp(
-            _changelog(), headers={"ETag": '"v1"', "Last-Modified": "Mon, 01 Jun 2026 00:00:00 GMT"}
+            _changelog(),
+            headers={"ETag": '"v1"', "Last-Modified": "Mon, 01 Jun 2026 00:00:00 GMT"},
         )
     )
     sid, _p, engine, _q = _setup(store, fetcher)
@@ -1143,9 +1154,6 @@ async def test_polling_the_same_page_twice_produces_no_duplicate_items(store):
     assert len(queue.enqueued) == 3
 
 
-# ── the schema IS the validator (§2.2 single source of truth) ────────────────────────
-
-
 def _schema_types(node, acc):
     if isinstance(node, dict):
         if "type" in node and isinstance(node["type"], str):
@@ -1160,8 +1168,9 @@ def _schema_types(node, acc):
 
 def test_every_schema_type_is_one_the_validator_implements():
     """The single-source-of-truth property, asserted from the direction that can actually
-    break: a schema keyword the walker does not implement would silently accept anything."""
-    from gideon.knowledge_providers.web_source import (
+    break: a schema keyword the walker does not implement would silently accept anything.
+    """
+    from gideon.integrations.knowledge_providers.web_source import (
         FIELD_SCHEMA,
         POST_PROCESS_SCHEMA,
     )
@@ -1179,13 +1188,15 @@ def test_every_schema_type_is_one_the_validator_implements():
     found = set()
     for schema in (SPEC_SCHEMA, FIELD_SCHEMA, POST_PROCESS_SCHEMA):
         _schema_types(schema, found)
-    assert found <= implemented, f"unimplemented schema type(s): {sorted(found - implemented)}"
+    assert (
+        found <= implemented
+    ), f"unimplemented schema type(s): {sorted(found - implemented)}"
 
 
 def test_an_unimplemented_schema_type_raises_rather_than_passing_everything():
     """The walker's guard is live, not decorative — this is what makes the test above mean
     something rather than measuring a set nobody enforces."""
-    from gideon.knowledge_providers.web_source import _validate_against
+    from gideon.integrations.knowledge_providers.web_source import _validate_against
 
     with pytest.raises(AssertionError):
         _validate_against("x", {"type": "number"}, "spec.x")
@@ -1194,7 +1205,9 @@ def test_an_unimplemented_schema_type_raises_rather_than_passing_everything():
 def test_the_detector_enum_in_the_schema_is_the_detector_stack():
     """A sixth detector cannot be added to the stack without the schema admitting it (and a
     schema entry for a detector that does not exist cannot linger)."""
-    assert SPEC_SCHEMA["properties"]["detectors"]["items"]["enum"] == list(DETECTOR_ORDER)
+    assert SPEC_SCHEMA["properties"]["detectors"]["items"]["enum"] == list(
+        DETECTOR_ORDER
+    )
     assert len(DETECTOR_ORDER) == 5
     assert DETECTOR_ORDER[-1] == DETECTOR_SELECTOR_FREQUENCY
 
@@ -1213,7 +1226,10 @@ def test_spec_validation_is_fail_closed(store):
         {"url": PAGE_URL, "typo_key": 1},
         {"url": PAGE_URL, "extraction": {"items": {}}},
         {"url": PAGE_URL, "extraction": {"items": {"selector": "div:has(> a)"}}},
-        {"url": PAGE_URL, "extraction": {"items": {"selector": "div"}, "title": {"nope": 1}}},
+        {
+            "url": PAGE_URL,
+            "extraction": {"items": {"selector": "div"}, "title": {"nope": 1}},
+        },
         {
             "url": PAGE_URL,
             "extraction": {
@@ -1233,7 +1249,11 @@ def test_spec_validation_is_fail_closed(store):
         assert not ok and err, bad
     assert prov.validate_spec({"url": PAGE_URL})[0]
     assert prov.validate_spec(
-        {"url": PAGE_URL, "detectors": [DETECTOR_JSON_LD], "extraction": _MANUAL_EXTRACTION}
+        {
+            "url": PAGE_URL,
+            "detectors": [DETECTOR_JSON_LD],
+            "extraction": _MANUAL_EXTRACTION,
+        }
     )[0]
 
 
@@ -1253,16 +1273,13 @@ async def test_a_mutated_spec_is_refused_at_poll_time_not_only_at_save(store):
     assert "spec.url" in (store.get_source(sid)["last_error_summary"] or "")
 
 
-# ── zero tokens in the detection path ───────────────────────────────────────────────
-
-
 def _forbid_model_calls(monkeypatch):
     """Patch every model seam this repo routes background completions through to RAISE.
 
     A comment claiming "zero LLM" proves nothing and an assertion that a poll SUCCEEDED would
     pass with a model running, so the proof is that the seams are unreachable.
     """
-    import gideon.llm_helpers as llm
+    import gideon.integrations.llm_helpers as llm
 
     calls: list[str] = []
 
@@ -1273,7 +1290,11 @@ def _forbid_model_calls(monkeypatch):
 
         return _seam
 
-    for seam in ("one_shot_completion", "stream_and_collect", "stream_and_collect_json"):
+    for seam in (
+        "one_shot_completion",
+        "stream_and_collect",
+        "stream_and_collect_json",
+    ):
         monkeypatch.setattr(llm, seam, _boom(seam))
     return calls
 
@@ -1281,8 +1302,12 @@ def _forbid_model_calls(monkeypatch):
 @pytest.mark.asyncio
 async def test_the_whole_detection_path_makes_zero_model_calls(store, monkeypatch):
     calls = _forbid_model_calls(monkeypatch)
-    fetcher = _Fetcher(routes={"wp-json": _Resp(_WP_POSTS), "changelog": _Resp(_wordpress_page())})
-    provider = WebSourceProvider(store, fetch_fn=fetcher, render_fn=_Render(_changelog()))
+    fetcher = _Fetcher(
+        routes={"wp-json": _Resp(_WP_POSTS), "changelog": _Resp(_wordpress_page())}
+    )
+    provider = WebSourceProvider(
+        store, fetch_fn=fetcher, render_fn=_Render(_changelog())
+    )
 
     for spec in (
         {"url": PAGE_URL},
@@ -1305,7 +1330,7 @@ async def test_the_whole_detection_path_makes_zero_model_calls(store, monkeypatc
 async def test_the_model_seams_really_do_raise_when_patched(store, monkeypatch):
     """The vacuity counterpart. Without it, a typo'd patch target (or a seam that moved)
     would make the zero-token test above a test of nothing at all."""
-    import gideon.llm_helpers as llm
+    import gideon.integrations.llm_helpers as llm
 
     _forbid_model_calls(monkeypatch)
     with pytest.raises(AssertionError):
@@ -1320,21 +1345,23 @@ def test_the_provider_imports_no_model_and_owns_no_socket():
     for a completion or an HTTP client reds here rather than at review time."""
     from pathlib import Path
 
-    import gideon.knowledge_providers.html_dom as dom_mod
-    import gideon.knowledge_providers.web_source as mod
+    import gideon.integrations.knowledge_providers.html_dom as dom_mod
+    import gideon.integrations.knowledge_providers.web_source as mod
 
     for module in (mod, dom_mod):
         src = Path(module.__file__).read_text(encoding="utf-8")
-        body = "\n".join(line for line in src.splitlines() if not line.lstrip().startswith("#"))
+        body = "\n".join(
+            line for line in src.splitlines() if not line.lstrip().startswith("#")
+        )
         for forbidden in ("one_shot_completion", "llm_helpers", "get_active_embed_fn"):
             assert forbidden not in body, f"{module.__name__} reaches for {forbidden}"
         for forbidden in ("aiohttp", "httpx", "urllib.request", "requests."):
-            assert forbidden not in body, f"{module.__name__} owns a socket via {forbidden}"
-    # Vacuity floor: the two names the provider IS allowed to route through must be present,
-    # so the rail above is measuring absence-of-the-wrong-thing rather than an empty file.
+            assert (
+                forbidden not in body
+            ), f"{module.__name__} owns a socket via {forbidden}"
     src = Path(mod.__file__).read_text(encoding="utf-8")
-    assert "from gideon.net.client import fetch" in src
-    assert "from gideon.web.render import render_url" in src
+    assert "from gideon.security.net.client import fetch" in src
+    assert "from gideon.integrations.web.render import render_url" in src
 
 
 def test_the_web_source_provider_ships_registered():
@@ -1342,17 +1369,18 @@ def test_the_web_source_provider_ships_registered():
     registration is part of the feature rather than a wiring detail."""
     from pathlib import Path
 
-    import gideon.dashboard.server as server
+    import gideon.interfaces.dashboard.server as server
 
     src = Path(server.__file__).read_text(encoding="utf-8")
     assert "register_provider(WebSourceProvider(" in src
 
 
-# ── the CSS subset behaves like CSS, or refuses ─────────────────────────────────────
-
-
 def test_the_selector_subset_matches_and_refuses_predictably():
-    from gideon.knowledge_providers.html_dom import SelectorError, parse_html, select
+    from gideon.integrations.knowledge_providers.html_dom import (
+        SelectorError,
+        parse_html,
+        select,
+    )
 
     dom = parse_html(
         '<html><body><div class="a b" id="one"><p class="x">1</p><span><p class="x">2</p>'
@@ -1366,13 +1394,21 @@ def test_the_selector_subset_matches_and_refuses_predictably():
     assert len(select(dom, "[id]")) == 1
     assert len(select(dom, '[id="one"]')) == 1
     assert len(select(dom, "span, div")) == 2
-    for bad in ("div:has(p)", "p::first-line", "div + p", "div ~ p", "> p", "div >", ""):
+    for bad in (
+        "div:has(p)",
+        "p::first-line",
+        "div + p",
+        "div ~ p",
+        "> p",
+        "div >",
+        "",
+    ):
         with pytest.raises(SelectorError):
             select(dom, bad)
 
 
 def test_inner_html_round_trips_tags_and_attribute_values():
-    from gideon.knowledge_providers.html_dom import parse_html, select_one
+    from gideon.integrations.knowledge_providers.html_dom import parse_html, select_one
 
     dom = parse_html(
         '<html><body><div class="c">a <a href="/x?y=1&amp;z=2">b</a> c</div></body></html>'
@@ -1386,7 +1422,7 @@ def test_inner_html_round_trips_tags_and_attribute_values():
 def test_script_text_is_reachable_but_never_read_as_item_text():
     """The reason structural parsing runs on RAW markup: json_ld/json_state need script
     bodies, and item text must never contain them."""
-    from gideon.knowledge_providers.html_dom import parse_html, select_one
+    from gideon.integrations.knowledge_providers.html_dom import parse_html, select_one
 
     dom = parse_html(
         '<html><body><div class="c">Visible<script>var secret = 1;</script></div></body></html>'

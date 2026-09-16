@@ -7,22 +7,21 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.dashboard.handlers import api_file_search
+from gideon.interfaces.dashboard.handlers import api_file_search
 
 
 def _make_app() -> web.Application:
     app = web.Application()
     app.router.add_get("/api/file-search", api_file_search)
-    # api_file_search reads app["state"].file_indexes for the index fast path
     state = MagicMock()
-    state.file_indexes.get.return_value = None  # no index → always use walk fallback
+    state.file_indexes.get.return_value = None
     app["state"] = state
     return app
 
 
 @pytest.fixture()
 def mock_sel():
-    with patch("gideon.dashboard.handlers.sel") as m:
+    with patch("gideon.interfaces.dashboard.handlers.sel") as m:
         m.return_value = MagicMock()
         yield m.return_value
 
@@ -36,19 +35,16 @@ def _populate(tmp_path):
     sub.mkdir()
     (sub / "hello_util.py").write_text("y")
     (sub / ".secret").write_text("s")
-    # excluded dirs
     nm = tmp_path / "node_modules"
     nm.mkdir()
     (nm / "hello_dep.py").write_text("z")
     git = tmp_path / ".git"
     git.mkdir()
     (git / "hello_obj").write_text("g")
-    # _ext: PClaw per-cwd memory-partition store — must be pruned, never returned
-    # (in production it holds hundreds of identical agent-internal memory files).
+    # _ext: Gideon per-cwd memory-partition store — must be pruned, never returned
     ext = tmp_path / "_ext" / "some_session_slug" / "memory"
     ext.mkdir(parents=True)
     (ext / "hello_prefs.md").write_text("e")
-    # Go module cache (non-dot, generic basenames) — pruned by path suffix.
     gocache = tmp_path / "go" / "pkg" / "mod" / "x@v1"
     gocache.mkdir(parents=True)
     (gocache / "hello_gomod.go").write_text("g")
@@ -80,7 +76,6 @@ class TestFileSearch:
             assert "hello.py" in names
             assert "hello_world.py" in names
             assert "hello_util.py" in names
-            # Check fields present
             r0 = data["results"][0]
             assert "path" in r0 and "size" in r0 and "mtime" in r0
 
@@ -100,9 +95,7 @@ class TestFileSearch:
             paths = [r["path"] for r in (await resp.json())["results"]]
             assert not any("node_modules" in p for p in paths)
             assert not any(".git" in p for p in paths)
-            # _ext memory-partition store is pruned (would flood with dupes)
             assert not any("_ext" in p for p in paths)
-            # Go module cache is pruned (would bury real files for common names)
             assert not any("/go/pkg/" in p for p in paths)
 
     @pytest.mark.asyncio
@@ -140,12 +133,9 @@ class TestFileSearch:
 
     @pytest.mark.asyncio
     async def test_fallback_scopes_to_workspace_not_home(self, tmp_path, mock_sel):
-        # No session cwd: the fallback must scope to the configured workspace root
-        # (where the native agent can actually read), NOT the whole home dir.
         ws = tmp_path / "workspace"
         ws.mkdir()
         (ws / "findme.txt").write_text("x")
-        # A file living elsewhere under home must NOT be surfaced.
         (tmp_path / "elsewhere.txt").write_text("y")
         with patch.dict(
             os.environ,
@@ -182,9 +172,11 @@ class TestFileSearch:
     async def test_project_sensitive_path_rejected(self, tmp_path, mock_sel):
         sensitive_dir = tmp_path / "secret"
         sensitive_dir.mkdir()
-        with patch("gideon.security.is_sensitive_path", return_value=True):
+        with patch("gideon.security.security.is_sensitive_path", return_value=True):
             async with TestClient(TestServer(_make_app())) as client:
-                resp = await client.get(f"/api/file-search?q=test&project={sensitive_dir}")
+                resp = await client.get(
+                    f"/api/file-search?q=test&project={sensitive_dir}"
+                )
                 assert resp.status == 403
                 data = await resp.json()
                 assert data["error"] == "Access denied"
@@ -193,13 +185,13 @@ class TestFileSearch:
     async def test_path_match_ranked_below_name_match(self, tmp_path, mock_sel):
         sub = tmp_path / "myfeature"
         sub.mkdir()
-        (sub / "utils.py").write_text("x")  # path matches "myfeature"
-        (tmp_path / "myfeature.py").write_text("x")  # filename matches "myfeature"
+        (sub / "utils.py").write_text("x")
+        (tmp_path / "myfeature.py").write_text("x")
         async with TestClient(TestServer(_make_app())) as client:
             resp = await client.get(f"/api/file-search?q=myfeature&project={tmp_path}")
             results = (await resp.json())["results"]
-            assert results[0]["name"] == "myfeature.py"  # filename match ranked first
-            assert any(r["name"] == "utils.py" for r in results)  # path match included
+            assert results[0]["name"] == "myfeature.py"
+            assert any(r["name"] == "utils.py" for r in results)
 
     @pytest.mark.asyncio
     async def test_project_not_found_returns_404(self, tmp_path, mock_sel):
@@ -231,7 +223,6 @@ class TestFileSearch:
         async with TestClient(TestServer(_make_app())) as client:
             resp = await client.get(f"/api/file-search?q=config&project={tmp_path}")
             results = (await resp.json())["results"]
-            # Exact stem match "config" should be first
             assert results[0]["name"] == "config.py"
 
     @pytest.mark.asyncio

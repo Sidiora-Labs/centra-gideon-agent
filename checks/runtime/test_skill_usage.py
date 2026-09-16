@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from gideon.skills.usage import SkillUsage, SkillUsageStore
+from gideon.extensions.skills.usage import SkillUsage, SkillUsageStore
 
 NOW = datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -31,7 +31,7 @@ def test_record_use_increments_and_stamps(store: SkillUsageStore):
 
 
 def test_record_uses_batch_dedups(store: SkillUsageStore):
-    store.record_uses(["a", "b", "a"], now=NOW)  # 'a' twice in one turn → +1
+    store.record_uses(["a", "b", "a"], now=NOW)
     assert store.get("a").count == 1
     assert store.get("b").count == 1
 
@@ -54,7 +54,6 @@ def test_all_usage_roundtrip(store: SkillUsageStore):
 def test_counts_persist_across_instances(tmp_path: Path):
     p = tmp_path / ".usage.json"
     SkillUsageStore(path=p).record_use("auto/foo", now=NOW)
-    # a fresh instance reads the same file
     assert SkillUsageStore(path=p).get("auto/foo").count == 1
 
 
@@ -71,7 +70,6 @@ def test_corrupt_file_degrades_to_empty(tmp_path: Path):
     p.write_text("{ this is not json", encoding="utf-8")
     store = SkillUsageStore(path=p)
     assert store.all_usage() == {}
-    # and a record still works (overwrites the garbage)
     assert store.record_use("a", now=NOW) == 1
 
 

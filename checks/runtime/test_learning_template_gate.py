@@ -14,10 +14,10 @@ import asyncio
 
 import pytest
 
-from gideon.learning import detectors, staging
-from gideon.learning.detectors import Candidate, Skip
-from gideon.learning.staging import FlushOutcome
-from gideon.learning.template_gate import (
+from gideon.cognition.learning import detectors, staging
+from gideon.cognition.learning.detectors import Candidate, Skip
+from gideon.cognition.learning.staging import FlushOutcome
+from gideon.cognition.learning.template_gate import (
     LEDGER_PREFIX,
     evaluate,
     record_skip,
@@ -39,7 +39,7 @@ def store(tmp_path, monkeypatch):
 @pytest.fixture
 def no_filing(monkeypatch):
     """Capture enqueue calls instead of touching the real proposals dir."""
-    from gideon.learning import proposals
+    from gideon.cognition.learning import proposals
 
     calls: list[dict] = []
 
@@ -61,9 +61,6 @@ def _skipped_rows(store):
             (FlushOutcome.FLUSH_SKIPPED.value,),
         ).fetchall()
     return [{"cadence": r[0], "detail": r[1]} for r in rows]
-
-
-# ── the clause that ends the inert-module problem ──
 
 
 def test_the_gate_has_a_production_caller():
@@ -103,7 +100,11 @@ def test_the_gate_has_a_production_caller():
             Skip.TEMPLATE_EXISTS,
         ),
         (
-            Candidate(run_id="r3", steps=["build {{x}}", "deploy the result"], budget_burn=0.95),
+            Candidate(
+                run_id="r3",
+                steps=["build {{x}}", "deploy the result"],
+                budget_burn=0.95,
+            ),
             Skip.BUDGET_BURN,
         ),
         (
@@ -126,8 +127,6 @@ def test_every_negative_decision_writes_a_typed_row(store, candidate, expected):
     rows = _skipped_rows(store)
     assert len(rows) == 1
     detail = str(rows[0]["detail"])
-    # Prefixed AND typed: the ledger is shared with the capture gate's denials, so an untagged
-    # "declined" would be unattributable to a gate.
     assert detail.startswith(LEDGER_PREFIX + ":")
     assert expected.value in detail
 
@@ -136,7 +135,10 @@ def test_a_low_score_refusal_is_recorded_with_its_score(store):
     """The LOW_SCORE branch fires after scoring, so it is the one that could be lost."""
     candidate = Candidate(
         run_id="r5",
-        steps=["review /Users/x/a.py and https://example.com/b", "check {{x}} at deadbeefcafe12"],
+        steps=[
+            "review /Users/x/a.py and https://example.com/b",
+            "check {{x}} at deadbeefcafe12",
+        ],
     )
     outcome = evaluate(candidate)
     assert outcome.decision.skip_reason == Skip.LOW_SCORE.value
@@ -177,9 +179,6 @@ def test_record_skip_refuses_to_log_an_accept_as_a_skip(store):
     assert _skipped_rows(store) == []
 
 
-# ── filing is never installing ──
-
-
 def test_an_accepted_candidate_is_filed_as_a_pending_proposal(store, no_filing):
     """The human-accept invariant: the gate FILES, and filing writes no definition."""
     outcome = evaluate(
@@ -199,7 +198,6 @@ def test_an_accepted_candidate_is_filed_as_a_pending_proposal(store, no_filing):
     assert call["kind"] == "template"
     assert call["run_id"] == "r8"
     assert call["session_key"] == "sess-1"
-    # Nothing in the call can install: enqueue's contract is a PENDING row.
     assert "installer" not in call
 
 
@@ -211,8 +209,6 @@ def test_the_consult_band_files_nothing(store, no_filing):
     candidate = Candidate(
         run_id="r9", steps=["build {{target}}", "deploy the result", "notify the team"]
     )
-    # Pinned, not skipped: a conditional skip here would silently stop covering the band the moment
-    # a threshold moved, which is the one branch with no ledger row and no proposal to notice by.
     assert detectors.gate(candidate).action == "consult"
     outcome = evaluate(candidate)
     assert outcome.filed is False
@@ -224,7 +220,9 @@ def test_filing_survives_a_recording_failure(tmp_path, monkeypatch, no_filing):
     """Observability must never cost a proposal the chain already approved."""
     staging.reset_store()
     monkeypatch.setattr(
-        staging, "get_store", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no store"))
+        staging,
+        "get_store",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no store")),
     )
     outcome = evaluate(
         Candidate(
@@ -244,14 +242,13 @@ def test_a_refusal_survives_a_recording_failure(tmp_path, monkeypatch):
     """The symmetric half: a dead ledger must not raise into the turn."""
     staging.reset_store()
     monkeypatch.setattr(
-        staging, "get_store", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no store"))
+        staging,
+        "get_store",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no store")),
     )
     outcome = evaluate(Candidate(run_id="r11", steps=["one step"]))
     assert outcome.decision.skip_reason == Skip.TOO_FEW_STEPS.value
     assert outcome.recorded is False
-
-
-# ── the reason counts §3.2 tunes against ──
 
 
 def test_skip_counts_reads_back_only_this_gates_reasons(store):
@@ -259,7 +256,6 @@ def test_skip_counts_reads_back_only_this_gates_reasons(store):
     evaluate(Candidate(run_id="a", steps=["one step"]))
     evaluate(Candidate(run_id="b", steps=["one step"]))
     evaluate(Candidate(run_id="c", steps=["build the thing", "deploy the thing"]))
-    # A capture-gate denial in the same table, with the same outcome, different prefix.
     store.record_flush(
         cadence="per_turn", outcome=FlushOutcome.FLUSH_SKIPPED, detail="not_worthwhile"
     )
@@ -272,18 +268,17 @@ def test_skip_counts_is_empty_without_a_store(monkeypatch):
     """A statistics read is never worth failing a caller over."""
     staging.reset_store()
     monkeypatch.setattr(
-        staging, "get_store", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no store"))
+        staging,
+        "get_store",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no store")),
     )
     assert skip_counts() == {}
 
 
-# ── the ladder's fifth branch ──
-
-
 def _ladder(raw, monkeypatch, *, defs=None):
     """Drive run_skill_ladder_review with a canned model response."""
-    from gideon import after_turn_review as atr
-    from gideon.workflows import service
+    from gideon.automation.workflows import service
+    from gideon.cognition import after_turn_review as atr
 
     async def _completion(_prompt):
         return raw
@@ -321,7 +316,9 @@ def test_the_ladder_fifth_branch_reaches_the_gate(store, no_filing, monkeypatch)
     assert len(no_filing) == 1 and no_filing[0]["kind"] == "template"
 
 
-def test_the_fifth_branch_records_a_refusal_and_surfaces_no_chip(store, no_filing, monkeypatch):
+def test_the_fifth_branch_records_a_refusal_and_surfaces_no_chip(
+    store, no_filing, monkeypatch
+):
     """A declined candidate is silent to the user but LOUD in the ledger."""
     raw = (
         '{"action": "template", "slug": "one-liner", "description": "just one step", '
@@ -333,7 +330,9 @@ def test_the_fifth_branch_records_a_refusal_and_surfaces_no_chip(store, no_filin
     assert len(rows) == 1 and Skip.TOO_FEW_STEPS.value in str(rows[0]["detail"])
 
 
-def test_template_exists_is_resolved_against_the_real_def_registry(store, no_filing, monkeypatch):
+def test_template_exists_is_resolved_against_the_real_def_registry(
+    store, no_filing, monkeypatch
+):
     """``template_surfaced`` must have a real WRITER, not sit at its dataclass default.
 
     A defaulted field is an unsupplied input: left at False, the TEMPLATE_EXISTS pre-gate could
@@ -352,14 +351,16 @@ def test_template_exists_is_resolved_against_the_real_def_registry(store, no_fil
 
 def test_the_first_four_ladder_branches_still_enqueue_skills(monkeypatch):
     """The fifth branch must not have stolen the other four's turns."""
-    from gideon.skills import proposals as skill_proposals
+    from gideon.extensions.skills import proposals as skill_proposals
 
     seen: list[dict] = []
 
     class _P:
         slug = "some-skill"
 
-    monkeypatch.setattr(skill_proposals, "enqueue", lambda **kw: (seen.append(kw), _P())[1])
+    monkeypatch.setattr(
+        skill_proposals, "enqueue", lambda **kw: (seen.append(kw), _P())[1]
+    )
     raw = (
         '{"action": "create", "slug": "some-skill", "description": "a how-to", '
         '"procedure_md": "step one", "triggers": "x"}'
@@ -376,7 +377,9 @@ def test_a_template_action_without_steps_is_dropped(store, no_filing, monkeypatc
     assert no_filing == [] and _skipped_rows(store) == []
 
 
-def test_template_steps_are_redacted_before_they_are_scored(store, no_filing, monkeypatch):
+def test_template_steps_are_redacted_before_they_are_scored(
+    store, no_filing, monkeypatch
+):
     """An accepted candidate becomes a proposal body, so the skill branches' posture applies."""
     raw = (
         '{"action": "template", "slug": "leaky", "description": "has a secret", '
@@ -390,20 +393,17 @@ def test_template_steps_are_redacted_before_they_are_scored(store, no_filing, mo
     assert "sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAA" not in body
 
 
-# ── the MCP tool ──
-
-
 @pytest.fixture
 def no_defs(monkeypatch):
     """No workflow-def providers, so TEMPLATE_EXISTS depends on the candidate alone."""
-    from gideon.workflows import defs as defs_mod
+    from gideon.automation.workflows import defs as defs_mod
 
     monkeypatch.setattr(defs_mod, "list_providers", lambda: [])
 
 
 def test_the_tool_files_a_draft_proposal(store, no_filing, no_defs):
     """``template_save_from_session`` exists, is dispatched, and files a DRAFT."""
-    from gideon import mcp_core
+    from gideon.integrations import mcp_core
 
     out = mcp_core._call_tool_inner(
         "template_save_from_session",
@@ -424,7 +424,7 @@ def test_the_tool_files_a_draft_proposal(store, no_filing, no_defs):
 
 def test_the_tool_reports_a_decline_with_its_typed_reason(store, no_filing, no_defs):
     """A silent no teaches the model nothing; the reason is what it can act on."""
-    from gideon import mcp_core
+    from gideon.integrations import mcp_core
 
     out = mcp_core._call_tool_inner(
         "template_save_from_session",
@@ -435,10 +435,12 @@ def test_the_tool_reports_a_decline_with_its_typed_reason(store, no_filing, no_d
     assert Skip.NO_SLOTS.value in str(_skipped_rows(store)[0]["detail"])
 
 
-def test_the_tool_resolves_template_exists_against_the_def_registry(store, no_filing, monkeypatch):
+def test_the_tool_resolves_template_exists_against_the_def_registry(
+    store, no_filing, monkeypatch
+):
     """The tool's own ``template_surfaced`` writer — not the ladder's."""
-    from gideon import mcp_core
-    from gideon.workflows import defs as defs_mod
+    from gideon.automation.workflows import defs as defs_mod
+    from gideon.integrations import mcp_core
 
     class _Provider:
         async def list_defs(self, *, limit=200, offset=0):
@@ -470,14 +472,14 @@ def test_the_tool_resolves_template_exists_against_the_def_registry(store, no_fi
     ],
 )
 def test_the_tool_validates_its_inputs(args, needle):
-    from gideon import mcp_core
+    from gideon.integrations import mcp_core
 
     assert needle in mcp_core._call_tool_inner("template_save_from_session", args)
 
 
 def test_the_tool_is_declared_in_the_tool_list():
     """A dispatch arm nothing declares is unreachable from the model."""
-    from gideon import mcp_core
+    from gideon.integrations import mcp_core
 
     names = {t["name"] for t in mcp_core._list_tools()}
     assert "template_save_from_session" in names
@@ -485,13 +487,14 @@ def test_the_tool_is_declared_in_the_tool_list():
 
 def test_the_tool_has_manifest_meta():
     """A live tool with no TOOL_META entry reds the manifest-drift gate."""
-    from gideon.manifest_meta import TOOL_META
+    from gideon.extensions.manifest_meta import TOOL_META
 
     meta = TOOL_META["template_save_from_session"]
     assert meta["examples"] and meta["examples"][0]["summary"].strip()
-    # Every example arg must be a real parameter — an invented signature teaches a wrong call.
-    from gideon import mcp_core
+    from gideon.integrations import mcp_core
 
-    tool = next(t for t in mcp_core._list_tools() if t["name"] == "template_save_from_session")
+    tool = next(
+        t for t in mcp_core._list_tools() if t["name"] == "template_save_from_session"
+    )
     real = set(tool["inputSchema"]["properties"])
     assert set(meta["examples"][0]["args"]) <= real

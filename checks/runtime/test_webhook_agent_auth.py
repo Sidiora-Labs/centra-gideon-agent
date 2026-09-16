@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from gideon.dashboard.handlers import hooks as hooks_mod
+from gideon.interfaces.dashboard.handlers import hooks as hooks_mod
 
 
 def _req(headers: dict[str, str]):
@@ -24,7 +24,7 @@ def _req(headers: dict[str, str]):
 def _cfg(monkeypatch, tmp_path):
     """Point config at an isolated home with a known webhook token."""
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.config.loader import AppConfig
+    from gideon.core.config.loader import AppConfig
 
     cfg = AppConfig.load()
     cfg.hooks["webhook_token"] = "sekrit-token"
@@ -33,11 +33,16 @@ def _cfg(monkeypatch, tmp_path):
 
 
 def test_valid_bearer_token_accepted(_cfg):
-    assert hooks_mod._verify_hook_token(_req({"Authorization": "Bearer sekrit-token"})) is True
+    assert (
+        hooks_mod._verify_hook_token(_req({"Authorization": "Bearer sekrit-token"}))
+        is True
+    )
 
 
 def test_valid_header_token_accepted(_cfg):
-    assert hooks_mod._verify_hook_token(_req({"x-gideon-token": "sekrit-token"})) is True
+    assert (
+        hooks_mod._verify_hook_token(_req({"x-gideon-token": "sekrit-token"})) is True
+    )
 
 
 def test_wrong_token_rejected(_cfg):
@@ -50,4 +55,7 @@ def test_missing_token_rejected(_cfg):
 
 def test_unconfigured_token_rejects_everything(monkeypatch, tmp_path):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    assert hooks_mod._verify_hook_token(_req({"Authorization": "Bearer anything"})) is False
+    assert (
+        hooks_mod._verify_hook_token(_req({"Authorization": "Bearer anything"}))
+        is False
+    )

@@ -14,13 +14,14 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from gideon.providers import entity_routes as er
+from gideon.extensions.providers import entity_routes as er
 
 
 @pytest.fixture(autouse=True)
 def _isolate_settings(monkeypatch, tmp_path):
-    # Point the entity-settings dir at a tmp path so the live store is untouched.
-    monkeypatch.setattr(er, "_entity_settings_path", lambda entity: tmp_path / f"{entity}.json")
+    monkeypatch.setattr(
+        er, "_entity_settings_path", lambda entity: tmp_path / f"{entity}.json"
+    )
 
 
 def _req(body):
@@ -35,8 +36,6 @@ async def _json(resp):
 
 @pytest.mark.asyncio
 async def test_notifications_put_persists_known_keys():
-    # NB: "warn" (the old fixture value) is now correctly a 400 — it was
-    # out-of-domain all along and ranked as info in the delivery gate.
     resp = await er.handle_notifications_settings_put(
         _req({"mute_all": True, "min_severity": "warning"})
     )
@@ -53,10 +52,9 @@ async def test_notifications_put_drops_unknown_keys():
         _req({"mute_all": True, "totally_bogus_key_xyz": "junk", "sound_enabled": None})
     )
     settings = (await _json(resp))["settings"]
-    assert settings["mute_all"] is True  # known key applied
-    assert "totally_bogus_key_xyz" not in settings  # garbage rejected
-    assert "sound_enabled" not in settings  # not-in-schema rejected
-    # And it's not on disk either (GET would otherwise leak it back).
+    assert settings["mute_all"] is True
+    assert "totally_bogus_key_xyz" not in settings
+    assert "sound_enabled" not in settings
     get_resp = await er.handle_notifications_settings_get(_req({}))
     got = (await _json(get_resp))["settings"]
     assert "totally_bogus_key_xyz" not in got
@@ -84,7 +82,9 @@ async def test_notifications_migrates_legacy_master_mute_key(tmp_path):
 @pytest.mark.asyncio
 async def test_inbox_put_drops_unknown_keys():
     """The inbox settings handler has the same guard."""
-    resp = await er.handle_inbox_settings_put(_req({"retention_days": 30, "nope_not_a_setting": 1}))
+    resp = await er.handle_inbox_settings_put(
+        _req({"retention_days": 30, "nope_not_a_setting": 1})
+    )
     settings = (await _json(resp))["settings"]
     assert settings["retention_days"] == 30
     assert "nope_not_a_setting" not in settings
@@ -112,7 +112,6 @@ async def test_inbox_put_rejects_mistyped_values():
     ):
         resp = await er.handle_inbox_settings_put(_req(body))
         assert resp.status == 400, f"accepted mistyped {body}"
-    # Store untouched → GET returns pristine defaults.
     got = (await _json(await er.handle_inbox_settings_get(_req({}))))["settings"]
     assert got == er.INBOX_DEFAULTS
 
@@ -152,10 +151,10 @@ async def test_notifications_put_rejects_out_of_domain_values():
     ):
         resp = await er.handle_notifications_settings_put(_req(body))
         assert resp.status == 400, f"accepted out-of-domain {body}"
-    # Store untouched → GET returns pristine defaults.
-    got = (await _json(await er.handle_notifications_settings_get(_req({}))))["settings"]
+    got = (await _json(await er.handle_notifications_settings_get(_req({}))))[
+        "settings"
+    ]
     assert got == er.NOTIFICATIONS_DEFAULTS
-    # And the valid shapes still round-trip.
     resp = await er.handle_notifications_settings_put(
         _req({"min_severity": "error", "quiet_hours_start": "23:15"})
     )
@@ -170,7 +169,9 @@ async def test_notifications_drops_retired_default_channel(tmp_path):
     delivery consumer) — a legacy store carrying it must not leak it back."""
     store = er._entity_settings_path("notifications")
     store.write_text(json.dumps({"default_channel": "browser", "mute_all": True}))
-    got = (await _json(await er.handle_notifications_settings_get(_req({}))))["settings"]
+    got = (await _json(await er.handle_notifications_settings_get(_req({}))))[
+        "settings"
+    ]
     assert "default_channel" not in got
     assert got["mute_all"] is True
 
@@ -200,10 +201,10 @@ class TestNotificationAllowed:
 
     def test_min_severity_warning_filters_info_kinds(self):
         self._write(min_severity="warning")
-        assert er.notification_allowed("cron") is False  # info-ranked
-        assert er.notification_allowed("heartbeat") is False  # info-ranked
+        assert er.notification_allowed("cron") is False
+        assert er.notification_allowed("heartbeat") is False
         assert er.notification_allowed("warning") is True
-        assert er.notification_allowed("inbox_alert") is True  # user-configured alert = warning
+        assert er.notification_allowed("inbox_alert") is True
         assert er.notification_allowed("error") is True
 
     def test_min_severity_error_only(self):
@@ -214,69 +215,69 @@ class TestNotificationAllowed:
     def test_quiet_hours_suppress_non_critical(self):
         from datetime import datetime
 
-        self._write(quiet_hours_enabled=True, quiet_hours_start="22:00", quiet_hours_end="08:00")
-        inside = datetime(2026, 1, 1, 23, 30)  # wraps midnight
+        self._write(
+            quiet_hours_enabled=True, quiet_hours_start="22:00", quiet_hours_end="08:00"
+        )
+        inside = datetime(2026, 1, 1, 23, 30)
         inside2 = datetime(2026, 1, 1, 7, 59)
         outside = datetime(2026, 1, 1, 12, 0)
         assert er.notification_allowed("info", now=inside) is False
         assert er.notification_allowed("warning", now=inside2) is False
-        assert er.notification_allowed("error", now=inside) is True  # critical rides through
+        assert er.notification_allowed("error", now=inside) is True
         assert er.notification_allowed("info", now=outside) is True
 
     def test_quiet_hours_non_wrapping_window(self):
         from datetime import datetime
 
-        self._write(quiet_hours_enabled=True, quiet_hours_start="09:00", quiet_hours_end="17:00")
+        self._write(
+            quiet_hours_enabled=True, quiet_hours_start="09:00", quiet_hours_end="17:00"
+        )
         assert er.notification_allowed("info", now=datetime(2026, 1, 1, 12, 0)) is False
         assert er.notification_allowed("info", now=datetime(2026, 1, 1, 8, 59)) is True
 
     def test_garbage_quiet_window_never_matches(self):
         from datetime import datetime
 
-        self._write(quiet_hours_enabled=True, quiet_hours_start="bogus", quiet_hours_end="08:00")
+        self._write(
+            quiet_hours_enabled=True, quiet_hours_start="bogus", quiet_hours_end="08:00"
+        )
         assert er.notification_allowed("info", now=datetime(2026, 1, 1, 3, 0)) is True
 
 
 @pytest.mark.asyncio
 async def test_state_notify_respects_gate(monkeypatch, tmp_path):
-    """DashboardState.notify() must consult the gate: a muted store drops the
+    """ConsoleState.notify() must consult the gate: a muted store drops the
     note (no log append, no broadcast, no persist)."""
-    from gideon.dashboard import state as st
+    from gideon.interfaces.dashboard import state as st
 
     er._save_entity_settings("notifications", {"mute_all": True})
-    ds = object.__new__(st.DashboardState)  # skip heavyweight __init__
+    ds = object.__new__(st.ConsoleState)
     ds._notification_log = []
-    # `notify()` reads the desktop registry to decide the `native` target (DC-5). Supplied
-    # explicitly rather than left off: the decision fails OPEN, so an absent attribute would
-    # make this test pass through the except branch and stop exercising the live path.
-    from gideon.dashboard.desktop_registry import DesktopRegistry
+    from gideon.interfaces.dashboard.desktop_registry import DesktopRegistry
 
     ds.desktop = DesktopRegistry()
     broadcasts = []
     persisted = []
-    monkeypatch.setattr(st.DashboardState, "_broadcast", lambda self, note: broadcasts.append(note))
-    monkeypatch.setattr(st, "_persist_notification", lambda note: persisted.append(note))
+    monkeypatch.setattr(
+        st.ConsoleState, "_broadcast", lambda self, note: broadcasts.append(note)
+    )
+    monkeypatch.setattr(
+        st, "_persist_notification", lambda note: persisted.append(note)
+    )
 
     ds.notify("info", "Muted", "should not deliver")
     assert ds._notification_log == [] and broadcasts == [] and persisted == []
 
     er._save_entity_settings("notifications", {"mute_all": False})
     ds.notify("info", "Live", "delivers")
-    assert len(ds._notification_log) == 1 and len(broadcasts) == 1 and len(persisted) == 1
-
-
-# ── Notification rules matrix (INBOX-NOTIFICATIONS-UNIFICATION T1.3) ──
-#
-# The guards here exist because a rules file that fails to parse degrades to
-# registry defaults — which means a REJECTED-at-write value that got persisted
-# anyway becomes silent policy failure: the user sets `never` on a noisy kind,
-# sees it accepted, and keeps getting notified. So the PUT must 400 rather than
-# store anything the read path would later ignore.
+    assert (
+        len(ds._notification_log) == 1 and len(broadcasts) == 1 and len(persisted) == 1
+    )
 
 
 @pytest.fixture()
 def _isolate_rules(monkeypatch, tmp_path):
-    from gideon import notification_rules as nr
+    from gideon.workspace import notification_rules as nr
 
     (tmp_path / "entity_settings").mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(nr, "config_dir", lambda: tmp_path)
@@ -285,7 +286,7 @@ def _isolate_rules(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_rules_get_returns_a_row_per_registered_kind(_isolate_rules):
-    from gideon import notification_kinds as nk
+    from gideon.workspace import notification_kinds as nk
 
     resp = await er.handle_notification_rules_get(MagicMock())
     data = await _json(resp)
@@ -295,30 +296,37 @@ async def test_rules_get_returns_a_row_per_registered_kind(_isolate_rules):
 
 @pytest.mark.asyncio
 async def test_rules_put_persists_and_takes_effect(_isolate_rules):
-    from gideon import notification_rules as nr
+    from gideon.workspace import notification_rules as nr
 
     resp = await er.handle_notification_rules_put(
         _req({"rules": {"heartbeat/status": {"mode": "badge"}}})
     )
     data = await _json(resp)
     assert data["ok"] is True
-    # The effective read path — not just the response echo — must reflect it.
     assert nr.resolve_rule("heartbeat", "status").mode == "badge"
 
 
 @pytest.mark.asyncio
 async def test_rules_put_merges_rather_than_replacing(_isolate_rules):
-    from gideon import notification_rules as nr
+    from gideon.workspace import notification_rules as nr
 
-    await er.handle_notification_rules_put(_req({"rules": {"heartbeat/status": {"mode": "badge"}}}))
-    await er.handle_notification_rules_put(_req({"rules": {"hook/fired": {"mode": "never"}}}))
-    assert nr.resolve_rule("heartbeat", "status").mode == "badge", "second PUT dropped the first"
+    await er.handle_notification_rules_put(
+        _req({"rules": {"heartbeat/status": {"mode": "badge"}}})
+    )
+    await er.handle_notification_rules_put(
+        _req({"rules": {"hook/fired": {"mode": "never"}}})
+    )
+    assert (
+        nr.resolve_rule("heartbeat", "status").mode == "badge"
+    ), "second PUT dropped the first"
     assert nr.resolve_rule("hook", "fired").mode == "never"
 
 
 @pytest.mark.asyncio
 async def test_rules_put_rejects_unknown_kind(_isolate_rules):
-    resp = await er.handle_notification_rules_put(_req({"rules": {"nope/nada": {"mode": "never"}}}))
+    resp = await er.handle_notification_rules_put(
+        _req({"rules": {"nope/nada": {"mode": "never"}}})
+    )
     assert resp.status == 400
     assert "unknown notification kind" in (await _json(resp))["error"]
 
@@ -326,7 +334,9 @@ async def test_rules_put_rejects_unknown_kind(_isolate_rules):
 @pytest.mark.asyncio
 async def test_rules_put_rejects_unknown_mode(_isolate_rules):
     """A typo'd mode would read back as the default — accept it and policy lies."""
-    resp = await er.handle_notification_rules_put(_req({"rules": {"hook/fired": {"mode": "nevr"}}}))
+    resp = await er.handle_notification_rules_put(
+        _req({"rules": {"hook/fired": {"mode": "nevr"}}})
+    )
     assert resp.status == 400
 
 
@@ -342,20 +352,19 @@ async def test_rules_put_rejects_unknown_target(_isolate_rules):
 async def test_rules_put_rejects_verify_true_on_non_verifiable_kind(_isolate_rules):
     """INU-6: verify:true on a kind that carries no checkable claim is a 400, not a silent
     no-op the user would see 'saved' and never fire."""
-    from gideon import notification_rules as nr
+    from gideon.workspace import notification_rules as nr
 
     resp = await er.handle_notification_rules_put(
         _req({"rules": {"heartbeat/status": {"verify": True}}})
     )
     assert resp.status == 400
     assert "not verifiable" in (await _json(resp))["error"]
-    # And it must not have persisted.
     assert nr.resolve_rule("heartbeat", "status").verify is False
 
 
 @pytest.mark.asyncio
 async def test_rules_put_accepts_verify_on_a_verifiable_kind(_isolate_rules):
-    from gideon import notification_rules as nr
+    from gideon.workspace import notification_rules as nr
 
     resp = await er.handle_notification_rules_put(
         _req({"rules": {"skills/proposal": {"verify": True}}})
@@ -367,7 +376,7 @@ async def test_rules_put_accepts_verify_on_a_verifiable_kind(_isolate_rules):
 @pytest.mark.asyncio
 async def test_rules_put_accepts_a_known_sound(_isolate_rules):
     """MC-6: a voice from the closed set persists and takes effect on the read path."""
-    from gideon import notification_rules as nr
+    from gideon.workspace import notification_rules as nr
 
     resp = await er.handle_notification_rules_put(
         _req({"rules": {"approval/requested": {"sound": "coin_blip"}}})
@@ -379,7 +388,7 @@ async def test_rules_put_accepts_a_known_sound(_isolate_rules):
 @pytest.mark.asyncio
 async def test_rules_put_rejects_an_unknown_sound(_isolate_rules):
     """A voice outside soundCues would 'save' and then hand the client an unplayable name."""
-    from gideon import notification_rules as nr
+    from gideon.workspace import notification_rules as nr
 
     resp = await er.handle_notification_rules_put(
         _req({"rules": {"approval/requested": {"sound": "ka-ching"}}})
@@ -391,20 +400,23 @@ async def test_rules_put_rejects_an_unknown_sound(_isolate_rules):
 
 @pytest.mark.asyncio
 async def test_rules_put_null_sound_clears_it(_isolate_rules):
-    from gideon import notification_rules as nr
+    from gideon.workspace import notification_rules as nr
 
     await er.handle_notification_rules_put(
         _req({"rules": {"approval/requested": {"sound": "error"}}})
     )
-    await er.handle_notification_rules_put(_req({"rules": {"approval/requested": {"sound": None}}}))
+    await er.handle_notification_rules_put(
+        _req({"rules": {"approval/requested": {"sound": None}}})
+    )
     assert nr.resolve_rule("approval", "requested").sound is None
 
 
 @pytest.mark.asyncio
 async def test_rules_put_merges_fields_within_a_key(_isolate_rules):
     """Two independent controls (mode, then sound) each save their OWN partial PUT — the second
-    must not clobber the first, or the sound picker would silently reset the delivery mode."""
-    from gideon import notification_rules as nr
+    must not clobber the first, or the sound picker would silently reset the delivery mode.
+    """
+    from gideon.workspace import notification_rules as nr
 
     await er.handle_notification_rules_put(
         _req({"rules": {"approval/requested": {"mode": "badge"}}})
@@ -464,16 +476,18 @@ async def test_rules_put_rejects_non_object_body(_isolate_rules):
 
 @pytest.mark.asyncio
 async def test_rules_put_persists_a_valid_digest_schedule(_isolate_rules):
-    from gideon import notification_rules as nr
+    from gideon.workspace import notification_rules as nr
 
-    resp = await er.handle_notification_rules_put(_req({"digest": {"schedule": "0 7 * * 1-5"}}))
+    resp = await er.handle_notification_rules_put(
+        _req({"digest": {"schedule": "0 7 * * 1-5"}})
+    )
     assert resp.status == 200
     assert nr.digest_settings()["schedule"] == "0 7 * * 1-5"
 
 
 @pytest.mark.asyncio
 async def test_rules_put_stores_conditions_that_escalate(_isolate_rules):
-    from gideon import notification_rules as nr
+    from gideon.workspace import notification_rules as nr
 
     await er.handle_notification_rules_put(
         _req(
@@ -503,7 +517,13 @@ async def test_inbox_put_no_longer_accepts_the_retired_alert_fields():
     alerts were configured.
     """
     resp = await er.handle_inbox_settings_put(
-        _req({"alert_keywords": ["urgent"], "alert_on_name_mention": True, "retention_days": 30})
+        _req(
+            {
+                "alert_keywords": ["urgent"],
+                "alert_on_name_mention": True,
+                "retention_days": 30,
+            }
+        )
     )
     settings = (await _json(resp))["settings"]
     assert "alert_keywords" not in settings
@@ -516,21 +536,25 @@ async def test_legacy_alert_fields_are_readable_for_the_backfill(tmp_path, monke
     """The backfill needs the RAW values even though load_inbox_settings() drops them."""
     import json
 
-    monkeypatch.setattr(er, "_entity_settings_path", lambda entity: tmp_path / f"{entity}.json")
+    monkeypatch.setattr(
+        er, "_entity_settings_path", lambda entity: tmp_path / f"{entity}.json"
+    )
     (tmp_path / "inbox.json").write_text(
-        json.dumps({"alert_keywords": ["deploy"], "alert_on_name_mention": True}), encoding="utf-8"
+        json.dumps({"alert_keywords": ["deploy"], "alert_on_name_mention": True}),
+        encoding="utf-8",
     )
     assert er.legacy_inbox_alert_fields() == {
         "alert_keywords": ["deploy"],
         "alert_on_name_mention": True,
     }
-    # …and the public read path no longer surfaces them.
     assert "alert_keywords" not in er.load_inbox_settings()
 
 
 @pytest.mark.asyncio
 async def test_legacy_alert_read_is_empty_when_absent(tmp_path, monkeypatch):
-    monkeypatch.setattr(er, "_entity_settings_path", lambda entity: tmp_path / f"{entity}.json")
+    monkeypatch.setattr(
+        er, "_entity_settings_path", lambda entity: tmp_path / f"{entity}.json"
+    )
     assert er.legacy_inbox_alert_fields() == {}
 
 
@@ -540,21 +564,19 @@ async def test_notifications_put_rejects_zero_length_quiet_window():
     _in_quiet_window documents as never matching: accepting it showed quiet hours
     enabled + Saved ✓ while nothing was ever suppressed. Same doctrine as the
     unparseable-time guard, one case further."""
-    # Both keys in one write.
     resp = await er.handle_notifications_settings_put(
         _req({"quiet_hours_start": "08:00", "quiet_hours_end": "08:00"})
     )
     assert resp.status == 400
     body = await _json(resp)
-    # The refusal teaches: it names the never-matches consequence and the all-day escape.
     assert "never suppresses" in body["error"] and "00:00" in body["error"]
-    # Format variants cannot dodge the check — compared by parsed minutes.
     resp = await er.handle_notifications_settings_put(
         _req({"quiet_hours_start": "8:00", "quiet_hours_end": "08:00"})
     )
     assert resp.status == 400
-    # Store untouched.
-    got = (await _json(await er.handle_notifications_settings_get(_req({}))))["settings"]
+    got = (await _json(await er.handle_notifications_settings_get(_req({}))))[
+        "settings"
+    ]
     assert got == er.NOTIFICATIONS_DEFAULTS
 
 
@@ -562,12 +584,17 @@ async def test_notifications_put_rejects_zero_length_quiet_window():
 async def test_notifications_put_rejects_degenerate_window_via_single_key():
     """The degenerate pair is a property of the EFFECTIVE config: writing one key
     that lands equal to the STORED sibling must be refused too."""
-    resp = await er.handle_notifications_settings_put(_req({"quiet_hours_end": "23:30"}))
+    resp = await er.handle_notifications_settings_put(
+        _req({"quiet_hours_end": "23:30"})
+    )
     assert resp.status == 200
-    # Now push start onto the stored end, one key at a time.
-    resp = await er.handle_notifications_settings_put(_req({"quiet_hours_start": "23:30"}))
+    resp = await er.handle_notifications_settings_put(
+        _req({"quiet_hours_start": "23:30"})
+    )
     assert resp.status == 400
-    got = (await _json(await er.handle_notifications_settings_get(_req({}))))["settings"]
+    got = (await _json(await er.handle_notifications_settings_get(_req({}))))[
+        "settings"
+    ]
     assert got["quiet_hours_start"] != got["quiet_hours_end"]
 
 

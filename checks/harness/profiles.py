@@ -27,7 +27,7 @@ def resolve_python(repo_root: Path | None = None) -> str:
     not: ``harness validate``'s whole-suite collection could not even launch there
     (``[Errno 2] No such file or directory: '.venv/bin/python'``), so reference
     resolution collapsed into one "could not collect the test suite" error and three
-    tests in ``tests/test_harness_validate.py`` failed in EVERY worktree — for long
+    tests in ``checks/runtime/test_harness_validate.py`` failed in EVERY worktree — for long
     enough that sessions learned to wave them off as pre-existing (SH6.x).
 
     Resolution, most specific first:
@@ -42,16 +42,17 @@ def resolve_python(repo_root: Path | None = None) -> str:
     ``repo_root`` is injectable so both branches are testable; it defaults to the tree
     this module lives in (never the cwd).
     """
-    root = repo_root if repo_root is not None else Path(__file__).resolve().parent.parent
+    root = (
+        repo_root
+        if repo_root is not None
+        else Path(__file__).resolve().parent.parent.parent
+    )
     venv_py = root / ".venv" / "bin" / "python"
     if venv_py.is_file():
         return str(venv_py)
     return sys.executable
 
 
-# Used as the python for every profile command so the harness never accidentally runs
-# under a system interpreter missing the dev extras. Resolved once at import (the value
-# cannot change under a running process).
 HARNESS_PY = resolve_python()
 
 
@@ -66,12 +67,6 @@ class Profile:
     commands: tuple[str, ...]
     needs_tests: bool = False
 
-
-# ── The profile registry ────────────────────────────────────────────────────────
-#
-# `scan` is a MARKER profile with no shell command — the boundary scanner runs in-process
-# (harness.scanner) so it can be diff-line-scoped; the CLI dispatches it directly when the
-# profile is selected. Every other profile resolves to shell commands via resolve_commands.
 
 _REGISTRY: dict[str, Profile] = {}
 
@@ -92,7 +87,6 @@ _register(
     Profile(
         name="web",
         description="Frontend gate: typecheck + vitest (run from the repo root).",
-        # Root scripts proxy into the web workspace — never `cd web` (npm/cli#4828).
         commands=("npm run typecheck:web", "npm run test:web"),
     )
 )
@@ -101,8 +95,6 @@ _register(
         name="replay",
         description="Event-trace replay: FE-fold replay (vitest) + backend metric gate vs "
         "checked-in baselines.",
-        # Two drivers, matching where the pure folds live (§2.2): the vitest replay of the
-        # chat coalescer / run fold, and the Python backend-stream metric gate.
         commands=(
             "npm run test:web -- --run src/harness/replayFold.test.ts",
             f"{HARNESS_PY} -m harness replay",
@@ -121,9 +113,7 @@ _register(
         name="exemplars",
         description="Per-slice WF2 milestone exemplars (§4.1): run every exemplar's ≤30s "
         "smoke script through the real engine with a fake model. Regression anchors.",
-        # `python -m harness.exemplars` discovers every exemplars/slice_* bundle and runs its
-        # smoke script; a non-zero exit from any one fails the profile.
-        commands=(f"{HARNESS_PY} -m harness.exemplars",),
+        commands=(f"{HARNESS_PY} -m checks.harness.exemplars",),
     )
 )
 _register(
@@ -131,10 +121,6 @@ _register(
         name="scan",
         description="Static architectural-boundary scanner (runs in-process, not a shell "
         "command — the CLI invokes harness.scanner when this profile is selected).",
-        # `scan` is a MARKER profile: it has no shell command because the scanner runs
-        # in-process (harness/scanner.py) via the CLI's _run_scan_if_selected, so it can be
-        # diff-line-scoped. Selecting it (by a task spec or a forced-profile rule) triggers
-        # the scan; there is nothing to resolve into resolve_commands().
         commands=(),
     )
 )
@@ -164,7 +150,9 @@ class ResolvedCommand:
     command: str
 
 
-def resolve_commands(profiles: list[str], tests: list[str] | None = None) -> list[ResolvedCommand]:
+def resolve_commands(
+    profiles: list[str], tests: list[str] | None = None
+) -> list[ResolvedCommand]:
     """Resolve a list of profile names to the ordered, de-duplicated commands to run.
 
     ``tests`` node-ids are joined and substituted into any ``{tests}`` slot. A profile
@@ -182,7 +170,7 @@ def resolve_commands(profiles: list[str], tests: list[str] | None = None) -> lis
         for tmpl in prof.commands:
             if "{tests}" in tmpl:
                 if not joined:
-                    continue  # needs node-ids we don't have; caller reports
+                    continue
                 cmd = tmpl.replace("{tests}", joined)
             else:
                 cmd = tmpl
@@ -192,10 +180,9 @@ def resolve_commands(profiles: list[str], tests: list[str] | None = None) -> lis
     return out
 
 
-# Registration hook for later sessions: Session 2's scanner and Session 3's replay driver
-# call this to swap their placeholder profile for the real command once implemented,
-# keeping the profile *name* (and every spec that references it) stable.
-def override_commands(name: str, commands: tuple[str, ...], *, needs_tests: bool = False) -> None:
+def override_commands(
+    name: str, commands: tuple[str, ...], *, needs_tests: bool = False
+) -> None:
     """Replace a registered profile's commands in place (same name, same description).
 
     Used by later-session modules to fill in a placeholder profile (``scan``/``replay``)

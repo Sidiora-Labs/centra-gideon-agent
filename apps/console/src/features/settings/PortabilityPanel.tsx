@@ -1,0 +1,209 @@
+import { useRef, useState } from 'react'
+import { Download, Upload, AlertTriangle, Loader2, FileArchive, ShieldCheck } from 'lucide-react'
+import { api, type PortabilityManifest } from '../../shared/data/api'
+import { humanBytes } from '../../shared/data/chunkedUpload'
+import { confirm } from '../../shared/ui/dialog'
+import { notify } from '../../app/shell/appSdk'
+import { PanelHeader, Section } from './settingsUI'
+import { Button } from '../../shared/ui/Button'
+import { fvs } from '../../shared/theme/fontWeight'
+import { BUSY_REASON } from '../../shared/ui/unavailable'
+
+
+const EXPORTS: { key: string; label: string; domains?: string[]; hint: string }[] = [
+  {
+    key: 'full',
+    label: 'Everything',
+    hint: 'Every non-derived store Gideon holds. Credentials never travel.',
+  },
+  {
+    key: 'knowledge',
+    label: 'Knowledge',
+    domains: ['knowledge'],
+    hint: 'Your documents — the files/ originals, plus the knowledge and lexicon stores.',
+  },
+  {
+    key: 'memory',
+    label: 'Memory',
+    domains: ['memory'],
+    hint: "The assistant's own memory: what it recorded about you, and its learning log.",
+  },
+]
+
+export interface ArchiveRow { label: string; detail: string }
+
+const AREA_LABELS: Record<string, string> = {
+  memory: 'Memory', knowledge: 'Knowledge', work: 'Work', automation: 'Automation',
+  platform: 'Platform', config: 'Config', security: 'Security',
+}
+const areaLabel = (key: string) => AREA_LABELS[key] ?? (key.charAt(0).toUpperCase() + key.slice(1))
+const plural = (n: number, one: string) => `${n} ${n === 1 ? one : `${one}s`}`
+
+const looksLikeFile = (key: string) => /\.[a-z0-9]+$/i.test(key)
+
+export function archiveAreas(manifest: PortabilityManifest): ArchiveRow[] {
+  const counts = manifest.domain_counts
+  if (!counts) return []
+  return Object.entries(counts)
+    .sort((a, b) => (b[1]?.bytes ?? 0) - (a[1]?.bytes ?? 0))
+    .map(([key, v]) => ({
+      label: areaLabel(key),
+      detail: `${plural(v?.files ?? 0, 'file')} · ${humanBytes(v?.bytes ?? 0)}`,
+    }))
+}
+
+export function archiveInventory(manifest: PortabilityManifest): ArchiveRow[] {
+  const raw = (manifest.contents || {}) as Record<string, unknown>
+  return Object.entries(raw).flatMap(([key, v]) => {
+    if (v && typeof v === 'object') {
+      const inner = Object.entries(v as Record<string, number>).filter(([, n]) => Number(n) > 0)
+      if (!inner.length) return []
+      return [{ label: key, detail: inner.map(([k, n]) => `${k} ${n}`).join(', ') }]
+    }
+    const n = Number(v)
+    if (!Number.isFinite(n) || n <= 0) return []
+    return [{ label: key, detail: looksLikeFile(key) ? humanBytes(n) : String(n) }]
+  })
+}
+
+export function archiveWhen(created: string): string {
+  const d = new Date(created)
+  if (Number.isNaN(d.getTime())) return created
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
+export function PortabilityPanel() {
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [file, setFile] = useState<File | null>(null)
+  const [manifest, setManifest] = useState<PortabilityManifest | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [importResult, setImportResult] = useState('')
+
+  const download = async (spec: (typeof EXPORTS)[number]) => {
+    setBusy(spec.key)
+    try {
+      const blob = await api.durabilityExport(spec.domains)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      const tag = spec.domains ? `-${spec.domains.join('-')}` : ''
+      a.href = url
+      a.download = `gideon-export${tag}.zip`
+      document.body.appendChild(a); a.click(); a.remove()
+      URL.revokeObjectURL(url)
+      notify(`${spec.label} export downloaded`, 'success')
+    } catch (e) {
+      notify(`Couldn't export ${spec.label.toLowerCase()}: ${e instanceof Error ? e.message : String(e)}`, 'error')
+    }
+    setBusy(null)
+  }
+
+  const pickFile = async (f: File | null) => {
+    setFile(f); setManifest(null); setImportResult('')
+    if (!f) return
+    setBusy('validate')
+    try {
+      const r = await api.durabilityImport(f)
+      if (r.ok && r.manifest) setManifest(r.manifest)
+      else notify(`Couldn't read that archive: ${r.error?.message || 'it failed validation'}`, 'error')
+    } catch (e) {
+      notify(`Couldn't read that archive: ${e instanceof Error ? e.message : String(e)}`, 'error')
+    }
+    setBusy(null)
+  }
+
+  const runImport = async () => {
+    if (!file) return
+    if (!(await confirm({ title: 'Import this archive?', body: `Merge "${file.name}" into THIS instance? Existing data is kept; the archive fills in what is missing (memory and notifications are deduplicated).`, confirmLabel: 'Import' }))) return
+    setBusy('import'); setImportResult('')
+    try {
+      const r = await api.durabilityImport(file, 'merge')
+      if (r.ok) {
+        const what = r.summary?.items?.join(', ') || 'nothing to merge'
+        setImportResult(`Import complete: ${what}.`)
+        notify(`Import complete: ${what}`, 'success')
+      } else notify(`Import failed: ${r.error?.message || 'the server gave no reason'}`, 'error')
+    } catch (e) {
+      notify(`Import failed: ${e instanceof Error ? e.message : String(e)}`, 'error')
+    }
+    setBusy(null)
+  }
+
+  return (
+    <div>
+      <PanelHeader title="Import / Export" hint="Take your data out of this instance, or bring an archive in from another one." />
+
+      <Section title="Export" hint="Download your data as a portable archive. Credentials are never included.">
+        <div className="flex flex-col gap-3">
+          {EXPORTS.map((spec) => (
+            <div key={spec.key} className="flex flex-wrap items-center gap-3">
+              <Button
+                variant={spec.key === 'full' ? 'primary' : 'secondary'}
+                size="sm"
+                onClick={() => download(spec)}
+                loading={busy === spec.key} loadingLabel="Packaging…" disabled={busy !== null}
+              ><Download size={15} /> Export {spec.label.toLowerCase()}
+              </Button>
+              <span data-type="caption" className="text-on-surface-low">{spec.hint}</span>
+            </div>
+          ))}
+        </div>
+        <p data-type="caption" className="mt-3 text-on-surface-low">
+          Rebuildable caches (search indexes, model files) are left out — they regenerate,
+          and a stale index restored next to newer data is worse than none. Large
+          workspaces can take a minute to package.
+        </p>
+      </Section>
+
+      <Section title="Import" hint="Bring settings and data in from another Gideon instance.">
+        <div className="rounded-lg border border-warn/30 bg-warn/5 px-4 py-3">
+          <div data-type="body-s" className="flex items-start gap-2" style={{ color: 'var(--color-warning)' }}>
+            <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+            <span>Importing merges the archive's data into this instance — nothing you already have is overwritten. Choosing a file checks it first and shows what it contains.</span>
+          </div>
+          <input ref={fileRef} type="file" accept=".zip,application/zip" className="hidden" aria-label="Choose export archive"
+            onChange={(e) => void pickFile(e.target.files?.[0] ?? null)} />
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Button variant="secondary" size="sm" onClick={() => fileRef.current?.click()} disabled={busy !== null} disabledReason={BUSY_REASON}>
+              <FileArchive size={15} /> {file ? file.name : 'Choose archive…'}
+            </Button>
+            <Button size="sm" onClick={runImport} loading={busy === 'import'} loadingLabel="Importing…" disabled={busy !== null || !file || !manifest} disabledReason={!file && busy === null ? 'Choose a file first' : (!manifest && busy === null ? 'The archive has not passed validation' : undefined)}><Upload size={15} /> Import
+            </Button>
+            {busy === 'validate' && <span data-type="caption" className="inline-flex items-center gap-1.5 text-on-surface-low"><Loader2 size={13} className="animate-spin" /> Checking archive…</span>}
+            {importResult && <span data-type="caption" className="text-on-surface-low">{importResult}</span>}
+          </div>
+          {manifest && (
+            <div data-type="caption" className="mt-3 rounded-md bg-surface px-3 py-2">
+              <div className="text-on-surface" style={fvs(550)}>
+                Archive from {manifest.hostname} · {manifest.user} · {archiveWhen(manifest.created_at)}
+              </div>
+              <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-on-surface-low">
+                <span>format v{manifest.version}</span>
+                {manifest.scope && <span>scope: {manifest.scope}{manifest.domains?.length ? ` (${manifest.domains.join(', ')})` : ''}</span>}
+                {
+}
+                {manifest.verified
+                  ? <span className="inline-flex items-center gap-1 text-success"><ShieldCheck size={12} /> checksums verified</span>
+                  : <span>no checksums to verify (pre-v3 archive)</span>}
+              </div>
+              {(() => {
+                const areas = archiveAreas(manifest)
+                const rows = areas.length ? areas : archiveInventory(manifest)
+                if (!rows.length) return null
+                return (
+                  <ul className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-0.5 text-on-surface-low sm:grid-cols-3">
+                    {rows.map((r) => (
+                      <li key={r.label}>
+                        <span className="text-on-surface-var">{r.label}</span> {r.detail}
+                      </li>
+                    ))}
+                  </ul>
+                )
+              })()}
+            </div>
+          )}
+        </div>
+      </Section>
+    </div>
+  )
+}

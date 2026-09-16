@@ -1,6 +1,6 @@
 """Every Playwright spec in the tree either runs in CI or says why it cannot.
 
-`web/e2e/` holds three specs. Only `a11y.spec.ts` was named by a workflow. `pwa.spec.ts` —
+`apps/console/e2e/` holds three specs. Only `a11y.spec.ts` was named by a workflow. `pwa.spec.ts` —
 the proof that the service worker never serves an authenticated `/api` response from
 cache, which is a data-leak control — and `visual.spec.ts` with its 32 committed baselines
 ran in no automated gate at all. A suite nobody executes is not a slower suite; it is a
@@ -34,13 +34,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-_ROOT = Path(__file__).resolve().parents[1]
-_E2E = _ROOT / "web" / "e2e"
+_ROOT = Path(__file__).resolve().parents[2]
+_E2E = _ROOT / "apps/console" / "e2e"
 _WORKFLOWS = _ROOT / ".github" / "workflows"
 
-#: Specs deliberately NOT run in CI, each with the mechanical reason. A spec absent from
-#: both this map and the workflows fails the sweep — "we'll wire it later" has to be a
-#: sentence someone typed, not a file nobody noticed.
 LOCAL_ONLY: dict[str, str] = {
     "visual.spec.ts": (
         "All 32 baselines are platform-qualified `-darwin` (playwright.config.ts's "
@@ -57,7 +54,9 @@ def _specs() -> list[str]:
 
 
 def _workflow_text() -> str:
-    return "\n".join(p.read_text(encoding="utf-8") for p in sorted(_WORKFLOWS.glob("*.yml")))
+    return "\n".join(
+        p.read_text(encoding="utf-8") for p in sorted(_WORKFLOWS.glob("*.yml"))
+    )
 
 
 def names_spec(text: str, spec: str) -> bool:
@@ -89,7 +88,7 @@ def test_every_e2e_spec_is_executed_or_declared():
     silent = [s for s in specs if not _run_by_ci(s) and s not in LOCAL_ONLY]
     assert not silent, (
         "these Playwright specs run in no workflow and are not declared local-only:\n"
-        + "\n".join(f"  web/e2e/{s}" for s in silent)
+        + "\n".join(f"  apps/console/e2e/{s}" for s in silent)
         + "\n\nAdd a CI job that runs it, or add it to LOCAL_ONLY with the mechanical reason "
         "it cannot run there. A suite nobody executes has no failures anybody sees."
     )
@@ -124,7 +123,9 @@ def test_the_visual_exemption_retires_itself():
     is the one told to wire the job — instead of the exemption quietly outliving its cause.
     """
     shots = sorted((_E2E / "__screenshots__" / "visual.spec.ts").glob("*.png"))
-    assert shots, "no visual baselines found — the exemption's premise cannot be checked"
+    assert (
+        shots
+    ), "no visual baselines found — the exemption's premise cannot be checked"
     platforms = sorted({re.sub(r".*-([a-z0-9]+)\.png$", r"\1", p.name) for p in shots})
     assert platforms == ["darwin"], (
         "the visual baselines are no longer darwin-only "
@@ -140,10 +141,15 @@ def test_the_run_line_matcher_is_not_fooled_by_a_comment():
     every mentioned spec as executed, and the sweep would be green for a repo running none of
     them.
     """
-    assert _run_by_ci("a11y.spec.ts"), "the matcher missed the spec that genuinely does run"
-    assert not _run_by_ci("definitely-not-a-real.spec.ts"), "the matcher invents matches"
-    # The distinction itself, through the SAME function the assertions above use.
-    commented = "      # - run: npx playwright test e2e/ghost.spec.ts --project=chromium\n"
+    assert _run_by_ci(
+        "a11y.spec.ts"
+    ), "the matcher missed the spec that genuinely does run"
+    assert not _run_by_ci(
+        "definitely-not-a-real.spec.ts"
+    ), "the matcher invents matches"
+    commented = (
+        "      # - run: npx playwright test e2e/ghost.spec.ts --project=chromium\n"
+    )
     assert not names_spec(commented, "ghost.spec.ts"), (
         "a commented-out run line counted as execution — every spec merely DESCRIBED in a "
         "workflow comment would read as wired"

@@ -37,9 +37,7 @@ import math
 
 import pytest
 
-from gideon.knowledge import similarity_edges
-
-# ── fixtures ────────────────────────────────────────────────────────────────────
+from gideon.cognition.knowledge import similarity_edges
 
 
 @pytest.fixture()
@@ -57,19 +55,13 @@ def store(tmp_path):
     """
     mp = pytest.MonkeyPatch()
     mp.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.knowledge.store import KnowledgeStore, knowledge_db_path
+    from gideon.cognition.knowledge.store import KnowledgeStore, knowledge_db_path
 
     try:
         yield KnowledgeStore(str(knowledge_db_path()))
     finally:
         mp.undo()
 
-
-# ── vector helpers ──────────────────────────────────────────────────────────────
-#
-# Unit vectors with EXACTLY known cosines, so an assertion can name the number it expects
-# instead of eyeballing whatever an embedder happened to produce. `floats_to_bytes` packs
-# float32, so comparisons carry a tolerance for that round-trip and nothing more.
 
 _DIM = 4
 
@@ -97,7 +89,9 @@ def _axis_pair(cos_to_first: float, slot: int, dim: int) -> list[float]:
 
 
 def _item(store, title: str) -> str:
-    item_id = store.create_typed_item(item_type="note", title=title, content=f"body of {title}")
+    item_id = store.create_typed_item(
+        item_type="note", title=title, content=f"body of {title}"
+    )
     assert item_id, "fixture item was not created"
     return item_id
 
@@ -109,8 +103,8 @@ def _embed_chunks(store, item_id: str, vectors: list[list[float]]) -> None:
     ingest writes it — otherwise the ANN arm would have nothing to find and every test would
     silently measure the exact-scan fallback instead.
     """
-    from gideon.knowledge.chunking import Chunk
-    from gideon.knowledge.embedder import floats_to_bytes
+    from gideon.cognition.knowledge.chunking import Chunk
+    from gideon.cognition.knowledge.embedder import floats_to_bytes
 
     chunks = [
         Chunk(
@@ -142,9 +136,6 @@ def _pairs(store) -> set[tuple[str, str]]:
     return {(r["source_item_id"], r["target_item_id"]) for r in _edge_rows(store)}
 
 
-# ── the table: CASCADE is enforced, not decorative ──────────────────────────────
-
-
 def test_the_connection_has_foreign_keys_on(store):
     """The precondition every CASCADE assertion below rests on.
 
@@ -155,7 +146,10 @@ def test_the_connection_has_foreign_keys_on(store):
     """
     assert store.db.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
-    legs = {r[3]: r[6] for r in store.db.execute("PRAGMA foreign_key_list(item_similarity_edges)")}
+    legs = {
+        r[3]: r[6]
+        for r in store.db.execute("PRAGMA foreign_key_list(item_similarity_edges)")
+    }
     assert legs == {
         "source_item_id": "CASCADE",
         "target_item_id": "CASCADE",
@@ -188,14 +182,17 @@ def test_deleting_an_item_cascades_its_edges_with_no_application_code(store):
             },
         ]
     )
-    assert store.count_similarity_edges() == 2, "positive control: edges must exist to vanish"
+    assert (
+        store.count_similarity_edges() == 2
+    ), "positive control: edges must exist to vanish"
 
-    # Whichever leg `a` landed on after canonicalisation, deleting it must clear its edge.
     store.db.execute("DELETE FROM items WHERE id = ?", (a,))
     store.db.commit()
 
     remaining = _pairs(store)
-    assert not any(a in pair for pair in remaining), f"edge survived the cascade: {remaining}"
+    assert not any(
+        a in pair for pair in remaining
+    ), f"edge survived the cascade: {remaining}"
     assert (
         store.count_similarity_edges() == 1
     ), "the cascade must remove only the deleted item's edges, not the table"
@@ -219,9 +216,6 @@ def test_deleting_an_item_cascades_its_sweep_marker(store):
     assert store.db.execute("SELECT COUNT(*) FROM similarity_sweeps").fetchone()[0] == 0
 
 
-# ── the roll-up rule: MAX, not mean and not sum ─────────────────────────────────
-
-
 def test_item_pair_score_is_the_max_of_its_chunk_pairs(store):
     """One chunk in A against two chunks in B scoring 0.9 and 0.3.
 
@@ -235,8 +229,8 @@ def test_item_pair_score_is_the_max_of_its_chunk_pairs(store):
         store,
         b,
         [
-            _unit(0.9, math.sqrt(1 - 0.81)),  # cosine 0.9 with A's chunk
-            _unit(0.3, math.sqrt(1 - 0.09)),  # cosine 0.3 with A's chunk
+            _unit(0.9, math.sqrt(1 - 0.81)),
+            _unit(0.3, math.sqrt(1 - 0.09)),
         ],
     )
 
@@ -254,9 +248,7 @@ def test_provenance_names_the_winning_chunk_pair(store):
     """The edge stores WHICH chunks won, oriented to the ids it stores, so it can explain
     itself. A score with the wrong chunk indices is worse than no provenance at all."""
     a, b = _item(store, "A"), _item(store, "B")
-    # A's chunk 1 is the one that matches; A's chunk 0 is orthogonal to everything in B.
     _embed_chunks(store, a, [_unit(0.0, 0.0, 1.0), _unit(1.0, 0.0)])
-    # B's chunk 2 is the match; 0 and 1 are weak.
     _embed_chunks(
         store,
         b,
@@ -270,15 +262,20 @@ def test_provenance_names_the_winning_chunk_pair(store):
     assert similarity_edges.recompute_item_edges(store, a, top_k=5, min_score=0.5) == 1
 
     row = _edge_rows(store)[0]
-    a_index = row["source_chunk_index"] if row["source_item_id"] == a else row["target_chunk_index"]
-    b_index = row["target_chunk_index"] if row["source_item_id"] == a else row["source_chunk_index"]
+    a_index = (
+        row["source_chunk_index"]
+        if row["source_item_id"] == a
+        else row["target_chunk_index"]
+    )
+    b_index = (
+        row["target_chunk_index"]
+        if row["source_item_id"] == a
+        else row["source_chunk_index"]
+    )
     assert (a_index, b_index) == (
         1,
         2,
     ), f"provenance must name A's chunk 1 and B's chunk 2, got A={a_index} B={b_index}"
-
-
-# ── canonical ordering ──────────────────────────────────────────────────────────
 
 
 def test_edges_are_stored_in_canonical_min_max_order(store):
@@ -311,9 +308,6 @@ def test_the_same_pair_never_becomes_two_rows(store):
     assert store.count_similarity_edges() == 1, _edge_rows(store)
 
 
-# ── the clause that bites: a recompute must not eat another pass's edge ─────────
-
-
 @pytest.mark.parametrize("author_is_lower_id", [True, False])
 def test_recompute_keeps_the_edge_the_other_pass_found(store, author_is_lower_id):
     """One pass writes the edge; the OTHER endpoint then recomputes and finds nothing.
@@ -334,13 +328,12 @@ def test_recompute_keeps_the_edge_the_other_pass_found(store, author_is_lower_id
     author, other = (lo, hi) if author_is_lower_id else (hi, lo)
 
     assert (
-        similarity_edges.recompute_item_edges(store, author, top_k=5, min_score=0.5) == 1
+        similarity_edges.recompute_item_edges(store, author, top_k=5, min_score=0.5)
+        == 1
     ), "positive control: the author's pass must create the edge first"
     before = _pairs(store)
     assert before == {(lo, hi)}
 
-    # `other`'s pass derives nothing at this floor, so its withdraw step runs over an empty
-    # keep set — the exact situation in which a source-side or both-legs delete wipes the edge.
     similarity_edges.recompute_item_edges(store, other, top_k=5, min_score=0.999)
 
     assert _pairs(store) == before, (
@@ -349,7 +342,9 @@ def test_recompute_keeps_the_edge_the_other_pass_found(store, author_is_lower_id
     )
     row = _edge_rows(store)[0]
     claim = row["by_source"] if author == lo else row["by_target"]
-    assert claim == 1, "the surviving edge must still be claimed by the pass that found it"
+    assert (
+        claim == 1
+    ), "the surviving edge must still be claimed by the pass that found it"
 
 
 def test_a_recompute_does_reclaim_its_own_stale_edge(store):
@@ -370,9 +365,6 @@ def test_a_recompute_does_reclaim_its_own_stale_edge(store):
     assert (
         store.count_similarity_edges() == 0
     ), "an edge no writer claims any more must be reclaimed, not kept forever"
-
-
-# ── the GLOBAL degree cap ───────────────────────────────────────────────────────
 
 
 def test_degree_cap_bounds_inbound_edges_globally(store):
@@ -436,11 +428,13 @@ def test_degree_cap_evicts_the_lowest_scoring_edge(store):
 
     assert store.enforce_similarity_degree_cap([hub], cap=2) == 1
 
-    survivors = {n["item_id"] for n in store.similar_items(hub, limit=10, min_score=0.0)}
-    assert survivors == {mid, strong}, f"the weakest edge must be the one evicted, kept {survivors}"
-
-
-# ── the pass: resumable, drains, and never keyed on "has an edge" ───────────────
+    survivors = {
+        n["item_id"] for n in store.similar_items(hub, limit=10, min_score=0.0)
+    }
+    assert survivors == {
+        mid,
+        strong,
+    }, f"the weakest edge must be the one evicted, kept {survivors}"
 
 
 def test_drain_reaches_zero_even_when_no_edge_is_ever_written(store):
@@ -454,10 +448,12 @@ def test_drain_reaches_zero_even_when_no_edge_is_ever_written(store):
     for slot, item_id in enumerate(items, start=1):
         _embed_chunks(store, item_id, [_axis_pair(0.1, slot, 16)])
 
-    assert store.count_items_missing_similarity_sweep() == 5, "positive control: a real backlog"
+    assert (
+        store.count_items_missing_similarity_sweep() == 5
+    ), "positive control: a real backlog"
 
     drain = []
-    for _ in range(6):  # bounded, so a non-terminating backlog fails instead of hanging
+    for _ in range(6):
         n = similarity_edges.similarity_pass(batch_size=2, min_score=0.999)
         drain.append(n)
         if n == 0:
@@ -514,7 +510,6 @@ def test_the_pass_refuses_a_library_with_only_one_embedded_item(store):
         store.count_items_missing_similarity_sweep() == 1
     ), "the first document must not burn its one sweep against an empty library"
 
-    # And it becomes work the moment a second embedded item exists.
     second = _item(store, "second")
     _embed_chunks(store, second, [_unit(0.95, math.sqrt(1 - 0.9025))])
     assert similarity_edges.similarity_pass(batch_size=5) == 2
@@ -546,9 +541,6 @@ def test_rechunking_puts_an_item_back_in_the_backlog(store):
     assert store.count_items_missing_similarity_sweep() == 1
 
 
-# ── ANN unavailable: fail soft to the exact scan ────────────────────────────────
-
-
 def test_ann_unavailable_falls_soft_to_the_exact_scan(store):
     """`candidate_chunk_ids` returning `None` means "the index cannot serve this" — the pass
     must run the exact scan, exactly as the retrieval vector arm does, not crash and not
@@ -562,7 +554,9 @@ def test_ann_unavailable_falls_soft_to_the_exact_scan(store):
     _embed_chunks(store, b, [_unit(0.9, math.sqrt(1 - 0.81))])
 
     if not getattr(store.vec_index, "enabled", False):
-        pytest.skip("sqlite-vec unavailable: the ANN arm cannot be measured to compare against")
+        pytest.skip(
+            "sqlite-vec unavailable: the ANN arm cannot be measured to compare against"
+        )
 
     assert similarity_edges.recompute_item_edges(store, a, top_k=5, min_score=0.5) == 1
     with_ann = _edge_rows(store)
@@ -580,12 +574,18 @@ def test_ann_unavailable_falls_soft_to_the_exact_scan(store):
     mp = pytest.MonkeyPatch()
     mp.setattr(store.vec_index, "candidate_chunk_ids", _refuse)
     try:
-        assert similarity_edges.recompute_item_edges(store, a, top_k=5, min_score=0.5) == 1
+        assert (
+            similarity_edges.recompute_item_edges(store, a, top_k=5, min_score=0.5) == 1
+        )
     finally:
         mp.undo()
 
-    assert calls, "vacuity guard: the refusing stub was never called, so no fallback was taken"
-    assert _edge_rows(store) == with_ann, "the exact scan must reach the same answer as the ANN arm"
+    assert (
+        calls
+    ), "vacuity guard: the refusing stub was never called, so no fallback was taken"
+    assert (
+        _edge_rows(store) == with_ann
+    ), "the exact scan must reach the same answer as the ANN arm"
 
 
 def test_a_disabled_index_still_produces_edges(store):
@@ -598,7 +598,9 @@ def test_a_disabled_index_still_produces_edges(store):
     mp = pytest.MonkeyPatch()
     mp.setattr(type(store.vec_index), "enabled", property(lambda self: False))
     try:
-        assert similarity_edges.recompute_item_edges(store, a, top_k=5, min_score=0.5) == 1
+        assert (
+            similarity_edges.recompute_item_edges(store, a, top_k=5, min_score=0.5) == 1
+        )
     finally:
         mp.undo()
 
@@ -610,14 +612,13 @@ def test_a_documents_own_chunks_never_become_its_neighbours(store):
     (self-similarity ~1.0), so a candidate budget that does not account for them is spent
     entirely on self-hits and a long document finds nobody."""
     a, b = _item(store, "A"), _item(store, "B")
-    _embed_chunks(store, a, [_unit(1.0, 0.0)] * 12)  # more own chunks than the budget
+    _embed_chunks(store, a, [_unit(1.0, 0.0)] * 12)
     _embed_chunks(store, b, [_unit(0.9, math.sqrt(1 - 0.81))])
 
     assert similarity_edges.recompute_item_edges(store, a, top_k=2, min_score=0.5) == 1
-    assert {r["item_id"] for r in store.similar_items(a, limit=10, min_score=0.5)} == {b}
-
-
-# ── reading the table back ──────────────────────────────────────────────────────
+    assert {r["item_id"] for r in store.similar_items(a, limit=10, min_score=0.5)} == {
+        b
+    }
 
 
 def test_similar_items_reads_both_legs_and_applies_the_threshold(store):
@@ -650,9 +651,12 @@ def test_similar_items_reads_both_legs_and_applies_the_threshold(store):
         c,
     }, f"positive control: both neighbours must be readable, got {unfiltered}"
 
-    assert {n["item_id"] for n in store.similar_items(a, limit=10, min_score=0.5)} == {b}
-    # Symmetry: B must see A whichever leg the canonical row put A on.
-    assert {n["item_id"] for n in store.similar_items(b, limit=10, min_score=0.5)} == {a}
+    assert {n["item_id"] for n in store.similar_items(a, limit=10, min_score=0.5)} == {
+        b
+    }
+    assert {n["item_id"] for n in store.similar_items(b, limit=10, min_score=0.5)} == {
+        a
+    }
 
     from_a = store.similar_items(a, limit=10, min_score=0.5)[0]
     from_b = store.similar_items(b, limit=10, min_score=0.5)[0]
@@ -701,7 +705,6 @@ def test_upsert_canonicalises_and_keeps_the_higher_score(store):
         4,
     ), "the winning score's provenance must travel with it"
 
-    # A lower later score must not overwrite, and must not lose its provenance either.
     store.upsert_similarity_edges(
         [
             {
@@ -743,7 +746,6 @@ def test_top_k_truncates_to_the_strongest_neighbours(store):
     dim = 16
     a = _item(store, "A")
     _embed_chunks(store, a, [[1.0] + [0.0] * (dim - 1)])
-    # Descending similarity, so the expected survivors are unambiguous.
     others = []
     for slot, cos in enumerate([0.95, 0.9, 0.85, 0.8, 0.75], start=1):
         other = _item(store, f"O-{cos}")
@@ -753,10 +755,10 @@ def test_top_k_truncates_to_the_strongest_neighbours(store):
     assert similarity_edges.recompute_item_edges(store, a, top_k=2, min_score=0.7) == 2
 
     kept = {n["item_id"] for n in store.similar_items(a, limit=10, min_score=0.7)}
-    assert kept == {others[0][1], others[1][1]}, f"top-K must keep the strongest pair, kept {kept}"
-
-
-# ── tuning resolution ───────────────────────────────────────────────────────────
+    assert kept == {
+        others[0][1],
+        others[1][1],
+    }, f"top-K must keep the strongest pair, kept {kept}"
 
 
 def test_defaults_resolve_without_config_and_an_override_wins(tmp_path):
@@ -771,13 +773,23 @@ def test_defaults_resolve_without_config_and_an_override_wins(tmp_path):
     try:
         resolved = similarity_edges._resolve_tuning()
         assert resolved["top_k"] == similarity_edges.DEFAULT_TOP_K
-        assert resolved["min_score"] == pytest.approx(similarity_edges.DEFAULT_MIN_SCORE)
-        assert resolved["candidate_multiple"] == similarity_edges.DEFAULT_CANDIDATE_MULTIPLE
+        assert resolved["min_score"] == pytest.approx(
+            similarity_edges.DEFAULT_MIN_SCORE
+        )
+        assert (
+            resolved["candidate_multiple"]
+            == similarity_edges.DEFAULT_CANDIDATE_MULTIPLE
+        )
         assert resolved["degree_cap"] == similarity_edges.DEFAULT_DEGREE_CAP
 
-        overridden = similarity_edges._resolve_tuning(top_k=2, min_score=0.42, degree_cap=5)
+        overridden = similarity_edges._resolve_tuning(
+            top_k=2, min_score=0.42, degree_cap=5
+        )
         assert (overridden["top_k"], overridden["degree_cap"]) == (2, 5)
         assert overridden["min_score"] == pytest.approx(0.42)
-        assert overridden["candidate_multiple"] == similarity_edges.DEFAULT_CANDIDATE_MULTIPLE
+        assert (
+            overridden["candidate_multiple"]
+            == similarity_edges.DEFAULT_CANDIDATE_MULTIPLE
+        )
     finally:
         mp.undo()

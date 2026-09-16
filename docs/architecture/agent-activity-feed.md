@@ -8,8 +8,8 @@ The platform's contribution is **this contract, not the scene**. A world is hand
 typed value and renders it. It opens no socket, calls no endpoint, and knows nothing
 about loops, sessions or subagents beyond what is written here.
 
-- Contract + hook: `web/src/lib/useAgentActivity.ts`
-- First-party world: `web/src/pages/dashboard/world/` (`AgentWorld.tsx` paints,
+- Contract + hook: `apps/console/src/lib/useAgentActivity.ts`
+- First-party world: `apps/console/src/pages/dashboard/world/` (`AgentWorld.tsx` paints,
   `worldScene.ts` is the pure scene model)
 - Plan: the AMBIENT-SURFACES plan (internal) §"Amendment (2026-07-26)" (b), task `A2-3`
 
@@ -87,7 +87,7 @@ as calm `working` is precisely the lie an ambient surface must not tell.
 ## WS envelopes are SIGNALS, NEVER PAYLOADS
 
 This is the load-bearing invariant, inherited verbatim from the DashboardLive contract
-(`web/src/pages/dashboard/DashboardLive.tsx`).
+(`apps/console/src/pages/dashboard/DashboardLive.tsx`).
 
 `chat_status`, `sessions`, `subagent*`, `update_progress`, `approval` and
 `approval_resolved` each **nudge a debounced refetch** (600 ms, so a streaming turn's
@@ -99,7 +99,7 @@ Why it matters: envelope shapes drift per producer, several producers emit the s
 type with different fields, and a stale process can emit a contradicting one. A surface
 that renders envelope payloads renders whichever producer spoke last.
 
-The rail is `web/src/lib/agentActivitySignals.test.tsx`. It delivers a `chat_status`
+The rail is `apps/console/src/lib/agentActivitySignals.test.tsx`. It delivers a `chat_status`
 carrying deliberately **misleading** `status`, `title`, `running`, `progress` and
 `entities` fields and asserts the rendered scene came from the refetch — paired with a
 positive control that the refetch demonstrably happened, because "no bad field
@@ -113,7 +113,7 @@ A world **receives** `AgentActivityFeed` and renders it. It must not:
 - consume any other data hook (`useDashboardLive`, `useCachedData`, …);
 - take host-specific props — a world is handed a contract, not wired to a page.
 
-`web/src/pages/dashboard/world/agentWorldRender.test.ts*` enforces all of this
+`apps/console/src/pages/dashboard/world/agentWorldRender.test.ts*` enforces all of this
 structurally against the first-party world's source, because a behavioural test cannot
 see a fetch in a branch it did not reach.
 

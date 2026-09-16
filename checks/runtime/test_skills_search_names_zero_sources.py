@@ -53,12 +53,14 @@ class _StubMarketplace:
 
 def _search(registry, query: str = "postgres", marketplace: str = ""):
     """Drive `GET /api/skills/search` against a given registry."""
-    import gideon.dashboard.handlers.skills as H
-    from gideon.skills import marketplace as mp_mod
+    import gideon.interfaces.dashboard.handlers.skills as H
+    from gideon.extensions.skills import marketplace as mp_mod
 
     app = web.Application()
     app["state"] = SimpleNamespace()
-    q = f"/api/skills/search?q={query}" + (f"&marketplace={marketplace}" if marketplace else "")
+    q = f"/api/skills/search?q={query}" + (
+        f"&marketplace={marketplace}" if marketplace else ""
+    )
     req = make_mocked_request("GET", q, app=app)
 
     original = mp_mod.get_default_skills_registry
@@ -73,7 +75,7 @@ def _search(registry, query: str = "postgres", marketplace: str = ""):
 
 
 def _registry(*names: str):
-    from gideon.skills.marketplace import SkillsRegistry
+    from gideon.extensions.skills.marketplace import SkillsRegistry
 
     reg = SkillsRegistry()
     for name in names:
@@ -83,7 +85,8 @@ def _registry(*names: str):
 
 def test_an_empty_registry_reports_zero_installable_sources():
     """The bug. Before this, the response was indistinguishable from a no-match search, so the
-    store told the user to try a different term when there was nothing to search at all."""
+    store told the user to try a different term when there was nothing to search at all.
+    """
     resp, body = _search(_registry())
 
     assert resp.status == 200
@@ -111,7 +114,8 @@ def test_the_count_is_the_number_of_sources_reached():
 
 def test_a_named_marketplace_branch_answers_the_same_shape():
     """Both branches of this endpoint must agree, or the frontend has to know which one it hit.
-    Reaching the named branch means the marketplace resolved, so `sources` is 1 there."""
+    Reaching the named branch means the marketplace resolved, so `sources` is 1 there.
+    """
     resp, body = _search(_registry("skills.sh"), marketplace="skills.sh")
 
     assert resp.status == 200
@@ -129,7 +133,7 @@ def test_a_missing_query_is_still_a_400():
     """`sources` must not turn an argument error into an empty result."""
     import asyncio
 
-    import gideon.dashboard.handlers.skills as H
+    import gideon.interfaces.dashboard.handlers.skills as H
 
     app = web.Application()
     app["state"] = SimpleNamespace()
@@ -151,8 +155,8 @@ def test_the_shipped_registry_has_only_native_mirrors():
     copy ("install a skill-source app to add one") stops being true the moment one ships, and a
     stale reassurance is worse than the wording it replaced.
     """
-    import gideon.dashboard.handlers.skills  # noqa: F401 — registers the native sources
-    from gideon.skills.marketplace import get_default_skills_registry
+    import gideon.interfaces.dashboard.handlers.skills  # noqa: F401 — registers the native sources
+    from gideon.extensions.skills.marketplace import get_default_skills_registry
 
     info = get_default_skills_registry().info()
     assert info, "nothing registered at all — this test would then prove nothing"

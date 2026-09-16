@@ -19,12 +19,9 @@ import re
 
 import pytest
 
-from gideon import notification_kinds as nk
+from gideon.workspace import notification_kinds as nk
 
 SRC = pathlib.Path(nk.__file__).parent
-
-
-# ── registration mechanics ──────────────────────────────────────────────
 
 
 def test_registry_is_populated():
@@ -71,15 +68,14 @@ def test_kind_is_frozen():
         k.default_mode = "never"  # type: ignore[misc]
 
 
-# ── fail-open resolution ────────────────────────────────────────────────
-
-
 def test_unknown_pair_resolves_to_generic_not_raise(caplog):
     """Fail-OPEN: a kind we can't classify is still shown, mirroring the delivery gate."""
     with caplog.at_level("WARNING"):
         k = nk.resolve_kind("nope", "nada")
     assert (k.source, k.kind) == (nk.GENERIC_SOURCE, nk.GENERIC_KIND)
-    assert k.default_mode == "immediate", "an unclassifiable notification must still deliver"
+    assert (
+        k.default_mode == "immediate"
+    ), "an unclassifiable notification must still deliver"
     assert "nope/nada" in caplog.text
 
 
@@ -90,7 +86,9 @@ def test_unknown_pair_label_preserves_the_original_pair():
 
 def test_generic_is_itself_registered():
     """The fallback needs a row in the rules matrix like any other kind."""
-    assert (nk.GENERIC_SOURCE, nk.GENERIC_KIND) in {(k.source, k.kind) for k in nk.all_kinds()}
+    assert (nk.GENERIC_SOURCE, nk.GENERIC_KIND) in {
+        (k.source, k.kind) for k in nk.all_kinds()
+    }
 
 
 @pytest.mark.parametrize(
@@ -127,9 +125,6 @@ def test_legacy_junk_resolves_to_generic(junk):
     assert nk.kind_for_legacy(junk).key == f"{nk.GENERIC_SOURCE}/{nk.GENERIC_KIND}"
 
 
-# ── the behavior-preservation invariants ────────────────────────────────
-
-
 def test_every_default_mode_is_immediate():
     """No gate hides this rollout, so defaults MUST reproduce today's delivery.
 
@@ -146,7 +141,9 @@ def test_every_default_mode_is_immediate():
     """
     historical = {nk.kind_for_legacy(flat).key for flat in nk._LEGACY_FLAT}
     offenders = [
-        k.key for k in nk.all_kinds() if k.default_mode != "immediate" and k.key in historical
+        k.key
+        for k in nk.all_kinds()
+        if k.default_mode != "immediate" and k.key in historical
     ]
     assert not offenders, (
         "these kinds would change delivery behavior with no rules file: "
@@ -180,14 +177,18 @@ def test_the_kinds_defaulting_to_something_other_than_immediate_are_EXACTLY_thes
 
 def test_severity_vocabulary_matches_the_existing_delivery_gate():
     """The registry supplies the severity the existing gate reads; ranks must agree."""
-    from gideon.providers.entity_routes import _MIN_SEVERITY_RANK
+    from gideon.extensions.providers.entity_routes import _MIN_SEVERITY_RANK
 
-    assert set(_MIN_SEVERITY_RANK.values()) == {nk.SEV_INFO, nk.SEV_WARNING, nk.SEV_ERROR}
+    assert set(_MIN_SEVERITY_RANK.values()) == {
+        nk.SEV_INFO,
+        nk.SEV_WARNING,
+        nk.SEV_ERROR,
+    }
 
 
 def test_severity_of_legacy_kinds_matches_the_old_hardcoded_map():
     """`_KIND_SEVERITY` ranked error=3, warning=2, inbox_alert=2. Preserve exactly."""
-    from gideon.providers.entity_routes import _KIND_SEVERITY
+    from gideon.extensions.providers.entity_routes import _KIND_SEVERITY
 
     for flat, old_rank in _KIND_SEVERITY.items():
         assert (
@@ -207,15 +208,19 @@ def test_reachable_pairs_preserve_their_old_severity_exactly():
     S2 introduces via `emit_attention_item`) and are free to carry their honest severity —
     there is no established behavior to preserve.
     """
-    from gideon.providers.entity_routes import _KIND_SEVERITY
+    from gideon.extensions.providers.entity_routes import _KIND_SEVERITY
 
     drift = []
     for flat, ident in nk._LEGACY_FLAT.items():
         old_rank = _KIND_SEVERITY.get(flat, nk.SEV_INFO)
         new_rank = nk.resolve_kind(*ident).default_severity
         if new_rank != old_rank:
-            drift.append(f"{flat!r} → {'/'.join(ident)}: was {old_rank}, now {new_rank}")
-    assert not drift, "severity drift on kinds a live emitter still reaches:\n" + "\n".join(drift)
+            drift.append(
+                f"{flat!r} → {'/'.join(ident)}: was {old_rank}, now {new_rank}"
+            )
+    assert (
+        not drift
+    ), "severity drift on kinds a live emitter still reaches:\n" + "\n".join(drift)
 
 
 def test_attention_pairs_have_no_legacy_history():
@@ -261,7 +266,9 @@ def test_EVERY_EMITTER_IN_THE_TREE_IS_REGISTERED():
     for path in root.rglob("*.py"):
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"))
-        except SyntaxError:  # pragma: no cover - a generated file is not this test's subject
+        except (
+            SyntaxError
+        ):  # pragma: no cover - a generated file is not this test's subject
             continue
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
@@ -272,16 +279,18 @@ def test_EVERY_EMITTER_IN_THE_TREE_IS_REGISTERED():
                 continue
             kw = {k.arg: k.value for k in node.keywords if k.arg}
             src, kind = kw.get("source"), kw.get("kind")
-            # Only LITERAL pairs can be checked statically; a computed one (an app's dynamic
-            # kind_suffix) is covered by its own registration path.
             if isinstance(src, ast.Constant) and isinstance(kind, ast.Constant):
                 if isinstance(src.value, str) and isinstance(kind.value, str):
                     pairs[(src.value, kind.value)] = f"{path.name}:{node.lineno}"
 
-    assert len(pairs) >= 6, f"the sweep found only {len(pairs)} literal emitters — parser drift?"
+    assert (
+        len(pairs) >= 6
+    ), f"the sweep found only {len(pairs)} literal emitters — parser drift?"
     registered = {(k.source, k.kind) for k in nk.all_kinds()}
     missing = sorted(
-        f"{s}/{k}  ({where})" for (s, k), where in pairs.items() if (s, k) not in registered
+        f"{s}/{k}  ({where})"
+        for (s, k), where in pairs.items()
+        if (s, k) not in registered
     )
     assert not missing, (
         "these emitters are not in the registry, so they lose their own severity, mode and "
@@ -298,15 +307,21 @@ def test_a_registered_pair_keeps_its_OWN_digest_heading():
     counted them as one group. Each needs a DISTINCT wire string; this asserts the outcome
     rather than the mechanism.
     """
-    from gideon.notification_rules import build_digest_body
+    from gideon.workspace.notification_rules import build_digest_body
 
     entries = [
-        {"kind": nk.kind_for_legacy_pair("learning", "proposal"), "title": "Promote the heuristic"},
+        {
+            "kind": nk.kind_for_legacy_pair("learning", "proposal"),
+            "title": "Promote the heuristic",
+        },
         {
             "kind": nk.kind_for_legacy_pair("planning", "proposal"),
             "title": "Plan this jotted line?",
         },
-        {"kind": nk.kind_for_legacy_pair("skills", "proposal"), "title": "Refine a skill"},
+        {
+            "kind": nk.kind_for_legacy_pair("skills", "proposal"),
+            "title": "Refine a skill",
+        },
     ]
     body = build_digest_body(entries)
     for heading in (
@@ -315,7 +330,6 @@ def test_a_registered_pair_keeps_its_OWN_digest_heading():
         "**Skill proposal** — 1",
     ):
         assert heading in body, f"missing {heading!r} in:\n{body}"
-    # …and none of them is folded into another's count.
     assert "— 3" not in body and "— 2" not in body, body
 
 
@@ -334,10 +348,9 @@ def test_attention_pairs_round_trip_through_the_wire():
 def test_legacy_strings_win_a_collision_with_an_attention_kind():
     """A newly added attention kind must never re-point an existing persisted kind."""
     for flat, ident in nk._LEGACY_FLAT.items():
-        assert nk._WIRE_TO_PAIR[flat] == ident, f"{flat!r} was re-pointed away from {ident}"
-
-
-# ── drift guard against the real call sites ─────────────────────────────
+        assert (
+            nk._WIRE_TO_PAIR[flat] == ident
+        ), f"{flat!r} was re-pointed away from {ident}"
 
 
 def _emitted_kind_strings() -> set[str]:
@@ -354,7 +367,9 @@ def _emitted_kind_strings() -> set[str]:
         except (SyntaxError, UnicodeDecodeError):
             continue
         for node in ast.walk(tree):
-            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+            if not (
+                isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            ):
                 continue
             if node.func.attr != "notify" or not node.args:
                 continue
@@ -400,7 +415,9 @@ def _emitted_constant_names() -> set[str]:
         except (SyntaxError, UnicodeDecodeError):
             continue
         for node in ast.walk(tree):
-            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+            if not (
+                isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            ):
                 continue
             if node.func.attr != "notify" or not node.args:
                 continue
@@ -439,28 +456,37 @@ def test_every_emitted_constant_resolves():
 
 def test_loop_watchdog_dynamic_kinds_are_all_registered():
     """The watchdog's kind comes from `_NOTIFY_EVENTS`; every value must resolve."""
-    from gideon.loop.watchdog import LoopWatchdog
+    from gideon.automation.loop.watchdog import LoopWatchdog
 
     for event, (kind, _title) in LoopWatchdog._NOTIFY_EVENTS.items():
-        assert kind.lower() in nk._LEGACY_FLAT, f"watchdog event {event!r} emits {kind!r}"
+        assert (
+            kind.lower() in nk._LEGACY_FLAT
+        ), f"watchdog event {event!r} emits {kind!r}"
 
 
 def test_notify_action_provider_allowed_kinds_are_registered():
     """The action provider clamps to `_ALLOWED_KINDS`; each must resolve."""
-    from gideon.action_providers.notify_provider import _ALLOWED_KINDS
+    from gideon.integrations.action_providers.notify_provider import _ALLOWED_KINDS
 
     for kind in _ALLOWED_KINDS:
         assert kind.lower() in nk._LEGACY_FLAT, f"notify hook allows {kind!r}"
 
 
 def _frontend_kind_keys():
-    """The SPA display map's keys, or None when `web/` is absent from this checkout.
+    """The SPA display map's keys, or None when `apps/console/` is absent from this checkout.
 
     Quotes are stripped because a dotted key must be quoted in TS (`'app.route.drift'`), and the
     original parser's `isidentifier()` filter silently DROPPED exactly those — so the one key most
     likely to drift was the one key never checked.
     """
-    meta = SRC.parent.parent / "web" / "src" / "pages" / "notifications" / "notificationMeta.ts"
+    meta = (
+        SRC.parent.parent
+        / "apps/console"
+        / "src"
+        / "pages"
+        / "notifications"
+        / "notificationMeta.ts"
+    )
     if not meta.exists():
         return None
     text = meta.read_text(encoding="utf-8")
@@ -477,13 +503,20 @@ def _frontend_kind_keys():
 
 
 def _frontend_kind_labels():
-    """The SPA display map's ``key -> label``, or None when ``web/`` is absent.
+    """The SPA display map's ``key -> label``, or None when ``apps/console/`` is absent.
 
     Same block/line parse as `_frontend_kind_keys`, extended to the `label:` string, so the
     two halves of the map (which keys exist, what each is CALLED) are checked by the same
     reader against the same source.
     """
-    meta = SRC.parent.parent / "web" / "src" / "pages" / "notifications" / "notificationMeta.ts"
+    meta = (
+        SRC.parent.parent
+        / "apps/console"
+        / "src"
+        / "pages"
+        / "notifications"
+        / "notificationMeta.ts"
+    )
     if not meta.exists():
         return None
     text = meta.read_text(encoding="utf-8")
@@ -525,7 +558,7 @@ def test_frontend_labels_are_the_registry_declared_labels():
     """
     labels = _frontend_kind_labels()
     if labels is None:
-        pytest.skip("web/ not present in this checkout")
+        pytest.skip("apps/console/ not present in this checkout")
     assert labels, "failed to parse any labels out of the frontend kind map"
     drift = {
         key: (label, sorted(expected))
@@ -559,7 +592,7 @@ def test_every_emittable_kind_has_a_frontend_row():
     matters: a MISSING row is a visible defect for the user."""
     keys = _frontend_kind_keys()
     if keys is None:
-        pytest.skip("web/ not present in this checkout")
+        pytest.skip("apps/console/ not present in this checkout")
     assert keys, "failed to parse the frontend kind map"
     missing = sorted(_wire_vocabulary() - keys)
     assert not missing, f"the backend emits kinds the frontend cannot label: {missing}"
@@ -577,25 +610,26 @@ def test_frontend_display_map_kinds_all_resolve():
     """
     keys = _frontend_kind_keys()
     if keys is None:
-        pytest.skip("web/ not present in this checkout")
+        pytest.skip("apps/console/ not present in this checkout")
     tolerated = {
-        "schedule",  # pre-existing drift (T1.1 inventory); no emitter, kept for old rows
-        # Bare kinds whose pair emits a legacy flat string instead. Kept for persisted history.
-        "alert",  # inbox/alert     → emits `inbox_alert`
-        "result",  # cron/result     → emits `cron`
-        "failed",  # cron|loop/failed → emits `cron` / `failed`
-        "fired",  # hook/fired      → emits `hook`
-        "message",  # agent/message   → emits `agent`
-        "status",  # heartbeat/status → emits `heartbeat`
-        "progress",  # loop/progress   → emits `loop`
-        "complete",  # loop/complete   → emits `loop`
-        "stalled",  # loop/stalled    → emits `loop`
-        "retire",  # learning/retire → emits `feedback_retire`
-        "route_drift",  # system/route_drift → emits `app.route.drift`
-        "update",  # apps/update     → emits `app_update`
+        "schedule",
+        "alert",
+        "result",
+        "failed",
+        "fired",
+        "message",
+        "status",
+        "progress",
+        "complete",
+        "stalled",
+        "retire",
+        "route_drift",
+        "update",
     }
     unresolvable = sorted(k for k in keys - _wire_vocabulary() if k not in tolerated)
-    assert not unresolvable, f"frontend shows kinds the registry can't resolve: {unresolvable}"
+    assert (
+        not unresolvable
+    ), f"frontend shows kinds the registry can't resolve: {unresolvable}"
 
 
 def test_the_tolerated_list_does_not_outlive_its_reason():
@@ -606,7 +640,9 @@ def test_the_tolerated_list_does_not_outlive_its_reason():
     """
     keys = _frontend_kind_keys()
     if keys is None:
-        pytest.skip("web/ not present in this checkout")
+        pytest.skip("apps/console/ not present in this checkout")
     bare = {k.kind for k in nk.all_kinds()}
     for key in keys - _wire_vocabulary():
-        assert key in bare or key == "schedule", f"{key!r} is not a registered kind at all"
+        assert (
+            key in bare or key == "schedule"
+        ), f"{key!r} is not a registered kind at all"

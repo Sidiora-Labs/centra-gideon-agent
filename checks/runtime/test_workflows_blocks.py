@@ -21,10 +21,10 @@ import json
 
 import pytest
 
-from gideon.workflows import blocks
-from gideon.workflows.bundled_defs import bundled_root, template_names
-from gideon.workflows.macros import expand_spec
-from gideon.workflows.template_lint import (
+from gideon.automation.workflows import blocks
+from gideon.automation.workflows.bundled_defs import bundled_root, template_names
+from gideon.automation.workflows.macros import expand_spec
+from gideon.automation.workflows.template_lint import (
     SEVERITY_ERROR,
     SEVERITY_WARNING,
     lint_template,
@@ -43,7 +43,7 @@ def _isolated_def_registry():
     Snapshot-and-restore rather than clear-on-exit, so a provider that was legitimately registered
     before this module ran survives it.
     """
-    from gideon.workflows import defs as defs_mod
+    from gideon.automation.workflows import defs as defs_mod
 
     saved = dict(defs_mod._providers)
     try:
@@ -54,19 +54,28 @@ def _isolated_def_registry():
 
 
 def _raw(name: str) -> dict:
-    return json.loads((bundled_root() / name / "workflow.json").read_text(encoding="utf-8"))
+    return json.loads(
+        (bundled_root() / name / "workflow.json").read_text(encoding="utf-8")
+    )
 
 
 class TestBlockLibrary:
     def test_the_conventions_pack_ships(self) -> None:
         """`bundled/shared/` is the plan's named location for these."""
-        assert set(blocks.block_names()) >= {"finding-record", "safety-tiers", "gap-honesty"}
+        assert set(blocks.block_names()) >= {
+            "finding-record",
+            "safety-tiers",
+            "gap-honesty",
+        }
 
     def test_every_block_has_real_content(self) -> None:
         """An empty block resolves to nothing, which would silently remove a convention from
-        every prompt citing it — the failure would look like the model ignoring instructions."""
+        every prompt citing it — the failure would look like the model ignoring instructions.
+        """
         for name in blocks.block_names():
-            assert len(blocks.read_block(name)) > 200, f"{name} is too thin to be a convention"
+            assert (
+                len(blocks.read_block(name)) > 200
+            ), f"{name} is too thin to be a convention"
 
     def test_the_finding_record_defines_the_whole_ladder(self) -> None:
         """The severities are what gate predicates and the widget key on, so all four must be
@@ -74,7 +83,14 @@ class TestBlockLibrary:
         text = blocks.read_block("finding-record")
         for level in ("Critical", "Major", "Minor", "Nit"):
             assert level in text
-        for field in ("severity", "location", "problem", "why", "recommended_fix", "status"):
+        for field in (
+            "severity",
+            "location",
+            "problem",
+            "why",
+            "recommended_fix",
+            "status",
+        ):
             assert field in text, field
 
     def test_a_missing_block_reads_as_absent_not_as_a_crash(self) -> None:
@@ -90,7 +106,8 @@ class TestResolution:
     def test_an_unknown_reference_is_an_ERROR_not_a_passthrough(self) -> None:
         """A literal `{{block:…}}` reaching a model is a convention silently not applied — the
         model either ignores it or invents what it guessed was meant, which is worse than a loud
-        failure. The message lists what IS available, because a typo is the common case."""
+        failure. The message lists what IS available, because a typo is the common case.
+        """
         with pytest.raises(blocks.BlockError) as exc:
             blocks.resolve_text("{{block:finding-recrod}}")
         assert "finding-record" in str(exc.value)
@@ -111,7 +128,9 @@ class TestResolution:
 
     def test_it_does_not_mutate_the_input(self) -> None:
         """The save path re-reads the author's original for its response."""
-        spec = {"root": {"kind": "infer", "config": {"prompt": "{{block:gap-honesty}}"}}}
+        spec = {
+            "root": {"kind": "infer", "config": {"prompt": "{{block:gap-honesty}}"}}
+        }
         before = json.dumps(spec)
         blocks.resolve_spec(spec)
         assert json.dumps(spec) == before
@@ -136,7 +155,9 @@ class TestLibraryUsesTheBlocks:
         judge-panel macro) became three references to one definition."""
         for name in template_names():
             text = json.dumps(_raw(name))
-            assert "A Finding is {" not in text, f"{name} still defines the Finding record inline"
+            assert (
+                "A Finding is {" not in text
+            ), f"{name} still defines the Finding record inline"
 
     def test_the_review_templates_CITE_the_block(self) -> None:
         """The complement: having removed the inline copies, the convention must actually still
@@ -146,7 +167,8 @@ class TestLibraryUsesTheBlocks:
 
     def test_the_judge_panel_macro_cites_it_too(self) -> None:
         """The macro is Python, so it emits the REFERENCE and blocks resolve after expansion —
-        one definition governs the library's review stages including the generated ones."""
+        one definition governs the library's review stages including the generated ones.
+        """
         expanded = expand_spec(
             {
                 "name": "t",
@@ -163,7 +185,7 @@ class TestLibraryUsesTheBlocks:
 
     def test_what_the_provider_SERVES_has_no_unresolved_references(self) -> None:
         """The invariant, same as macros: nothing downstream of the provider knows blocks exist."""
-        from gideon.workflows.bundled_defs import read_template
+        from gideon.automation.workflows.bundled_defs import read_template
 
         for name in template_names():
             loaded = read_template(name)
@@ -188,13 +210,16 @@ class TestLint:
             "root": {
                 "kind": "infer",
                 "id": "a",
-                "config": {"prompt": "A Finding is {severity: Critical|Major|Minor|Nit}"},
+                "config": {
+                    "prompt": "A Finding is {severity: Critical|Major|Minor|Nit}"
+                },
             },
         }
-        findings = [f for f in lint_template(spec).findings if f.code == "WFL_INLINE_CONVENTION"]
+        findings = [
+            f for f in lint_template(spec).findings if f.code == "WFL_INLINE_CONVENTION"
+        ]
         assert findings
         assert findings[0].severity == SEVERITY_ERROR
-        # Names the block to use — "move it to shared" alone leaves the author guessing which.
         assert "finding-record" in findings[0].message
         assert findings[0].path == "a"
 
@@ -207,16 +232,24 @@ class TestLint:
                 "macro": "judge_panel",
                 "id": "p",
                 "config": {
-                    "lenses": [{"name": "a", "prompt": "severity: Critical|Major|Minor|Nit"}]
+                    "lenses": [
+                        {"name": "a", "prompt": "severity: Critical|Major|Minor|Nit"}
+                    ]
                 },
             },
         }
-        assert any(f.code == "WFL_INLINE_CONVENTION" for f in lint_template(spec).findings)
+        assert any(
+            f.code == "WFL_INLINE_CONVENTION" for f in lint_template(spec).findings
+        )
 
     def test_a_broken_block_reference_is_reported(self) -> None:
         spec = {
             "name": "t",
-            "root": {"kind": "infer", "id": "a", "config": {"prompt": "{{block:nope}}"}},
+            "root": {
+                "kind": "infer",
+                "id": "a",
+                "config": {"prompt": "{{block:nope}}"},
+            },
         }
         assert any(f.code == "WFL_UNKNOWN_BLOCK" for f in lint_template(spec).findings)
 
@@ -228,12 +261,22 @@ class TestLint:
                 "kind": "sequence",
                 "id": "s",
                 "children": [
-                    {"kind": "infer", "id": "a", "config": {"prompt": "{{block:gone-one}}"}},
-                    {"kind": "infer", "id": "b", "config": {"prompt": "{{block:gone-two}}"}},
+                    {
+                        "kind": "infer",
+                        "id": "a",
+                        "config": {"prompt": "{{block:gone-one}}"},
+                    },
+                    {
+                        "kind": "infer",
+                        "id": "b",
+                        "config": {"prompt": "{{block:gone-two}}"},
+                    },
                 ],
             },
         }
-        codes = [f for f in lint_template(spec).findings if f.code == "WFL_UNKNOWN_BLOCK"]
+        codes = [
+            f for f in lint_template(spec).findings if f.code == "WFL_UNKNOWN_BLOCK"
+        ]
         assert len(codes) == 2
 
     def test_a_required_input_with_a_default_is_an_error(self) -> None:
@@ -273,13 +316,16 @@ class TestLint:
             "name": "t",
             "description": "x" * 60,
             "root": {"kind": "infer", "id": "a", "config": {"prompt": "go"}},
-            "metadata": {"steering_examples": [{"event": "kickoff"}, {"event": "mutation"}]},
+            "metadata": {
+                "steering_examples": [{"event": "kickoff"}, {"event": "mutation"}]
+            },
             **spec_over,
         }
-        findings = [f for f in lint_template(spec, bundled=True).findings if f.code == code]
+        findings = [
+            f for f in lint_template(spec, bundled=True).findings if f.code == code
+        ]
         assert findings, code
         assert findings[0].severity == SEVERITY_WARNING
-        # Warnings never fail the lint's ok gate.
         assert lint_template(spec, bundled=True).ok is True
 
     def test_a_users_own_workflow_is_not_held_to_SHIPPING_standards(self) -> None:
@@ -307,7 +353,7 @@ class TestAuthorSurfacesTheLint:
     def test_the_manifest_advertises_the_macros_and_blocks(self) -> None:
         """The manifest is what an authoring model reads to learn the shapes it may write. A
         macro or block absent from it is one a model will never use."""
-        from gideon.workflows import service
+        from gideon.automation.workflows import service
 
         m = service.manifest()
         assert "judge_panel" in m["macros"]
@@ -321,21 +367,27 @@ class TestAuthorSurfacesTheLint:
         who never sees the advice cannot follow a convention nobody told them about."""
         home = tmp_path / "home"
         home.mkdir()
-        monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
-        from gideon.workflows import service
+        monkeypatch.setattr(
+            "gideon.automation.workflows.store.config_dir", lambda: home
+        )
+        from gideon.automation.workflows import service
 
         result = await service.author_def(
             name="inline-convention",
             root={
                 "kind": "infer",
                 "id": "a",
-                "config": {"prompt": "A Finding is {severity: Critical|Major|Minor|Nit}"},
+                "config": {
+                    "prompt": "A Finding is {severity: Critical|Major|Minor|Nit}"
+                },
             },
             save=False,
         )
-        assert result["ok"] is True, result  # advice, not a refusal
+        assert result["ok"] is True, result
         assert result["lint"]["ok"] is False
-        assert any(f["code"] == "WFL_INLINE_CONVENTION" for f in result["lint"]["findings"])
+        assert any(
+            f["code"] == "WFL_INLINE_CONVENTION" for f in result["lint"]["findings"]
+        )
 
 
 @pytest.fixture
@@ -349,11 +401,15 @@ def test_an_unresolved_block_reference_is_named_as_ITSELF() -> None:
     ("binding root 'block:finding-record' is not a known source") — which sends the author looking
     for a node that was never the problem, because blocks and bindings resolve at different times.
     """
-    from gideon.workflows.validator import validate_spec
+    from gideon.automation.workflows.validator import validate_spec
 
     spec = {
         "name": "t",
-        "root": {"kind": "infer", "id": "a", "config": {"prompt": "{{block:finding-record}}"}},
+        "root": {
+            "kind": "infer",
+            "id": "a",
+            "config": {"prompt": "{{block:finding-record}}"},
+        },
     }
     codes = [i.code for i in validate_spec(spec, strict=True).issues]
     assert "WF_UNRESOLVED_BLOCK" in codes
@@ -362,13 +418,19 @@ def test_an_unresolved_block_reference_is_named_as_ITSELF() -> None:
 
 def test_a_real_unknown_binding_root_still_reports_as_one() -> None:
     """The complement — the block branch must not have swallowed the general case."""
-    from gideon.workflows.validator import validate_spec
+    from gideon.automation.workflows.validator import validate_spec
 
     spec = {
         "name": "t",
-        "root": {"kind": "infer", "id": "a", "config": {"prompt": "{{invented.thing}}"}},
+        "root": {
+            "kind": "infer",
+            "id": "a",
+            "config": {"prompt": "{{invented.thing}}"},
+        },
     }
-    assert "WF_UNKNOWN_BINDING_ROOT" in [i.code for i in validate_spec(spec, strict=True).issues]
+    assert "WF_UNKNOWN_BINDING_ROOT" in [
+        i.code for i in validate_spec(spec, strict=True).issues
+    ]
 
 
 class TestDeclaredDefaultsAreApplied:
@@ -382,40 +444,44 @@ class TestDeclaredDefaultsAreApplied:
     """
 
     def test_an_omitted_optional_input_gets_its_declared_default(self) -> None:
-        from gideon.workflows.service import _with_declared_defaults
+        from gideon.automation.workflows.service import _with_declared_defaults
 
-        spec = {"inputs": {"kind": {"default": "document"}, "subject": {"required": True}}}
+        spec = {
+            "inputs": {"kind": {"default": "document"}, "subject": {"required": True}}
+        }
         out = _with_declared_defaults(spec, {"subject": "x"})
         assert out == {"subject": "x", "kind": "document"}
 
     def test_an_optional_input_with_NO_default_still_gets_a_key(self) -> None:
         """Otherwise a `{{inputs.acceptance}}` binding fails on an input the template said was
         optional — and "optional" has to mean the workflow works without it."""
-        from gideon.workflows.service import _with_declared_defaults
+        from gideon.automation.workflows.service import _with_declared_defaults
 
-        out = _with_declared_defaults({"inputs": {"acceptance": {"type": "string"}}}, {})
+        out = _with_declared_defaults(
+            {"inputs": {"acceptance": {"type": "string"}}}, {}
+        )
         assert out == {"acceptance": ""}
 
     def test_the_callers_value_always_wins(self) -> None:
-        from gideon.workflows.service import _with_declared_defaults
+        from gideon.automation.workflows.service import _with_declared_defaults
 
         spec = {"inputs": {"kind": {"default": "document"}}}
         assert _with_declared_defaults(spec, {"kind": "report"}) == {"kind": "report"}
 
     def test_an_explicit_empty_string_is_NOT_overridden(self) -> None:
         """A user who deliberately cleared a field is not asking for the default back."""
-        from gideon.workflows.service import _with_declared_defaults
+        from gideon.automation.workflows.service import _with_declared_defaults
 
         spec = {"inputs": {"focus": {"default": "everything"}}}
         assert _with_declared_defaults(spec, {"focus": ""}) == {"focus": ""}
 
     def test_an_undeclared_input_is_passed_through(self) -> None:
-        from gideon.workflows.service import _with_declared_defaults
+        from gideon.automation.workflows.service import _with_declared_defaults
 
         assert _with_declared_defaults({"inputs": {}}, {"extra": 1}) == {"extra": 1}
 
     def test_a_malformed_inputs_block_is_tolerated(self) -> None:
-        from gideon.workflows.service import _with_declared_defaults
+        from gideon.automation.workflows.service import _with_declared_defaults
 
         assert _with_declared_defaults({"inputs": "not a dict"}, {"a": 1}) == {"a": 1}
 
@@ -427,9 +493,11 @@ class TestDeclaredDefaultsAreApplied:
         before the fix none of them could be started the way the UI starts them."""
         home = tmp_path / "home"
         home.mkdir()
-        monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
-        from gideon.workflows import service
-        from gideon.workflows.bundled_defs import register_bundled_provider
+        monkeypatch.setattr(
+            "gideon.automation.workflows.store.config_dir", lambda: home
+        )
+        from gideon.automation.workflows import service
+        from gideon.automation.workflows.bundled_defs import register_bundled_provider
 
         register_bundled_provider()
         result = await service.start_run(
@@ -437,11 +505,9 @@ class TestDeclaredDefaultsAreApplied:
             inputs={"subject": "a subject"},
             skip_preflight=True,
         )
-        # `WF_NO_SUPERVISOR` is expected with no gateway: the run is CREATED and then not driven.
-        # That is exactly the boundary under test — input completion happens at creation, before
-        # any launch, so the record is complete regardless of whether anything drove it.
         assert result.get("run_id"), result
-        run = __import__("gideon.workflows.store", fromlist=["get"]).get(result["run_id"])
-        # The run RECORD carries the completed inputs, so it explains its own behaviour.
+        run = __import__("gideon.automation.workflows.store", fromlist=["get"]).get(
+            result["run_id"]
+        )
         assert run.inputs["artifact_kind"] == "document"
         assert run.inputs["acceptance"] == ""

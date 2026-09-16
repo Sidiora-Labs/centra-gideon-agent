@@ -34,8 +34,8 @@ from dataclasses import astuple, dataclass, fields
 
 import pytest
 
-from gideon.documents.docx_parser import LossReport, parse_docx
-from gideon.documents.model import (
+from gideon.workspace.documents.docx_parser import LossReport, parse_docx
+from gideon.workspace.documents.model import (
     BLOCK_KINDS,
     Block,
     Cell,
@@ -44,8 +44,8 @@ from gideon.documents.model import (
     ParagraphStyle,
     Run,
 )
-from gideon.documents.writers import docx_writer
-from gideon.documents.writers.docx_writer import render_docx
+from gideon.workspace.documents.writers import docx_writer
+from gideon.workspace.documents.writers.docx_writer import render_docx
 
 _URL = "https://example.invalid/spec"
 _OTHER_URL = "https://example.invalid/other"
@@ -71,9 +71,6 @@ def _rich_model() -> DocumentModel:
         blocks=[
             Block(kind="heading", text="Chapter One", level=1),
             Block(kind="heading", text="A Deeper Section", level=4),
-            # Inline spans: adjacent runs with DIFFERENT formatting, a code span and a
-            # link in the middle of a sentence rather than at either end, so a writer or
-            # parser that appends out of order shows up as reordered text.
             Block(
                 kind="paragraph",
                 runs=[
@@ -124,11 +121,6 @@ def _rich_model() -> DocumentModel:
     )
 
 
-# --------------------------------------------------------------------------------------
-# the canonical projection
-# --------------------------------------------------------------------------------------
-
-
 def _spans(runs: list[Run], text: str, *, bold: bool = False) -> tuple:
     """Inline spans as comparable tuples, collapsing the model's two ways to say one thing.
 
@@ -154,12 +146,7 @@ def _cells(block: Block) -> tuple:
     rows = block.cells or [[Cell(text=value) for value in row] for row in block.rows]
     return tuple(
         tuple(
-            # Row 0 is the header BY CONTRACT: the writer bolds every header cell, so both
-            # sides are projected as bold there. Bolding a header is the writer's
-            # convention, not a property the model can turn off, and comparing it as
-            # authored would call the writer's own contract a round-trip failure.
-            (_spans(cell.runs, cell.text, bold=number == 0), cell.align)
-            for cell in row
+            (_spans(cell.runs, cell.text, bold=number == 0), cell.align) for cell in row
         )
         for number, row in enumerate(rows)
     )
@@ -212,11 +199,6 @@ def _assert_recovers(authored: DocumentModel) -> None:
     assert _canonical(parsed) == _canonical(authored)
 
 
-# --------------------------------------------------------------------------------------
-# the claims
-# --------------------------------------------------------------------------------------
-
-
 def test_the_fixture_covers_every_block_kind():
     """The rail behind "across every BLOCK_KIND".
 
@@ -234,9 +216,6 @@ def test_parse_write_parse_is_stable():
     first, _ = parse_docx(render_docx(_rich_model()))
     second, _ = parse_docx(render_docx(first))
 
-    # Raw dataclass equality here, not the projection: the SECOND lap starts from a model
-    # the parser itself produced, so both sides already use the parser's own conventions
-    # and any difference is a real instability.
     assert first == second
 
 
@@ -296,11 +275,6 @@ def test_table_cells_survive_the_round_trip():
     assert plain.rows == [["plain h1", "plain h2"], ["r1c1", "r1c2"]]
 
 
-# --------------------------------------------------------------------------------------
-# what comes back out — the CLASSES, which a projection cannot see
-# --------------------------------------------------------------------------------------
-
-
 def test_the_parse_returns_the_SHIPPED_model_classes():
     """The one claim `_canonical` structurally cannot make.
 
@@ -328,10 +302,12 @@ def test_the_parse_returns_the_SHIPPED_model_classes():
     assert type(parsed.page) is PageSetup
     assert {type(block) for block in parsed.blocks} == {Block}
     assert {type(run) for block in parsed.blocks for run in block.runs} == {Run}
-    assert {type(cell) for block in parsed.blocks for row in block.cells for cell in row} == {Cell}
-    assert {type(block.style) for block in parsed.blocks if block.style is not None} == {
-        ParagraphStyle
-    }
+    assert {
+        type(cell) for block in parsed.blocks for row in block.cells for cell in row
+    } == {Cell}
+    assert {
+        type(block.style) for block in parsed.blocks if block.style is not None
+    } == {ParagraphStyle}
 
 
 def test_the_shipped_class_check_discriminates_by_CLASS_not_by_SHAPE():
@@ -353,21 +329,13 @@ def test_the_shipped_class_check_discriminates_by_CLASS_not_by_SHAPE():
 
     double, real = _LookAlikeRun(text="bold", bold=True), Run(text="bold", bold=True)
 
-    # The double is shape-identical, or the rejection below proves nothing.
     assert [(f.name, f.default) for f in fields(_LookAlikeRun)] == [
         (f.name, f.default) for f in fields(Run)
     ]
     assert astuple(double) == astuple(real)
 
     assert type(double) is not Run
-    # And this is WHY the check bites: dataclass equality is class-scoped, so a look-alike
-    # is not even equal to the real thing — the model's consumers would reject it too.
     assert double != real
-
-
-# --------------------------------------------------------------------------------------
-# claim 3 — the regressions that must red
-# --------------------------------------------------------------------------------------
 
 
 def _drop_bold(monkeypatch) -> None:
@@ -381,8 +349,6 @@ def _drop_bold(monkeypatch) -> None:
 
 
 def _drop_code_font(monkeypatch) -> None:
-    # The writer's code convention IS the font name, so renaming it is exactly the
-    # regression "code runs stop being distinguishable".
     monkeypatch.setattr(docx_writer, "_MONOSPACE", "Arial")
 
 
@@ -439,7 +405,7 @@ def test_a_deliberate_writer_regression_reds_the_round_trip(monkeypatch, regress
     pass rules out the `raises` succeeding for an unrelated reason.
     """
     authored = _rich_model()
-    _assert_recovers(authored)  # the control: green before the regression
+    _assert_recovers(authored)
 
     regression(monkeypatch)
 

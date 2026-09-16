@@ -6,8 +6,8 @@ statement: >
   (`coalesceReducers.ts`, `runFold.ts`) — `(state, event) -> state` with no React, fetch,
   or mutation — so recorded event traces can be replayed through them offline.
 appliesTo:
-  - web/src/pages/chat/coalesceReducers.ts
-  - web/src/pages/loops/runFold.ts
+  - apps/console/src/pages/chat/coalesceReducers.ts
+  - apps/console/src/pages/loops/runFold.ts
 requiredProfiles:
   - web
   - replay
@@ -24,10 +24,10 @@ expiry_condition: never while the chat/loops streams drive UI state through thes
 The chat message stream and the loop/run stream both derive their UI state through **pure
 fold functions**:
 
-- `web/src/pages/chat/coalesceReducers.ts` — `applyCoalescedFlush(segs, revealed,
+- `apps/console/src/pages/chat/coalesceReducers.ts` — `applyCoalescedFlush(segs, revealed,
   coalescing)` and `insertActivity(segs, text, activityKind, coalescing)`: operate on
   `Segment[]`, return new arrays, no side effects.
-- `web/src/pages/loops/runFold.ts` — `foldReducer(flags, event, data?)` folds one
+- `apps/console/src/pages/loops/runFold.ts` — `foldReducer(flags, event, data?)` folds one
   lifecycle event string into new `RunFlags`; `foldRunSnapshot(loop)` derives a view model
   from a persisted snapshot; `foldRun` merges them.
 

@@ -14,10 +14,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from gideon.memory_service import MemoryService
-from gideon.vector_memory import (
+from gideon.cognition.memory_service import MemoryService
+from gideon.cognition.vector_memory import (
     _OWNER_RANK_BONUS,
-    VectorMemoryStore,
+    SemanticArchive,
     _contributor_label,
     _owner_rank_bonus,
 )
@@ -32,16 +32,16 @@ def home(tmp_path, monkeypatch):
     (tmp_path / "config.json").write_text(
         json.dumps({"dashboard": {"username": OWNER}}), encoding="utf-8"
     )
-    from gideon.config.loader import AppConfig
+    from gideon.core.config.loader import AppConfig
 
-    if hasattr(AppConfig, "_cached"):  # defensive: no known cache, but don't rely on it
+    if hasattr(AppConfig, "_cached"):
         AppConfig._cached = None
     return tmp_path
 
 
 @pytest.fixture
 def store(home):
-    s = VectorMemoryStore(db_path=home / "m.db", embedding_dim=3)
+    s = SemanticArchive(db_path=home / "m.db", embedding_dim=3)
     s.init()
     return s
 
@@ -50,16 +50,15 @@ def store(home):
 def anon_store(tmp_path, monkeypatch):
     """A store with NO username configured — the single-user default."""
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    s = VectorMemoryStore(db_path=tmp_path / "anon.db", embedding_dim=3)
+    s = SemanticArchive(db_path=tmp_path / "anon.db", embedding_dim=3)
     s.init()
     return s
 
 
 def _keys_in_order(block: str) -> list[str]:
-    return [ln.split(":", 1)[0] for ln in block.splitlines() if ln.startswith("project.")]
-
-
-# ── Migration ────────────────────────────────────────────────────────────────
+    return [
+        ln.split(":", 1)[0] for ln in block.splitlines() if ln.startswith("project.")
+    ]
 
 
 def test_v9_is_applied(store):
@@ -74,7 +73,7 @@ def test_contributor_column_exists_on_both_tables(store, table):
 
 
 def test_the_migration_is_idempotent(store):
-    from gideon.vector_memory import _migrate_v9
+    from gideon.cognition.vector_memory import _migrate_v9
 
     _migrate_v9(store.db)
     _migrate_v9(store.db)
@@ -93,9 +92,6 @@ def test_existing_rows_are_not_back_stamped(store):
         "SELECT contributor FROM semantic_memory WHERE key='project.old.row'"
     ).fetchone()
     assert (row["contributor"] or "") == ""
-
-
-# ── The write stamp ──────────────────────────────────────────────────────────
 
 
 def test_a_semantic_write_is_stamped_with_the_owner(store):
@@ -132,7 +128,9 @@ def test_with_no_username_the_stamp_is_empty(anon_store):
 def test_editing_a_foreign_record_does_not_transfer_authorship(store):
     """Touching a shared record is not writing it. A column that silently became
     'last writer' while claiming to mean 'contributor' would be worse than no column."""
-    store.set_semantic("project.a.fact", "dana wrote this", 0.9, "user", contributor="dana")
+    store.set_semantic(
+        "project.a.fact", "dana wrote this", 0.9, "user", contributor="dana"
+    )
     store.set_semantic("project.a.fact", "edited by the owner", 0.9, "user")
     row = store.db.execute(
         "SELECT contributor, value_json FROM semantic_memory WHERE key='project.a.fact'"
@@ -152,9 +150,6 @@ def test_a_lesson_write_is_stamped_too(store):
     assert OWNER in rows
 
 
-# ── The ranking bonus (pure) ─────────────────────────────────────────────────
-
-
 def test_the_owners_own_record_earns_the_bonus():
     assert _owner_rank_bonus(OWNER, OWNER) == _OWNER_RANK_BONUS
 
@@ -172,7 +167,11 @@ def test_an_unattributed_record_counts_as_the_owners():
 
 def test_with_no_owner_every_record_scores_the_same():
     """Uniform ⇒ no ordering change, which is exactly today's behavior."""
-    assert _owner_rank_bonus("dana", "") == _owner_rank_bonus(OWNER, "") == _OWNER_RANK_BONUS
+    assert (
+        _owner_rank_bonus("dana", "")
+        == _owner_rank_bonus(OWNER, "")
+        == _OWNER_RANK_BONUS
+    )
 
 
 def test_the_bonus_is_smaller_than_one_keyword_step():
@@ -183,9 +182,6 @@ def test_the_bonus_is_smaller_than_one_keyword_step():
 
 def test_whitespace_only_contributor_is_treated_as_unattributed():
     assert _owner_rank_bonus("   ", OWNER) == _OWNER_RANK_BONUS
-
-
-# ── The contributor label (pure) ─────────────────────────────────────────────
 
 
 def test_a_foreign_record_is_labeled():
@@ -207,15 +203,16 @@ def test_with_no_owner_nothing_is_labeled():
     assert _contributor_label("dana", "") == ""
 
 
-# ── Ordering vs admission: the load-bearing boundary ─────────────────────────
-
-
 def test_at_equal_relevance_the_owners_memory_orders_first(store):
-    store.set_semantic("project.dana.x", "deploy cadence weekly", 0.9, "u", contributor="dana")
+    store.set_semantic(
+        "project.dana.x", "deploy cadence weekly", 0.9, "u", contributor="dana"
+    )
     store.set_semantic("project.mine.x", "deploy cadence weekly", 0.9, "u")
-    order = _keys_in_order(store.get_semantic_context(query_text="deploy cadence", cap=4000))
+    order = _keys_in_order(
+        store.get_semantic_context(query_text="deploy cadence", cap=4000)
+    )
     assert order[0] == "project.mine.x"
-    assert "project.dana.x" in order  # ordered lower, NOT excluded
+    assert "project.dana.x" in order
 
 
 def test_a_zero_relevance_owner_record_is_still_not_admitted(store):
@@ -237,7 +234,9 @@ def test_a_stronger_foreign_match_still_beats_a_weaker_owner_match(store):
         contributor="dana",
     )
     order = _keys_in_order(
-        store.get_semantic_context(query_text="deploy cadence schedule specifics", cap=4000)
+        store.get_semantic_context(
+            query_text="deploy cadence schedule specifics", cap=4000
+        )
     )
     assert order[0] == "project.dana.strong"
 
@@ -247,24 +246,27 @@ def test_ordering_is_unchanged_when_no_username_is_configured(anon_store):
     anon_store.set_semantic("project.a.x", "deploy cadence", 0.9, "u")
     anon_store.set_semantic("project.b.x", "deploy cadence weekly extra", 0.9, "u")
     order = _keys_in_order(
-        anon_store.get_semantic_context(query_text="deploy cadence weekly extra", cap=4000)
+        anon_store.get_semantic_context(
+            query_text="deploy cadence weekly extra", cap=4000
+        )
     )
-    assert order[0] == "project.b.x"  # the better match, unaffected by provenance
+    assert order[0] == "project.b.x"
 
 
 def test_admission_is_identical_with_and_without_a_contributor(store):
     """The set of records surfaced must not depend on provenance at all."""
     store.set_semantic("project.a.x", "deploy cadence", 0.9, "u")
     store.set_semantic("project.b.x", "deploy cadence", 0.9, "u", contributor="dana")
-    surfaced = set(_keys_in_order(store.get_semantic_context(query_text="deploy", cap=4000)))
+    surfaced = set(
+        _keys_in_order(store.get_semantic_context(query_text="deploy", cap=4000))
+    )
     assert surfaced == {"project.a.x", "project.b.x"}
 
 
-# ── Rendering into the prompt ────────────────────────────────────────────────
-
-
 def test_the_injected_block_labels_a_foreign_record(store):
-    store.set_semantic("project.dana.x", "dana's note about deploy", 0.9, "u", contributor="dana")
+    store.set_semantic(
+        "project.dana.x", "dana's note about deploy", 0.9, "u", contributor="dana"
+    )
     block = store.get_semantic_context(query_text="deploy", cap=4000)
     assert "(from dana)" in block
 
@@ -272,9 +274,9 @@ def test_the_injected_block_labels_a_foreign_record(store):
 def test_the_injected_block_does_not_label_the_owners_own(store):
     store.set_semantic("project.mine.x", "my note about deploy", 0.9, "u")
     block = store.get_semantic_context(query_text="deploy", cap=4000)
-    # Assert on the RECORD lines only: the fence header explains what a "(from …)"
-    # suffix means, so searching the whole block would match its own documentation.
-    assert all("(from" not in ln for ln in block.splitlines() if ln.startswith("project."))
+    assert all(
+        "(from" not in ln for ln in block.splitlines() if ln.startswith("project.")
+    )
 
 
 def test_the_fence_states_that_the_label_is_metadata_not_an_instruction(store):
@@ -291,9 +293,6 @@ def test_the_no_query_branch_also_labels(store):
     store.set_semantic("project.dana.x", "dana's note", 0.9, "u", contributor="dana")
     block = store.get_semantic_context(cap=4000)
     assert "(from dana)" in block
-
-
-# ── Episodic provenance ──────────────────────────────────────────────────────
 
 
 def test_recall_with_provenance_carries_the_contributor(store):
@@ -327,11 +326,10 @@ def test_episodic_owner_preference_does_not_change_the_candidate_set(store):
     store.write_episodic("deploy window notes", contributor="dana")
     store.write_episodic("unrelated marmalade", contributor=OWNER)
     svc = MemoryService(MagicMock(), vector_store=store)
-    texts = {h["text"] for h in svc.rank_episodic(query_text="deploy window notes", limit=5)}
+    texts = {
+        h["text"] for h in svc.rank_episodic(query_text="deploy window notes", limit=5)
+    }
     assert "deploy window notes" in texts
-
-
-# ── Import preserves foreign provenance ──────────────────────────────────────
 
 
 def test_import_preserves_a_foreign_contributor(store):
@@ -340,7 +338,11 @@ def test_import_preserves_a_foreign_contributor(store):
     store.import_memory(
         {
             "semantic": [
-                {"key": "project.x.a", "value_json": '"dana wrote this"', "contributor": "dana"}
+                {
+                    "key": "project.x.a",
+                    "value_json": '"dana wrote this"',
+                    "contributor": "dana",
+                }
             ],
             "episodic": [{"text": "dana said something", "contributor": "dana"}],
         }
@@ -355,20 +357,19 @@ def test_import_preserves_a_foreign_contributor(store):
 
 def test_import_stamps_an_unattributed_record_with_the_importer(store):
     """No recorded author ⇒ the importer is the closest true answer."""
-    store.import_memory({"semantic": [{"key": "project.x.b", "value_json": '"unclaimed"'}]})
+    store.import_memory(
+        {"semantic": [{"key": "project.x.b", "value_json": '"unclaimed"'}]}
+    )
     row = store.db.execute(
         "SELECT contributor FROM semantic_memory WHERE key='project.x.b'"
     ).fetchone()
     assert row["contributor"] == OWNER
 
 
-# ── Durability: the two explicit column allowlists ───────────────────────────
-
-
 def test_the_vault_frontmatter_emits_contributor():
     """_FM_ORDER is an explicit allowlist — a new column is invisible in vault notes
     unless it is listed."""
-    from gideon.memory_vault import _FM_ORDER
+    from gideon.cognition.memory_vault import _FM_ORDER
 
     assert "contributor" in _FM_ORDER
 
@@ -378,6 +379,6 @@ def test_the_snapshot_merge_carries_contributor():
     STRIP provenance if the column were missing from the list."""
     from pathlib import Path as _P
 
-    src = _P("src/gideon/snapshot.py").read_text(encoding="utf-8")
+    src = _P("runtime/gideon/workspace/snapshot.py").read_text(encoding="utf-8")
     merge = src.split("ATTACH DATABASE", 1)[1][:1200]
-    assert merge.count("contributor") >= 2  # semantic + episodic
+    assert merge.count("contributor") >= 2

@@ -1,0 +1,800 @@
+@import "tailwindcss";
+@import "./fonts.css";
+
+/* ════════════════════════════════════════════════════════════════════════
+   Gideon — design token core (Tailwind v4 @theme)
+   Graphite surfaces and the Gideon blue accent. Everything here is token-driven + theme-customizable
+   (schemes + per-token overrides). Dark is default; .light overrides.
+   ════════════════════════════════════════════════════════════════════════ */
+@theme {
+  /* ── fonts (Gideon default = Inter; selectable via Appearance) ── */
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-display: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+                                    
+  --color-canvas: #0b0f17;
+  --color-surface: #111722;
+  --color-surface-low: #141b26;
+  --color-surface-container: #171f2b;
+  --color-surface-high: #222c3c;
+  --color-surface-highest: #2c3748;
+  --color-rail: #0c111a;
+
+                                
+  --color-on-surface: #ecf0f7;
+  --color-on-surface-low: #a8b3c4;
+  --color-on-surface-var: #c3cddb;
+  --color-outline: #8490a4;
+  --color-outline-variant: #334056;
+
+  /* ── color: Gideon brand (dark) ── */
+  --color-primary: #8faaff;
+  --color-on-primary: #101d47;
+  --color-primary-container: #203260;
+  --color-on-primary-container: #e4ebff;
+  --color-primary-emphasis: #b3c5ff;
+  --color-secondary: #89c9ed; /* cool secondary */
+
+                             
+  --color-ok: #0ebc5f;
+  --color-warn: #ff8d41;
+  --color-danger: #f66c66;
+  --color-info: #629efe;
+                                                                              
+                                                                              
+                                                              
+
+                                                                                             
+                                                                            
+                                                                                                  
+                                                                                      
+                                                       
+
+                                                                                                 
+                                                                                                  
+
+                                                                                              
+                                                                                                   
+                                                                                                 
+                                                                                                
+                                                                                    
+
+                                                                                                   
+                                                                                           
+                                                                                                
+                                                                                                 
+                                                                                       
+                                                                                    
+                                                                                                    
+                                                                                                  
+                                                                                                     
+                                                                                                      
+                                                                                                     
+                                                                                                    
+                                                                                                  
+                                                      
+                                                                               
+                                                                                 
+                                                                                     
+                                                                                  
+  --color-success: var(--color-ok);
+  --color-warning: var(--color-warn);
+  --color-error: var(--color-danger);
+                                                                               
+                                                                                           
+                                                                                                
+                                                                                         
+                                                                                            
+                                                                                               
+                                              
+  --color-on-danger: #3f1008;
+
+                                                                                               
+                                                                 
+
+                                                                                            
+                                                                                               
+                                                                                             
+                                                                                                
+                                                                                             
+                                                                                                
+                                                                                                
+                                                                                            
+
+                                                                              
+                                                                                                
+                                                                                                 
+                                                                                               
+                                                                                            
+                                                                                         
+                                                                                             
+                                                                             
+                                                                             
+                                                                                                  
+                                                   
+  --color-on-primary-tint: var(--color-primary-emphasis);
+
+  /* ── brand gradient stops ── */
+  --grad-1: #3753b5;
+  --grad-2: #8faaff;
+  --grad-3: #a8c7fa;
+  --grad-4: #89c9ed;
+  --glow-a: #8faaff;
+  --glow-b: #a8c7fa;
+
+                                                                                       
+                                                                                  
+                                                                                      
+                                                                            
+  --radius-scale: 1;
+  --radius-density: 1;
+  --radius-xs: calc(4px * var(--radius-scale) * var(--radius-density));
+  --radius-sm: calc(8px * var(--radius-scale) * var(--radius-density));
+  --radius-md: calc(12px * var(--radius-scale) * var(--radius-density));
+  --radius-lg: calc(14px * var(--radius-scale) * var(--radius-density));
+  --radius-lgi: calc(18px * var(--radius-scale) * var(--radius-density));
+  --radius-xl: calc(20px * var(--radius-scale) * var(--radius-density));
+  --radius-xli: calc(24px * var(--radius-scale) * var(--radius-density));
+  --radius-2xl: calc(32px * var(--radius-scale) * var(--radius-density));
+  --radius-pill: 9999px;
+                                                                                 
+                                                       
+  --radius-squircle: calc(34px * var(--radius-scale) * var(--radius-density));
+
+                                                                                  
+  --anim-speed: 1;
+  --wave-amount: 1;
+  --glow: 1;
+                                                                                   
+                                                                                
+                                                                                
+                                                                   
+  --bounciness: 1;
+  --expressiveness: 0.8;
+                                                                                   
+                                                                                  
+                                            
+  --drag-elastic: 0.9;
+  --swipe-dismiss-velocity: 500px/s;
+  --swipe-dismiss-distance: 80px;
+                                                                                
+                                                                          
+                                     
+  --status-pulse-speed: 2.4s;
+  --surface-angle: 45deg;
+  --surface-distance: 1;
+  --dot-density: 1;
+  --dot-size: 1;
+
+                                                                          
+  --content-width: 820px;
+
+                                                                                
+                                                                                    
+                                                                             
+  --space-scale: 1;
+  --spacing-xs: calc(4px * var(--space-scale));
+  --spacing-s: calc(8px * var(--space-scale));
+  --spacing-m: calc(12px * var(--space-scale));
+  --spacing-l: calc(16px * var(--space-scale));
+  --spacing-xl: calc(20px * var(--space-scale));
+  --spacing-2xl: calc(24px * var(--space-scale));
+  --spacing-3xl: calc(28px * var(--space-scale));
+
+                                                           
+  --ease-emphasized: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasized-decel: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --ease-emphasized-accel: cubic-bezier(0.3, 0, 0.8, 0.15);
+
+                                                    
+  --shadow-composer: 0 2px 8px -2px rgb(0 0 0 / 0.16);
+  --shadow-menu: 0 0 20px rgb(0 0 0 / 0.28);
+  --shadow-sheet: 0 16px 40px rgb(0 0 0 / 0.42);
+                                                                    
+  --shadow-rest: 0 2px 8px -2px rgb(0 0 0 / 0.16);
+  --shadow-lift: 0 22px 55px -14px rgb(0 0 0 / 0.6),
+    0 0 48px -6px color-mix(in srgb, var(--color-primary) 50%, transparent);
+
+                                                                           
+                                                                                   
+                                                                           
+                                                                            
+  --neu-extrude: 0 1px 2px rgb(0 0 0 / 0.28), 0 6px 16px -6px rgb(0 0 0 / 0.34),
+    inset 0 1px 0 rgb(255 255 255 / 0.04);
+  --glass-blur: 16px;
+  --glass-alpha: 0.72;                                                  
+  --glass-bg: color-mix(in srgb, var(--color-surface-container) calc(var(--glass-alpha) * 100%), transparent);
+  --glass-highlight: inset 0 1px 0 rgb(255 255 255 / 0.10);
+
+                                                                             
+                                                                                    
+  --ring-stop-1: var(--grad-1);
+  --ring-stop-2: #eef3ff;
+  --ring-stop-3: var(--grad-2);
+  --ring-stop-4: var(--grad-4);
+
+                                                                           
+                                                                               
+                                                                           
+                                                                                
+                                                                                 
+                                                    
+
+                                                                                 
+                                                                                  
+                                                                                  
+                                                                               
+                                                          
+  --z-content: 50;                                                                                                                  
+  --z-overlay: calc(var(--z-content) + 5);                                                                                          
+  --z-modal:   calc(var(--z-content) + 10);                                                                                                                                                                                         
+  --z-menu:    calc(var(--z-content) + 50);                                                                                                                                                                                             
+  --z-toast:   calc(var(--z-content) + 150);                                                                                              
+}
+
+/* ── light mode overrides ── */
+.light {
+  --color-canvas: #f1f4fa;
+  --color-surface: #ffffff;
+  --color-surface-low: #f4f6fa;
+  --color-surface-container: #ffffff;
+  --color-surface-high: #e9eef6;
+  --color-surface-highest: #dfe6f0;
+  --color-rail: #e7edf5;
+  --color-on-surface: #172238;
+  --color-on-surface-low: #4b5b70;
+  --color-on-surface-var: #56657a;
+  --color-outline: #7e8da3;
+  --color-outline-variant: #d7dfeb;
+  --color-primary: #244cff;
+  --color-on-primary: #ffffff;
+  --color-primary-container: #e1e8ff;
+  --color-on-primary-container: #142347;
+  --color-primary-emphasis: #193bc4;
+                                                                                                   
+                                      
+
+                                                                                       
+                                                                                                 
+                                                                                              
+                                                                                               
+                                                                                             
+                                                                           
+
+                                                                                                   
+                                                                                              
+                                                                                                 
+                                                                                               
+                                                                                                   
+                                                                                                   
+                                                                                
+
+                                                                                               
+                                                                                                  
+                                                                                                  
+                                                                                            
+                                                                                                    
+                                                                                               
+  --color-on-primary-tint: var(--color-on-primary-container);
+                                                                               
+  --color-ok: #076e37;
+  --color-warn: #954c19;
+  --color-danger: #af2f29;
+                                                                                              
+                                                                                              
+                                                                                                  
+                                                                                     
+  --color-info: #1059bc;
+                                                                                        
+                                                                     
+  --color-on-danger: #ffffff;
+  --shadow-composer: 0 2px 8px -2px rgb(96 110 130 / 0.18);
+  --shadow-menu: 0 0 20px rgb(96 110 130 / 0.16);
+  --shadow-sheet: 0 16px 40px rgb(96 110 130 / 0.22);
+                                                                        
+                                                                      
+  --ring-stop-2: #142347;
+  --color-secondary: #27688e;
+  --grad-1: #3753b5;
+  --grad-2: #244cff;
+  --grad-3: #416cce;
+  --grad-4: #27688e;
+  --glow-a: #244cff;
+  --glow-b: #416cce;
+  color-scheme: light;
+}
+
+                                                                           
+                                                                                            
+                                                                                         
+                                                                                          
+                                                                                               
+                                                                                             
+                                                                                        
+                                                                       
+:root:not(.light) {
+  color-scheme: dark;
+}
+
+                                                                           
+                                                                           
+                                                                            
+                                                                             
+                                                                            
+                                                                          
+                                                                      
+                                                        
+                                                                              
+[data-ui="dense"] {
+  --space-scale: 0.8;                                       
+  --radius-density: 0.85;                                                                
+}
+[data-ui="cli"] {
+  --space-scale: 0.68;                               
+  --radius-density: 0.3;                               
+  --font-sans: "JetBrains Mono", ui-monospace, monospace;                          
+}
+
+                                                                           
+                                                                       
+                                                                              
+@layer base {
+                                                                         
+                                                                            
+                                                                            
+                                                                
+  html, body, #root { height: 100%; overflow: hidden; }
+  body {
+    margin: 0;
+    background: var(--color-canvas);
+    color: var(--color-on-surface);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+                                                                            
+                                                                                
+                                                                               
+                                                                               
+                                                                               
+                                                                               
+                                                   
+  }
+
+                                                                           
+                                                                             
+                                                                           
+                                                                                
+                                                                                  
+  :focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+                                                                                
+                                                                                 
+                                                                                  
+                                                                                 
+                                                             
+  .no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+
+                                                                           
+                                                                          
+                                                                                 
+                                                                                
+                                                                            
+                                                                                
+  * { scrollbar-width: none; -ms-overflow-style: none; }
+  *::-webkit-scrollbar { display: none; }
+
+                                                            
+  [data-type="display-l"]  { font-size: 2.625rem; line-height: 3rem;    font-variation-settings: "wght" 280; letter-spacing: 0; }
+  [data-type="display-m"]  { font-size: 2.25rem;  line-height: 2.75rem; font-variation-settings: "wght" 320; }
+  [data-type="display-s"]  { font-size: 2rem;     line-height: 2.375rem;font-variation-settings: "wght" 360; }
+  [data-type="headline-l"] { font-size: 1.75rem;  line-height: 2.25rem; font-variation-settings: "wght" 350; }
+  [data-type="headline-m"] { font-size: 1.5rem;   line-height: 1.75rem; font-variation-settings: "wght" 380; }
+  [data-type="headline-s"] { font-size: 1.25rem;  line-height: 1.5rem;  font-variation-settings: "wght" 470; }
+  [data-type="title-l"]    { font-size: 1.25rem;  line-height: 1.5rem;  font-variation-settings: "wght" 470; }
+  [data-type="title-m"]    { font-size: 0.9375rem;line-height: 1.25rem; font-variation-settings: "wght" 500; }
+  [data-type="body-l"]     { font-size: 1.0625rem;line-height: 1.5rem;  font-variation-settings: "wght" 400; }
+  [data-type="body-m"]     { font-size: 0.9375rem;line-height: 1.25rem; font-variation-settings: "wght" 400; }
+  [data-type="label-l"]    { font-size: 1.0625rem;line-height: 1.5rem;  font-variation-settings: "wght" 470; }
+  [data-type="label-m"]    { font-size: 0.9375rem;line-height: 1.25rem; font-variation-settings: "wght" 470; }
+                                                                             
+                                                                                  
+                                                                               
+                                                                                        
+  [data-type="label-s"]    { font-size: 0.8125rem;line-height: 1.125rem;font-variation-settings: "wght" 470; }
+  [data-type="body-s"]     { font-size: 0.8125rem;line-height: 1.125rem;font-variation-settings: "wght" 400; }
+                                                                                  
+                                                                             
+                                                                                
+                                                                             
+  [data-type="caption"]    { font-size: 0.75rem;  line-height: 1rem;    font-variation-settings: "wght" 470; }
+
+                                                                               
+                                                                                 
+                                                               
+                                                                                  
+  .fw-400 { font-variation-settings: "wght" 400; }
+  .fw-470 { font-variation-settings: "wght" 470; }
+  .fw-500 { font-variation-settings: "wght" 500; }
+  .fw-550 { font-variation-settings: "wght" 550; }
+  .fw-600 { font-variation-settings: "wght" 600; }
+  .fw-650 { font-variation-settings: "wght" 650; }
+}
+
+                                                                                 
+                                  
+@keyframes reveal-blink { 0%, 50% { opacity: 1; } 50.01%, 100% { opacity: 0; } }
+.reveal-caret { animation: reveal-blink 0.9s step-end infinite; }
+
+                                                                                  
+                                                                               
+                                                                                    
+@keyframes status-pulse {
+  0%   { transform: scale(1);   opacity: 0.55; }
+  75%, 100% { transform: scale(2.2); opacity: 0; }
+}
+.status-pulse {
+  animation: status-pulse var(--status-pulse-speed, 2.4s) cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+                                                                                 
+                                                                         
+@keyframes skeleton-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.skeleton {
+  background-image: linear-gradient(
+    90deg,
+    var(--color-surface-container) 0%,
+    var(--color-surface-high) 50%,
+    var(--color-surface-container) 100%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+                                                                                  
+                                                                              
+                                                                                  
+                                                        
+@keyframes text-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.text-shimmer {
+  background-image: linear-gradient(
+    90deg,
+    var(--color-on-surface-low) 0%,
+    var(--color-on-surface-low) 35%,
+    var(--color-on-surface) 50%,
+    var(--color-on-surface-low) 65%,
+    var(--color-on-surface-low) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: text-shimmer 2.2s linear infinite;
+}
+
+                                                                            
+                                                                            
+                                                                              
+.text-shimmer-primary {
+  background-image: linear-gradient(
+    90deg,
+    var(--color-on-surface-var) 0%,
+    var(--color-on-surface-var) 35%,
+    var(--color-primary-emphasis) 50%,
+    var(--color-on-surface-var) 65%,
+    var(--color-on-surface-var) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: text-shimmer 2.2s linear infinite;
+}
+
+                                                                                 
+                                                                                 
+                                                                                    
+@keyframes blueprint-draw {
+  from { stroke-dashoffset: var(--bp-len, 600); }
+  to   { stroke-dashoffset: 0; }
+}
+.blueprint-stroke {
+  stroke-dasharray: var(--bp-len, 600);
+  stroke-dashoffset: var(--bp-len, 600);
+  animation: blueprint-draw 1.4s var(--ease-emphasized-decel) forwards;
+}
+@keyframes blueprint-breathe {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 0.95; }
+}
+.blueprint-breathe { animation: blueprint-breathe 3s ease-in-out 1.6s infinite; }
+                                                          
+@keyframes blueprint-scan {
+  from { transform: translateX(-60%); }
+  to   { transform: translateX(260%); }
+}
+.blueprint-scan {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--color-primary) 14%, transparent),
+    transparent
+  );
+  animation: blueprint-scan 2.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+                                                                   
+  .blueprint-scan { display: none; }
+}
+
+                                                                                
+                                                                  
+                                                                             
+                                                                                
+                                                                          
+                                                                                 
+                                                       
+
+                                                                             
+                                                                              
+               
+
+                                                                                
+                                                                                
+                                                                           
+                                                                              
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 300ms;
+  animation-timing-function: var(--ease-emphasized-decel);
+}
+
+                                                                                     
+                                                                                
+                                                                                     
+                                                                                  
+                                                                              
+                                                                              
+                                                                          
+                                                                               
+                                             
+.crt-raster {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--color-on-surface) 6%, transparent) 0,
+    color-mix(in srgb, var(--color-on-surface) 6%, transparent) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+}
+                                                                                   
+@keyframes crt-beam {
+  from { transform: translate3d(0, -22vh, 0); }
+  to   { transform: translate3d(0, 100vh, 0); }
+}
+.crt-beam {
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    color-mix(in srgb, var(--color-primary) 10%, transparent),
+    transparent
+  );
+  animation: crt-beam 7s linear infinite;
+}
+
+                                                
+                                                                              
+                                                                               
+                                                                               
+.glass {
+  background: var(--color-surface-container);
+  box-shadow: var(--shadow-menu), var(--glass-highlight);
+}
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass {
+    background: var(--glass-bg);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+    backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  }
+}
+                                                                                    
+@media (prefers-reduced-motion: reduce) {
+  .glass { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--color-surface-container); }
+}
+
+                                                                        
+                                                                          
+                                                                      
+                       
+.squircle { border-radius: var(--radius-squircle); }
+@supports (corner-shape: superellipse) {
+  .squircle { corner-shape: superellipse; border-radius: var(--radius-xl); }
+}
+
+                                                                                   
+@layer base {
+  .hljs { color: var(--color-on-surface); background: transparent; }
+  .hljs-comment, .hljs-quote { color: var(--color-on-surface-low); font-style: italic; }
+  .hljs-keyword, .hljs-selector-tag, .hljs-built_in, .hljs-name, .hljs-tag { color: var(--color-primary); }
+  .hljs-string, .hljs-attr, .hljs-template-tag, .hljs-addition { color: var(--color-ok); }
+  .hljs-number, .hljs-literal, .hljs-variable, .hljs-template-variable, .hljs-type { color: var(--color-primary-emphasis); }
+  .hljs-title, .hljs-section, .hljs-function .hljs-title { color: var(--color-secondary); }
+  .hljs-attribute, .hljs-meta, .hljs-symbol, .hljs-bullet, .hljs-link { color: var(--color-warn); }
+  .hljs-deletion { color: var(--color-danger); }
+  .hljs-emphasis { font-style: italic; }
+  .hljs-strong { font-weight: 600; }
+}
+
+                                                         
+                                                                                  
+                                                                     
+                                                                                    
+                                                                     
+                                                                                    
+                                                                                    
+                                                                                
+
+                                                                                     
+                                                                                      
+                                                                                       
+                                                                                       
+                                                                                    
+                                                                                        
+                                                                                        
+                                                                                
+                                                                                    
+                                                                            
+                                           
+.doc, .reading { color: var(--color-on-surface); font-size: 1rem; line-height: 1.7; }
+.doc > :first-child, .reading > :first-child { margin-top: 0; }
+.doc :is(h1, h2, h3, h4, h5, h6), .reading :is(h1, h2, h3, h4, h5, h6) {
+  line-height: 1.25; margin: 1.8em 0 0.6em; font-variation-settings: "wght" 640; color: var(--color-on-surface);
+}
+.doc h1, .reading h1 { font-size: 1.9rem; letter-spacing: -0.01em; }
+.doc h2, .reading h2 { font-size: 1.45rem; letter-spacing: -0.005em; }
+.doc h3, .reading h3 { font-size: 1.2rem; }
+.doc h4, .reading h4 { font-size: 1.02rem; }
+.doc :is(p, li), .reading :is(p, li) { margin: 0.6em 0; font-size: 1rem; line-height: 1.7; }
+.doc :is(ul, ol), .reading :is(ul, ol) { padding-left: 1.4em; margin: 0.6em 0; }
+.doc ul, .reading ul { list-style: disc; } .doc ol, .reading ol { list-style: decimal; }
+.doc a, .reading a { color: var(--color-primary); text-decoration: underline; text-underline-offset: 2px; }
+.doc img, .reading img { max-width: 100%; height: auto; border-radius: 8px; }
+.doc blockquote, .reading blockquote {
+  margin: 1em 0; padding: 0.2em 0 0.2em 1em; border-left: 3px solid var(--color-outline-variant);
+  color: var(--color-on-surface-low); font-style: italic;
+}
+.doc pre, .reading pre { overflow: auto; background: var(--color-surface-low); padding: 1em; border-radius: 10px; margin: 1em 0; }
+.doc code, .reading code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.875em; }
+.doc :not(pre) > code, .reading :not(pre) > code { background: var(--color-surface-high); padding: 0.12em 0.36em; border-radius: 5px; }
+.doc table, .reading table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 0.92em; }
+.doc :is(th, td), .reading :is(th, td) { border: 1px solid var(--color-outline-variant); padding: 0.5em 0.7em; text-align: left; }
+.doc th, .reading th { background: var(--color-surface-high); font-variation-settings: "wght" 600; }
+.doc hr, .reading hr { border: none; border-top: 1px solid var(--color-outline-variant); margin: 2em 0; }
+.doc figure, .reading figure { margin: 1.2em 0; }
+.doc figcaption, .reading figcaption { color: var(--color-on-surface-low); font-size: 0.85em; text-align: center; margin-top: 0.4em; }
+
+                                                                                         
+                                                                                          
+                                                                                       
+                                                                                       
+                      
+
+                                                                                           
+                                                                                       
+                                                                                     
+                                                                                            
+                                                                                            
+                                                                                           
+                   
+
+                                                                                         
+                                                                                           
+                                                                             
+
+                                                                                            
+                                                                                          
+                                                                                           
+                                                                                      
+                                                                                       
+
+                                                                                         
+                                                                                         
+                                                             
+.hit-24 {
+  position: relative;
+  --hit-min: 24px;
+  --hit-size: 21px;
+}
+.hit-24::before {
+  content: "";
+  position: absolute;
+                                                                                           
+  inset: calc(-1 * max(0px, (var(--hit-min) - var(--hit-size)) / 2));
+                                                                                          
+                                                                                          
+                                                           
+  pointer-events: auto;
+}
+
+                                                                                         
+                                                                                                  
+                                                                                                    
+                                                                                                     
+                                                                                          
+                                                                                         
+                                                                                              
+                                                                                                    
+.hit-24-x {
+                                                                                                 
+                                                                                                 
+                                                                                                   
+                                                                                          
+  --hit-min: 24px;
+}
+.hit-24-x::before {
+  content: "";
+  position: absolute;
+                                                                                                    
+  top: 0;
+  bottom: 0;
+                                                                                           
+  left: 50%;
+  width: var(--hit-min);
+  transform: translateX(-50%);
+                                                                    
+  pointer-events: auto;
+}
+
+                                                                                    
+                                                                                   
+                                                                                     
+                                                                                 
+                                                                                   
+                                                                     
+.kl-highlight {
+  background-color: color-mix(in srgb, var(--color-primary) 26%, transparent);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0.05em 0;
+}
+
+                                                                           
+                                                                           
+                                                                          
+                                                                         
+@layer base {
+  .dag-node, .dag-edge { transition: opacity 160ms ease; }
+  svg.dag-hovering .dag-node:not(.dag-lit),
+  svg.dag-hovering .dag-edge:not(.dag-lit) { opacity: 0.18; }
+                                                                               
+                                                                            
+  svg.dag-hovering .dag-edge.dag-lit:not(.dag-edge-bad) path {
+    stroke: var(--color-primary); stroke-width: 2.5; opacity: 1;
+    marker-end: url(#dag-arrow-active);
+  }
+  svg.dag-hovering .dag-edge.dag-lit.dag-edge-bad path { stroke-width: 2.5; opacity: 1; }
+}
+
+                                                                             
+                                                                          
+                                                                             
+                                                                                 
+                                                                                
+                                           
+::highlight(gideon-find) {
+  background-color: color-mix(in srgb, var(--color-primary) 34%, transparent);
+  color: var(--color-on-surface);
+}

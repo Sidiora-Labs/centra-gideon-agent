@@ -1,7 +1,7 @@
 """Chat plan mode (CHAT-CRAFT CC-8) — the five properties the atom names.
 
 The whole point of the atom is that there is **no second state machine**: a chat's plan
-walkthrough is the *same* ``gideon.planning.session`` model the loop planning
+walkthrough is the *same* ``gideon.cognition.planning.session`` model the loop planning
 surface drives. So these tests mostly pin *routing* — that each chat-side action lands on
 the shared transition and inherits its exact rule — plus the two guarantees that are
 behavioural rather than structural:
@@ -28,35 +28,41 @@ from aiohttp.test_utils import TestClient, TestServer
 from chat_test_helpers import _make_app, _make_state
 from test_native_runtime import _defn, _drain, _ScriptedModel, _Tool
 
-from gideon.agents.native.runtime import NativeAgentRuntime
-from gideon.dashboard import chat_plan
-from gideon.llm.events import (
+from gideon.cognition.planning.session import StepStatus
+from gideon.engine.agents.native.runtime import NativeAgentRuntime
+from gideon.integrations.llm.events import (
     EVENT_COMPLETE,
     EVENT_TEXT_CHUNK,
     EVENT_TOOL_CALL,
     EVENT_TOOL_RESULT,
     AgentEvent,
 )
-from gideon.planning.session import StepStatus
+from gideon.interfaces.dashboard import chat_plan
 
-_SRC = Path(__file__).resolve().parents[1] / "src" / "gideon"
+_SRC = Path(__file__).resolve().parents[2] / "runtime" / "gideon"
 
 
 def _app(state) -> web.Application:
     """The chat app plus the six plan-mode routes (registered exactly as server.py does)."""
     app = _make_app(state)
-    app.router.add_get("/api/chat/sessions/{session}/plan-session", chat_plan.api_chat_plan_session)
+    app.router.add_get(
+        "/api/chat/sessions/{session}/plan-session", chat_plan.api_chat_plan_session
+    )
     app.router.add_post(
         "/api/chat/sessions/{session}/plan/activate", chat_plan.api_chat_plan_activate
     )
-    app.router.add_post("/api/chat/sessions/{session}/plan/edit", chat_plan.api_chat_plan_edit)
+    app.router.add_post(
+        "/api/chat/sessions/{session}/plan/edit", chat_plan.api_chat_plan_edit
+    )
     app.router.add_post(
         "/api/chat/sessions/{session}/plan/comment", chat_plan.api_chat_plan_comment
     )
     app.router.add_post(
         "/api/chat/sessions/{session}/plan/approve", chat_plan.api_chat_plan_approve
     )
-    app.router.add_post("/api/chat/sessions/{session}/plan/cancel", chat_plan.api_chat_plan_cancel)
+    app.router.add_post(
+        "/api/chat/sessions/{session}/plan/cancel", chat_plan.api_chat_plan_cancel
+    )
     return app
 
 
@@ -76,7 +82,9 @@ def _no_dispatch(monkeypatch) -> list[str]:
     async def _fake_run_chat(state, session, msg, **kw):
         seen.append(msg)
 
-    monkeypatch.setattr("gideon.dashboard.chat_runner.run_chat", _fake_run_chat)
+    monkeypatch.setattr(
+        "gideon.interfaces.dashboard.chat_runner.run_chat", _fake_run_chat
+    )
     return seen
 
 
@@ -91,15 +99,12 @@ class TestManualOnlyActivation:
             r = await client.post("/api/chat/sessions/c1/plan/activate")
             assert r.status == 200
             data = await r.json()
-        # The persisted shape is a planning.session PlanSession owned by the CHAT —
-        # project_id carries the chat key, the step is a plain PlanStep.
         sess, binding = chat_plan.read("c1")
         assert sess is not None
         assert sess.project_id == "c1"
         assert [(s.id, s.kind, s.status) for s in sess.steps] == [
             ("chat-plan-1", chat_plan.PLAN_STEP_KIND, StepStatus.RUNNING.value)
         ]
-        # ...and the session is now in the plan posture, which is what gates tools.
         assert chat._task_mode == "plan"
         assert binding["resume_task_mode"] == "agent"
         assert data["parked"] is False
@@ -130,7 +135,6 @@ class TestManualOnlyActivation:
         )
         assert callers == [], callers
         own = (_SRC / "dashboard" / "chat_plan.py").read_text()
-        # Exactly one call site, inside the activate endpoint.
         assert own.count("= activate(chat, running=") == 1
 
 
@@ -138,7 +142,9 @@ class TestEditableMarkdownArtifact:
     """Clause 1+2: the artifact is markdown, edited through ``PS.edit_artifact``."""
 
     @pytest.mark.asyncio
-    async def test_the_plan_turns_reply_becomes_the_awaiting_review_artifact(self, tmp_path):
+    async def test_the_plan_turns_reply_becomes_the_awaiting_review_artifact(
+        self, tmp_path
+    ):
         state = _make_state(tmp_path)
         chat = _seed(state)
         async with TestClient(TestServer(_app(state))) as client:
@@ -176,15 +182,16 @@ class TestEditableMarkdownArtifact:
         sess, _ = chat_plan.read("c1")
         assert sess.steps[0].artifact["markdown"] == "# my own plan"
         assert sess.steps[0].artifact["structured"] == {"steps": ["a"]}
-        # Still awaiting review: editing is not approving.
         assert sess.steps[0].status == StepStatus.AWAITING_REVIEW.value
 
     @pytest.mark.asyncio
-    async def test_editing_a_step_that_is_not_awaiting_review_is_refused(self, tmp_path):
+    async def test_editing_a_step_that_is_not_awaiting_review_is_refused(
+        self, tmp_path
+    ):
         state = _make_state(tmp_path)
         _seed(state)
         async with TestClient(TestServer(_app(state))) as client:
-            await client.post("/api/chat/sessions/c1/plan/activate")  # step is RUNNING
+            await client.post("/api/chat/sessions/c1/plan/activate")
             r = await client.post(
                 "/api/chat/sessions/c1/plan/edit",
                 json={"step_id": "chat-plan-1", "markdown": "x"},
@@ -213,7 +220,9 @@ class TestApproveAndComment:
         assert sess.steps[0].status == StepStatus.RUNNING.value
 
     @pytest.mark.asyncio
-    async def test_comment_sends_the_step_back_for_a_redraft(self, tmp_path, monkeypatch):
+    async def test_comment_sends_the_step_back_for_a_redraft(
+        self, tmp_path, monkeypatch
+    ):
         state = _make_state(tmp_path)
         chat = _seed(state)
         seen = _no_dispatch(monkeypatch)
@@ -229,8 +238,6 @@ class TestApproveAndComment:
             assert r.status == 200
         sess, _ = chat_plan.read("c1")
         step = sess.steps[0]
-        # comment_step's exact effects: the comment is threaded onto the step AND the
-        # step goes back to RUNNING (a re-draft), not to approved.
         assert [c["text"] for c in step.comments] == ["too vague"]
         assert step.status == StepStatus.RUNNING.value
         assert len(seen) == 1 and "too vague" in seen[0]
@@ -262,7 +269,9 @@ class TestApproveAndComment:
             chat.append("assistant", "plan v1", "msg msg-a")
             chat.drain()
             chat_plan.maybe_submit_plan_draft(state, chat)
-            await client.post("/api/chat/sessions/c1/plan/approve", json={"step_id": "chat-plan-1"})
+            await client.post(
+                "/api/chat/sessions/c1/plan/approve", json={"step_id": "chat-plan-1"}
+            )
             await client.post("/api/chat/sessions/c1/plan/activate")
         sess, binding = chat_plan.read("c1")
         assert [s.id for s in sess.steps] == ["chat-plan-1", "chat-plan-2"]
@@ -271,7 +280,6 @@ class TestApproveAndComment:
             StepStatus.RUNNING.value,
         ]
         assert sess.steps[1].title == "Re-plan"
-        # The pre-plan mode is remembered once — a re-plan must not record "plan".
         assert binding["resume_task_mode"] == "agent"
 
 
@@ -296,19 +304,26 @@ class TestTheGateNotThePrompt:
                     ),
                     AgentEvent(kind=EVENT_COMPLETE),
                 ],
-                [AgentEvent(kind=EVENT_TEXT_CHUNK, text="ok"), AgentEvent(kind=EVENT_COMPLETE)],
+                [
+                    AgentEvent(kind=EVENT_TEXT_CHUNK, text="ok"),
+                    AgentEvent(kind=EVENT_COMPLETE),
+                ],
             ]
         )
-        rt = NativeAgentRuntime(definition=_defn(), model_provider=model, tool_providers=[tool])
-        rt.set_approval_policy("yolo")  # the most permissive approval posture
+        rt = NativeAgentRuntime(
+            definition=_defn(), model_provider=model, tool_providers=[tool]
+        )
+        rt.set_approval_policy("yolo")
         state.sessions.set_task_mode = lambda key, mode: rt.set_task_mode(mode)
         return rt
 
     @pytest.mark.asyncio
-    async def test_a_mutating_tool_is_denied_while_awaiting_plan_approval(self, tmp_path):
+    async def test_a_mutating_tool_is_denied_while_awaiting_plan_approval(
+        self, tmp_path
+    ):
         state = _make_state(tmp_path)
         chat = _seed(state)
-        tool = _Tool(name="write_file", requires_approval=False)  # auto-approved
+        tool = _Tool(name="write_file", requires_approval=False)
         rt = self._runtime_bound_to(state, tool)
         async with TestClient(TestServer(_app(state))) as client:
             await client.post("/api/chat/sessions/c1/plan/activate")
@@ -321,7 +336,7 @@ class TestTheGateNotThePrompt:
         seen = await _drain(rt, "write the file")
         result = next(e for e in seen if e.kind == EVENT_TOOL_RESULT)
         assert "plan mode" in str(result.tool_output).lower()
-        assert tool.invoked == []  # denied BEFORE invoke, despite yolo auto-approve
+        assert tool.invoked == []
 
     @pytest.mark.asyncio
     async def test_the_task_mode_control_cannot_relax_the_gate_while_awaiting_review(
@@ -336,7 +351,9 @@ class TestTheGateNotThePrompt:
             chat.append("assistant", "the plan", "msg msg-a")
             chat.drain()
             chat_plan.maybe_submit_plan_draft(state, chat)
-            r = await client.post("/api/chat/task-mode", json={"mode": "agent", "session": "c1"})
+            r = await client.post(
+                "/api/chat/task-mode", json={"mode": "agent", "session": "c1"}
+            )
             assert r.status == 409
             body = await r.json()
             assert body["error"]["code"] == "plan_awaiting_approval"
@@ -360,7 +377,7 @@ class TestTheGateNotThePrompt:
         assert chat_plan.read("c1") == (None, {})
         await rt.start()
         await _drain(rt, "write the file")
-        assert tool.invoked == [{"path": "x", "content": "y"}]  # the gate is gone
+        assert tool.invoked == [{"path": "x", "content": "y"}]
 
     @pytest.mark.asyncio
     async def test_approving_lifts_the_gate(self, tmp_path):
@@ -397,7 +414,9 @@ class TestMidTurnParkAndResume:
         return chat.task
 
     @pytest.mark.asyncio
-    async def test_activating_mid_turn_parks_and_keeps_the_whole_transcript(self, tmp_path):
+    async def test_activating_mid_turn_parks_and_keeps_the_whole_transcript(
+        self, tmp_path
+    ):
         state = _make_state(tmp_path)
         chat = _seed(state)
         chat.append("user", "u2", "msg msg-u")
@@ -412,14 +431,15 @@ class TestMidTurnParkAndResume:
                 assert (await r.json())["parked"] is True
         finally:
             task.cancel()
-        # Parking is a posture change plus a stop request — never a truncation.
         assert [(m["role"], m["content"]) for m in chat.messages] == before
         _sess, binding = chat_plan.read("c1")
         assert binding["parked"] is True
         assert binding["parked_messages"] == len(before)
         assert chat._task_mode == "plan"
-        # The in-flight turn was asked to stop cooperatively, not killed.
-        assert state.sessions.stop_turn.calls and state.sessions.stop_turn.calls[0][1] is False
+        assert (
+            state.sessions.stop_turn.calls
+            and state.sessions.stop_turn.calls[0][1] is False
+        )
 
     @pytest.mark.asyncio
     async def test_approval_resumes_the_parked_run_and_continues_the_transcript(
@@ -440,23 +460,20 @@ class TestMidTurnParkAndResume:
                 chat.drain()
                 chat_plan.maybe_submit_plan_draft(state, chat)
                 r = await client.post(
-                    "/api/chat/sessions/c1/plan/approve", json={"step_id": "chat-plan-1"}
+                    "/api/chat/sessions/c1/plan/approve",
+                    json={"step_id": "chat-plan-1"},
                 )
                 assert r.status == 200
                 body = await r.json()
         finally:
             task.cancel()
         assert body["resumed"] is True and body["task_mode"] == "agent"
-        # Resumed, not restarted: the pre-park transcript is still the prefix, and the
-        # continuation was appended after it (never in place of it).
         current = [(m["role"], m["content"]) for m in chat.messages]
         assert current[: len(before)] == before
         assert current[-1][0] == "user" and "# Approved plan" in current[-1][1]
-        # One turn dispatched, carrying the approved plan as a continuation.
         assert len(seen) == 1
         assert "# Approved plan\n- step one" in seen[0]
         assert "do not re-plan" in seen[0]
-        # The park is settled — a later approval must not resume twice.
         _sess, binding = chat_plan.read("c1")
         assert "parked" not in binding
 
@@ -496,7 +513,9 @@ class TestADraftMustComeFromItsOwnTurn:
     """
 
     @pytest.mark.asyncio
-    async def test_a_previous_turns_reply_is_not_reused_as_a_new_steps_draft(self, tmp_path):
+    async def test_a_previous_turns_reply_is_not_reused_as_a_new_steps_draft(
+        self, tmp_path
+    ):
         state = _make_state(tmp_path)
         chat = _seed(state)
         async with TestClient(TestServer(_app(state))) as client:
@@ -505,23 +524,21 @@ class TestADraftMustComeFromItsOwnTurn:
         chat.drain()
         assert chat_plan.maybe_submit_plan_draft(state, chat) is True
         async with TestClient(TestServer(_app(state))) as client:
-            await client.post("/api/chat/sessions/c1/plan/approve", json={"step_id": "chat-plan-1"})
-            # A second activation: the mid-task re-plan.
+            await client.post(
+                "/api/chat/sessions/c1/plan/approve", json={"step_id": "chat-plan-1"}
+            )
             await client.post("/api/chat/sessions/c1/plan/activate")
 
-        # No new reply yet — the hook must NOT reach back for the first plan.
         assert chat_plan.maybe_submit_plan_draft(state, chat) is False
         sess, _ = chat_plan.read("c1")
         assert sess.steps[1].status == StepStatus.RUNNING.value
         assert sess.steps[1].artifact in ({}, None)
 
-        # The re-plan turn's own reply is what lands.
         chat.append("assistant", "### SECOND PLAN\n1. two", "msg msg-a")
         chat.drain()
         assert chat_plan.maybe_submit_plan_draft(state, chat) is True
         sess, _ = chat_plan.read("c1")
         assert sess.steps[1].artifact["markdown"] == "### SECOND PLAN\n1. two"
-        # And the approved first step is untouched.
         assert sess.steps[0].artifact["markdown"] == "### FIRST PLAN\n1. one"
 
     @pytest.mark.asyncio
@@ -531,7 +548,6 @@ class TestADraftMustComeFromItsOwnTurn:
         async with TestClient(TestServer(_app(state))) as client:
             await client.post("/api/chat/sessions/c1/plan/activate")
         _, binding = chat_plan.read("c1")
-        # `_seed` leaves two messages, so the boundary is the transcript length at open.
         assert binding["draft_from"] == len(chat.messages)
 
     def test_a_corrupt_boundary_does_not_wedge_the_draft(self, tmp_path):
@@ -566,13 +582,13 @@ class TestSidecarRobustness:
         state = _make_state(tmp_path)
         chat = _seed(state)
         chat_plan.activate(chat, running=False)
-        from gideon.config.loader import config_dir
+        from gideon.core.config.loader import config_dir
 
         assert chat_plan._path("c1") == config_dir() / "chat_plans" / "c1.json"
 
 
 class _AsyncRecorder:
-    """An awaitable stand-in for SessionManager.stop_turn that records its args."""
+    """An awaitable stand-in for ConversationDirectory.stop_turn that records its args."""
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, bool]] = []

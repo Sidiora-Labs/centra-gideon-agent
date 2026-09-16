@@ -12,10 +12,8 @@ import json
 
 import pytest
 
-from gideon.learning import decay
-from gideon.memory_record import MemoryKind, _kind_from_key, decay_profile
-
-# ── kind mapping ──
+from gideon.cognition.learning import decay
+from gideon.cognition.memory_record import MemoryKind, _kind_from_key, decay_profile
 
 
 def test_user_approval_prefix_maps_to_approval_kind():
@@ -31,7 +29,6 @@ def test_user_approval_prefix_maps_to_approval_kind():
         ("user.commitment.abc", MemoryKind.COMMITMENT),
         ("user.procedural.abc", MemoryKind.PROCEDURAL),
         ("user.persona.abc", MemoryKind.SELF_PERSONA),
-        # Near-misses must NOT become approvals: the prefix is exact.
         ("user.approvals.abc", MemoryKind.SEMANTIC),
         ("approval.abc", MemoryKind.SEMANTIC),
     ],
@@ -41,27 +38,22 @@ def test_neighbouring_prefixes_unchanged(key, kind):
 
 
 def test_approval_kind_has_a_decay_decision():
-    # decay_profile() raises for an unmapped kind, and KIND_MULTIPLIERS.get()
-    # would silently hand an unmapped profile the reference rate — assert both.
     assert decay_profile(MemoryKind.APPROVAL) == "approval"
     assert "approval" in decay.KIND_MULTIPLIERS
 
 
 def test_every_kind_is_mapped_everywhere():
-    from gideon.memory_record import _DEFAULT_TIER
+    from gideon.cognition.memory_record import _DEFAULT_TIER
 
     for kind in MemoryKind:
         assert kind in _DEFAULT_TIER, f"{kind} missing from _DEFAULT_TIER"
         assert decay_profile(kind) in decay.KIND_MULTIPLIERS
 
 
-# ── the non-fact exclusion, both directions ──
-
-
 def _store(tmp_path):
-    from gideon.vector_memory import VectorMemoryStore
+    from gideon.cognition.vector_memory import SemanticArchive
 
-    store = VectorMemoryStore(db_path=tmp_path / "m.db", embedding_dim=3)
+    store = SemanticArchive(db_path=tmp_path / "m.db", embedding_dim=3)
     store.init()
     return store
 
@@ -69,7 +61,10 @@ def _store(tmp_path):
 def test_approval_rows_never_enter_the_fact_block(tmp_path):
     store = _store(tmp_path)
     try:
-        assert store.set_semantic("pref.editor", "vim", 0.9, source="user_explicit") is None
+        assert (
+            store.set_semantic("pref.editor", "vim", 0.9, source="user_explicit")
+            is None
+        )
         assert (
             store.set_semantic(
                 "user.approval.aabbccddeeff",
@@ -80,9 +75,7 @@ def test_approval_rows_never_enter_the_fact_block(tmp_path):
             is None
         )
         ctx = store.get_semantic_context()
-        # Direction 1: the ordinary fact still renders (guards an over-broad clause).
         assert "pref.editor" in ctx
-        # Direction 2: the approval rule does not (guards a missing clause).
         assert "user.approval" not in ctx
         assert "noreply.github.com" not in ctx
         manifest = store.get_l1_manifest()
@@ -92,8 +85,6 @@ def test_approval_rows_never_enter_the_fact_block(tmp_path):
 
 
 def test_approval_rows_are_still_readable_as_records(tmp_path):
-    # Excluded from the fact block, NOT from the store: the triage lookup is an
-    # exact prefix query over these rows, so iter_records must still yield them.
     store = _store(tmp_path)
     try:
         store.set_semantic(
@@ -105,18 +96,15 @@ def test_approval_rows_are_still_readable_as_records(tmp_path):
         recs = list(store.iter_records(kinds={MemoryKind.APPROVAL.value}))
         assert [r.id for r in recs] == ["user.approval.aabbccddeeff"]
         assert recs[0].kind is MemoryKind.APPROVAL
-        # And an approval row is not returned when only facts are asked for.
         facts = list(store.iter_records(kinds={MemoryKind.SEMANTIC.value}))
         assert all(not r.id.startswith("user.approval.") for r in facts)
     finally:
         store.close()
 
 
-# ── the matcher: deny-wins, most-specific, total ──
-
 from datetime import datetime, timedelta, timezone  # noqa: E402
 
-from gideon.proactive.approval import (  # noqa: E402
+from gideon.cognition.proactive.approval import (
     APPROVAL_KEY_PREFIX,
     COOLDOWN_LADDER_SECONDS,
     ApprovalRule,
@@ -144,7 +132,6 @@ def _rule(pattern, verdict, **kw):
 
 
 def test_no_match_is_no_decision_not_an_allow():
-    # The dangerous default. An empty rule set must never auto-execute.
     res = match_rules([], ITEM, now=NOW)
     assert res.decision is Decision.NO_DECISION
     assert res.auto_executes is False
@@ -156,14 +143,13 @@ def test_no_match_is_no_decision_not_an_allow():
 def test_deny_wins_at_equal_specificity():
     allow = _rule(ITEM, "approve")
     deny = _rule(ITEM, "deny")
-    for rules in ([allow, deny], [deny, allow]):  # order must not matter
+    for rules in ([allow, deny], [deny, allow]):
         res = match_rules(rules, ITEM, now=NOW)
         assert res.decision is Decision.DENY, res
         assert res.rule is not None and res.rule.verdict is Verdict.DENY
 
 
 def test_broader_deny_beats_narrower_approve():
-    # "deny at ANY matching specificity wins" — the whole asymmetry.
     res = match_rules([_rule("archive", "deny"), _rule(ITEM, "approve")], ITEM, now=NOW)
     assert res.decision is Decision.DENY
     assert res.rule.pattern == "archive"
@@ -178,12 +164,10 @@ def test_most_specific_approve_wins_among_approves():
 
 
 def test_equal_specificity_tie_break_is_stable():
-    # Two same-verdict rules of equal specificity: the named rule must be the
-    # same every time (it lands in a ledger row). Tie-break = (pattern, key).
     a = _rule("archive:sender", "approve")
-    b = _rule("archive:SENDER", "approve")  # normalizes to the same pattern
+    b = _rule("archive:SENDER", "approve")
     c = _rule("archive:other", "approve")
-    assert a.key == b.key  # normalization ⇒ one pattern, one key
+    assert a.key == b.key
     picked = {
         match_rules(order, "archive:sender:x", now=NOW).rule.key
         for order in ([a, c], [c, a], [b, c])
@@ -219,24 +203,27 @@ def test_an_explicit_rule_beats_a_cooldown():
         match_rules([cooling, _rule(ITEM, "approve")], ITEM, now=NOW).decision
         is Decision.AUTO_APPROVE
     )
-    assert match_rules([cooling, _rule(ITEM, "deny")], ITEM, now=NOW).decision is Decision.DENY
+    assert (
+        match_rules([cooling, _rule(ITEM, "deny")], ITEM, now=NOW).decision
+        is Decision.DENY
+    )
 
 
 def test_an_elapsed_cooldown_stops_suppressing():
     done = _rule(
-        ITEM, "suppressed", decline_count=2, cooldown_until=(NOW - timedelta(1)).isoformat()
+        ITEM,
+        "suppressed",
+        decline_count=2,
+        cooldown_until=(NOW - timedelta(1)).isoformat(),
     )
     assert match_rules([done], ITEM, now=NOW).decision is Decision.NO_DECISION
-
-
-# ── row encoding ──
 
 
 def test_rule_key_and_roundtrip():
     r = _rule(ITEM, "deny", created_from_digest="run-7", hit_count=3)
     assert r.key.startswith(APPROVAL_KEY_PREFIX)
     assert len(r.key) == len(APPROVAL_KEY_PREFIX) + 12
-    assert rule_key(ITEM.upper()) == rule_key(ITEM)  # normalization is part of the key
+    assert rule_key(ITEM.upper()) == rule_key(ITEM)
     back = rule_from_row(r.key, rule_to_value(r))
     assert back == r
     assert rule_from_row(r.key, json.dumps(rule_to_value(r))) == r
@@ -246,25 +233,21 @@ def test_rule_key_and_roundtrip():
 @pytest.mark.parametrize(
     "key,value",
     [
-        ("pref.editor", {"pattern": "x", "verdict": "approve"}),  # wrong prefix
-        ("user.approval.abc", {"pattern": "x"}),  # no verdict
-        ("user.approval.abc", {"pattern": "x", "verdict": "allow"}),  # unknown verdict
-        ("user.approval.abc", {"verdict": "approve"}),  # no pattern
+        ("pref.editor", {"pattern": "x", "verdict": "approve"}),
+        ("user.approval.abc", {"pattern": "x"}),
+        ("user.approval.abc", {"pattern": "x", "verdict": "allow"}),
+        ("user.approval.abc", {"verdict": "approve"}),
         ("user.approval.abc", "not json"),
         ("user.approval.abc", None),
     ],
 )
 def test_undecodable_rows_are_dropped_not_repaired(key, value):
     assert rule_from_row(key, value) is None
-    # …and a dropped row cannot auto-approve anything.
-    from gideon.proactive.approval import rules_from_rows
+    from gideon.cognition.proactive.approval import rules_from_rows
 
     assert match_rules(rules_from_rows([(key, value)]), "x", now=NOW).decision is (
         Decision.NO_DECISION
     )
-
-
-# ── suppression ladder ──
 
 
 def test_cooldowns_escalate_24h_7d_30d_then_clamp():
@@ -299,14 +282,12 @@ def test_accepting_during_a_cooldown_clears_it():
     assert cleared.cooldown_until is None
     assert cleared.decline_count == 0
     assert match_rules([cleared], ITEM, now=NOW).decision is Decision.NO_DECISION
-    # The run of declines is over: the next decline starts at 24h again.
     nxt = escalate_suppression(
-        SuppressionState(cleared.pattern, cleared.decline_count, None), pattern=ITEM, now=NOW
+        SuppressionState(cleared.pattern, cleared.decline_count, None),
+        pattern=ITEM,
+        now=NOW,
     )
     assert nxt.rung_seconds == COOLDOWN_LADDER_SECONDS[0]
-
-
-# ── reply grammar ──
 
 
 @pytest.mark.parametrize(
@@ -341,13 +322,13 @@ def test_grammar_accepts_the_documented_forms(text, action, ordinal):
         "",
         "   ",
         None,
-        "yes",  # no target
-        "3",  # no verb
+        "yes",
+        "3",
         "sure, go ahead and archive number 3",
         "yes 3 no 4",
-        "always yes all",  # a blanket rule from one word: refused
+        "always yes all",
         "yes 0",
-        "yes 99",  # outside the digest
+        "yes 99",
         "yes three",
         "maybe 3",
         "3 yep",
@@ -379,35 +360,30 @@ def test_always_forms_are_the_only_rule_writers():
 
 
 def test_ordinal_bounds_need_a_digest_size():
-    # Without max_ordinal only the 1-or-higher floor applies (no fabricated cap).
     assert parse_reply("yes 99").action is ReplyAction.APPROVE_ONCE
     assert parse_reply("yes 99", max_ordinal=8).action is ReplyAction.UNPARSEABLE
-
-
-# ── ProactiveConfig: the two wiring points test_config_roundtrip cannot see ──
 
 
 def test_every_proactive_field_is_patchable_or_deliberately_not():
     from dataclasses import fields
 
-    from gideon.config.learning import ProactiveConfig
-    from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+    from gideon.core.config.learning import ProactiveConfig
+    from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
-    # The generic round-trip test covers dataclass/_meta + load() + to_dict(); it
-    # stays green if the PATCH entry is dropped, so assert the write path here.
     for f in fields(ProactiveConfig):
-        assert f"proactive.{f.name}" in _EDITABLE_CONFIG, f"proactive.{f.name} not patchable"
+        assert (
+            f"proactive.{f.name}" in _EDITABLE_CONFIG
+        ), f"proactive.{f.name} not patchable"
         assert f.metadata.get("label"), f"proactive.{f.name} has no _meta label"
         assert f.metadata.get("help"), f"proactive.{f.name} has no _meta help"
 
 
 def test_proactive_defaults_are_fail_closed():
-    from gideon.config.learning import ProactiveConfig
+    from gideon.core.config.learning import ProactiveConfig
 
     cfg = ProactiveConfig()
     assert cfg.triage_enabled is False
     assert cfg.auto_execute_enabled is False
-    # The spend floor is the one that defaults ON.
     assert cfg.classifier_gate_enabled is True
     assert cfg.max_auto_actions_per_run == 5
     assert cfg.decision_default_horizon_days == 90
@@ -416,7 +392,7 @@ def test_proactive_defaults_are_fail_closed():
 def test_unreadable_proactive_values_fail_in_the_safe_direction(tmp_path, monkeypatch):
     from unittest.mock import patch as _patch
 
-    from gideon.config.loader import AppConfig
+    from gideon.core.config.loader import AppConfig
 
     path = tmp_path / "config.json"
     path.write_text(
@@ -434,11 +410,10 @@ def test_unreadable_proactive_values_fail_in_the_safe_direction(tmp_path, monkey
         ),
         encoding="utf-8",
     )
-    with _patch("gideon.config.loader.config_path", return_value=path):
+    with _patch("gideon.core.config.loader.config_path", return_value=path):
         cfg = AppConfig.load()
     assert cfg.proactive.triage_enabled is False
     assert cfg.proactive.auto_execute_enabled is False
-    # Gate fails OPEN — an unreadable value must not send every item to the model.
     assert cfg.proactive.classifier_gate_enabled is True
     assert cfg.proactive.max_auto_actions_per_run == 5
     assert cfg.proactive.decision_default_horizon_days == 1
@@ -446,19 +421,16 @@ def test_unreadable_proactive_values_fail_in_the_safe_direction(tmp_path, monkey
 
 
 def test_a_negative_action_cap_clamps_to_zero_not_unbounded():
-    from gideon.config.learning import ProactiveConfig
+    from gideon.core.config.learning import ProactiveConfig
 
     assert ProactiveConfig(max_auto_actions_per_run=-1).max_auto_actions_per_run == 0
 
 
-# ── the triage_rules tool + its endpoints ──
-
-
 def _svc(tmp_path):
-    from gideon.memory_service import MemoryService
-    from gideon.vector_memory import VectorMemoryStore
+    from gideon.cognition.memory_service import MemoryService
+    from gideon.cognition.vector_memory import SemanticArchive
 
-    store = VectorMemoryStore(db_path=tmp_path / "m.db", embedding_dim=3)
+    store = SemanticArchive(db_path=tmp_path / "m.db", embedding_dim=3)
     store.init()
     return MemoryService.over_vector_store(store), store
 
@@ -468,11 +440,13 @@ def rules_api(tmp_path, monkeypatch):
     """The three approval-rule handlers over a real store in tmp_path."""
     from types import SimpleNamespace
 
-    from gideon.dashboard.handlers import memory as mem_handlers
+    from gideon.interfaces.dashboard.handlers import memory as mem_handlers
 
     svc, store = _svc(tmp_path)
     monkeypatch.setattr(mem_handlers, "_get_service", lambda state: svc)
-    monkeypatch.setattr(mem_handlers, "_is_restricted_session", lambda state, req: False)
+    monkeypatch.setattr(
+        mem_handlers, "_is_restricted_session", lambda state, req: False
+    )
     monkeypatch.setattr(
         mem_handlers,
         "_sel",
@@ -500,7 +474,7 @@ def _mocked(method, path, body=None, match_info=None):
         return body
 
     req.json = _json  # type: ignore[method-assign]
-    assert payload  # the encoded form is unused; keep the shape explicit
+    assert payload
     return req
 
 
@@ -525,11 +499,13 @@ async def test_rule_add_list_revoke_roundtrip_with_provenance(rules_api):
     key = (await _json_of(add))["rule"]["key"]
     assert key.startswith("user.approval.")
 
-    listed = await rules_api.api_memory_approval_rules(_mocked("GET", "/api/memory/approval-rules"))
+    listed = await rules_api.api_memory_approval_rules(
+        _mocked("GET", "/api/memory/approval-rules")
+    )
     rules = (await _json_of(listed))["rules"]
     assert len(rules) == 1
     assert rules[0]["verdict"] == "deny"
-    assert rules[0]["created_from_digest"] == "run-42"  # provenance
+    assert rules[0]["created_from_digest"] == "run-42"
     assert rules[0]["hit_count"] == 0
     assert rules[0]["created_at"]
 
@@ -570,8 +546,8 @@ async def test_revoke_is_scoped_to_approval_keys(rules_api):
 
 
 def test_triage_rules_tool_is_declared_and_schema_bound():
-    from gideon import mcp_memory
-    from gideon.validation import MCP_CORE_SCHEMAS, validate_tool_args
+    from gideon.assurance.validation import MCP_CORE_SCHEMAS, validate_tool_args
+    from gideon.integrations import mcp_memory
 
     assert "triage_rules" in {t["name"] for t in mcp_memory._list_tools()}
     schema = MCP_CORE_SCHEMAS["triage_rules"]
@@ -582,7 +558,7 @@ def test_triage_rules_tool_is_declared_and_schema_bound():
 
 
 def test_triage_rules_branches(monkeypatch):
-    from gideon import mcp_memory
+    from gideon.integrations import mcp_memory
 
     calls: list[tuple] = []
     monkeypatch.setattr(
@@ -617,10 +593,11 @@ def test_triage_rules_branches(monkeypatch):
 
     out = mcp_memory._call_tool_inner("triage_rules", {"action": "list"})
     assert "deny" in out and "4 hits" in out and "from run-9" in out
-    assert "unreadable" in out  # not swallowed
+    assert "unreadable" in out
 
     out = mcp_memory._call_tool_inner(
-        "triage_rules", {"action": "add", "pattern": "archive:sender:x", "verdict": "deny"}
+        "triage_rules",
+        {"action": "add", "pattern": "archive:sender:x", "verdict": "deny"},
     )
     assert "Added deny rule" in out
     assert calls[-1][2]["created_from_digest"] == "tool:triage_rules"
@@ -630,11 +607,13 @@ def test_triage_rules_branches(monkeypatch):
     )
     assert "Revoked" in out
 
-    # An unknown action is an error, not a silent fallthrough to `list`.
-    assert "unknown action" in mcp_memory._call_tool_inner("triage_rules", {"action": "wat"})
-    # And `add` without its arguments reports failure rather than writing a partial rule.
+    assert "unknown action" in mcp_memory._call_tool_inner(
+        "triage_rules", {"action": "wat"}
+    )
     assert "Error" in mcp_memory._call_tool_inner("triage_rules", {"action": "add"})
-    assert "Error" in mcp_memory._call_tool_inner("triage_rules", {"action": "add", "pattern": "x"})
+    assert "Error" in mcp_memory._call_tool_inner(
+        "triage_rules", {"action": "add", "pattern": "x"}
+    )
     assert "Error" in mcp_memory._call_tool_inner("triage_rules", {"action": "revoke"})
 
 
@@ -642,7 +621,7 @@ def test_the_approval_rule_routes_are_registered():
     """A handler nobody can reach is not a feature."""
     import pathlib
 
-    from gideon.dashboard import handlers, server
+    from gideon.interfaces.dashboard import handlers, server
 
     src = pathlib.Path(server.__file__).read_text(encoding="utf-8")
     for verb, name in (

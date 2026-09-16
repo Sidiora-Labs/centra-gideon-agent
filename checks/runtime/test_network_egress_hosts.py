@@ -7,7 +7,7 @@ privacy claim was documentation, not a control. That is the same defect shape as
 field nothing reads, except the thing nobody reads here is a promise to the user.
 
 So this is a census of DESTINATIONS. Every routable hostname appearing as a literal in
-shipped code — core `src/gideon/**/*.py` and the SPA `web/src/**/*.{ts,tsx}` — must be
+shipped code — core `runtime/gideon/**/*.py` and the SPA `apps/console/src/**/*.{ts,tsx}` — must be
 listed in `docs/architecture/network-egress-hosts.txt` with a judgment saying whether it is
 fetched and by whose action. A new host reds CI; a listed host that has disappeared reds it
 too, so the table stays an exact mirror rather than accumulating.
@@ -32,18 +32,21 @@ import ipaddress
 import re
 from pathlib import Path
 
-_ROOT = Path(__file__).resolve().parents[1]
-_CORE = _ROOT / "src" / "gideon"
-_WEB = _ROOT / "web" / "src"
+_ROOT = Path(__file__).resolve().parents[2]
+_CORE = _ROOT / "runtime" / "gideon"
+_WEB = _ROOT / "apps/console" / "src"
 _TABLE = _ROOT / "docs" / "architecture" / "network-egress-hosts.txt"
 
 _HOST_RE = re.compile(r"https?://([A-Za-z0-9._{}-]+)")
 
-#: RFC 2606 / RFC 6761 names, which are guaranteed never to resolve globally, plus RFC 6762
-#: `.local` — multicast DNS, resolvable only on the caller's own link. A LAN name cannot be a
-#: vendor destination, and `.local` shows up as the example in the egress-allowlist panel's
-#: own placeholder text ("e.g. nas.local"), which is UI copy about the user's homelab.
-_RESERVED_SUFFIXES = (".example", ".invalid", ".test", ".localhost", ".example.com", ".local")
+_RESERVED_SUFFIXES = (
+    ".example",
+    ".invalid",
+    ".test",
+    ".localhost",
+    ".example.com",
+    ".local",
+)
 _RESERVED_EXACT = frozenset({"example.com", "example.net", "example.org", "localhost"})
 
 
@@ -79,7 +82,6 @@ def _shipped_files() -> list[Path]:
             out.append(p)
     for pattern in ("*.ts", "*.tsx"):
         for p in sorted(_WEB.rglob(pattern)):
-            # A test fixture's URL is not something the product contacts.
             if p.name.endswith((".test.ts", ".test.tsx")) or "__tests__" in p.parts:
                 continue
             out.append(p)
@@ -131,7 +133,9 @@ def test_every_egress_host_is_a_declared_destination():
     """The rail: a new destination in shipped code must be written down and justified."""
     table = _table()
     found = _found()
-    undeclared = sorted(f"{h} ({where})" for h, where in found.items() if h not in table)
+    undeclared = sorted(
+        f"{h} ({where})" for h, where in found.items() if h not in table
+    )
     assert not undeclared, (
         "shipped code reaches hostnames that are not in the egress census:\n"
         + "\n".join(f"  {u}" for u in undeclared)
@@ -195,8 +199,12 @@ def test_the_census_is_not_vacuous():
     """Both sides are populated. Two empty sets agree about nothing."""
     found = _found()
     table = _table()
-    assert len(found) >= 15, f"the scan found only {len(found)} hosts — it is not reading"
-    assert len(table) >= 15, f"the census lists only {len(table)} hosts — it looks truncated"
+    assert (
+        len(found) >= 15
+    ), f"the scan found only {len(found)} hosts — it is not reading"
+    assert (
+        len(table) >= 15
+    ), f"the census lists only {len(table)} hosts — it looks truncated"
 
 
 def test_the_release_check_is_the_only_unprompted_destination():

@@ -40,8 +40,8 @@ import inspect
 
 import pytest
 
-from gideon.workflows import service, store
-from gideon.workflows.models import RunStatus
+from gideon.automation.workflows import service, store
+from gideon.automation.workflows.models import RunStatus
 
 MISSING = "no-such-run-zzz"
 
@@ -50,7 +50,7 @@ MISSING = "no-such-run-zzz"
 def _isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
     return home
 
 
@@ -66,8 +66,6 @@ class _FakeSupervisor:
         return None
 
 
-#: Every run-control verb, as `(name, callable)`. The point of the list is that it is a LIST: the
-#: three that were wrong were wrong precisely because nothing enumerated their obligations.
 CONTROL_VERBS = [
     ("cancel_run", lambda s: service.cancel_run(MISSING, supervisor=s)),
     ("pause_run", lambda s: service.pause_run(MISSING, supervisor=s)),
@@ -77,10 +75,15 @@ CONTROL_VERBS = [
     ("run_from", lambda s: service.run_from(MISSING, "root", supervisor=s)),
     (
         "edit_run",
-        lambda s: service.edit_run(MISSING, [{"op": "retry", "node_id": "root"}], supervisor=s),
+        lambda s: service.edit_run(
+            MISSING, [{"op": "retry", "node_id": "root"}], supervisor=s
+        ),
     ),
     ("pending_steering", lambda s: service.pending_steering(MISSING)),
-    ("preview_edit", lambda s: service.preview_edit(MISSING, [{"op": "retry", "node_id": "root"}])),
+    (
+        "preview_edit",
+        lambda s: service.preview_edit(MISSING, [{"op": "retry", "node_id": "root"}]),
+    ),
     (
         "resolve_confirmation:approve",
         lambda s: service.resolve_confirmation(MISSING, supervisor=s, verb="approve"),
@@ -103,7 +106,9 @@ CONTROL_VERBS = [
 @pytest.mark.parametrize("name,call", CONTROL_VERBS, ids=[n for n, _ in CONTROL_VERBS])
 def test_a_nonexistent_run_is_NOT_FOUND(name: str, call) -> None:
     body = call(_FakeSupervisor())
-    assert body["ok"] is False, f"{name} reported success for a run that does not exist: {body}"
+    assert (
+        body["ok"] is False
+    ), f"{name} reported success for a run that does not exist: {body}"
     assert body["code"] == "WF_RUN_NOT_FOUND", (
         f"{name} answered {body['code']!r}. A nonexistent id is a 404, not a state complaint — "
         "`run_not_live` tells the user to resume a run that is not there (issue 765)."
@@ -118,7 +123,9 @@ def test_skip_and_quit_do_not_claim_a_pending_gate() -> None:
     above would also catch this, but a red naming the shape is worth more than one naming a code.
     """
     for verb in ("skip", "quit"):
-        body = service.resolve_confirmation(MISSING, supervisor=_FakeSupervisor(), verb=verb)
+        body = service.resolve_confirmation(
+            MISSING, supervisor=_FakeSupervisor(), verb=verb
+        )
         assert body["ok"] is False
         assert "still_pending" not in body
         assert body.get("resumed") is None
@@ -128,19 +135,25 @@ def test_an_unknown_VERB_is_still_refused_before_anything_else() -> None:
     """🪤 The floor for the reordering. The existence check moved ABOVE the verb split, and it must
     not have moved above the verb VALIDATION — a typo'd verb has to stay a 400 rather than becoming
     a 404 about the run, or the caller is told to fix the wrong thing."""
-    body = service.resolve_confirmation(MISSING, supervisor=_FakeSupervisor(), verb="aprove")
+    body = service.resolve_confirmation(
+        MISSING, supervisor=_FakeSupervisor(), verb="aprove"
+    )
     assert body["ok"] is False
     assert body["code"] == "WF_CONFIRM_VERB_INVALID"
 
 
 def _terminal_run(status: RunStatus):
-    from gideon.workflows.models import WorkflowRun
+    from gideon.automation.workflows.models import WorkflowRun
 
     return store.create(WorkflowRun(id="", workflow_name="wf", status=status))
 
 
-@pytest.mark.parametrize("status", [RunStatus.COMPLETE, RunStatus.FAILED, RunStatus.CANCELLED])
-def test_resume_REFUSES_a_terminal_run_and_does_not_write_to_it(status: RunStatus) -> None:
+@pytest.mark.parametrize(
+    "status", [RunStatus.COMPLETE, RunStatus.FAILED, RunStatus.CANCELLED]
+)
+def test_resume_REFUSES_a_terminal_run_and_does_not_write_to_it(
+    status: RunStatus,
+) -> None:
     """issue 679. The refusal matters, and so does the absence of the write.
 
     The clear-pause path pops `pause_requested` and calls `store.save`, so answering 200 here was
@@ -156,7 +169,6 @@ def test_resume_REFUSES_a_terminal_run_and_does_not_write_to_it(status: RunStatu
     assert body["ok"] is False
     assert body["code"] == "WF_RUN_ALREADY_TERMINAL"
     assert status.value in body["message"]
-    # The finished run is untouched — this is the half that made 679 more than a wrong status.
     assert store.get(run.id).extra.get("pause_requested") is True
 
 
@@ -168,9 +180,6 @@ def test_the_table_covers_every_control_verb() -> None:
     require each to appear in `CONTROL_VERBS`. A new verb reds HERE, with instructions, rather
         than shipping without a guard.
     """
-    # Functions whose first positional parameter is `run_id` and that live in the control section.
-    # Reads are excluded by name: `status`/`output`/`detail`/`observe` answer questions about a run
-    # and already 404 on their own, and this rail is about the verbs that ACT.
     exclude = {
         "run_status",
         "run_output",
@@ -192,7 +201,16 @@ def test_the_table_covers_every_control_verb() -> None:
             continue
         if not any(
             k in name
-            for k in ("cancel", "pause", "steer", "resume", "rewind", "run_from", "edit", "confirm")
+            for k in (
+                "cancel",
+                "pause",
+                "steer",
+                "resume",
+                "rewind",
+                "run_from",
+                "edit",
+                "confirm",
+            )
         ):
             continue
         if name not in covered:

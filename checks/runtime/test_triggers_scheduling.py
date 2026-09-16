@@ -29,7 +29,7 @@ once, which reads as the
 
 import pytest
 
-from gideon.triggers.scheduling import (
+from gideon.automation.triggers.scheduling import (
     BOOT_STAGGER_BASE_SECS,
     CLAIM_MAX_DURATION_SECS,
     POLL_CEILING_SECS,
@@ -49,14 +49,6 @@ from gideon.triggers.scheduling import (
 NOW = 1_700_000_000.0
 
 
-# ── jitter parity: the migration-day property ──
-
-
-#: The shipped `ScheduleService._jitter_offset(id, 120.0)` values, captured from that method before
-#: S112 deleted it and verified equal to `jitter_offset` at the time of capture. PINNED BY VALUE
-#: rather than compared against the old implementation, because a parity test whose reference no
-#: longer exists cannot fail — and the property it protects (never silently re-phasing a
-#: migrated schedule into a different slot) outlives the class it was measured against.
 _SHIPPED_JITTER_120 = {
     "job-1": 0.8902834632714198,
     "system:heartbeat:fts": 77.92671171411901,
@@ -95,9 +87,6 @@ def test_a_ZERO_window_yields_no_offset():
     assert jitter_offset("t-1", 0.0) == 0.0
 
 
-# ── dueness reads the PERSISTED fire time ──
-
-
 def test_a_trigger_is_due_when_its_persisted_time_has_passed():
     due, why = is_due(next_fire_at=NOW - 1, now=NOW, fires_automatically=True)
     assert due is True
@@ -106,7 +95,8 @@ def test_a_trigger_is_due_when_its_persisted_time_has_passed():
 
 def test_NOT_ARMED_is_distinguished_from_NOT_YET():
     """The first means nothing computed a next fire — a bug, or a just-enabled trigger. The second
-    means the schedule is working. Collapsing them hides the bug behind the normal case."""
+    means the schedule is working. Collapsing them hides the bug behind the normal case.
+    """
     _d1, unarmed = is_due(next_fire_at=0.0, now=NOW, fires_automatically=True)
     _d2, waiting = is_due(next_fire_at=NOW + 60, now=NOW, fires_automatically=True)
     assert unarmed == Dueness.NOT_ARMED.value
@@ -123,7 +113,9 @@ def test_an_EXPIRED_trigger_is_refused_even_when_armed():
     """Auto-expiry exists so a user-created recurring automation needs a
     deliberate renewal. Honouring
     a stale `next_fire_at` past that date would defeat it."""
-    due, why = is_due(next_fire_at=NOW - 1, now=NOW, fires_automatically=True, expires_at=NOW - 100)
+    due, why = is_due(
+        next_fire_at=NOW - 1, now=NOW, fires_automatically=True, expires_at=NOW - 100
+    )
     assert due is False
     assert why == Dueness.EXPIRED.value
 
@@ -133,9 +125,6 @@ def test_an_unexpired_trigger_with_an_expiry_still_fires():
         next_fire_at=NOW - 1, now=NOW, fires_automatically=True, expires_at=NOW + 10_000
     )
     assert due is True
-
-
-# ── the wake delay ──
 
 
 def test_an_IDLE_machine_sleeps_the_poll_ceiling_not_zero():
@@ -169,14 +158,13 @@ def test_UNARMED_triggers_are_ignored_when_choosing_the_delay():
     assert next_wake_delay([0.0, -1.0, NOW + 7], NOW) == 7.0
 
 
-# ── recompute: from completion, anchored to the grid ──
-
-
 def test_recompute_is_from_COMPLETION_not_the_missed_slot():
     """A run that takes 90s on a 60s interval would otherwise be due the instant
     it finishes, forever,
     and the machine never idles."""
-    nxt = recompute_from_completion(interval_secs=60.0, created_at=1000.0, completed_at=1150.0)
+    nxt = recompute_from_completion(
+        interval_secs=60.0, created_at=1000.0, completed_at=1150.0
+    )
     assert nxt > 1150.0
 
 
@@ -184,9 +172,10 @@ def test_recompute_ANCHORS_to_the_created_at_grid():
     """`completed_at + interval` re-phases the schedule to whenever the
     overrun happened: a job created
     to run on the hour drifts to :07 after one slow day and stays there."""
-    # grid: 1000, 1060, 1120, 1180 — a completion at 1150 must land on 1180, not 1210.
     assert (
-        recompute_from_completion(interval_secs=60.0, created_at=1000.0, completed_at=1150.0)
+        recompute_from_completion(
+            interval_secs=60.0, created_at=1000.0, completed_at=1150.0
+        )
         == 1180.0
     )
 
@@ -205,7 +194,9 @@ def test_the_phase_SURVIVES_repeated_overruns():
 
 def test_an_on_time_completion_gets_the_NEXT_slot():
     assert (
-        recompute_from_completion(interval_secs=60.0, created_at=1000.0, completed_at=1060.0)
+        recompute_from_completion(
+            interval_secs=60.0, created_at=1000.0, completed_at=1060.0
+        )
         == 1120.0
     )
 
@@ -213,25 +204,29 @@ def test_an_on_time_completion_gets_the_NEXT_slot():
 def test_a_ZERO_interval_is_not_a_schedule():
     """Guard rather than a division: a zero interval would be an infinite fire loop."""
     assert (
-        recompute_from_completion(interval_secs=0.0, created_at=1000.0, completed_at=1100.0) == 0.0
+        recompute_from_completion(
+            interval_secs=0.0, created_at=1000.0, completed_at=1100.0
+        )
+        == 0.0
     )
 
 
 def test_a_MISSING_created_at_falls_back_to_completion():
     """A migrated row with no birth time still needs a grid; anchoring on completion is the only
     honest choice, and it is stable from then on."""
-    nxt = recompute_from_completion(interval_secs=60.0, created_at=0.0, completed_at=1100.0)
+    nxt = recompute_from_completion(
+        interval_secs=60.0, created_at=0.0, completed_at=1100.0
+    )
     assert nxt == 1160.0
-
-
-# ── boot recovery ──
 
 
 def test_an_overdue_fire_is_PUSHED_not_fired_inline():
     """Firing overdue work during recovery is what makes a restart run every
     automation at once — and
     it would run before the gateway finished starting."""
-    when, why = boot_recovery(next_fire_at=NOW - 5000, now=NOW, trigger_id="t", catch_up=False)
+    when, why = boot_recovery(
+        next_fire_at=NOW - 5000, now=NOW, trigger_id="t", catch_up=False
+    )
     assert when >= NOW + BOOT_STAGGER_BASE_SECS
     assert why == "missed_dropped"
 
@@ -240,13 +235,17 @@ def test_catch_up_is_RECORDED_but_still_staggered():
     """The plan's catch_up is "fire ONCE at boot/wake" — session 65 owns the
     exactly-once bookkeeping;
     recovery's job is only to make it survivable."""
-    _when, why = boot_recovery(next_fire_at=NOW - 5000, now=NOW, trigger_id="t", catch_up=True)
+    _when, why = boot_recovery(
+        next_fire_at=NOW - 5000, now=NOW, trigger_id="t", catch_up=True
+    )
     assert why == "caught_up_staggered"
 
 
 def test_a_STILL_UPCOMING_fire_is_left_alone():
     """Re-arming a schedule that is still valid would re-phase it for no gain."""
-    when, why = boot_recovery(next_fire_at=NOW + 500, now=NOW, trigger_id="t", catch_up=False)
+    when, why = boot_recovery(
+        next_fire_at=NOW + 500, now=NOW, trigger_id="t", catch_up=False
+    )
     assert when == NOW + 500
     assert why == "still_upcoming"
 
@@ -260,19 +259,24 @@ def test_an_UNARMED_trigger_stays_unarmed():
 
 def test_two_triggers_overdue_by_the_SAME_amount_do_not_land_together():
     """The thundering herd this exists to prevent."""
-    a, _ = boot_recovery(next_fire_at=NOW - 100, now=NOW, trigger_id="alpha", catch_up=False)
-    b, _ = boot_recovery(next_fire_at=NOW - 100, now=NOW, trigger_id="beta", catch_up=False)
+    a, _ = boot_recovery(
+        next_fire_at=NOW - 100, now=NOW, trigger_id="alpha", catch_up=False
+    )
+    b, _ = boot_recovery(
+        next_fire_at=NOW - 100, now=NOW, trigger_id="beta", catch_up=False
+    )
     assert a != b
 
 
 def test_the_stagger_is_REPRODUCIBLE_across_restarts():
     """Deterministic, so a crash-loop does not reshuffle every schedule on each restart."""
-    first, _ = boot_recovery(next_fire_at=NOW - 100, now=NOW, trigger_id="alpha", catch_up=False)
-    second, _ = boot_recovery(next_fire_at=NOW - 100, now=NOW, trigger_id="alpha", catch_up=False)
+    first, _ = boot_recovery(
+        next_fire_at=NOW - 100, now=NOW, trigger_id="alpha", catch_up=False
+    )
+    second, _ = boot_recovery(
+        next_fire_at=NOW - 100, now=NOW, trigger_id="alpha", catch_up=False
+    )
     assert first == second
-
-
-# ── the fire claim (single flight) ──
 
 
 def test_an_unheld_trigger_can_be_claimed():
@@ -285,7 +289,9 @@ def test_a_HELD_claim_refuses_the_next_fire_under_skip():
     """The semantics autonudge already has for a mid-turn nudge, and the natural implementation of
     `overlap: skip`."""
     held = Claim(trigger_id="t", holder="svc-1", claimed_at=NOW)
-    claim, refusal = claim_fire(held, trigger_id="t", holder="svc-2", now=NOW + 10, overlap="skip")
+    claim, refusal = claim_fire(
+        held, trigger_id="t", holder="svc-2", now=NOW + 10, overlap="skip"
+    )
     assert claim is None
     assert "held by svc-1" in refusal
 
@@ -314,7 +320,9 @@ def test_QUEUE_refuses_like_skip_because_the_OUTCOME_carries_the_difference():
 
 def test_an_EXPIRED_claim_never_refuses_anything():
     """The self-expiry at work: a killed process must not wedge the trigger forever."""
-    stale = Claim(trigger_id="t", holder="dead", claimed_at=NOW - CLAIM_MAX_DURATION_SECS - 1)
+    stale = Claim(
+        trigger_id="t", holder="dead", claimed_at=NOW - CLAIM_MAX_DURATION_SECS - 1
+    )
     claim, refusal = claim_fire(stale, trigger_id="t", holder="svc-2", now=NOW)
     assert refusal == ""
     assert claim.holder == "svc-2"
@@ -323,7 +331,7 @@ def test_an_EXPIRED_claim_never_refuses_anything():
 def test_the_claim_ceiling_matches_the_TASK_LEASE_ceiling():
     """The same question — how long may one holder hold? — should not have two answers on one
     machine."""
-    from gideon.workflows.pool import MAX_LEASE_SECS
+    from gideon.automation.workflows.pool import MAX_LEASE_SECS
 
     assert CLAIM_MAX_DURATION_SECS == MAX_LEASE_SECS
 
@@ -332,9 +340,6 @@ def test_a_claim_serializes_with_its_DERIVED_expiry():
     """A surface deciding whether a claim is stale should not have to re-derive the rule."""
     payload = Claim(trigger_id="t", holder="h", claimed_at=NOW).to_dict()
     assert payload["expires_at"] == NOW + CLAIM_MAX_DURATION_SECS
-
-
-# ── coalescing ──
 
 
 def test_due_triggers_are_COALESCED_into_one_wake():
@@ -364,38 +369,38 @@ def test_nothing_due_is_an_EMPTY_batch():
     assert coalesce_wakes({"a": NOW + 100}, NOW) == []
 
 
-# ── revalidate on fire ──
-
-
 def test_a_trigger_DISABLED_while_the_timer_slept_does_not_fire():
     """Reads as the off switch not working — the single most damaging bug an
     automation surface can
     have."""
-    ok, why = revalidate(still_enabled=False, next_fire_at_at_arm=NOW, next_fire_at_now=NOW)
+    ok, why = revalidate(
+        still_enabled=False, next_fire_at_at_arm=NOW, next_fire_at_now=NOW
+    )
     assert ok is False
     assert "disabled" in why
 
 
 def test_a_trigger_RESCHEDULED_while_the_timer_slept_does_not_fire():
     """Otherwise a user who moved a job to 9am also gets the 3am fire it was already armed for."""
-    ok, why = revalidate(still_enabled=True, next_fire_at_at_arm=NOW, next_fire_at_now=NOW + 3600)
+    ok, why = revalidate(
+        still_enabled=True, next_fire_at_at_arm=NOW, next_fire_at_now=NOW + 3600
+    )
     assert ok is False
     assert "rescheduled" in why
 
 
 def test_an_unchanged_trigger_proceeds():
-    ok, why = revalidate(still_enabled=True, next_fire_at_at_arm=NOW, next_fire_at_now=NOW)
+    ok, why = revalidate(
+        still_enabled=True, next_fire_at_at_arm=NOW, next_fire_at_now=NOW
+    )
     assert ok is True
     assert why == ""
-
-
-# ── the disposition table, checked against the tree ──
 
 
 def test_EVERY_named_surface_still_EXISTS():
     """A markdown table cannot be checked against the code. This one can: a rename during the
     migration fails here instead of leaving a row pointing at nothing."""
-    from gideon.triggers.disposition import missing_surfaces
+    from gideon.automation.triggers.disposition import missing_surfaces
 
     assert missing_surfaces() == []
 
@@ -403,18 +408,21 @@ def test_EVERY_named_surface_still_EXISTS():
 def test_the_ABSORBED_surfaces_each_name_what_they_KEEP():
     """ "Absorbed" without a keeps-list is how a rewrite loses the semantics a rename would have
     kept — `schedule.py` alone has ten behaviours §2 says are preserved verbatim."""
-    from gideon.triggers.disposition import absorbed
+    from gideon.automation.triggers.disposition import absorbed
 
     for row in absorbed():
-        assert row.keeps or row.note, f"{row.surface} says absorbed but names nothing preserved"
+        assert (
+            row.keeps or row.note
+        ), f"{row.surface} says absorbed but names nothing preserved"
 
 
 def test_the_schedule_machinery_keeps_its_LOAD_BEARING_behaviours():
     """Each of these fails silently if dropped: a rewritten jitter re-phases every schedule, a lost
-    same-minute guard double-fires, a lost mtime sync stops picking up MCP-process edits."""
-    from gideon.triggers.disposition import DISPOSITION
+    same-minute guard double-fires, a lost mtime sync stops picking up MCP-process edits.
+    """
+    from gideon.automation.triggers.disposition import DISPOSITION
 
-    row = next(r for r in DISPOSITION if r.module == "gideon.schedule")
+    row = next(r for r in DISPOSITION if r.module == "gideon.automation.schedule")
     joined = " ".join(row.keeps)
     for behaviour in ("jitter", "same-minute", "mtime", "reaper", "fcntl"):
         assert behaviour in joined
@@ -425,13 +433,13 @@ def test_KEPT_WITH_DUTY_is_distinct_from_KEPT():
     them lets a required emission read as "nothing to do here" — and then the
     bus has no publishers.
     """
-    from gideon.triggers.disposition import Verdict, gains_a_duty
+    from gideon.automation.triggers.disposition import Verdict, gains_a_duty
 
     duties = gains_a_duty()
     assert duties
     assert all(r.verdict is Verdict.KEPT_WITH_DUTY for r in duties)
     modules = {r.module for r in duties}
-    assert "gideon.fs_watch" in modules
+    assert "gideon.automation.fs_watch" in modules
 
 
 def test_autonudge_absorption_LANDED_and_points_at_the_adapter():
@@ -439,10 +447,10 @@ def test_autonudge_absorption_LANDED_and_points_at_the_adapter():
     at the surviving adapter (`triggers.nudge`, which `missing_surfaces()` must be able to
     import) and its note records the landing, not the block. The kept-semantics list is
     unchanged: those five behaviours are what the port had to preserve."""
-    from gideon.triggers.disposition import DISPOSITION
+    from gideon.automation.triggers.disposition import DISPOSITION
 
     row = next(r for r in DISPOSITION if r.surface == "autonudge.py")
-    assert row.module == "gideon.triggers.nudge"
+    assert row.module == "gideon.automation.triggers.nudge"
     assert "landed" in row.note.lower()
     assert "deleted" in row.note.lower()
     assert "delivered-only cycle counting" in row.keeps
@@ -451,7 +459,7 @@ def test_autonudge_absorption_LANDED_and_points_at_the_adapter():
 def test_the_policy_layer_is_KEPT_not_absorbed():
     """`HookManager`'s declarative allow/deny rules are policy, not automation. Absorbing them would
     turn a synchronous permission check into an async run."""
-    from gideon.triggers.disposition import DISPOSITION, Verdict
+    from gideon.automation.triggers.disposition import DISPOSITION, Verdict
 
     rows = [r for r in DISPOSITION if "HookManager" in r.surface]
     assert rows and all(r.verdict is Verdict.KEPT for r in rows)

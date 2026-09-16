@@ -15,27 +15,29 @@ import json
 
 import pytest
 
-from harness import fanout_measure as fm
-from harness.cli import main
+from checks.harness import fanout_measure as fm
+from checks.harness.cli import main
 
 
 def _arm(name: str, scores: list[float], tokens_each: int) -> fm.Arm:
-    return fm.Arm(name=name, trials=[fm.Trial(score=s, tokens=tokens_each) for s in scores])
+    return fm.Arm(
+        name=name, trials=[fm.Trial(score=s, tokens=tokens_each) for s in scores]
+    )
 
 
-def _observations(tmp_path, fanout: dict, single: dict, work="rank 8 config files by risk"):
+def _observations(
+    tmp_path, fanout: dict, single: dict, work="rank 8 config files by risk"
+):
     path = tmp_path / "obs.json"
     path.write_text(
-        json.dumps({"work": work, "arms": {"fanout": fanout, "single": single}}), encoding="utf-8"
+        json.dumps({"work": work, "arms": {"fanout": fanout, "single": single}}),
+        encoding="utf-8",
     )
     return path
 
 
 def _trials(scores: list[float], tokens_each: int) -> dict:
     return {"trials": [{"score": s, "tokens": tokens_each} for s in scores]}
-
-
-# ── the inconclusive band (the C2.3 done_when) ──
 
 
 def test_a_THREE_point_delta_reports_INCONCLUSIVE_and_NOT_a_win():
@@ -86,7 +88,8 @@ def test_a_delta_ABOVE_the_band_at_matched_tokens_IS_a_verdict():
 def test_the_SINGLE_agent_can_win_too():
     """MASLab's re-benchmark had only 2 of 9 multi-agent methods beat the single agent, and
     Agentless beat SWE-agent 32.00% vs 18.33% at ~28% of the cost. A harness that could only
-    report a fan-out win would be unable to record the literature's most common result."""
+    report a fan-out win would be unable to record the literature's most common result.
+    """
     result = fm.compare(
         "identical work",
         _arm("fanout", [50.0, 50.0, 50.0], 10_000),
@@ -106,9 +109,6 @@ def test_a_delta_SMALLER_than_the_WITHIN_ARM_spread_is_inconclusive():
     assert result.delta_points > fm.INCONCLUSIVE_BAND_POINTS
     assert result.verdict == fm.VERDICT_INCONCLUSIVE
     assert any("spread" in n for n in result.notes)
-
-
-# ── token matching ──
 
 
 def test_an_UNMATCHED_token_spend_refuses_to_report_a_winner():
@@ -155,18 +155,8 @@ def test_the_report_names_the_TOKENS_PER_POINT_of_each_arm():
         _arm("single", [60.0, 60.0, 60.0], 30_000),
     )
     payload = result.to_dict()
-    # 3 trials x 30_000 tokens = 90_000 per arm; over a mean of 50 vs 60 points.
     assert payload["arms"]["fanout"]["tokens_per_point"] == pytest.approx(1800.0)
     assert payload["arms"]["single"]["tokens_per_point"] == pytest.approx(1500.0)
-
-
-# ── the spend basis: which denominator the gate divides (#2587) ──
-#
-# "The two arms spent the same" is not one quantity. Amendment (e) matches budget by giving the
-# cheaper arm more samples, so ITS arms' trial counts are unequal on purpose and TOTALS are the
-# question. A PAIRED design runs both arms over identical work the same number of times, so its
-# totals are commensurable only while the counts match. The default stays totals: this module's own
-# experiment is the fan-out one, and a paired caller must say so.
 
 
 def test_the_DEFAULT_basis_is_TOTALS_because_this_modules_own_design_matches_BUDGET():
@@ -187,7 +177,8 @@ def test_the_DEFAULT_basis_is_TOTALS_because_this_modules_own_design_matches_BUD
 def test_the_SAME_arms_on_the_PER_TRIAL_basis_are_NOT_spend_matched():
     """The other side of the same numbers, and the whole point of naming the basis: 10,000 per
     attempt against 3,000 per attempt is 233% apart, so a PAIRED reading of those arms must refuse.
-    One pair of arms, two honest answers, because the two designs ask different questions."""
+    One pair of arms, two honest answers, because the two designs ask different questions.
+    """
     result = fm.compare(
         "identical work",
         _arm("fanout", [70.0, 70.0, 70.0], 10_000),
@@ -207,7 +198,9 @@ def test_the_per_trial_basis_leaves_an_EQUAL_pair_untouched():
     on = _arm("fanout", [70.0, 70.0, 70.0], 10_200)
     off = _arm("single", [60.0, 60.0, 60.0], 10_000)
     totals = fm.compare(fanout=on, single=off, **kwargs)
-    per_trial = fm.compare(fanout=on, single=off, spend_basis=fm.SPEND_PER_TRIAL, **kwargs)
+    per_trial = fm.compare(
+        fanout=on, single=off, spend_basis=fm.SPEND_PER_TRIAL, **kwargs
+    )
     assert totals.verdict == per_trial.verdict == fm.VERDICT_FANOUT_WINS
     assert totals.token_ratio == pytest.approx(per_trial.token_ratio)
 
@@ -278,15 +271,15 @@ def test_an_UNKNOWN_basis_is_refused_even_when_a_GATE_would_short_circuit_first(
 
 def test_an_observation_FILE_is_measured_on_the_fanout_designs_basis(tmp_path):
     """The file shape is a `fanout`/`single` pair, which IS amendment (e)'s design, so
-    `measure_file` does not offer a basis to choose — and the answer says which one it used."""
+    `measure_file` does not offer a basis to choose — and the answer says which one it used.
+    """
     assert fm.SPEND_BASES == {fm.SPEND_TOTAL, fm.SPEND_PER_TRIAL}
     path = _observations(
-        tmp_path, _trials([62.0, 63.0, 61.0], 10_000), _trials([60.0, 60.0, 61.0], 10_000)
+        tmp_path,
+        _trials([62.0, 63.0, 61.0], 10_000),
+        _trials([60.0, 60.0, 61.0], 10_000),
     )
     assert fm.measure_file(path).spend_basis == fm.SPEND_TOTAL
-
-
-# ── trial count ──
 
 
 def test_ONE_trial_per_arm_is_NOT_a_measurement():
@@ -300,7 +293,8 @@ def test_ONE_trial_per_arm_is_NOT_a_measurement():
 
 def test_the_trial_floor_is_checked_BEFORE_token_matching():
     """Order of checks is order of honesty: an unmatched two-trial comparison should report the more
-    fundamental problem, because fixing the token match would still leave it unmeasurable."""
+    fundamental problem, because fixing the token match would still leave it unmeasurable.
+    """
     result = fm.compare(
         "identical work",
         _arm("fanout", [90.0, 90.0], 40_000),
@@ -309,15 +303,14 @@ def test_the_trial_floor_is_checked_BEFORE_token_matching():
     assert result.verdict == fm.VERDICT_INSUFFICIENT_TRIALS
 
 
-# ── the observation file ──
-
-
 def test_a_file_with_no_WORK_declaration_is_refused(tmp_path):
     """The arms must be measured on IDENTICAL work, and a comparison that cannot name the work
     cannot claim they were."""
     path = tmp_path / "obs.json"
     path.write_text(
-        json.dumps({"arms": {"fanout": _trials([1.0], 1), "single": _trials([1.0], 1)}}),
+        json.dumps(
+            {"arms": {"fanout": _trials([1.0], 1), "single": _trials([1.0], 1)}}
+        ),
         encoding="utf-8",
     )
     with pytest.raises(fm.MeasurementError, match="declares no `work`"):
@@ -328,7 +321,8 @@ def test_a_MISSING_ARM_is_an_error_not_an_empty_arm(tmp_path):
     """One arm plus a default is a single measurement wearing a comparison's clothes."""
     path = tmp_path / "obs.json"
     path.write_text(
-        json.dumps({"work": "w", "arms": {"fanout": _trials([1.0], 1)}}), encoding="utf-8"
+        json.dumps({"work": "w", "arms": {"fanout": _trials([1.0], 1)}}),
+        encoding="utf-8",
     )
     with pytest.raises(fm.MeasurementError, match="missing the 'single' arm"):
         fm.load_observations(path)
@@ -361,14 +355,13 @@ def test_a_missing_file_is_a_typed_error(tmp_path):
 
 def test_a_well_formed_file_ROUND_TRIPS_to_a_verdict(tmp_path):
     path = _observations(
-        tmp_path, _trials([62.0, 63.0, 61.0], 10_000), _trials([60.0, 60.0, 61.0], 10_000)
+        tmp_path,
+        _trials([62.0, 63.0, 61.0], 10_000),
+        _trials([60.0, 60.0, 61.0], 10_000),
     )
     result = fm.measure_file(path)
     assert result.work == "rank 8 config files by risk"
     assert result.verdict == fm.VERDICT_INCONCLUSIVE
-
-
-# ── the CLI surface ──
 
 
 def test_the_CLI_exits_ZERO_on_an_INCONCLUSIVE_verdict(tmp_path, capsys):
@@ -376,7 +369,9 @@ def test_the_CLI_exits_ZERO_on_an_INCONCLUSIVE_verdict(tmp_path, capsys):
     the amendment's risk register says the failure mode to guard is a harness that only reports
     wins."""
     path = _observations(
-        tmp_path, _trials([63.0, 63.0, 63.0], 10_000), _trials([60.0, 60.0, 60.0], 10_000)
+        tmp_path,
+        _trials([63.0, 63.0, 63.0], 10_000),
+        _trials([60.0, 60.0, 60.0], 10_000),
     )
     assert main(["fanout-measure", str(path)]) == 0
     out = capsys.readouterr().out
@@ -393,7 +388,9 @@ def test_the_CLI_exits_TWO_on_a_MALFORMED_observation_file(tmp_path):
 
 def test_the_CLI_can_print_the_MACHINE_READABLE_dict(tmp_path, capsys):
     path = _observations(
-        tmp_path, _trials([70.0, 70.0, 70.0], 10_000), _trials([60.0, 60.0, 60.0], 10_000)
+        tmp_path,
+        _trials([70.0, 70.0, 70.0], 10_000),
+        _trials([60.0, 60.0, 60.0], 10_000),
     )
     assert main(["fanout-measure", str(path), "--json"]) == 0
     out = capsys.readouterr().out

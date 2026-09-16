@@ -16,19 +16,16 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.artifacts import registry
-from gideon.artifacts.handlers import register_artifact_routes
-from gideon.artifacts.models import MAX_VERSIONS, slugify
-from gideon.artifacts.native import NativeArtifactProvider
-from gideon.artifacts.provider import ArtifactProvider
+from gideon.workspace.artifacts import registry
+from gideon.workspace.artifacts.handlers import register_artifact_routes
+from gideon.workspace.artifacts.models import MAX_VERSIONS, slugify
+from gideon.workspace.artifacts.native import NativeArtifactProvider
+from gideon.workspace.artifacts.provider import ArtifactProvider
 
 
 @pytest.fixture
 def provider(tmp_path) -> NativeArtifactProvider:
     return NativeArtifactProvider(root=tmp_path / "artifacts")
-
-
-# ── slugify ──
 
 
 class TestSlugify:
@@ -47,9 +44,6 @@ class TestSlugify:
         assert len(slugify("a" * 200)) <= 80
 
 
-# ── native provider ──
-
-
 class TestNativeProvider:
     def test_create_and_get(self, provider) -> None:
         a = provider.create(
@@ -60,17 +54,14 @@ class TestNativeProvider:
         assert a.events[0].type == "created"
         g = provider.get("my-chart")
         assert g.content == "<div>v1</div>"
-        assert g.live_dirty is False  # current matches the v1 snapshot
+        assert g.live_dirty is False
 
     def test_project_id_round_trips_and_filters(self, provider) -> None:
-        # Projects native entity: an artifact can be tied to a containing project
-        # and the list filters by it (so a project's outputs surface together).
         provider.create(name="Bound", content="x", project_id="p-abc123")
         provider.create(name="Free", content="y")
         assert provider.get("bound").project_id == "p-abc123"
         scoped = provider.list(project_id="p-abc123")
         assert [a.slug for a in scoped] == ["bound"]
-        # persisted to meta.json (survives reload), not a transient field
         reread = provider.get("bound")
         assert reread.project_id == "p-abc123"
 
@@ -79,16 +70,16 @@ class TestNativeProvider:
         u = provider.update("c", content="v2", snapshot=False, actor="user")
         assert u.version == 1
         assert u.content == "v2"
-        assert u.live_dirty is True  # live ahead of latest snapshot
+        assert u.live_dirty is True
 
     def test_snapshot_bumps_version(self, provider) -> None:
         provider.create(name="C", content="v1")
         provider.update("c", content="v2", snapshot=False)
-        s = provider.update("c", snapshot=True, actor="agent")  # captures live v2
+        s = provider.update("c", snapshot=True, actor="agent")
         assert s.version == 2
         assert s.content == "v2"
         assert s.live_dirty is False
-        assert s.events[-1].type == "iterated"  # agent → iterated
+        assert s.events[-1].type == "iterated"
 
     def test_user_snapshot_is_edited(self, provider) -> None:
         provider.create(name="C", content="v1")
@@ -144,7 +135,6 @@ class TestNativeProvider:
         provider.create(name="C", content="v1")
         with pytest.raises(ValueError):
             provider.update("c", content="v2", snapshot=True, event_type="bogus")
-        # No orphaned version: still at v1.
         assert provider.list_versions("c") == [1]
 
     def test_version_prune_at_cap(self, provider) -> None:
@@ -153,7 +143,6 @@ class TestNativeProvider:
             provider.update("c", content=f"v{i}", snapshot=True)
         nums = provider.list_versions("c")
         assert len(nums) == MAX_VERSIONS
-        # Oldest pruned; the newest survive.
         assert nums[-1] == provider.get("c").version
 
     def test_meta_json_omits_content_and_live_dirty(self, provider, tmp_path) -> None:
@@ -165,43 +154,47 @@ class TestNativeProvider:
         assert "live_dirty" not in meta
 
 
-# ── live-pointer ──
-
-
 class TestLivePointer:
     def test_file_backed_reads_live_disk(self, provider, tmp_path) -> None:
         f = tmp_path / "doc.md"
         f.write_text("# original")
-        provider.create(name="Doc", content="# original", kind="markdown", source_path=str(f))
-        # External edit to the workspace file.
+        provider.create(
+            name="Doc", content="# original", kind="markdown", source_path=str(f)
+        )
         f.write_text("# edited externally")
         g = provider.get(provider.list()[0].slug)
-        assert g.content == "# edited externally"  # live read, not snapshot
+        assert g.content == "# edited externally"
         assert g.live_dirty is True
 
     def test_update_writes_back_to_source(self, provider, tmp_path) -> None:
         f = tmp_path / "doc.md"
         f.write_text("orig")
-        a = provider.create(name="Doc", content="orig", kind="markdown", source_path=str(f))
+        a = provider.create(
+            name="Doc", content="orig", kind="markdown", source_path=str(f)
+        )
         provider.update(a.slug, content="from-artifact", snapshot=False)
         assert f.read_text() == "from-artifact"
 
     def test_snapshot_without_content_captures_live(self, provider, tmp_path) -> None:
         f = tmp_path / "doc.md"
         f.write_text("v1")
-        a = provider.create(name="Doc", content="v1", kind="markdown", source_path=str(f))
+        a = provider.create(
+            name="Doc", content="v1", kind="markdown", source_path=str(f)
+        )
         f.write_text("v2-external")
-        s = provider.update(a.slug, snapshot=True)  # no content → capture live
+        s = provider.update(a.slug, snapshot=True)
         assert s.content == "v2-external"
         assert provider.get(a.slug, version=s.version).content == "v2-external"
 
     def test_missing_source_falls_back_to_current(self, provider, tmp_path) -> None:
         f = tmp_path / "doc.md"
         f.write_text("v1")
-        a = provider.create(name="Doc", content="v1", kind="markdown", source_path=str(f))
-        f.unlink()  # source disappears
+        a = provider.create(
+            name="Doc", content="v1", kind="markdown", source_path=str(f)
+        )
+        f.unlink()
         g = provider.get(a.slug)
-        assert g.content == "v1"  # falls back to current.html
+        assert g.content == "v1"
 
     def test_find_by_source_path_dedup(self, provider, tmp_path) -> None:
         f = tmp_path / "doc.md"
@@ -217,37 +210,27 @@ class TestLivePointer:
             source_path=str(Path.home() / ".aws" / "credentials"),
         )
         g = provider.get(a.slug)
-        # Live read refused → falls back to current.html placeholder, never the real file.
         assert g.content == "placeholder"
 
     def test_sensitive_source_path_refused_on_write(self, provider, tmp_path) -> None:
         sensitive = str(Path.home() / ".ssh" / "id_rsa")
         a = provider.create(name="Key", content="placeholder", source_path=sensitive)
-        # update must not write to the sensitive path (it returns, degraded).
         provider.update(a.slug, content="malicious", snapshot=False)
-        # The sensitive file is untouched (we can't assert its content, but the
-        # write path returns False; assert current.html still updated locally).
         assert provider.get(a.slug, version=1).content == "placeholder"
-
-
-# ── record_impression ──
 
 
 class TestImpression:
     def test_idempotent_per_session(self, provider) -> None:
-        a = provider.create(name="C", content="x")  # 'created' has no session
+        a = provider.create(name="C", content="x")
         _, app1 = provider.record_impression(a.slug, session_id="sess-A")
         assert app1 is True
         _, app2 = provider.record_impression(a.slug, session_id="sess-A")
-        assert app2 is False  # same session suppressed
+        assert app2 is False
 
     def test_suppressed_when_session_has_cud_event(self, provider) -> None:
-        a = provider.create(name="C", content="x", session_id="sess-B")  # created by sess-B
+        a = provider.create(name="C", content="x", session_id="sess-B")
         _, appended = provider.record_impression(a.slug, session_id="sess-B")
-        assert appended is False  # session already has a lifecycle event
-
-
-# ── registry ──
+        assert appended is False
 
 
 class TestRegistry:
@@ -295,9 +278,6 @@ class TestRegistry:
             registry.unregister_provider("ro")
 
 
-# ── REST handlers ──
-
-
 async def _client(provider) -> TestClient:
     app = web.Application()
     state = MagicMock()
@@ -322,7 +302,8 @@ async def test_rest_create_and_get(patched_native) -> None:
     client = await _client(patched_native)
     try:
         resp = await client.post(
-            "/api/artifacts", json={"name": "Chart", "content": "<div>hi</div>", "kind": "widget"}
+            "/api/artifacts",
+            json={"name": "Chart", "content": "<div>hi</div>", "kind": "widget"},
         )
         assert resp.status == 201
         body = await resp.json()
@@ -341,7 +322,11 @@ async def test_rest_redacts_content_and_name(patched_native) -> None:
         secret = "AKIAIOSFODNN7EXAMPLE"
         resp = await client.post(
             "/api/artifacts",
-            json={"name": f"key {secret}", "content": f"<div>{secret}</div>", "kind": "html"},
+            json={
+                "name": f"key {secret}",
+                "content": f"<div>{secret}</div>",
+                "kind": "html",
+            },
         )
         body = await resp.json()
         assert secret not in body["name"]
@@ -355,8 +340,13 @@ async def test_rest_redacts_content_and_name(patched_native) -> None:
 async def test_rest_restricted_session_403(patched_native) -> None:
     client = await _client(patched_native)
     try:
-        with patch("gideon.artifacts.handlers._is_restricted_session", return_value=True):
-            resp = await client.post("/api/artifacts", json={"name": "X", "content": "y"})
+        with patch(
+            "gideon.workspace.artifacts.handlers._is_restricted_session",
+            return_value=True,
+        ):
+            resp = await client.post(
+                "/api/artifacts", json={"name": "X", "content": "y"}
+            )
             assert resp.status == 403
     finally:
         await client.close()
@@ -370,14 +360,23 @@ async def test_rest_dedup_by_source_path(patched_native, tmp_path) -> None:
     try:
         r1 = await client.post(
             "/api/artifacts",
-            json={"name": "Doc", "content": "orig", "kind": "markdown", "source_path": str(f)},
+            json={
+                "name": "Doc",
+                "content": "orig",
+                "kind": "markdown",
+                "source_path": str(f),
+            },
         )
         assert r1.status == 201
         slug1 = (await r1.json())["slug"]
-        # Re-save same source_path → bump (200), same slug, no duplicate.
         r2 = await client.post(
             "/api/artifacts",
-            json={"name": "Doc", "content": "updated", "kind": "markdown", "source_path": str(f)},
+            json={
+                "name": "Doc",
+                "content": "updated",
+                "kind": "markdown",
+                "source_path": str(f),
+            },
         )
         assert r2.status == 200
         assert (await r2.json())["slug"] == slug1
@@ -391,7 +390,9 @@ async def test_rest_dedup_by_source_path(patched_native, tmp_path) -> None:
 async def test_rest_slug_collision_409(patched_native) -> None:
     client = await _client(patched_native)
     try:
-        await client.post("/api/artifacts", json={"name": "A", "content": "x", "slug": "taken"})
+        await client.post(
+            "/api/artifacts", json={"name": "A", "content": "x", "slug": "taken"}
+        )
         resp = await client.post(
             "/api/artifacts", json={"name": "B", "content": "y", "slug": "taken"}
         )
@@ -408,17 +409,25 @@ async def test_rest_create_malformed_slug_400_not_500(patched_native) -> None:
     try:
         resp = await client.post(
             "/api/artifacts",
-            json={"name": "probe", "slug": "UPPER Bad Slug!!", "kind": "markdown", "content": "x"},
+            json={
+                "name": "probe",
+                "slug": "UPPER Bad Slug!!",
+                "kind": "markdown",
+                "content": "x",
+            },
         )
         assert resp.status == 400
         assert (await resp.json())["error"] == "invalid slug"
-        # nothing persisted
         listing = await (await client.get("/api/artifacts")).json()
         assert listing["artifacts"] == []
-        # a valid slug still works
         ok = await client.post(
             "/api/artifacts",
-            json={"name": "probe", "slug": "good-slug", "kind": "markdown", "content": "x"},
+            json={
+                "name": "probe",
+                "slug": "good-slug",
+                "kind": "markdown",
+                "content": "x",
+            },
         )
         assert ok.status == 201
         assert (await ok.json())["slug"] == "good-slug"
@@ -430,7 +439,6 @@ async def test_rest_create_malformed_slug_400_not_500(patched_native) -> None:
 async def test_rest_events_drops_dashboard_ui(patched_native) -> None:
     client = await _client(patched_native)
     try:
-        # create carries the browser's dashboard:ui marker as session
         resp = await client.post(
             "/api/artifacts",
             json={"name": "C", "content": "x"},

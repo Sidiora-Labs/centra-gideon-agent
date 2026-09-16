@@ -1,8 +1,8 @@
 """Import-lint: an installed APP may only reach into core through ``gideon.sdk.*``.
 
 The core/app boundary (workspace-core-app-split §3) is a PUBLISHED SDK: apps import the
-stable ``gideon.sdk`` facade, never deep core internals (``gideon.dashboard``,
-``gideon.agents.native``, ``gideon.tool_providers.projection``, …). This test
+stable ``gideon.sdk`` facade, never deep core internals (``gideon.interfaces.dashboard``,
+``gideon.engine.agents.native``, ``gideon.integrations.tool_providers.projection``, …). This test
 statically scans every ``apps/<name>/*.py`` and fails on any ``import gideon.X`` /
 ``from gideon.X import`` where ``X`` is not ``sdk`` (or ``sdk.*``).
 
@@ -23,18 +23,16 @@ from pathlib import Path
 
 import pytest
 
-_REPO_ROOT = Path(__file__).resolve().parents[1]
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
-#: Apps that ship INSIDE this repo. Always present in any clone, which is what keeps this rail
-#: from being a no-op — see the skip note below.
-_BUNDLED_APPS = _REPO_ROOT / "src" / "gideon" / "apps" / "native"
+_BUNDLED_APPS = _REPO_ROOT / "runtime" / "gideon" / "extensions" / "apps" / "native"
 
 
 def _app_roots() -> list[Path]:
     """Every directory holding app source this lint should scan.
 
     🔴 THIS RAIL HAD NEVER RUN, ANYWHERE. It resolved its target as
-    ``Path(__file__).parents[2] / "apps"`` and module-skipped when that was absent — and it was
+    ``Path(__file__).parents[3] / "apps"`` and module-skipped when that was absent — and it was
     always absent (issue 1777):
 
     * ``parents[2]`` is the parent of the *checkout*, not of the workspace, so from a git
@@ -82,9 +80,13 @@ def _app_source_files() -> list[tuple[Path, Path]]:
     out: list[tuple[Path, Path]] = []
     for root in _app_roots():
         for p in sorted(root.rglob("*.py")):
-            if "__pycache__" in p.parts or ".venv" in p.parts or "node_modules" in p.parts:
+            if (
+                "__pycache__" in p.parts
+                or ".venv" in p.parts
+                or "node_modules" in p.parts
+            ):
                 continue
-            if p.name.startswith("test_"):  # test files may import core helpers
+            if p.name.startswith("test_"):
                 continue
             out.append((root, p))
     return out
@@ -99,7 +101,6 @@ def _offending_imports(path: Path) -> list[str]:
         if not mod or not mod.startswith("gideon"):
             return
         parts = mod.split(".")
-        # allow `gideon.sdk` and `gideon.sdk.<anything>`
         if len(parts) >= 2 and parts[1] == "sdk":
             return
         bad.append(mod)
@@ -109,7 +110,6 @@ def _offending_imports(path: Path) -> list[str]:
             for alias in node.names:
                 _check(alias.name)
         elif isinstance(node, ast.ImportFrom):
-            # ignore relative imports (node.level > 0 → app-local siblings)
             if node.level == 0:
                 _check(node.module)
     return bad

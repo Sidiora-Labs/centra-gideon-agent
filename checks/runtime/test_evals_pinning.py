@@ -26,14 +26,18 @@ import types
 
 import pytest
 
-from gideon.evals import pinning, provenance
-from gideon.evals import runner as runner_mod
-from gideon.evals import scenarios as scenario_lib
-from gideon.evals import store
-from gideon.evals.child import render_result_line, resolve_scenario, seed_fixture_home
-from gideon.evals.matrix import PASSED, MatrixSpec
-from gideon.evals.runner import run_matrix
-from gideon.evals.scenarios import ScenarioLibraryError
+from gideon.assurance.evals import pinning, provenance
+from gideon.assurance.evals import runner as runner_mod
+from gideon.assurance.evals import scenarios as scenario_lib
+from gideon.assurance.evals import store
+from gideon.assurance.evals.child import (
+    render_result_line,
+    resolve_scenario,
+    seed_fixture_home,
+)
+from gideon.assurance.evals.matrix import PASSED, MatrixSpec
+from gideon.assurance.evals.runner import run_matrix
+from gideon.assurance.evals.scenarios import ScenarioLibraryError
 
 SCENARIO = {
     "name": "s",
@@ -61,7 +65,9 @@ def _pinnable(home, *, model="Acme:m1"):
     (home / "config.json").write_text(
         json.dumps({"providers": [{"name": "Acme"}]}), encoding="utf-8"
     )
-    (home / "active_models.json").write_text(json.dumps({"chat": [model]}), encoding="utf-8")
+    (home / "active_models.json").write_text(
+        json.dumps({"chat": [model]}), encoding="utf-8"
+    )
     _write_scenario(home, "s", SCENARIO)
     return home
 
@@ -73,18 +79,17 @@ def _fake_spawn(monkeypatch, *, score=1.0):
     def _run(args, *, env, timeout, capture_output, text):
         calls.append({"args": list(args), "env": dict(env)})
         payload = {"ok": True, "passed": True, "score": score}
-        return types.SimpleNamespace(returncode=0, stdout=render_result_line(payload), stderr="")
+        return types.SimpleNamespace(
+            returncode=0, stdout=render_result_line(payload), stderr=""
+        )
 
     monkeypatch.setattr(runner_mod.subprocess, "run", _run)
     return calls
 
 
-# ── the packaged library actually moved (clean break, no old path) ─────────────
-
-
 def test_old_packaged_scenarios_dir_is_gone():
     """ES-2 is a clean break: the pre-ES-2 read path must not exist to fall back to."""
-    import gideon.eval as eval_pkg
+    import gideon.assurance.eval as eval_pkg
 
     old = scenario_lib.Path(eval_pkg.__file__).resolve().parent / "scenarios"
     assert not old.exists()
@@ -96,11 +101,7 @@ def test_shipped_library_declares_version_and_fixture_home():
     for path in shipped:
         data = json.loads(path.read_text(encoding="utf-8"))
         assert int(data["version"]) >= 1
-        # A fixture that doesn't ship would make the scenario unrunnable.
         assert scenario_lib.resolve_fixture_home(path) == data["fixture_home"]
-
-
-# ── install_library: an idempotent backfill keyed on the data ─────────────────
 
 
 def test_install_backfills_shipped_scenarios_into_the_home(home):
@@ -161,21 +162,18 @@ def test_local_only_scenario_is_kept_and_marked_local(home):
 def test_manifest_lives_beside_the_scenarios_dir_not_inside_it(home):
     scenario_lib.install_library()
     assert scenario_lib.manifest_path() == home / "evals" / "scenario_library.json"
-    # Every reader of the dir globs scenario files; a manifest among them would parse
-    # as a broken scenario.
     assert scenario_lib.manifest_path().name not in {
         p.name for p in store.scenarios_dir().iterdir()
     }
-
-
-# ── scenario identity ────────────────────────────────────────────────────────
 
 
 def test_scenario_sha256_ignores_formatting_but_not_content(home):
     path = _write_scenario(home, "s", SCENARIO)
     baseline = scenario_lib.scenario_sha256(path)
 
-    path.write_text(json.dumps(SCENARIO, indent=8, sort_keys=True) + "\n\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(SCENARIO, indent=8, sort_keys=True) + "\n\n", encoding="utf-8"
+    )
     assert scenario_lib.scenario_sha256(path) == baseline
 
     changed = json.loads(json.dumps(SCENARIO))
@@ -201,9 +199,6 @@ def test_unknown_fixture_home_is_refused_before_a_run(home):
     with pytest.raises(ScenarioLibraryError) as excinfo:
         scenario_lib.resolve_fixture_home(path)
     assert "no-such-fixture" in str(excinfo.value)
-
-
-# ── the pin's four parts ─────────────────────────────────────────────────────
 
 
 def test_compute_pin_fills_all_four_parts(home):
@@ -251,9 +246,6 @@ def test_cell_override_repins_the_model_but_not_the_scenario(home):
     assert pin.with_model_override(None) is pin
 
 
-# ── the REAL run path persists the pin (not merely defines it) ────────────────
-
-
 def test_run_matrix_persists_the_pin_and_the_pinned_ledger_row(home, monkeypatch):
     _pinnable(home)
     calls = _fake_spawn(monkeypatch)
@@ -278,14 +270,17 @@ def test_run_matrix_persists_the_pin_and_the_pinned_ledger_row(home, monkeypatch
     assert calls, "the run must have reached the child-spawn boundary"
 
 
-def test_rebinding_the_model_yields_a_new_fingerprint_for_the_same_scenario(home, monkeypatch):
+def test_rebinding_the_model_yields_a_new_fingerprint_for_the_same_scenario(
+    home, monkeypatch
+):
     """The amendment's own acceptance sentence, driven end to end."""
     _pinnable(home, model="Acme:m1")
     _fake_spawn(monkeypatch)
     run_matrix(MatrixSpec(subject="s", trial_count=1), matrix_id="m-1")
 
-    # The user rebinds the chat model in Settings → Models.
-    (home / "active_models.json").write_text(json.dumps({"chat": ["Acme:m2"]}), encoding="utf-8")
+    (home / "active_models.json").write_text(
+        json.dumps({"chat": ["Acme:m2"]}), encoding="utf-8"
+    )
     run_matrix(MatrixSpec(subject="s", trial_count=1), matrix_id="m-2")
 
     rows = store.read_results()
@@ -295,7 +290,9 @@ def test_rebinding_the_model_yields_a_new_fingerprint_for_the_same_scenario(home
 
     diff = pinning.pin_diff()
     assert len(diff) == 1
-    assert sorted(diff[0]["fingerprints"]) == sorted({rows[0]["model_fp"], rows[1]["model_fp"]})
+    assert sorted(diff[0]["fingerprints"]) == sorted(
+        {rows[0]["model_fp"], rows[1]["model_fp"]}
+    )
 
 
 def test_editing_the_scenario_yields_a_new_scenario_hash(home, monkeypatch):
@@ -347,9 +344,6 @@ def test_run_refuses_an_unresolvable_scenario(home, monkeypatch):
     assert calls == []
 
 
-# ── the named seeded fixture home ────────────────────────────────────────────
-
-
 def test_cell_gets_its_own_home_in_the_child_env_only(home, monkeypatch):
     _pinnable(home)
     parent_home_before = os.environ["GIDEON_HOME"]
@@ -360,17 +354,19 @@ def test_cell_gets_its_own_home_in_the_child_env_only(home, monkeypatch):
     assert child_env["GIDEON_HOME"] != parent_home_before
     assert child_env["GIDEON_HOME"].endswith("/home")
     assert child_env["GIDEON_WORKSPACE"].endswith("/workspace")
-    # §1.3: the parent's env is untouched by the cell's overrides.
     assert os.environ["GIDEON_HOME"] == parent_home_before
 
     descriptor = json.loads(
-        (store.matrix_dir("m-1") / "cell-0000" / "descriptor.json").read_text(encoding="utf-8")
+        (store.matrix_dir("m-1") / "cell-0000" / "descriptor.json").read_text(
+            encoding="utf-8"
+        )
     )
     assert descriptor["fixture_home"] == "empty"
-    # The parent resolves the scenario; the child must not re-resolve a bare name
-    # against its throwaway home.
     assert descriptor["scenario_path"].endswith("/evals/scenarios/s.json")
-    assert descriptor["pin"]["scenario_sha256"] == pinning.matrix_pin("m-1").scenario_sha256
+    assert (
+        descriptor["pin"]["scenario_sha256"]
+        == pinning.matrix_pin("m-1").scenario_sha256
+    )
 
 
 def test_child_seeds_the_named_fixture_into_its_home(tmp_path, monkeypatch):
@@ -393,9 +389,6 @@ def test_child_loads_exactly_the_parent_resolved_file(home):
     assert scenario.name == "s"
 
 
-# ── the eval CLI reads the installed library, not the packaged one ────────────
-
-
 class _Stop(RuntimeError):
     """Sentinel: stop ``_run_eval`` the moment it has resolved a scenario file."""
 
@@ -409,7 +402,7 @@ def test_eval_cli_resolves_scenarios_from_the_installed_library(home, monkeypatc
     """
     import asyncio
 
-    from gideon import cli_commands
+    from gideon.interfaces.cli import commands as cli_commands
 
     _write_scenario(home, "mine", {**SCENARIO, "name": "mine"})
     resolved: list = []
@@ -425,24 +418,22 @@ def test_eval_cli_resolves_scenarios_from_the_installed_library(home, monkeypatc
     assert resolved == [store.scenarios_dir() / "mine.json"]
 
 
-# ── the pin-diff query ───────────────────────────────────────────────────────
-
-
 def test_pin_diff_groups_fingerprints_under_one_scenario_hash():
     rows = [
         {"scenario_id": "s", "scenario_sha256": "a" * 64, "model_fp": "fp1"},
         {"scenario_id": "s", "scenario_sha256": "a" * 64, "model_fp": "fp2"},
         {"scenario_id": "s", "scenario_sha256": "a" * 64, "model_fp": "fp1"},
         {"scenario_id": "t", "scenario_sha256": "b" * 64, "model_fp": "fp1"},
-        {"scenario_id": "", "scenario_sha256": "", "model_fp": "fp9"},  # pre-pin junk row
+        {
+            "scenario_id": "",
+            "scenario_sha256": "",
+            "model_fp": "fp9",
+        },
     ]
     diff = pinning.pin_diff(rows)
     assert [e["scenario_sha256"] for e in diff] == ["a" * 64, "b" * 64]
     assert diff[0]["fingerprints"] == ["fp1", "fp2"]
     assert diff[1]["fingerprints"] == ["fp1"]
-
-
-# ══ #2561 — the pin names what the CELLS could reach, as a SECOND fact ════════
 
 
 def test_the_cells_reach_is_a_separate_fact_from_the_homes_binding(home):
@@ -460,14 +451,11 @@ def test_the_cells_reach_is_a_separate_fact_from_the_homes_binding(home):
     bound = home_pin.with_cell_models({"chat": "LocalOllama:gemma4:12b"})
     unbound = home_pin.with_cell_models({})
 
-    # The home fact is UNMOVED by either — one fact, one field.
     assert bound.model_fp() == unbound.model_fp() == home_pin.model_fp() != ""
-    # The cells' fact separates them.
     assert bound.cell_model_fp() != unbound.cell_model_fp()
     assert unbound.cell_model_fp() == provenance.NO_MODEL
     assert bound.cell_model_fp() not in (provenance.NO_MODEL, provenance.UNRECORDED)
     assert len(bound.cell_model_fp()) == pinning.MODEL_FP_LEN
-    # And a pin nobody declared it for is UNRECORDED — never "the cells reached nothing".
     assert home_pin.cell_model_fingerprint is None
     assert home_pin.cell_model_fp() == provenance.UNRECORDED
     assert provenance.state_of(home_pin.to_dict(), "cell_model_fingerprint") == (
@@ -476,12 +464,16 @@ def test_the_cells_reach_is_a_separate_fact_from_the_homes_binding(home):
     assert provenance.state_of(unbound.to_dict(), "cell_model_fingerprint") == (
         provenance.RECORDED_NONE
     )
-    assert provenance.state_of(bound.to_dict(), "cell_model_fingerprint") == provenance.RECORDED
+    assert (
+        provenance.state_of(bound.to_dict(), "cell_model_fingerprint")
+        == provenance.RECORDED
+    )
 
 
 def test_a_legacy_pin_json_reads_as_UNRECORDED_and_not_as_no_model(home):
     """`or {}` in the reader would have turned every pin written before #2561 into "the cells
-    reached nothing" — inventing a measurement out of an absence, i.e. the defect in the reader."""
+    reached nothing" — inventing a measurement out of an absence, i.e. the defect in the reader.
+    """
     _pinnable(home)
     legacy = pinning.compute_pin("s").to_dict()
     del legacy["cell_model_fingerprint"]
@@ -489,7 +481,6 @@ def test_a_legacy_pin_json_reads_as_UNRECORDED_and_not_as_no_model(home):
     restored = pinning.RunPin.from_dict(legacy)
     assert restored.cell_model_fingerprint is None
     assert restored.cell_model_fp() == provenance.UNRECORDED
-    # A pin that RECORDED "no model" round-trips as `{}`, and the two stay apart.
     recorded_none = pinning.RunPin.from_dict(
         pinning.compute_pin("s").with_cell_models({}).to_dict()
     )
@@ -506,24 +497,30 @@ def test_the_model_axis_override_does_not_drop_the_cells_reach(home):
     overridden = pin.with_model_override("Acme:m2")
     assert overridden.cell_model_fingerprint == {"chat": "LocalOllama:gemma4:12b"}
     assert overridden.cell_model_fp() == pin.cell_model_fp()
-    # The home fingerprint DID move, which is what the override is for.
     assert overridden.model_fingerprint == {"chat": "Acme:m2"}
 
 
-def test_the_ledger_row_can_tell_an_offline_run_from_a_real_model_run(home, monkeypatch):
+def test_the_ledger_row_can_tell_an_offline_run_from_a_real_model_run(
+    home, monkeypatch
+):
     """#2561's second consequence, driven through the REAL run path: "someone reading a
     `results.tsv` row cannot tell an offline run from a real-model run. `model_fp` is identical for
     both." Now one column can, and the two rows still agree on the home digest.
     """
-    from gideon.evals import cell_provider
+    from gideon.assurance.evals import cell_provider
 
     _pinnable(home)
     _fake_spawn(monkeypatch)
     binding = cell_provider.CellProviderBinding(
-        use_case="chat", provider_name="LocalOllama", model="gemma4:12b", base_url="http://x/v1"
+        use_case="chat",
+        provider_name="LocalOllama",
+        model="gemma4:12b",
+        base_url="http://x/v1",
     )
     run_matrix(
-        MatrixSpec(subject="s", trial_count=1), matrix_id="m-bound", provider_binding=binding
+        MatrixSpec(subject="s", trial_count=1),
+        matrix_id="m-bound",
+        provider_binding=binding,
     )
     run_matrix(MatrixSpec(subject="s", trial_count=1), matrix_id="m-unbound")
 
@@ -533,12 +530,9 @@ def test_the_ledger_row_can_tell_an_offline_run_from_a_real_model_run(home, monk
     ), "the HOME fact is one fact and must not fork"
     assert rows["m-bound"]["cell_model_fp"] != rows["m-unbound"]["cell_model_fp"]
     assert rows["m-unbound"]["cell_model_fp"] == provenance.NO_MODEL
-    # A digest, and never an empty cell — an empty one already means "the column did not exist".
     assert len(rows["m-bound"]["cell_model_fp"]) == pinning.MODEL_FP_LEN
     assert rows["m-bound"]["cell_model_fp"] != ""
 
-    # The bound pin names ONE use case, where the home's names three-or-however-many. That is the
-    # issue's first consequence: "the pin can name three use cases when the binding grants one."
     bound_pin = pinning.matrix_pin("m-bound")
     assert bound_pin is not None
     assert set(bound_pin.cell_model_fingerprint or {}) == {"chat"}
@@ -547,7 +541,8 @@ def test_the_ledger_row_can_tell_an_offline_run_from_a_real_model_run(home, monk
 
 def test_the_column_is_APPENDED_so_an_older_row_stays_parseable(home):
     """The ledger is append-only. An old row has fewer cells, `read_results`' `zip` truncation
-    leaves the key absent, and `state_of` reads that as UNRECORDED without a special case."""
+    leaves the key absent, and `state_of` reads that as UNRECORDED without a special case.
+    """
     assert store.RESULTS_COLUMNS[-1] == "cell_model_fp"
     assert store.RESULTS_COLUMNS[:-1] == (
         "study_id",
@@ -568,7 +563,10 @@ def test_the_column_is_APPENDED_so_an_older_row_stays_parseable(home):
     path.parent.mkdir(parents=True, exist_ok=True)
     short = "\t".join(store.RESULTS_COLUMNS[:-1])
     path.write_text(
-        "\t".join(store.RESULTS_COLUMNS) + "\n" + short.replace("study_id", "old-1", 1) + "\n",
+        "\t".join(store.RESULTS_COLUMNS)
+        + "\n"
+        + short.replace("study_id", "old-1", 1)
+        + "\n",
         encoding="utf-8",
     )
     row = store.read_results()[0]

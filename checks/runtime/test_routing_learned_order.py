@@ -12,14 +12,12 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from gideon.routing import learned, stats
-from gideon.routing.learned import learned_order
+from gideon.engine.routing import learned, stats
+from gideon.engine.routing.learned import learned_order
 
 _UC = "chat"
 _QC = "short_qa"
 
-#: Two local refs (same provider, different models) for the tests where the cloud margin must not
-#: interfere, plus one cloud ref for the margin tests.
 _LOCAL_A = "ollama:llama3.1-8b"
 _LOCAL_B = "ollama:qwen2.5-7b"
 _LOCAL_C = "ollama:phi4-14b"
@@ -27,7 +25,9 @@ _CLOUD = "openai:gpt-4o"
 _LOCAL_KEYS = {"ollama"}
 
 
-def _row(n: int, success: Any, *, feedback: float = 0.0, feedback_n: int = 0) -> dict[str, Any]:
+def _row(
+    n: int, success: Any, *, feedback: float = 0.0, feedback_n: int = 0
+) -> dict[str, Any]:
     """One fold row in ``stats.fold_record``'s shape."""
     return {
         "n": n,
@@ -61,11 +61,6 @@ def _call(refs: list[str], fold: Any, **over: Any) -> list[str]:
     return learned_order(refs, **kwargs)
 
 
-# --------------------------------------------------------------------------------------------
-# Quality ordering
-# --------------------------------------------------------------------------------------------
-
-
 def test_clear_winner_is_promoted_and_near_equals_stay_put() -> None:
     """A ref that beats the field by more than ``hysteresis`` moves up; the two near-equals below
     it keep their incoming order, because a 0.02 score difference is noise."""
@@ -88,7 +83,7 @@ def test_sub_threshold_ref_keeps_its_slot_and_cannot_leapfrog() -> None:
     fold = _fold(
         {
             _LOCAL_A: _row(50, 0.60),
-            _LOCAL_B: _row(1, 1.0),  # one lucky call
+            _LOCAL_B: _row(1, 1.0),
             _LOCAL_C: _row(50, 0.85),
         }
     )
@@ -122,11 +117,6 @@ def test_one_opinion_alone_reorders_nothing() -> None:
     assert _call(refs, fold) == refs
 
 
-# --------------------------------------------------------------------------------------------
-# Hysteresis: cost may reorder INSIDE the band and nowhere else
-# --------------------------------------------------------------------------------------------
-
-
 def test_cost_reorders_inside_the_band() -> None:
     """0.90 vs 0.88 is inside a 0.05 band, so the cheaper of the two near-equals goes first."""
     refs = [_LOCAL_A, _LOCAL_B]
@@ -138,7 +128,10 @@ def test_cost_reorders_inside_the_band() -> None:
 def test_cost_does_not_reorder_across_bands() -> None:
     """0.90 vs 0.70 is NOT near-equal, so the better ref is promoted over the cheaper one — a cost
     comparison applied globally would leave the cheap-but-worse ref in front."""
-    refs = [_LOCAL_B, _LOCAL_A]  # cheap-and-worse first, so the expectation is a real reorder
+    refs = [
+        _LOCAL_B,
+        _LOCAL_A,
+    ]
     fold = _fold({_LOCAL_A: _row(50, 0.90), _LOCAL_B: _row(50, 0.70)})
     cost = {_LOCAL_A: 10.0, _LOCAL_B: 1.0}
     assert _call(refs, fold, cost_of=cost.__getitem__) == [_LOCAL_A, _LOCAL_B]
@@ -170,11 +163,6 @@ def test_unknown_price_keeps_its_slot_and_never_raises() -> None:
     assert _call(refs, fold, cost_of=cost_of) == refs
 
 
-# --------------------------------------------------------------------------------------------
-# The cloud margin is asymmetric
-# --------------------------------------------------------------------------------------------
-
-
 def test_equal_scoring_cloud_does_not_beat_local() -> None:
     """Free and private wins ties: an equal-scoring cloud ref is demoted below local even though it
     was bound first."""
@@ -197,11 +185,6 @@ def test_a_bigger_margin_can_hold_a_better_cloud_ref_back() -> None:
     assert _call(refs, fold, cloud_quality_margin=0.50) == [_LOCAL_A, _CLOUD]
 
 
-# --------------------------------------------------------------------------------------------
-# Degradation — every one of these returns the input unchanged, and none raises
-# --------------------------------------------------------------------------------------------
-
-
 def test_vacuity_floor_the_same_call_does_reorder_with_a_decisive_fold() -> None:
     """The floor under every "unchanged" assertion below: identical refs and knobs, only the fold
     differs, and a decisive fold DOES change the order."""
@@ -222,7 +205,10 @@ def test_missing_and_empty_folds_return_the_input_unchanged() -> None:
         {"version": 1, "use_cases": {_UC: {}}},
         {"version": 1, "use_cases": {_UC: {_QC: {}}}},
         {"version": 1, "use_cases": {_UC: {"other_class": {_LOCAL_B: _row(50, 0.99)}}}},
-        {"version": 1, "use_cases": {"other_use_case": {_QC: {_LOCAL_B: _row(50, 0.99)}}}},
+        {
+            "version": 1,
+            "use_cases": {"other_use_case": {_QC: {_LOCAL_B: _row(50, 0.99)}}},
+        },
         {"version": 1, "use_cases": {_UC: {_QC: "corrupt"}}},
         _fold({}),
     ):
@@ -233,7 +219,8 @@ def test_a_corrupt_entry_is_handled_by_the_scoring_path_not_the_failsafe(
     caplog: Any,
 ) -> None:
     """A string where a number belongs makes that ref opinionless — it does not raise, and it does
-    not reach the fail-safe catch. If it ever does, this stage's failures become invisible."""
+    not reach the fail-safe catch. If it ever does, this stage's failures become invisible.
+    """
     refs = [_LOCAL_A, _LOCAL_B]
     corrupt = _fold({_LOCAL_A: _row(50, "high"), _LOCAL_B: _row(50, 0.99)})
     with caplog.at_level(logging.DEBUG, logger=learned.__name__):
@@ -264,9 +251,14 @@ def test_degenerate_inputs_return_the_input_unchanged() -> None:
     decisive = _fold({_LOCAL_A: _row(50, 0.10), _LOCAL_B: _row(50, 0.99)})
     assert _call([], decisive) == []
     assert _call([_LOCAL_A], decisive) == [_LOCAL_A]
-    # Negative knobs clamp to 0 rather than inverting the comparison.
-    assert _call([_LOCAL_A, _LOCAL_B], decisive, hysteresis=-1.0) == [_LOCAL_B, _LOCAL_A]
-    assert _call([_LOCAL_A, _LOCAL_B], decisive, cloud_quality_margin=-1.0) == [_LOCAL_B, _LOCAL_A]
+    assert _call([_LOCAL_A, _LOCAL_B], decisive, hysteresis=-1.0) == [
+        _LOCAL_B,
+        _LOCAL_A,
+    ]
+    assert _call([_LOCAL_A, _LOCAL_B], decisive, cloud_quality_margin=-1.0) == [
+        _LOCAL_B,
+        _LOCAL_A,
+    ]
 
 
 def test_the_result_is_always_a_permutation() -> None:
@@ -282,12 +274,7 @@ def test_the_result_is_always_a_permutation() -> None:
     out = _call(refs, fold, cost_of=lambda ref: 1.0)
     assert sorted(out) == sorted(refs)
     assert len(out) == len(refs)
-    assert _call(refs, fold, cost_of=lambda ref: 1.0) == out  # deterministic
-
-
-# --------------------------------------------------------------------------------------------
-# Contract with the fold's producer and with the one scoring formula
-# --------------------------------------------------------------------------------------------
+    assert _call(refs, fold, cost_of=lambda ref: 1.0) == out
 
 
 def test_reads_the_shape_fold_record_actually_writes() -> None:
@@ -362,13 +349,11 @@ def test_feedback_is_honoured_through_score() -> None:
     refs = [_LOCAL_A, _LOCAL_B]
     fold = _fold(
         {
-            _LOCAL_A: _row(50, 0.90, feedback=0.0, feedback_n=0),  # score 0.90
-            _LOCAL_B: _row(50, 0.80, feedback=1.0, feedback_n=9),  # 0.6*0.80 + 0.4*1.0 = 0.88
+            _LOCAL_A: _row(50, 0.90, feedback=0.0, feedback_n=0),
+            _LOCAL_B: _row(50, 0.80, feedback=1.0, feedback_n=9),
         }
     )
     assert stats._score(0.80, 1.0, 9) == 0.88
-    # 0.90 vs 0.88 is inside the band, so nothing moves without a cost signal...
     assert _call(refs, fold) == refs
-    # ...and a wider gap in feedback's favour does move it.
     fold["use_cases"][_UC][_QC][_LOCAL_A] = _row(50, 0.50)
     assert _call(refs, fold) == [_LOCAL_B, _LOCAL_A]

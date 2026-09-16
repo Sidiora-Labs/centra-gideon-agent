@@ -3,7 +3,7 @@
 Two things make these tests different from the module's own development:
 
 **The routing fixtures are the deployment gate, and they are UNSEEN.** A keyword classifier tuned
-against the same examples that measure it reports its training set back. `tests/fixtures/
+against the same examples that measure it reports its training set back. `checks/runtime/fixtures/
 planner_routing.json` was written from how a user actually types — lowercase, abbreviated, missing
 the keywords the classifier hopes for — and the classifier was corrected until it passed. Measured
 along the way: 68% on first contact against an 85% bar.
@@ -18,8 +18,8 @@ import pathlib
 
 import pytest
 
-from gideon.workflows.intent import Level, Rigor, classify, route_rigor
-from gideon.workflows.matcher import (
+from gideon.automation.workflows.intent import Level, Rigor, classify, route_rigor
+from gideon.automation.workflows.matcher import (
     MAX_CONFIDENCE,
     MIN_CONFIDENCE,
     TIE_BAND,
@@ -39,13 +39,12 @@ RIGOR_CASES = [c for c in _cases() if "rigor" in c]
 SHAPE_CASES = [c for c in _cases() if "shape" in c]
 
 
-# ── the deployment gate (UP-R13.1) ──
-
-
 def test_routing_accuracy_clears_the_deployment_bar():
     """The plan's bar is >=85% on the fixture suite. Asserted as an AGGREGATE as well as per-case,
     because the bar is what ships and a single tolerated failure erodes it silently."""
-    correct = sum(1 for c in RIGOR_CASES if classify(c["intent"]).rigor.value == c["rigor"])
+    correct = sum(
+        1 for c in RIGOR_CASES if classify(c["intent"]).rigor.value == c["rigor"]
+    )
     accuracy = correct / len(RIGOR_CASES)
     assert accuracy >= 0.85, f"{correct}/{len(RIGOR_CASES)} = {accuracy:.0%}"
 
@@ -60,9 +59,6 @@ def test_each_routing_fixture(case):
 @pytest.mark.parametrize("case", SHAPE_CASES, ids=lambda c: c["intent"][:40])
 def test_each_shape_fixture(case):
     assert classify(case["intent"]).shape == case["shape"], case["why"]
-
-
-# ── the classifier's judgement calls ──
 
 
 def test_an_empty_intent_is_unclassified_not_simple():
@@ -120,27 +116,38 @@ def test_a_destructive_verb_does_not_by_itself_raise_stakes():
 def test_stakes_never_buy_fewer_steps_than_an_unremarkable_request():
     """Measured: "write the changelog entry for this release" matched `release`, short-circuited
     the stakes branch to FAST, and got LESS planning than "add a retry"."""
-    assert classify("write the changelog entry for this release").rigor == Rigor.STANDARD
+    assert (
+        classify("write the changelog entry for this release").rigor == Rigor.STANDARD
+    )
 
 
 def test_word_boundaries_are_respected():
     """Substring matching fires "prod" inside "produce" and "test" inside "latest" — and a stakes
-    classifier that reads "produce a summary" as production work escalates every writing task."""
+    classifier that reads "produce a summary" as production work escalates every writing task.
+    """
     assert classify("produce a summary of the latest results").stakes != Level.HIGH
 
 
 def test_breadth_cancels_a_simplicity_signal():
     """ "Rename x to y" is trivial; "rename x to y everywhere it's used" is mechanical but scoped.
-    Same verb, different scope — and the simplicity word won before breadth was a signal."""
+    Same verb, different scope — and the simplicity word won before breadth was a signal.
+    """
     assert classify("rename config_dir to home_dir").rigor == Rigor.TRIVIAL
-    assert classify("rename config_dir to home_dir everywhere it's used").rigor == Rigor.FAST
+    assert (
+        classify("rename config_dir to home_dir everywhere it's used").rigor
+        == Rigor.FAST
+    )
 
 
 def test_a_domain_noun_alone_does_not_earn_the_deep_path():
     """ "Refactor the ingestion pipeline" is ordinary work. Counting the target noun as a second
-    unit of scale alongside the verb escalated it; only action-scale words and breadth count."""
+    unit of scale alongside the verb escalated it; only action-scale words and breadth count.
+    """
     assert classify("refactor the ingestion pipeline").rigor == Rigor.STANDARD
-    assert classify("port the whole ingestion pipeline to the new interface").rigor == Rigor.DEEP
+    assert (
+        classify("port the whole ingestion pipeline to the new interface").rigor
+        == Rigor.DEEP
+    )
 
 
 def test_terseness_does_not_override_stated_uncertainty():
@@ -151,7 +158,9 @@ def test_terseness_does_not_override_stated_uncertainty():
 def test_confidence_reflects_how_many_dimensions_spoke():
     """Driven by DIMENSIONS, not raw hit count: ten complexity signals and nothing else is still a
     guess about stakes, and counting hits would report that as high confidence."""
-    rich = classify("migrate the production auth system after investigating the current design")
+    rich = classify(
+        "migrate the production auth system after investigating the current design"
+    )
     thin = classify("do it")
     assert rich.confidence > thin.confidence
 
@@ -174,13 +183,10 @@ def test_every_classification_explains_itself():
 def test_route_rigor_is_pure_over_the_tuple():
     """Separable from the keyword layer, so the routing POLICY can be tested without arguing about
     vocabulary."""
-    from gideon.workflows.intent import Intent
+    from gideon.automation.workflows.intent import Intent
 
     hot = Intent(complexity=Level.HIGH, uncertainty=Level.HIGH)
     assert route_rigor(hot) == Rigor.DEEP
-
-
-# ── the tiered matcher (UP-R2) ──
 
 
 def library() -> list[TemplateProfile]:
@@ -258,7 +264,11 @@ def test_confidence_varies_with_the_evidence():
 
 def test_confidence_never_reaches_certainty():
     """The matcher chooses among templates a human wrote for purposes it cannot fully know."""
-    for intent in ("audit review find issues", "research find out", "monitor watch keep an eye"):
+    for intent in (
+        "audit review find issues",
+        "research find out",
+        "monitor watch keep an eye",
+    ):
         assert match_template(intent, library()).confidence < 1.0
 
 
@@ -327,7 +337,9 @@ def test_the_embedding_tier_only_breaks_ties():
         calls.append(text)
         return [1.0, 0.0]
 
-    match_template("audit the auth module for security issues", library(), embedder=embedder)
+    match_template(
+        "audit the auth module for security issues", library(), embedder=embedder
+    )
     assert calls == [], "a clear keyword winner must not spend an embedding call"
 
 
@@ -392,8 +404,13 @@ def test_a_multi_word_keyword_needs_all_its_words():
     stopwords are gone.
     """
     profiles = [TemplateProfile(name="latency", keywords=["cold start"])]
-    assert match_template("investigate cold start latency", profiles).primary == "latency"
-    assert match_template("why is the cold boot start so slow", profiles).primary == "latency"
+    assert (
+        match_template("investigate cold start latency", profiles).primary == "latency"
+    )
+    assert (
+        match_template("why is the cold boot start so slow", profiles).primary
+        == "latency"
+    )
     assert not match_template("a warm drink before the race", profiles).matched
 
 
@@ -403,10 +420,17 @@ def test_the_profile_reads_both_dicts_and_objects():
     from types import SimpleNamespace
 
     as_dict = TemplateProfile.from_def(
-        {"name": "x", "description": "d", "tags": ["t"], "metadata": {"keywords": ["k"]}}
+        {
+            "name": "x",
+            "description": "d",
+            "tags": ["t"],
+            "metadata": {"keywords": ["k"]},
+        }
     )
     as_object = TemplateProfile.from_def(
-        SimpleNamespace(name="x", description="d", tags=["t"], metadata={"keywords": ["k"]})
+        SimpleNamespace(
+            name="x", description="d", tags=["t"], metadata={"keywords": ["k"]}
+        )
     )
     assert as_dict == as_object
 
@@ -434,9 +458,6 @@ def test_a_candidate_carries_its_reasons():
     assert candidate.to_dict()["reasons"] == ["keywords[a]"]
 
 
-# ── T4: the live embedding tie-break, its cache, and the threshold gate (WF2UNI-11) ──
-
-
 def _tied_profiles():
     return [
         TemplateProfile(name="alpha", keywords=["report"], match_text="alpha template"),
@@ -447,19 +468,24 @@ def _tied_profiles():
 def test_the_embedder_breaks_a_tie_when_the_cosine_clears_the_threshold():
     """T4 fires on a tie and picks the candidate the intent embeds nearest — the one legitimate
     case the deterministic tiers cannot decide."""
-    from gideon.workflows import matcher
+    from gideon.automation.workflows import matcher
 
-    matcher._EMBED_CACHE.clear()  # the cache is process-global; isolate this case from others
+    matcher._EMBED_CACHE.clear()
     vectors = {
         "make a report": [1.0, 0.0],
-        "alpha template": [1.0, 0.05],  # near-identical → cosine ~1.0, clears the threshold
-        "beta template": [0.0, 1.0],  # orthogonal → cosine 0.0
+        "alpha template": [
+            1.0,
+            0.05,
+        ],
+        "beta template": [0.0, 1.0],
     }
 
     def embedder(text):
         return vectors.get(text)
 
-    result = match_template("make a report", _tied_profiles(), embedder=embedder, threshold=0.62)
+    result = match_template(
+        "make a report", _tied_profiles(), embedder=embedder, threshold=0.62
+    )
     assert result.primary == "alpha"
     assert result.tier == "T4"
     assert not result.compose, "a broken tie composes nothing"
@@ -469,29 +495,29 @@ def test_a_below_threshold_cosine_does_not_unseat_the_deterministic_leader():
     """The demotion in miniature: an embedding too weak to be sure is not evidence enough to
     override a keyword tie. Below the threshold the deterministic leader stands and the tie
     composes as if no embedder ran."""
-    from gideon.workflows import matcher
+    from gideon.automation.workflows import matcher
 
-    matcher._EMBED_CACHE.clear()  # the cache is process-global; isolate this case from others
+    matcher._EMBED_CACHE.clear()
     vectors = {
         "make a report": [1.0, 0.0],
-        "alpha template": [1.0, 1.0],  # cosine 0.707 — the nearest, but not near ENOUGH
-        "beta template": [0.0, 1.0],  # cosine 0.0
+        "alpha template": [1.0, 1.0],
+        "beta template": [0.0, 1.0],
     }
 
     def embedder(text):
         return vectors.get(text)
 
-    # A threshold of 0.9 is above the best cosine (~0.71), so no candidate is confidently nearest.
-    result = match_template("make a report", _tied_profiles(), embedder=embedder, threshold=0.9)
+    result = match_template(
+        "make a report", _tied_profiles(), embedder=embedder, threshold=0.9
+    )
     assert result.tier != "T4", "a below-threshold cosine did not earn the T4 override"
-    # The deterministic leader (first by score then name) stands, unchanged by the weak embedding.
     assert result.primary == "alpha"
 
 
 def test_match_embedding_caches_per_text():
     """The same template texts recur across every plan; a per-text cache turns N re-embeddings of
     the library into one."""
-    from gideon.workflows import matcher
+    from gideon.automation.workflows import matcher
 
     matcher._EMBED_CACHE.clear()
     calls: list[str] = []
@@ -509,7 +535,7 @@ def test_match_embedding_caches_per_text():
 def test_match_embedding_does_not_cache_a_none_result():
     """A transient miss must be retried, not pinned — an embedder that comes online later should
     start working, not stay poisoned by an early None."""
-    from gideon.workflows import matcher
+    from gideon.automation.workflows import matcher
 
     matcher._EMBED_CACHE.clear()
     state = {"ready": False}
@@ -522,9 +548,6 @@ def test_match_embedding_does_not_cache_a_none_result():
     assert matcher.match_embedding("x", embedder) == [1.0, 0.0]
 
 
-# ── T5: the injected summarizer re-enters the deterministic scorer (WF2UNI-11) ──
-
-
 def test_t5_rephrases_and_rematches_through_the_deterministic_scorer():
     """The summarizer fires only when NOTHING matched, and its output re-enters the scorer — it
     never returns a template id of its own."""
@@ -532,12 +555,14 @@ def test_t5_rephrases_and_rematches_through_the_deterministic_scorer():
 
     def summarizer(text):
         calls.append(text)
-        return "audit the module for security problems"  # rephrased into the library's vocabulary
+        return "audit the module for security problems"
 
     result = match_template(
         "give the codebase a thorough going-over", library(), summarizer=summarizer
     )
-    assert calls, "T5 must call the summarizer when the deterministic tiers found nothing"
+    assert (
+        calls
+    ), "T5 must call the summarizer when the deterministic tiers found nothing"
     assert result.primary == "audit-sweep"
     assert result.tier == "T5"
     assert result.confidence <= 0.6, "a paraphrase match is penalised"
@@ -564,6 +589,6 @@ def test_without_a_summarizer_an_unmatched_intent_degrades_to_no_match():
 
 
 def test_the_match_threshold_default_is_the_plans_number():
-    from gideon.workflows.matcher import MATCH_THRESHOLD
+    from gideon.automation.workflows.matcher import MATCH_THRESHOLD
 
     assert MATCH_THRESHOLD == 0.62

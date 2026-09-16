@@ -9,7 +9,7 @@ through) is wrapped for the whole suite and refuses a real, user-owned model roo
 
 Detection lives here rather than inline in ``conftest.py`` for the reason
 ``real_home_guard`` gives: a guard that only ever runs against the tree it guards cannot
-be distinguished from a guard that never fires. ``tests/test_local_model_root_guard.py``
+be distinguished from a guard that never fires. ``checks/runtime/test_local_model_root_guard.py``
 drives this function against both a real root and a ``tmp_path`` one.
 
 The rail names the roots it forbids instead of forbidding all of ``$HOME``: a developer's
@@ -33,20 +33,16 @@ import os
 import tempfile
 from pathlib import Path
 
-#: The user's real home, captured at import time — BEFORE any fixture repoints
-#: ``HOME``/``GIDEON_HOME``, so a test cannot move the rail out from under itself.
 REAL_HOME = Path(os.path.expanduser("~"))
 
-#: Roots that hold REAL downloaded weights / real Gideon state. Relative to the
-#: real home, so the rail is meaningful on a machine that has none of them yet.
 FORBIDDEN_SUBPATHS: tuple[str, ...] = (
-    ".gideon",  # the real Gideon home (models/, entity_settings/, …)
-    ".cache/huggingface",  # HF hub — faster-whisper, sentence-transformers, pyannote
-    ".cache/torch",  # torch.hub checkpoints
-    ".cache/whisper",  # openai-whisper's own cache
-    ".cache/piper",  # piper voices
-    ".ollama",  # ollama's pulled models
-    "Library/Caches/huggingface",  # macOS HF cache spelling
+    ".gideon",
+    ".cache/huggingface",
+    ".cache/torch",
+    ".cache/whisper",
+    ".cache/piper",
+    ".ollama",
+    "Library/Caches/huggingface",
     "Library/Application Support/gideon",
     ".local/share/gideon",
 )
@@ -109,12 +105,6 @@ def offending_root(cache_root: object) -> Path | None:
     except (TypeError, ValueError):
         return None
 
-    # A RELATIVE path is unparseable for this rail's purpose and must not be resolved:
-    # `resolve()` would anchor it to the CWD, and on a machine whose CWD sits under a
-    # forbidden root (CI runs from `/home/runner/work/...` while REAL_HOME is
-    # `/home/runner`) every junk argument would report that root as offending. Measured:
-    # `offending_root(None)` builds `Path("None")` and returned `/home/runner` on CI while
-    # returning None locally, i.e. the rail's verdict depended on where it was run.
     if not raw.is_absolute():
         return None
 
@@ -124,19 +114,17 @@ def offending_root(cache_root: object) -> Path | None:
     except (OSError, RuntimeError):
         pass
 
-    # NAMED roots first, and with no exemption: these are the places a real downloaded model
-    # actually lives, and they are the whole reason the rail exists.
     for root in named_forbidden_roots():
         for candidate in candidates:
             if candidate == root or root in candidate.parents:
                 return root
 
-    # Then the bare-home catch-all, which a pytest ``tmp_path`` must not trip — see
-    # :func:`_test_path_root` for the measurement that made this necessary.
     tmp_root = _test_path_root()
     for candidate in candidates:
         if candidate == REAL_HOME or REAL_HOME in candidate.parents:
-            if tmp_root is not None and (candidate == tmp_root or tmp_root in candidate.parents):
+            if tmp_root is not None and (
+                candidate == tmp_root or tmp_root in candidate.parents
+            ):
                 continue
             return REAL_HOME
     return None
@@ -156,16 +144,8 @@ def assert_safe(function_name: str, cache_root: object) -> None:
     )
 
 
-#: The UNWRAPPED ``layouts`` functions, recorded by ``conftest._forbid_real_model_roots``
-#: as it installs each wrapper. This is exactly the object a module-level
-#: ``from gideon.local_models.layouts import delete_all_layouts`` captures — the
-#: alias is bound at IMPORT time, before any fixture runs, so it never sees the wrapper.
-#: Kept here so the rail can be driven against the shape that escapes it instead of only
-#: against the shape it catches.
 ORIGINALS: dict[str, object] = {}
 
-#: The layouts entry points the rail wraps. Every one takes ``cache_root`` first, and
-#: between them they cover every probe and the single deletion sweep.
 GUARDED_FUNCTIONS: tuple[str, ...] = (
     "candidate_paths",
     "is_downloaded",
@@ -177,8 +157,7 @@ GUARDED_FUNCTIONS: tuple[str, ...] = (
     "reclaimable_bytes",
 )
 
-#: The module a guarded name would be imported FROM.
-_LAYOUTS_MODULE = "gideon.local_models.layouts"
+_LAYOUTS_MODULE = "gideon.integrations.local_models.layouts"
 
 
 def import_bound_guarded_names(source: str) -> set[str]:
@@ -186,7 +165,7 @@ def import_bound_guarded_names(source: str) -> set[str]:
 
     The rail is installed with ``monkeypatch.setattr(layouts, name, wrapper)``, so it
     intercepts an ATTRIBUTE LOOKUP (``layouts.delete_all_layouts(...)``) and nothing else.
-    A module-level ``from gideon.local_models.layouts import delete_all_layouts``
+    A module-level ``from gideon.integrations.local_models.layouts import delete_all_layouts``
     binds the unwrapped function object at collection time — before the autouse fixture has
     run even once — and every later call through that alias bypasses the rail.
 
@@ -210,7 +189,7 @@ def import_bound_guarded_names(source: str) -> set[str]:
     def _walk(node: ast.AST) -> None:
         for child in ast.iter_child_nodes(node):
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue  # deferred to call time — resolves the wrapper, not the original
+                continue
             if isinstance(child, ast.ImportFrom) and child.module == _LAYOUTS_MODULE:
                 found.update(a.name for a in child.names if a.name in guarded)
             _walk(child)
@@ -247,7 +226,7 @@ def trailing_args(function_name: str) -> tuple[str, ...]:
     positional = [
         p
         for p in inspect.signature(original).parameters.values()
-        if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD) and p.default is p.empty
+        if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+        and p.default is p.empty
     ]
-    # ``cache_root`` is supplied by the caller; everything else required gets a dummy.
     return tuple("some/model" for _ in positional[1:])

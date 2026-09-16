@@ -14,14 +14,14 @@ from pathlib import Path
 
 import pytest
 
-from gideon.apps import app_manager, dependency_ledger, manager
-from gideon.apps.dependency_ledger import DepDisposition
-from gideon.apps.manifest import AppManifest
+from gideon.extensions.apps import app_manager, dependency_ledger, manager
+from gideon.extensions.apps.dependency_ledger import DepDisposition
+from gideon.extensions.apps.manifest import AppManifest
 
 
 @pytest.fixture(autouse=True)
 def _isolate_apps(tmp_path, monkeypatch):
-    import gideon.config.loader as loader
+    import gideon.core.config.loader as loader
 
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(manager, "config_dir", lambda: tmp_path)
@@ -63,7 +63,11 @@ class TestLedgerUnit:
 
     def test_dep_keys_singularize_kind(self):
         m = _manifest("a", mcp=["m1"], skills=["s1"], agents=["g1"])
-        assert set(dependency_ledger.manifest_dep_keys(m)) == {"mcp:m1", "skill:s1", "agent:g1"}
+        assert set(dependency_ledger.manifest_dep_keys(m)) == {
+            "mcp:m1",
+            "skill:s1",
+            "agent:g1",
+        }
 
     def test_object_form_dep_id(self):
         m = _manifest("a", mcp=[{"id": "obj-mcp", "managedBy": "app"}])
@@ -84,7 +88,6 @@ class TestLedgerUnit:
         assert cls["mcp:common"].remaining == ["app-a"]
 
     def test_classify_user_installed_when_no_record(self):
-        # The app declares a dep the ledger never recorded (user added it directly).
         m = _manifest("late", mcp=["user-added"])
         cls = {c.key: c.disposition for c in dependency_ledger.classify_uninstall(m)}
         assert cls["mcp:user-added"] is DepDisposition.USER_INSTALLED
@@ -104,16 +107,13 @@ class TestLedgerThroughLifecycle:
     def test_two_apps_share_dep_force_uninstall_keeps_shared(self, tmp_path):
         app_manager.install(_src(tmp_path, "app-a", subdir="s1", mcp=["shared"]))
         app_manager.install(_src(tmp_path, "app-b", subdir="s2", mcp=["shared"]))
-        # Preview app-a's uninstall: the shared dep should classify SHARED.
         preview = {c.key: c.disposition for c in app_manager.preview_uninstall("app-a")}
         assert preview["mcp:shared"] is DepDisposition.SHARED
-        # Force-uninstall app-a (real removal) → app-b still owns the dep. (A plain
-        # uninstall just deactivates, keeping files+deps, so the ledger only
-        # updates on the destructive force path.)
         app_manager.force_uninstall("app-a")
         assert dependency_ledger.installed_by("mcp:shared") == ["app-b"]
-        # Now app-b's uninstall sees it as REMOVABLE (sole remaining owner).
-        preview_b = {c.key: c.disposition for c in app_manager.preview_uninstall("app-b")}
+        preview_b = {
+            c.key: c.disposition for c in app_manager.preview_uninstall("app-b")
+        }
         assert preview_b["mcp:shared"] is DepDisposition.REMOVABLE
 
     def test_preview_unknown_app_empty(self, tmp_path):

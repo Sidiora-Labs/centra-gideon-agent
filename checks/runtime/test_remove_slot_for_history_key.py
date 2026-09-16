@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from gideon.dashboard.handlers import _remove_session_for_history_key
+from gideon.interfaces.dashboard.handlers import _remove_session_for_history_key
 
 
 def _make_state(sessions: dict) -> MagicMock:
@@ -97,12 +97,11 @@ class TestRemoveSessionForHistoryKey:
                 "chat-9-999": session_c,
             }
         )
-        # Simulate batch clear for two keys (one matched, one running)
         await _remove_session_for_history_key(state, "dashboard_chat-1-100")
         await _remove_session_for_history_key(state, "dashboard_chat-2-200")
         assert "chat-1-100" not in state._sessions
         assert "chat-2-200" not in state._sessions
-        assert "chat-9-999" in state._sessions  # unmatched stays
+        assert "chat-9-999" in state._sessions
         assert state.sessions.destroy.await_count == 2
 
     @pytest.mark.asyncio

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 
-from gideon.memory_record import (
+from gideon.cognition.memory_record import (
     MemoryCapabilities,
     MemoryKind,
     MemoryRecord,
@@ -16,11 +16,9 @@ from gideon.memory_record import (
     embedding_to_blob,
 )
 
-# ── embedding blob encoding (must match vector_memory's on-disk format) ──
-
 
 def test_embedding_blob_roundtrip_normalizes():
-    emb = [3.0, 4.0]  # norm 5 → normalized [0.6, 0.8]
+    emb = [3.0, 4.0]
     blob = embedding_to_blob(emb)
     back = blob_to_embedding(blob)
     assert back is not None
@@ -35,24 +33,20 @@ def test_embedding_blob_none():
 
 
 def test_embedding_blob_matches_store_encoding(tmp_path):
-    # The store writes embeddings via the same normalize→float32 path; a record
-    # built from a written episodic row must decode to the normalized vector.
-    from gideon.vector_memory import VectorMemoryStore
+    from gideon.cognition.vector_memory import SemanticArchive
 
-    store = VectorMemoryStore(db_path=tmp_path / "m.db", embedding_dim=3)
+    store = SemanticArchive(db_path=tmp_path / "m.db", embedding_dim=3)
     store.init()
     store.embed_fn = lambda t: [1.0, 0.0, 0.0]
     assert store.write_episodic("a fragment to remember", source="test") is True
-    rows = store.db.execute("SELECT * FROM episodic_memories WHERE is_deleted=0").fetchall()
+    rows = store.db.execute(
+        "SELECT * FROM episodic_memories WHERE is_deleted=0"
+    ).fetchall()
     rec = MemoryRecord.from_episodic_row(rows[0])
     assert rec.kind == MemoryKind.EPISODIC
     assert rec.embedding is not None
-    # normalized unit vector along x
     assert abs(rec.embedding[0] - 1.0) < 1e-6
     store.close()
-
-
-# ── semantic row → record ──
 
 
 def test_from_semantic_row_fact():
@@ -76,7 +70,6 @@ def test_from_semantic_row_fact():
     assert rec.text == "vim"
     assert rec.confidence == 0.9
     assert rec.recall_count == 3
-    # default axes preserve today's global/durable behavior
     assert rec.scope == MemoryScope.GLOBAL
     assert rec.tier == MemoryTier.SEMANTIC
 
@@ -108,11 +101,7 @@ def test_from_semantic_row_non_string_value():
     }
     rec = MemoryRecord.from_semantic_row(row)
     assert rec.value == {"a": 1, "b": [2, 3]}
-    # text is the JSON projection for search/embed
     assert json.loads(rec.text) == {"a": 1, "b": [2, 3]}
-
-
-# ── episodic row → record ──
 
 
 def test_from_episodic_row():
@@ -145,14 +134,13 @@ def test_kind_and_axis_string_coercion():
 
 
 def test_to_public_dict_omits_embedding_bytes():
-    rec = MemoryRecord(id="x", kind=MemoryKind.SEMANTIC, text="hi", embedding=[1.0, 0.0])
+    rec = MemoryRecord(
+        id="x", kind=MemoryKind.SEMANTIC, text="hi", embedding=[1.0, 0.0]
+    )
     d = rec.to_public_dict()
     assert "embedding" not in d
     assert d["kind"] == "semantic"
     assert d["scope"] == "global"
-
-
-# ── capabilities ──
 
 
 def test_capabilities_defaults_and_dict():
@@ -167,13 +155,10 @@ def test_capabilities_defaults_and_dict():
     }
 
 
-# ── store-level typed-record view (M0, read-only over both tables) ──
-
-
 def _store(tmp_path):
-    from gideon.vector_memory import VectorMemoryStore
+    from gideon.cognition.vector_memory import SemanticArchive
 
-    s = VectorMemoryStore(db_path=tmp_path / "m.db", embedding_dim=3)
+    s = SemanticArchive(db_path=tmp_path / "m.db", embedding_dim=3)
     s.init()
     return s
 
@@ -181,7 +166,7 @@ def _store(tmp_path):
 def test_store_capabilities_track_embed_fn(tmp_path):
     s = _store(tmp_path)
     caps = s.capabilities()
-    assert caps.vector is False  # no embed_fn yet → degrade to FTS
+    assert caps.vector is False
     assert caps.event_log is True and caps.transactional_batch is True
     s.embed_fn = lambda t: [1.0, 0.0, 0.0]
     assert s.capabilities().vector is True
@@ -197,8 +182,9 @@ def test_store_get_record_semantic_and_episodic(tmp_path):
     rec = s.get_record("pref.editor")
     assert rec is not None and rec.kind == MemoryKind.SEMANTIC and rec.value == "vim"
 
-    # episodic id
-    eid = s.db.execute("SELECT id FROM episodic_memories WHERE is_deleted=0").fetchone()["id"]
+    eid = s.db.execute(
+        "SELECT id FROM episodic_memories WHERE is_deleted=0"
+    ).fetchone()["id"]
     erec = s.get_record(eid)
     assert erec is not None and erec.kind == MemoryKind.EPISODIC
 

@@ -1,4 +1,4 @@
-"""EA-7 — the guarded inbound chokepoint (``gideon.channel_inbound``).
+"""EA-7 — the guarded inbound chokepoint (``gideon.integrations.channel_inbound``).
 
 ``channel_trust.guard_inbound`` shipped complete and with ZERO production callers: every
 transport was expected to call it at the top of its own inbound path, by convention. A
@@ -18,10 +18,10 @@ import asyncio
 
 import pytest
 
-from gideon import channel_inbound as ci
-from gideon import channel_trust as ct
-from gideon.channel_transports.base import ChannelMessage
-from gideon.testing.channel_conformance import CapturingState
+from gideon.assurance.testing.channel_conformance import CapturingState
+from gideon.integrations import channel_inbound as ci
+from gideon.integrations import channel_trust as ct
+from gideon.integrations.channel_transports.base import ChannelMessage
 
 PROVIDER = "telegram"
 
@@ -35,12 +35,14 @@ def isolated(tmp_path, monkeypatch):
     cache is keyed on message identity, not on the store, so tmp_path isolation alone does
     not isolate it.
     """
-    import gideon.config.loader as cfg
-    import gideon.providers.entity_routes as er
+    import gideon.core.config.loader as cfg
+    import gideon.extensions.providers.entity_routes as er
 
     monkeypatch.setattr(cfg, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(
-        er, "_entity_settings_path", lambda entity: tmp_path / "entity_settings" / f"{entity}.json"
+        er,
+        "_entity_settings_path",
+        lambda entity: tmp_path / "entity_settings" / f"{entity}.json",
     )
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     ci.reset_admissions()
@@ -56,7 +58,7 @@ def turns(monkeypatch):
     async def _fake_run_chat(state, session, message, **kw):
         started.append((session.key, message))
 
-    monkeypatch.setattr("gideon.dashboard.chat.run_chat", _fake_run_chat)
+    monkeypatch.setattr("gideon.interfaces.dashboard.chat.run_chat", _fake_run_chat)
     return started
 
 
@@ -72,14 +74,21 @@ class _Services:
         self.dashboard_state = state
 
     async def deliver_channel_inbound(self, provider, msg, *, is_dm=True):
-        from gideon.dashboard.chat import run_chat
+        from gideon.interfaces.dashboard.chat import run_chat
 
-        return await ci.deliver_inbound(self, provider, msg, is_dm=is_dm, turn_runner=run_chat)
+        return await ci.deliver_inbound(
+            self, provider, msg, is_dm=is_dm, turn_runner=run_chat
+        )
 
 
 def _msg(text="hello?", sender="stranger", channel="dm1", mid="m1", **kw):
     return ChannelMessage(
-        channel_id=channel, text=text, sender=sender, thread_id=channel, message_id=mid, **kw
+        channel_id=channel,
+        text=text,
+        sender=sender,
+        thread_id=channel,
+        message_id=mid,
+        **kw,
     )
 
 
@@ -90,12 +99,9 @@ async def _settle():
 
 
 def _sel_ops():
-    from gideon.sel import sel
+    from gideon.security.sel import sel
 
     return [e.get("operation") for e in sel().recent(200)]
-
-
-# ── the load-bearing negative, and its vacuity partner ───────────────────────
 
 
 def test_an_unpaired_sender_never_reaches_a_session(turns):
@@ -108,7 +114,9 @@ def test_an_unpaired_sender_never_reaches_a_session(turns):
     state = CapturingState()
 
     async def go():
-        return await _Services(state).deliver_channel_inbound(PROVIDER, _msg(), is_dm=True)
+        return await _Services(state).deliver_channel_inbound(
+            PROVIDER, _msg(), is_dm=True
+        )
 
     verdict = asyncio.run(go())
 
@@ -182,13 +190,9 @@ def test_an_allowed_channel_message_is_broadcast_to_a_watching_dashboard(turns):
     assert event == "chat_message"
     assert payload["role"] == "user"
     assert payload["session"] == state.sessions_created[0].key
-    # The broadcast text is the redacted line the transcript holds — not the raw text.
     appended = [c for role, c in state.sessions_created[0].appended if role == "user"]
     assert payload["content"] == appended[0]
     assert "hunter2" not in payload["content"]
-
-
-# ── the chokepoint property: trust does not depend on the transport co-operating ──
 
 
 def test_a_transport_that_never_calls_trust_is_still_checked(turns):
@@ -222,21 +226,18 @@ def test_a_transport_that_never_calls_trust_is_still_checked(turns):
     assert state.sessions_created == []
     assert turns == []
 
-    # And the same transport, unchanged, works once the sender is trusted — so the denial
-    # above is the trust decision, not the transport failing to wire anything up.
     ct.allow_sender(PROVIDER, "nobody")
     ci.reset_admissions()
 
     async def go2():
-        v = await BareTransport().on_message(_msg(text="do the thing", sender="nobody", mid="m2"))
+        v = await BareTransport().on_message(
+            _msg(text="do the thing", sender="nobody", mid="m2")
+        )
         await _settle()
         return v
 
     assert asyncio.run(go2()).allowed is True
     assert [t[1] for t in turns] == ["do the thing"]
-
-
-# ── the double-notification hazard ───────────────────────────────────────────
 
 
 def test_one_message_produces_one_notification_when_the_transport_also_guards(turns):
@@ -252,9 +253,7 @@ def test_one_message_produces_one_notification_when_the_transport_also_guards(tu
     msg = _msg(text="hi", sender="stranger")
 
     async def go():
-        # 1. What an un-migrated transport does first, with its own hands.
         ct.guard_inbound(state, PROVIDER, msg.sender, is_dm=True, text=msg.text)
-        # 2. Then it hands the SAME message to the platform's door.
         return await _Services(state).deliver_channel_inbound(PROVIDER, msg, is_dm=True)
 
     verdict = asyncio.run(go())
@@ -313,7 +312,9 @@ def test_two_different_messages_renotify_when_the_window_is_zero(turns):
                 PROVIDER, _msg(text="hi", sender="stranger", mid="m1"), is_dm=True
             )
             await services.deliver_channel_inbound(
-                PROVIDER, _msg(text="hello again", sender="stranger", mid="m2"), is_dm=True
+                PROVIDER,
+                _msg(text="hello again", sender="stranger", mid="m2"),
+                is_dm=True,
             )
 
         asyncio.run(go())
@@ -322,9 +323,6 @@ def test_two_different_messages_renotify_when_the_window_is_zero(turns):
         assert turns == []
     finally:
         monkey.undo()
-
-
-# ── the rest of the gate's behaviour, reached through the door ────────────────
 
 
 def test_a_pairing_code_pairs_the_sender_and_is_not_delivered_as_a_turn(turns):
@@ -343,11 +341,12 @@ def test_a_pairing_code_pairs_the_sender_and_is_not_delivered_as_a_turn(turns):
     verdict = asyncio.run(go())
 
     assert verdict.meta.get("paired") is True
-    assert verdict.allowed is False, "a pairing code must not become a question for the agent"
+    assert (
+        verdict.allowed is False
+    ), "a pairing code must not become a question for the agent"
     assert ct.is_allowed_sender(PROVIDER, "stranger") is True
     assert turns == [], "the code itself never reached a session"
 
-    # The NEXT message from that sender does get through.
     async def go2():
         v = await services.deliver_channel_inbound(
             PROVIDER, _msg(text="hello!", sender="stranger", mid="m2"), is_dm=True
@@ -406,7 +405,9 @@ def test_an_allowed_senders_tracked_group_message_is_not_fenced(turns):
 
     assert verdict.allowed is True
     assert verdict.fenced_text == ""
-    assert turns[0][1] == "deploy the fix please", "the RAW text is what became the turn"
+    assert (
+        turns[0][1] == "deploy the fix please"
+    ), "the RAW text is what became the turn"
 
 
 def test_an_untracked_group_never_reaches_a_session(turns):
@@ -415,7 +416,9 @@ def test_an_untracked_group_never_reaches_a_session(turns):
 
     async def go():
         return await _Services(state).deliver_channel_inbound(
-            PROVIDER, _msg(text="hi", sender="other", channel="grp-unknown"), is_dm=False
+            PROVIDER,
+            _msg(text="hi", sender="other", channel="grp-unknown"),
+            is_dm=False,
         )
 
     verdict = asyncio.run(go())
@@ -427,13 +430,15 @@ def test_an_untracked_group_never_reaches_a_session(turns):
 
 def test_no_services_means_no_delivery(turns):
     """A transport whose handle is gone delivers nothing — it does not fall back to open."""
-    from gideon.channel_transports.reference_echo import ReferenceEchoTransport
+    from gideon.integrations.channel_transports.reference_echo import (
+        ReferenceEchoTransport,
+    )
 
     async def go():
         t = ReferenceEchoTransport()
         await t.connect()
         await t.start_inbound(_Services(CapturingState()))
-        await t.stop_inbound()  # handle cleared
+        await t.stop_inbound()
         return await t.handle_inbound(_msg(text="hi", sender="stranger"), is_dm=True)
 
     decision = asyncio.run(go())
@@ -441,19 +446,13 @@ def test_no_services_means_no_delivery(turns):
     assert turns == []
 
 
-# ── rails: the door is the ONLY route ────────────────────────────────────────
-
-#: Symbols that START a channel-originated turn or build the session it lands in. An
-#: in-core transport naming any of these is reaching past the guarded door. Outbound
-#: session access is NOT in this set — `webui.py` legitimately appends an assistant
-#: message to an existing session in `send()`, which is the reply path, not ingestion.
 _TURN_STARTERS = ("run_chat", "get_or_create_session", "link_channel", "guard_inbound")
 
 
 def _transport_modules():
     from pathlib import Path
 
-    import gideon.channel_transports as pkg
+    import gideon.integrations.channel_transports as pkg
 
     root = Path(pkg.__file__).parent
     return sorted(p for p in root.glob("*.py") if p.name != "__init__.py")
@@ -495,19 +494,21 @@ def test_no_in_core_transport_starts_a_turn_except_through_the_door():
     """
     mods = _transport_modules()
 
-    # ── floor 1: the scan found the things it claims to be checking ──
     names = {p.name for p in mods}
     assert {"base.py", "manager.py", "reference_echo.py", "webui.py"} <= names, names
 
-    identifiers = {p.name: _referenced_identifiers(p.read_text(encoding="utf-8")) for p in mods}
+    identifiers = {
+        p.name: _referenced_identifiers(p.read_text(encoding="utf-8")) for p in mods
+    }
 
-    # ── floor 2: the extraction is not blind — it finds a call that is genuinely there ──
     assert "deliver_channel_inbound" in identifiers["reference_echo.py"], (
         "the AST scan cannot see the door call in the reference transport, so a clean "
         "result below would prove nothing"
     )
 
-    offenders = {name: sorted(set(_TURN_STARTERS) & ids) for name, ids in identifiers.items()}
+    offenders = {
+        name: sorted(set(_TURN_STARTERS) & ids) for name, ids in identifiers.items()
+    }
     offenders = {k: v for k, v in offenders.items() if v}
     assert not offenders, (
         f"in-core transport(s) reach past the guarded inbound door: {offenders}. "
@@ -529,11 +530,11 @@ def test_run_chat_is_off_the_facade_for_good():
     From here the chokepoint is structural, not conventional: an app can only start a
     channel-originated turn through `services.deliver_channel_inbound`, which applies
     `guard_inbound` unconditionally, and the `gideon.sdk.*`-only import boundary
-    (`tests/test_apps_import_boundary.py`) leaves no path around it. Re-adding the export
+    (`checks/runtime/test_apps_import_boundary.py`) leaves no path around it. Re-adding the export
     would silently reopen the ungated route — the reason this asserts absence instead of
     being deleted with the gap it used to declare.
 
-    `run_chat` itself still exists at `gideon.dashboard.chat.run_chat` for the
+    `run_chat` itself still exists at `gideon.interfaces.dashboard.chat.run_chat` for the
     owner's own surfaces (dashboard turns, cron, heartbeat, the CLI), where there is no
     channel identity and nothing to deny; off the app facade is the whole change.
     """
@@ -546,10 +547,7 @@ def test_run_chat_is_off_the_facade_for_good():
         "did, extend the door, not the facade."
     )
     assert not hasattr(channel, "run_chat")
-    # The underscore alias is gone for good and must not come back (see #1804).
     assert not hasattr(channel, "_run_chat")
-    # Vacuity floor: the module still exports the rest of its surface — an import error
-    # or a gutted __all__ would make the two asserts above pass while proving nothing.
     assert "save_session_to_history" in channel.__all__
     assert hasattr(channel, "save_session_to_history")
 
@@ -560,11 +558,10 @@ def test_the_door_is_on_the_gateway_services_contract():
     `ChannelTransportProvider` did not have to change."""
     import inspect
 
-    from gideon.channel_transports.base import ChannelTransportProvider
-    from gideon.gateway import GatewayOrchestrator
-    from gideon.gateway_services import GatewayServices
+    from gideon.engine.gateway import RuntimeCoordinator
+    from gideon.engine.gateway_services import GatewayServices
+    from gideon.integrations.channel_transports.base import ChannelTransportProvider
 
     assert hasattr(GatewayServices, "deliver_channel_inbound")
-    assert inspect.iscoroutinefunction(GatewayOrchestrator.deliver_channel_inbound)
-    # The ABC is untouched: no trust/ingestion method was added to it.
+    assert inspect.iscoroutinefunction(RuntimeCoordinator.deliver_channel_inbound)
     assert not hasattr(ChannelTransportProvider, "deliver_channel_inbound")

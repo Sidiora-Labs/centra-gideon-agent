@@ -291,7 +291,7 @@ transcript with extra steps.
 
 ## Events
 
-Per-run SSE on `DashboardState.workflow_sse()` (key `workflow:<run_id>`), plus
+Per-run SSE on `ConsoleState.workflow_sse()` (key `workflow:<run_id>`), plus
 WebSocket refetch signals. Deliberately NOT routed through `notify()`: that is
 the user-notification gate behind mute/severity/quiet-hours, and a quiet-hours
 setting would silently eat a run's entire event stream.
@@ -375,13 +375,13 @@ libraries are documented in
 The bundled `self-qa` template's `evidence` node is an **`action`** node backed by
 `selfqa-evidence`, not an LLM `stage`: sealing a proof bundle is deterministic work a model
 must not be trusted to fake ("compute the digests; do not estimate them"). Two new modules
-under `src/gideon/selfqa/` carry that work, consumed by the
+under `runtime/gideon/selfqa/` carry that work, consumed by the
 `action_providers/selfqa_evidence_provider.py` provider:
 
 | Module | Job |
 |---|---|
 | `selfqa/evidence.py` | the evidence bundle: a cached ffmpeg availability probe (modelled on the docker sandbox probe — `None` "never yet" sentinel, short TTL); contact-sheet + GIF derived via ffmpeg as a local subprocess with typed graceful degradation (a `Derivation` whose `degraded_reason` the manifest records, never a crash); a schema-versioned SHA256 `Manifest` (per-file `{kind,name,size,sha256}` computed from the bytes on disk); `check_required_kinds`, the bundle-level completion gate that names the missing kinds; and `register_bundle`, which composes the bundle into a single Artifact (manifest as content, files stored content-addressed under the artifact dir) |
-| `selfqa/fix_branch.py` | `create_fix_branch` opens `pclaw/selfqa-<sha8>` off the failing commit only when `fix_branch_enabled`, with no checkout and no push — the git runner mirrors `loop/worktree.py`'s build-ceiling discipline |
+| `selfqa/fix_branch.py` | `create_fix_branch` opens `gideon/selfqa-<sha8>` off the failing commit only when `fix_branch_enabled`, with no checkout and no push — the git runner mirrors `loop/worktree.py`'s build-ceiling discipline |
 
 The completion gate is a kind-level, deterministic counterpart to the engine's file-glob
 `required_artifacts` gate (`verify.check_required_artifacts`, WF2-R3): where that one refuses a

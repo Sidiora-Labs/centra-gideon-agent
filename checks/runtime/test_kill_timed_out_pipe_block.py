@@ -37,13 +37,13 @@ from pathlib import Path
 
 import pytest
 
-from gideon.loop import gates
+from gideon.automation.loop import gates
 
-# The grandchild outlives the bound by a wide margin so a slow CI host cannot flip the
-# comparison: the fixed path returns in ~1s, the unfixed one in ~GRANDCHILD_SECS.
 GRANDCHILD_SECS = 8
 BOUND_SECS = 5.0
-FORKING_CMD = f"sleep {GRANDCHILD_SECS} & wait"  # sh forks, then waits -> real grandchild
+FORKING_CMD = (
+    f"sleep {GRANDCHILD_SECS} & wait"  # sh forks, then waits -> real grandchild
+)
 
 _SRC = Path(gates.__file__).resolve().parents[1]
 
@@ -62,19 +62,15 @@ def _group_is_empty(pgid: int, *, deadline: float = 2.0) -> bool:
     return False
 
 
-# ── the call site ──
-
-
 @pytest.mark.asyncio
-async def test_run_verify_command_kills_the_grandchild_within_the_bound(monkeypatch, tmp_path):
+async def test_run_verify_command_kills_the_grandchild_within_the_bound(
+    monkeypatch, tmp_path
+):
     """The gate's 1s bound must bind on the SHELL's grandchild, not wait it out."""
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(gates, "VERIFY_TIMEOUT_SECS", 1)
 
-    # Spy on the real spawn so we can observe the tree the call site actually created.
-    # gates.py imports the helper INSIDE the function, so patching the module attribute
-    # is what the call site resolves at call time.
-    import gideon.sandbox as sandbox
+    import gideon.security.sandbox as sandbox
 
     real_spawn = sandbox.create_subprocess_limited
     seen: dict[str, object] = {}
@@ -82,8 +78,6 @@ async def test_run_verify_command_kills_the_grandchild_within_the_bound(monkeypa
     async def _spy(*args, **kwargs):
         proc = await real_spawn(*args, **kwargs)
         seen["pid"] = proc.pid
-        # The call site must have asked for its own session, else the group branch of
-        # kill_timed_out cannot fire and the grandchild is unreachable.
         seen["leads_own_group"] = os.getpgid(proc.pid) == proc.pid
         return proc
 
@@ -95,7 +89,9 @@ async def test_run_verify_command_kills_the_grandchild_within_the_bound(monkeypa
         result = await gates.run_verify_command(FORKING_CMD, str(tmp_path))
         elapsed = time.monotonic() - started
 
-        assert seen, "the spy never ran — the call site did not reach create_subprocess_limited"
+        assert (
+            seen
+        ), "the spy never ran — the call site did not reach create_subprocess_limited"
         pid = int(seen["pid"])  # type: ignore[arg-type]
         pgid = pid
 
@@ -103,13 +99,11 @@ async def test_run_verify_command_kills_the_grandchild_within_the_bound(monkeypa
             "run_verify_command spawned the shell into the gateway's own process group; "
             "kill_timed_out then cannot signal the group and the grandchild survives"
         )
-        # A timed-out gate yields no done-ness signal.
         assert result is None
         assert elapsed < BOUND_SECS, (
             f"the 1s gate took {elapsed:.2f}s to return — the post-kill reap waited for "
             f"the grandchild's inherited pipe instead of the child's exit"
         )
-        # Fast is only half of it: fast-because-we-stopped-waiting would leak the tree.
         assert _group_is_empty(pgid), (
             f"process group {pgid} still has members after the gate timed out — "
             "the grandchild outlived the kill"
@@ -142,8 +136,8 @@ async def test_control_the_replaced_shape_blows_the_same_bound():
         try:
             await asyncio.wait_for(proc.communicate(), timeout=1)
         except (asyncio.TimeoutError, TimeoutError):
-            proc.kill()  # the replaced shape: direct child only
-            await proc.communicate()  # ...and an unbounded drain
+            proc.kill()
+            await proc.communicate()
         elapsed = time.monotonic() - started
 
         assert elapsed > BOUND_SECS, (
@@ -156,23 +150,18 @@ async def test_control_the_replaced_shape_blows_the_same_bound():
             os.killpg(pgid, signal.SIGKILL)
 
 
-# ── the census rail (bidirectional: leaves must stay leaves) ──
-
-# From the kill-site census. A spawn earns its own session ONLY when the child can fork a
-# grandchild that inherits a live pipe. Everything else is git plumbing that never forks;
-# giving it a session buys nothing and widens the blast radius of a group signal.
 _UPDATES_GROUP_LED = {
-    "proc",  # git fetch      -> forks git-remote-https / ssh
-    "pip_up",  # pip -U         -> forks build backends / compilers
-    "pull",  # git pull       -> forks fetch's remote helper + merge
-    "pip_install",  # pip install -e -> forks build backends
+    "proc",
+    "pip_up",
+    "pull",
+    "pip_install",
 }
 _UPDATES_LEAF = {
-    "local",  # git rev-parse HEAD
-    "remote",  # git rev-parse @{u}
-    "show",  # git show <sha>:./pyproject.toml
-    "diff",  # git diff <range> -- CHANGELOG.md
-    "dirty",  # git status --porcelain
+    "local",
+    "remote",
+    "show",
+    "diff",
+    "dirty",
 }
 
 
@@ -201,7 +190,9 @@ def test_only_the_censused_spawns_lead_their_own_group():
     src = (_SRC / "dashboard" / "handlers" / "updates.py").read_text()
     spawns = _spawns_by_target(src, "create_subprocess_exec")
 
-    missing = {n for n in _UPDATES_GROUP_LED if "start_new_session" not in spawns.get(n, set())}
+    missing = {
+        n for n in _UPDATES_GROUP_LED if "start_new_session" not in spawns.get(n, set())
+    }
     assert not missing, (
         f"{sorted(missing)} in updates.py can fork a grandchild that inherits its pipe, "
         "but no longer asks for its own session — kill_timed_out will fall back to a "
@@ -270,24 +261,14 @@ def test_the_loop_gate_kills_its_shells_group():
     )
 
 
-# ── the same census over the file browser's spawns (#432) ──
-#
-# files.py is where this defect class was found a second time: `api_file_git_original`
-# had hand-rolled `_git`'s spawn and its timeout handler killed NOTHING (measured: two
-# live processes leaked per timeout — the git child and its grandchild — accumulating
-# one pair per poll of the diff view), and `_content_search_rg` had the identical shape
-# for ripgrep. Keyed by FUNCTION here, not by variable name: all four of these spawns
-# are called `proc`, so the by-name matcher above cannot tell them apart.
 _FILES_REAPED = {
-    "_git",  # git forks: fsmonitor hook, LFS filter, remote helper
-    "_content_search_rg",  # rg over a huge tree blows the 15s search deadline
+    "_git",
+    "_content_search_rg",
 }
 _FILES_PID_KILL = {
-    "api_upload",  # osascript: the Finder dialog is the OS's window, not a child
-    "api_screenshot",  # screencapture: no children
+    "api_upload",
+    "api_screenshot",
 }
-# Only a spawn whose child can fork needs its own session; a group signal you do not
-# lead is wider than the fix (see the updates.py census above for the same rule).
 _FILES_GROUP_LED = {"_git"}
 
 
@@ -312,7 +293,10 @@ def _spawn_functions(source: str) -> dict[str, dict[str, object]]:
                 f = inner.func
                 if isinstance(f, ast.Attribute) and f.attr in {"kill", "terminate"}:
                     kill = "pid"
-                elif isinstance(f, ast.Name) and f.id in {"kill_timed_out", "terminate_and_reap"}:
+                elif isinstance(f, ast.Name) and f.id in {
+                    "kill_timed_out",
+                    "terminate_and_reap",
+                }:
                     kill = "group"
         out[fn.name] = {"kill": kill, "own_session": "start_new_session" in dumped}
     return out
@@ -347,7 +331,9 @@ def test_every_file_browser_spawn_reaps_its_timeout():
         "orphan that outlives the request (#432 leaked one per timed-out read)."
     )
     drifted = {n for n in _FILES_PID_KILL if sites[n]["kill"] != "pid"}
-    assert not drifted, f"{sorted(drifted)} changed kill style without moving in the census"
+    assert (
+        not drifted
+    ), f"{sorted(drifted)} changed kill style without moving in the census"
 
     assert {n for n, s in sites.items() if s["own_session"]} == _FILES_GROUP_LED, (
         "the set of files.py spawns leading their own session drifted from the census: "
@@ -366,9 +352,13 @@ def test_the_by_function_matcher_sees_an_unreaped_timeout():
         "    except asyncio.TimeoutError:\n"
         "        return None\n"
     )
-    assert _spawn_functions(unreaped) == {"api_leaky": {"kill": None, "own_session": False}}
+    assert _spawn_functions(unreaped) == {
+        "api_leaky": {"kill": None, "own_session": False}
+    }
 
-    fixed = unreaped.replace("        return None\n", "        await kill_timed_out(proc)\n")
+    fixed = unreaped.replace(
+        "        return None\n", "        await kill_timed_out(proc)\n"
+    )
     assert _spawn_functions(fixed)["api_leaky"]["kill"] == "group"
 
 
@@ -382,8 +372,9 @@ def test_the_matcher_tells_the_two_shapes_apart():
         "    except asyncio.TimeoutError:\n"
     )
     assert _timeout_kill_style(header + "        proc.kill()\n") == {"proc": "pid"}
-    assert _timeout_kill_style(header + "        await kill_timed_out(proc)\n") == {"proc": "group"}
-    # A kill OUTSIDE a timeout handler is not this defect and must not be reported.
+    assert _timeout_kill_style(header + "        await kill_timed_out(proc)\n") == {
+        "proc": "group"
+    }
     assert _timeout_kill_style("def g(proc):\n    proc.kill()\n") == {}
 
 

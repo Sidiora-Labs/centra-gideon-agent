@@ -1,6 +1,6 @@
 """P4a — the run-script action provider (zero-token script execution).
 
-Wraps :func:`gideon.schedule_script.run_script_sandboxed`; asserts the
+Wraps :func:`gideon.automation.schedule_script.run_script_sandboxed`; asserts the
 missing-field error path and that the sandbox status dict maps onto ActionResult
 (ok/done/report/skip → success; error → failure). The sandbox call is stubbed so
 no script actually runs.
@@ -12,8 +12,10 @@ import asyncio
 
 import pytest
 
-from gideon.action_providers.base import ActionContext, ActionProvider
-from gideon.action_providers.run_script_provider import RunScriptActionProvider
+from gideon.integrations.action_providers.base import ActionContext, ActionProvider
+from gideon.integrations.action_providers.run_script_provider import (
+    RunScriptActionProvider,
+)
 
 
 def _ctx() -> ActionContext:
@@ -33,7 +35,7 @@ def test_missing_script_is_error_result():
 
 @pytest.mark.parametrize("status", ["ok", "done", "report", "skip"])
 def test_success_statuses_map_to_success(monkeypatch, status):
-    import gideon.schedule_script as ss
+    import gideon.automation.schedule_script as ss
 
     monkeypatch.setattr(
         ss, "run_script_sandboxed", lambda *a, **k: {"status": status, "message": "out"}
@@ -44,7 +46,7 @@ def test_success_statuses_map_to_success(monkeypatch, status):
 
 
 def test_error_status_maps_to_failure(monkeypatch):
-    import gideon.schedule_script as ss
+    import gideon.automation.schedule_script as ss
 
     monkeypatch.setattr(
         ss, "run_script_sandboxed", lambda *a, **k: {"status": "error", "error": "boom"}
@@ -55,7 +57,7 @@ def test_error_status_maps_to_failure(monkeypatch):
 
 
 def test_sandbox_exception_is_caught(monkeypatch):
-    import gideon.schedule_script as ss
+    import gideon.automation.schedule_script as ss
 
     def _raise(*a, **k):
         raise RuntimeError("explode")
@@ -67,7 +69,7 @@ def test_sandbox_exception_is_caught(monkeypatch):
 
 
 def test_run_script_registered_by_default():
-    from gideon.action_providers.registry import (
+    from gideon.integrations.action_providers.registry import (
         _ensure_default_providers_registered,
         get_action_provider,
         list_action_providers,

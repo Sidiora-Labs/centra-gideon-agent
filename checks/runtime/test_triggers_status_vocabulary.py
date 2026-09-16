@@ -44,13 +44,10 @@ from typing import Any
 
 import pytest
 
-from gideon.triggers import executor as E
-from gideon.triggers import history as H
+from gideon.automation.triggers import executor as E
+from gideon.automation.triggers import history as H
 
-SRC = pathlib.Path(__file__).resolve().parents[1] / "src" / "gideon"
-
-
-# ── the writer census ──
+SRC = pathlib.Path(__file__).resolve().parents[2] / "runtime" / "gideon"
 
 
 @dataclass(frozen=True)
@@ -66,81 +63,62 @@ class Writer:
     path: str
     table: dict[str, str]
     table_name: str
-    #: How a status is written here. `attr` = `<x>.<name> = ...`; `kwarg` = `Name(<name>=...)`;
-    #: `dictkey` = `{"<name>": ...}`.
     kind: str
     name: str
-    #: For `kwarg`: the callable's name. For `dictkey`: unused.
     call: str = ""
-    #: Restrict the scan to one function (`dictkey` would otherwise match any dict in the file).
-    #: Asserted to EXIST, so a rename reds the rail instead of quietly scanning nothing.
     in_function: str = ""
     min_sites: int = 1
     min_values: int = 1
-    #: Statuses the table deliberately does not carry, each with a reason in the comment below.
     exempt: frozenset[str] = field(default_factory=frozenset)
 
 
 WRITERS: tuple[Writer, ...] = (
     Writer(
         label="hooks.py sets ScriptHook.last_status",
-        path="hooks.py",
+        path="engine/hooks.py",
         table=H.HOOK_STATUS_TO_OUTCOME,
         table_name="HOOK_STATUS_TO_OUTCOME",
         kind="attr",
         name="last_status",
-        # The writer GENUINELY SHRANK (the claim this floor's docstring demands): the per-branch
-        # `hook.last_status = "<literal>"` writes were consolidated into ONE `_record(status)`
-        # choke point so the Test-rehearsal rule cannot drift per branch (issue 609). The single
-        # assignment is pinned by a `not in` guard naming the full closed vocabulary, so the scan
-        # now infers MORE values from FEWER sites — min_values is the floor doing the work here.
         min_sites=1,
         min_values=9,
     ),
     Writer(
-        label="gateway.py records a fire's ScheduleRun",
-        path="gateway.py",
+        label="trigger_outcomes.py records a fire's ExecutionRecord",
+        path="engine/trigger_outcomes.py",
         table=H.SCHEDULE_STATUS_TO_OUTCOME,
         table_name="SCHEDULE_STATUS_TO_OUTCOME",
         kind="kwarg",
         name="status",
-        call="ScheduleRun",
+        call="ExecutionRecord",
         min_sites=2,
-        # Raised from 3 when AG-7 added the rung ladder's `skipped_gate` refusal: both refusal
-        # statuses now arrive through `_record_refused_fire`, pinned by its `_REFUSAL_STATUSES`
-        # guard, so the floor tightens rather than staying where a lost status would fit.
         min_values=4,
     ),
     Writer(
-        label="triggers/service.py records a suppressed fire's ScheduleRun",
-        path="triggers/service.py",
+        label="triggers/service.py records a suppressed fire's ExecutionRecord",
+        path="automation/triggers/service.py",
         table=H.SCHEDULE_STATUS_TO_OUTCOME,
         table_name="SCHEDULE_STATUS_TO_OUTCOME",
         kind="kwarg",
         name="status",
-        call="ScheduleRun",
+        call="ExecutionRecord",
         min_sites=1,
         min_values=6,
     ),
     Writer(
-        label="dashboard/handlers/triggers.py records a manual run's ScheduleRun",
-        path="dashboard/handlers/triggers.py",
+        label="dashboard/handlers/triggers.py records a manual run's ExecutionRecord",
+        path="interfaces/dashboard/handlers/triggers.py",
         table=H.SCHEDULE_STATUS_TO_OUTCOME,
         table_name="SCHEDULE_STATUS_TO_OUTCOME",
         kind="kwarg",
         name="status",
-        call="ScheduleRun",
+        call="ExecutionRecord",
         min_sites=1,
         min_values=4,
     ),
     Writer(
-        # The executor's runner is INJECTED, so its status source is open by design (an app's
-        # provider, or `mcp_automation._http_runner`'s HTTP body). `classify`'s unrecognized→FAILED
-        # rule plus `action_providers/base.py`'s "adding a member means updating these maps" note
-        # are what cover the open half; this covers the one in-repo runner, which is the one that
-        # fires every clock trigger.
-        label="gateway._clock_loop._runner reports a status to the executor",
-        path="gateway.py",
+        label="AutomationRoutes._runner reports a status to the executor",
+        path="engine/automation_routes.py",
         table=E.STATUS_TO_OUTCOME,
         table_name="executor.STATUS_TO_OUTCOME",
         kind="dictkey",
@@ -150,9 +128,6 @@ WRITERS: tuple[Writer, ...] = (
         min_values=2,
     ),
 )
-
-
-# ── the inference ──
 
 
 class Unresolved(Exception):
@@ -172,7 +147,9 @@ def _literals(node: ast.expr, module: str) -> set[str]:
     """
     if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
         out = {
-            e.value for e in node.elts if isinstance(e, ast.Constant) and isinstance(e.value, str)
+            e.value
+            for e in node.elts
+            if isinstance(e, ast.Constant) and isinstance(e.value, str)
         }
         if len(out) != len(node.elts):
             raise Unresolved(f"non-string member in {ast.unparse(node)}")
@@ -180,7 +157,9 @@ def _literals(node: ast.expr, module: str) -> set[str]:
     if isinstance(node, ast.Name):
         try:
             value = getattr(importlib.import_module(module), node.id)
-        except Exception as exc:  # noqa: BLE001 - an unreadable constant is unresolved, not clean
+        except (
+            Exception
+        ) as exc:  # noqa: BLE001 - an unreadable constant is unresolved, not clean
             raise Unresolved(f"could not resolve {node.id} in {module}: {exc}") from exc
         if not isinstance(value, (set, frozenset, tuple, list)) or not all(
             isinstance(v, str) for v in value
@@ -213,17 +192,17 @@ def _pins(test: ast.expr, module: str, *, holds: bool) -> dict[str, set[str]]:
             for value in test.values:
                 out.update(_pins(value, module, holds=holds))
         return out
-    if isinstance(test, ast.Compare) and len(test.ops) == 1 and len(test.comparators) == 1:
+    if (
+        isinstance(test, ast.Compare)
+        and len(test.ops) == 1
+        and len(test.comparators) == 1
+    ):
         op = test.ops[0]
         wanted = isinstance(op, ast.In) if holds else isinstance(op, ast.NotIn)
         if wanted:
             try:
                 out[ast.unparse(test.left)] = _literals(test.comparators[0], module)
             except Unresolved:
-                # An unreadable container (`in (None, "")`, a dict of non-strings) pins NOTHING.
-                # Swallowed only here, and only in the safe direction: a missing pin can make the
-                # write site unresolvable, which fails loudly, while a guessed pin would invent
-                # coverage.
                 pass
     return out
 
@@ -253,7 +232,11 @@ def _values(
         raise Unresolved(f"non-string constant {key}")
     if isinstance(expr, ast.IfExp):
         return _values(
-            expr.body, {**pins, **_pins(expr.test, module, holds=True)}, locals_, module, depth + 1
+            expr.body,
+            {**pins, **_pins(expr.test, module, holds=True)},
+            locals_,
+            module,
+            depth + 1,
         ) | _values(
             expr.orelse,
             {**pins, **_pins(expr.test, module, holds=False)},
@@ -261,8 +244,11 @@ def _values(
             module,
             depth + 1,
         )
-    # `str(x)` / `x or ""` are transparent wrappers around the value that matters.
-    if isinstance(expr, ast.Call) and isinstance(expr.func, ast.Name) and expr.func.id == "str":
+    if (
+        isinstance(expr, ast.Call)
+        and isinstance(expr.func, ast.Name)
+        and expr.func.id == "str"
+    ):
         if len(expr.args) == 1:
             return _values(expr.args[0], pins, locals_, module, depth + 1)
     if isinstance(expr, ast.BoolOp) and isinstance(expr.op, ast.Or):
@@ -280,7 +266,9 @@ def _values(
 
 def _terminates(body: list[ast.stmt]) -> bool:
     """Whether a block always leaves — so the code after its `if` runs only when the test failed."""
-    return bool(body) and isinstance(body[-1], (ast.Return, ast.Raise, ast.Continue, ast.Break))
+    return bool(body) and isinstance(
+        body[-1], (ast.Return, ast.Raise, ast.Continue, ast.Break)
+    )
 
 
 def _matches(node: ast.AST, writer: Writer) -> list[ast.expr]:
@@ -326,13 +314,19 @@ def _scan_body(
             after = {**pins, **_pins(stmt.test, module, holds=False)}
             _scan_body(stmt.orelse, after, writer, sites, locals_, module)
             if _terminates(stmt.body) and not stmt.orelse:
-                # An early-return guard: everything below it runs only on the surviving path.
                 pins = after
             continue
-        if isinstance(stmt, (ast.For, ast.AsyncFor, ast.While, ast.With, ast.AsyncWith, ast.Try)):
+        if isinstance(
+            stmt, (ast.For, ast.AsyncFor, ast.While, ast.With, ast.AsyncWith, ast.Try)
+        ):
             for field_name in ("body", "orelse", "finalbody"):
                 _scan_body(
-                    getattr(stmt, field_name, []) or [], pins, writer, sites, locals_, module
+                    getattr(stmt, field_name, []) or [],
+                    pins,
+                    writer,
+                    sites,
+                    locals_,
+                    module,
                 )
             for handler in getattr(stmt, "handlers", []) or []:
                 _scan_body(handler.body, pins, writer, sites, locals_, module)
@@ -383,9 +377,6 @@ def scan(writer: Writer) -> tuple[set[str], int, list[str]]:
     return values, count, unresolved
 
 
-# ── the rails ──
-
-
 @pytest.mark.parametrize("writer", WRITERS, ids=lambda w: w.label)
 def test_every_status_a_writer_produces_is_in_its_table(writer: Writer) -> None:
     """🔴 THE RAIL. A status the table lacks is projected by a fallback nobody chose."""
@@ -411,7 +402,7 @@ def test_the_scan_is_not_vacuous(writer: Writer) -> None:
     """A scan that matches nothing is indistinguishable from a scan that found nothing wrong.
 
     Both floors matter: `min_sites` catches a shape change that stops matching (the writer moved to
-    a helper, or `ScheduleRun(**kwargs)` replaced the keyword), and `min_values` catches an
+    a helper, or `ExecutionRecord(**kwargs)` replaced the keyword), and `min_values` catches an
     inference that silently stopped resolving guards.
     """
     values, count, _unresolved = scan(writer)
@@ -428,7 +419,7 @@ def test_the_scan_is_not_vacuous(writer: Writer) -> None:
 def test_the_writer_file_census_is_pinned() -> None:
     """A NEW writer file is the drift no per-file scan can see.
 
-    Every module that assigns `.last_status` or constructs a `ScheduleRun` is enumerated here, so a
+    Every module that assigns `.last_status` or constructs a `ExecutionRecord` is enumerated here, so a
     fifth writer reds this test and forces the question "which table translates what it writes?"
     instead of inheriting a silent fallback.
     """
@@ -440,7 +431,11 @@ def test_the_writer_file_census_is_pinned() -> None:
         for node in ast.walk(tree):
             if isinstance(node, ast.Assign):
                 for target in node.targets:
-                    if isinstance(target, ast.Attribute) and target.attr == "last_status":
+                    if any(
+                        isinstance(assigned, ast.Attribute)
+                        and assigned.attr == "last_status"
+                        for assigned in ast.walk(target)
+                    ):
                         attr_files.add(rel)
             if isinstance(node, ast.Call):
                 called = (
@@ -448,31 +443,24 @@ def test_the_writer_file_census_is_pinned() -> None:
                     if isinstance(node.func, ast.Name)
                     else getattr(node.func, "attr", "")
                 )
-                if called == "ScheduleRun":
+                if called == "ExecutionRecord":
                     call_files.add(rel)
 
     assert attr_files == {
-        "hooks.py",
-        # `web_poll.py` writes an HTTP status CODE (an int) to a different entity's field. Named
-        # here so its absence from the tables is a decision on the record, not an oversight.
-        "triggers/web_poll.py",
-        # WF2KNO-12: a report definition carries its OWN `last_status` ("ok" | "error" | ""), which
-        # is not the trigger status vocabulary this file pins — it is the report's own two-value
-        # run outcome, read by the reports list to say "last run failed" without losing the run
-        # time. Named here for the same reason as `web_poll.py`: a same-named field on a different
-        # entity should be a decision on the record rather than a silent census drift.
-        "knowledge/research_reports.py",
+        "engine/hooks.py",
+        "automation/triggers/web_poll.py",
+        "cognition/knowledge/research_reports.py",
     }, f"the set of modules assigning .last_status changed: {sorted(attr_files)}"
     assert call_files == {
-        "gateway.py",
-        "triggers/service.py",
-        "dashboard/handlers/triggers.py",
-    }, f"the set of modules constructing a ScheduleRun changed: {sorted(call_files)}"
+        "engine/trigger_outcomes.py",
+        "automation/triggers/service.py",
+        "interfaces/dashboard/handlers/triggers.py",
+    }, f"the set of modules constructing a ExecutionRecord changed: {sorted(call_files)}"
 
 
 def test_every_table_value_is_a_typed_outcome() -> None:
     """A table may only translate INTO the closed vocabulary, or the feed becomes unfilterable."""
-    from gideon.triggers.models import FIRE_OUTCOMES
+    from gideon.automation.triggers.models import FIRE_OUTCOMES
 
     for name, table in (
         ("HOOK_STATUS_TO_OUTCOME", H.HOOK_STATUS_TO_OUTCOME),
@@ -480,7 +468,9 @@ def test_every_table_value_is_a_typed_outcome() -> None:
         ("executor.STATUS_TO_OUTCOME", E.STATUS_TO_OUTCOME),
     ):
         for status, outcome in table.items():
-            assert outcome in FIRE_OUTCOMES, f"{name}[{status!r}] = {outcome!r} is not typed"
+            assert (
+                outcome in FIRE_OUTCOMES
+            ), f"{name}[{status!r}] = {outcome!r} is not typed"
 
 
 def test_the_inference_handles_the_shape_that_hid_a_status() -> None:
@@ -518,23 +508,27 @@ def test_the_inference_handles_the_shape_that_hid_a_status() -> None:
         writer,
         sites,
         locals_,
-        "gideon.triggers.history",
+        "gideon.automation.triggers.history",
     )
     assert len(sites) == 3
 
-    resolved = _values(sites[0][0], sites[0][1], locals_, "gideon.triggers.history")
+    resolved = _values(
+        sites[0][0], sites[0][1], locals_, "gideon.automation.triggers.history"
+    )
     assert resolved == {"launched", "queued", "ok"}
-    assert _values(sites[1][0], sites[1][1], locals_, "gideon.triggers.history") == {"parked"}
+    assert _values(
+        sites[1][0], sites[1][1], locals_, "gideon.automation.triggers.history"
+    ) == {"parked"}
     with pytest.raises(Unresolved):
-        _values(sites[2][0], sites[2][1], locals_, "gideon.triggers.history")
+        _values(sites[2][0], sites[2][1], locals_, "gideon.automation.triggers.history")
 
 
 def test_a_name_resolves_through_the_module_it_is_read_in() -> None:
     """`INERT_OUTCOMES` in a guard resolves to the SAME six values the writer sees."""
-    from gideon.triggers.models import INERT_OUTCOMES
+    from gideon.automation.triggers.models import INERT_OUTCOMES
 
     test = ast.parse("outcome not in INERT_OUTCOMES", mode="eval").body
-    pins = _pins(test, "gideon.triggers.service", holds=False)
+    pins = _pins(test, "gideon.automation.triggers.service", holds=False)
     assert pins == {"outcome": set(INERT_OUTCOMES)}
     assert len(pins["outcome"]) == 6
 
@@ -548,7 +542,9 @@ def test_the_two_status_families_do_not_disagree() -> None:
     """
     shared = set(H.HOOK_STATUS_TO_OUTCOME) & set(H.SCHEDULE_STATUS_TO_OUTCOME)
     for status in sorted(shared):
-        assert H.HOOK_STATUS_TO_OUTCOME[status] == H.SCHEDULE_STATUS_TO_OUTCOME[status], status
+        assert (
+            H.HOOK_STATUS_TO_OUTCOME[status] == H.SCHEDULE_STATUS_TO_OUTCOME[status]
+        ), status
     both = (set(H.HOOK_STATUS_TO_OUTCOME) | set(H.SCHEDULE_STATUS_TO_OUTCOME)) & set(
         E.STATUS_TO_OUTCOME
     )

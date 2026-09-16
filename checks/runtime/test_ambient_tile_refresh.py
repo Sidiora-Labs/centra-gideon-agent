@@ -21,15 +21,12 @@ import json
 
 import pytest
 
-from gideon.artifacts import registry as artifact_registry
-from gideon.artifacts.native import NativeArtifactProvider
-from gideon.dashboard import tile_refresh, views_store
-from gideon.ledger import TILE_REFRESHED
+from gideon.assurance.ledger import TILE_REFRESHED
+from gideon.interfaces.dashboard import tile_refresh, views_store
+from gideon.workspace.artifacts import registry as artifact_registry
+from gideon.workspace.artifacts.native import NativeArtifactProvider
 
 SKELETON = "<div>items: {{nodes.health.output.item_count}} ({{nodes.health.output.note}})</div>"
-#: `knowledge-health` on an empty store — a real, allowlisted, zero-token data source, so the
-#: happy path is driven through the shipped provider rather than a stand-in that could pass while
-#: the registry dispatch was broken.
 HEALTH_NODE = {"id": "health", "provider": "knowledge-health", "config": {}}
 
 
@@ -41,10 +38,14 @@ def home(tmp_path, monkeypatch):
     provider in a module global whose root was frozen at construction, so patching the home
     alone would leave writes landing wherever the first test in the session put them.
     """
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
-    monkeypatch.setattr("gideon.dashboard.views_store.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "gideon.interfaces.dashboard.views_store.config_dir", lambda: tmp_path
+    )
     previous = artifact_registry.get_provider()
-    artifact_registry.register_provider(NativeArtifactProvider(root=tmp_path / "artifacts"))
+    artifact_registry.register_provider(
+        NativeArtifactProvider(root=tmp_path / "artifacts")
+    )
     yield tmp_path
     if previous is not None:
         artifact_registry.register_provider(previous)
@@ -53,8 +54,12 @@ def home(tmp_path, monkeypatch):
 def _live_tile(*, ttl_secs: int = 60, skeleton_body: str = SKELETON, data=None) -> str:
     """Pin a tile in ttl mode over a stored skeleton. Returns the tile ref."""
     store = artifact_registry.get_provider()
-    store.create(name="Skeleton", content=skeleton_body, kind="widget", slug="tile-skeleton")
-    store.create(name="Sales", content="<div>first paint</div>", kind="widget", slug="sales")
+    store.create(
+        name="Skeleton", content=skeleton_body, kind="widget", slug="tile-skeleton"
+    )
+    store.create(
+        name="Sales", content="<div>first paint</div>", kind="widget", slug="sales"
+    )
     views_store.add_tile("overview", "artifact:sales")
     views_store.set_tile_refresh(
         "overview",
@@ -74,9 +79,6 @@ def _body(slug: str = "sales") -> str:
     return (art.content or "") if art is not None else ""
 
 
-# ── 1. the render transform: deterministic, LLM-free ─────────────────────────
-
-
 class TestTheRenderTransformIsDeterministic:
     def test_the_same_inputs_render_byte_identical_bodies(self):
         outputs = {"a": {"n": 7, "rows": [{"x": 1}, {"x": 2}]}}
@@ -84,13 +86,11 @@ class TestTheRenderTransformIsDeterministic:
         first = tile_refresh.render_skeleton(template, outputs)
         for _ in range(5):
             assert tile_refresh.render_skeleton(template, outputs) == first
-        # And the render actually substituted — a transform that returned the template
-        # unchanged would also be byte-identical every time.
         assert "{{" not in first
         assert "<b>7</b>" in first
 
     def test_an_unresolvable_slot_raises_instead_of_emptying_the_panel(self):
-        from gideon.workflows.bindings import BindingError
+        from gideon.automation.workflows.bindings import BindingError
 
         with pytest.raises(BindingError):
             tile_refresh.render_skeleton("<b>{{nodes.missing.output.n}}</b>", {})
@@ -103,24 +103,29 @@ class TestTheWF2NodeRendersTheStoredSkeleton:
 
     @pytest.mark.asyncio
     async def test_dispatch_transform_interpolates_a_skeleton_artifact(self, home):
-        from gideon.workflows.bindings import BindingContext
-        from gideon.workflows.engine import dispatch_transform
-        from gideon.workflows.models import InstanceState, Node, NodeKind
+        from gideon.automation.workflows.bindings import BindingContext
+        from gideon.automation.workflows.engine import dispatch_transform
+        from gideon.automation.workflows.models import InstanceState, Node, NodeKind
 
         artifact_registry.get_provider().create(
-            name="Sk", content="<p>{{nodes.data.output.k}}</p>", kind="widget", slug="sk"
+            name="Sk",
+            content="<p>{{nodes.data.output.k}}</p>",
+            kind="widget",
+            slug="sk",
         )
         node = Node(kind=NodeKind.TRANSFORM, id="render", config={"skeleton": "sk"})
-        result = await dispatch_transform(node, BindingContext(node_outputs={"data": {"k": "v"}}))
+        result = await dispatch_transform(
+            node, BindingContext(node_outputs={"data": {"k": "v"}})
+        )
 
         assert result.state is InstanceState.DONE
         assert result.output == "<p>v</p>"
 
     @pytest.mark.asyncio
     async def test_a_missing_skeleton_is_a_typed_user_failure(self, home):
-        from gideon.workflows.bindings import BindingContext
-        from gideon.workflows.engine import dispatch_transform
-        from gideon.workflows.models import InstanceState, Node, NodeKind
+        from gideon.automation.workflows.bindings import BindingContext
+        from gideon.automation.workflows.engine import dispatch_transform
+        from gideon.automation.workflows.models import InstanceState, Node, NodeKind
 
         node = Node(kind=NodeKind.TRANSFORM, id="render", config={"skeleton": "nope"})
         result = await dispatch_transform(node, BindingContext(node_outputs={}))
@@ -129,7 +134,7 @@ class TestTheWF2NodeRendersTheStoredSkeleton:
         assert "nope" in (result.failure.cause_plain if result.failure else "")
 
     def test_the_validator_accepts_a_skeleton_transform_with_no_expr(self):
-        from gideon.workflows.validator import validate_spec
+        from gideon.automation.workflows.validator import validate_spec
 
         spec = {
             "name": "live-tile",
@@ -145,7 +150,7 @@ class TestTheWF2NodeRendersTheStoredSkeleton:
         assert "WF_MISSING_EXPR" not in codes
 
     def test_a_transform_with_neither_expr_nor_skeleton_is_still_rejected(self):
-        from gideon.workflows.validator import validate_spec
+        from gideon.automation.workflows.validator import validate_spec
 
         spec = {
             "name": "broken",
@@ -159,9 +164,6 @@ class TestTheWF2NodeRendersTheStoredSkeleton:
         assert "WF_MISSING_EXPR" in codes
 
 
-# ── 2. zero LLM calls, with a vacuity floor ──────────────────────────────────
-
-
 class TestASteadyStateRefreshMakesZeroModelCalls:
     @pytest.mark.asyncio
     async def test_the_model_sink_is_never_reached_and_the_render_still_changed(
@@ -170,7 +172,7 @@ class TestASteadyStateRefreshMakesZeroModelCalls:
         """Proved at the chokepoint every non-interactive model call resolves through, and
         floored on the render actually changing: "no model call" is trivially true of a
         refresh that did nothing at all."""
-        import gideon.providers.provider_bridge as bridge
+        import gideon.extensions.providers.provider_bridge as bridge
 
         def explode(*_args, **_kwargs):
             raise AssertionError("a tile refresh resolved a model provider")
@@ -182,37 +184,40 @@ class TestASteadyStateRefreshMakesZeroModelCalls:
         result = await tile_refresh.refresh_tile("overview", ref)
 
         assert result.refreshed is True, result.reason
-        # VACUITY FLOOR — the refresh produced a real, fully-interpolated, CHANGED body.
         after = _body()
         assert after != before
         assert "{{" not in after
         assert "items: 0" in after
-        # And the attempt audit recorded no non-interactive model call.
         assert not (home / "model_calls.jsonl").exists()
 
     @pytest.mark.asyncio
-    async def test_two_refreshes_of_unchanged_data_produce_byte_identical_bodies(self, home):
+    async def test_two_refreshes_of_unchanged_data_produce_byte_identical_bodies(
+        self, home
+    ):
         """Determinism where it is load-bearing: a second refresh over the same inputs must
         write the same bytes. A transform that stamped a render time would pass every
         single-run assertion above and fail here."""
         ref = _live_tile()
         assert (await tile_refresh.refresh_tile("overview", ref)).refreshed is True
         first = _body()
-        assert (await tile_refresh.refresh_tile("overview", ref, force=True)).refreshed is True
+        assert (
+            await tile_refresh.refresh_tile("overview", ref, force=True)
+        ).refreshed is True
         assert _body() == first
-
-
-# ── 3. the ledger row ────────────────────────────────────────────────────────
 
 
 class TestTheLedgerRow:
     @pytest.mark.asyncio
-    async def test_a_refresh_writes_one_row_carrying_zero_tokens_and_a_duration(self, home):
+    async def test_a_refresh_writes_one_row_carrying_zero_tokens_and_a_duration(
+        self, home
+    ):
         ref = _live_tile()
         result = await tile_refresh.refresh_tile("overview", ref)
 
         row = tile_refresh.last_row("overview", ref)
-        assert row, "a refresh that writes no row leaves the tile unable to say what it cost"
+        assert (
+            row
+        ), "a refresh that writes no row leaves the tile unable to say what it cost"
         assert row["kind"] == TILE_REFRESHED
         assert row["tokens"] == 0
         assert row["cost_usd"] == 0.0
@@ -246,7 +251,9 @@ class TestTheLedgerRow:
         assert second.row["event_id"] == "overview__sales-evt-2"
         assert second.row["seq"] == 2
 
-        rows = tile_refresh.read_events(tile_refresh._STORE, tile_refresh.tile_key("overview", ref))
+        rows = tile_refresh.read_events(
+            tile_refresh._STORE, tile_refresh.tile_key("overview", ref)
+        )
         ids = [r["event_id"] for r in rows]
         assert len(ids) == len(set(ids)), f"duplicate ledger event ids: {ids}"
 
@@ -257,14 +264,12 @@ class TestTheLedgerRow:
 
         path = tile_refresh.ledger_path("overview", ref)
         assert path.exists()
-        rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+        rows = [
+            json.loads(line) for line in path.read_text().splitlines() if line.strip()
+        ]
         assert len(rows) == 1
-        # One directory PER TILE, not per refresh — the run-weight §2.3 refuses.
         assert path.parent.name == "overview__sales"
         assert path.parent.parent.name == tile_refresh.LEDGER_DIRNAME
-
-
-# ── 4. the TTL boundary ──────────────────────────────────────────────────────
 
 
 class TestTheTTLBoundary:
@@ -274,31 +279,15 @@ class TestTheTTLBoundary:
         first = await tile_refresh.refresh_tile("overview", ref)
         assert first.refreshed is True
 
-        # Anchor the injected clock to the stamp `due()` actually subtracts, NOT to a live
-        # `time.time()` read taken after the refresh returned. Two separate errors used to
-        # ride that read, both in the same direction, against a ONE-second margin:
-        #   1. `time.time()` was evaluated AFTER `first` completed, so the offset was
-        #      `T_return + 599` while the code ages from the stamp written mid-call — the
-        #      elapsed it saw was `599 + (T_return - T_stamp)`, i.e. every millisecond the
-        #      first refresh took ate into the margin.
-        #   2. the ledger `ts` is whole-second (`%Y-%m-%dT%H:%M:%SZ`), so the parsed stamp is
-        #      TRUNCATED — up to another second of apparent age on top.
-        # Together those routinely reached 600s on a loaded xdist worker and turned the
-        # refusal this test exists to assert into a refresh (seen on PR #1610, whose diff
-        # contained zero .py files, and again on #1879).
-        #
-        # This is a TIGHTENING, not a widened margin: offsetting from the recorded stamp makes
-        # `age` exactly 599 and exactly 601, so each side of the boundary is now pinned to the
-        # second instead of drifting with how long the call before it took.
-        stamp = tile_refresh._epoch(str(tile_refresh.last_row("overview", ref).get("ts", "")))
+        stamp = tile_refresh._epoch(
+            str(tile_refresh.last_row("overview", ref).get("ts", ""))
+        )
         assert stamp > 0, "no stamp to age from — the first refresh wrote no ledger row"
 
-        # A second read seconds later must NOT re-fetch (a cadence, not a fetch-per-paint).
         early = await tile_refresh.refresh_tile("overview", ref, now=stamp + 599)
         assert early.refreshed is False
         assert early.reason == "within_ttl"
 
-        # One second past the boundary it fires.
         late = await tile_refresh.refresh_tile("overview", ref, now=stamp + 601)
         assert late.refreshed is True, late.reason
 
@@ -317,12 +306,13 @@ class TestTheTTLBoundary:
         forced = await tile_refresh.refresh_tile("overview", ref, force=True)
         assert forced.refreshed is True
 
-    def test_an_unset_ttl_falls_back_to_the_ambient_config_cadence(self, home, monkeypatch):
+    def test_an_unset_ttl_falls_back_to_the_ambient_config_cadence(
+        self, home, monkeypatch
+    ):
         tile = views_store.DashboardTile(
             ref="artifact:x", refresh=views_store.TileRefresh(mode="ttl", ttl_secs=0)
         )
         monkeypatch.setattr(tile_refresh, "_default_ttl", lambda: 1234)
-        # No prior row ⇒ due, and the fallback is what a later comparison would use.
         assert tile_refresh.due("overview", tile, 0.0) == (True, 0.0)
         assert tile_refresh._default_ttl() == 1234
 
@@ -339,16 +329,14 @@ class TestTheTTLBoundary:
         assert (await tile_refresh.refresh_tile("overview", ref)).refreshed is True
         tile = views_store.find_tile("overview", ref)
         assert tile is not None
-        stamp = tile_refresh._epoch(str(tile_refresh.last_row("overview", ref).get("ts", "")))
+        stamp = tile_refresh._epoch(
+            str(tile_refresh.last_row("overview", ref).get("ts", ""))
+        )
         assert stamp > 0, "no stamp to age from"
 
-        # `due` is `age >= ttl`, so 600 is INSIDE the fire half — the boundary is inclusive.
         assert tile_refresh.due("overview", tile, stamp + 599) == (False, 599.0)
         assert tile_refresh.due("overview", tile, stamp + 600) == (True, 600.0)
         assert tile_refresh.due("overview", tile, stamp + 601) == (True, 601.0)
-
-
-# ── 5. a failed refresh keeps the last-good paint ────────────────────────────
 
 
 class TestAFailedRefreshKeepsLastGood:
@@ -356,11 +344,13 @@ class TestAFailedRefreshKeepsLastGood:
     async def test_a_failing_data_node_leaves_the_body_untouched_and_reddens_the_chip(
         self, home, monkeypatch
     ):
-        ref = _live_tile(data=[{"id": "health", "provider": "knowledge-retrieve", "config": {}}])
+        ref = _live_tile(
+            data=[{"id": "health", "provider": "knowledge-retrieve", "config": {}}]
+        )
         first = _body()
 
-        from gideon.action_providers.base import ActionResult
-        from gideon.action_providers.registry import (
+        from gideon.integrations.action_providers.base import ActionResult
+        from gideon.integrations.action_providers.registry import (
             _ensure_default_providers_registered,
             get_action_provider,
         )
@@ -386,11 +376,13 @@ class TestAFailedRefreshKeepsLastGood:
         assert row["tokens"] == 0
 
     @pytest.mark.asyncio
-    async def test_a_provider_outside_the_allowlist_is_refused_not_dispatched(self, home):
+    async def test_a_provider_outside_the_allowlist_is_refused_not_dispatched(
+        self, home
+    ):
         """The allowlist is the reason a TTL tile is not an unattended-execution surface, so
         the refusal is asserted rather than assumed — and asserted on a provider that really
         is registered, or the test would pass on "not registered" instead."""
-        from gideon.action_providers.registry import (
+        from gideon.integrations.action_providers.registry import (
             _ensure_default_providers_registered,
             get_action_provider,
         )
@@ -399,7 +391,9 @@ class TestAFailedRefreshKeepsLastGood:
         assert get_action_provider("bash") is not None
         assert "bash" not in tile_refresh.DATA_PROVIDERS
 
-        ref = _live_tile(data=[{"id": "shell", "provider": "bash", "config": {"command": "id"}}])
+        ref = _live_tile(
+            data=[{"id": "shell", "provider": "bash", "config": {"command": "id"}}]
+        )
         result = await tile_refresh.refresh_tile("overview", ref)
 
         assert result.refreshed is False
@@ -407,12 +401,16 @@ class TestAFailedRefreshKeepsLastGood:
         assert "not a tile data source" in result.nodes[0].error
 
     @pytest.mark.asyncio
-    async def test_incident_mode_suspends_the_unattended_refresh(self, home, monkeypatch):
+    async def test_incident_mode_suspends_the_unattended_refresh(
+        self, home, monkeypatch
+    ):
         """🔴 The kill switch, at the CALL SITE. A TTL tile is a fourth unattended dispatch seam
         (AUTONOMY-GUARDRAILS §1.2), so a dashboard that kept fetching through an incident would be
         the quiet exception that makes the switch useless."""
         ref = _live_tile()
-        monkeypatch.setattr("gideon.guardrails.incident.incident_active", lambda: True)
+        monkeypatch.setattr(
+            "gideon.security.guardrails.incident.incident_active", lambda: True
+        )
         before = _body()
 
         result = await tile_refresh.refresh_tile("overview", ref)
@@ -423,19 +421,21 @@ class TestAFailedRefreshKeepsLastGood:
         assert _body() == before
 
     @pytest.mark.asyncio
-    async def test_the_denylist_is_threaded_with_a_NON_EMPTY_session_key(self, home, monkeypatch):
+    async def test_the_denylist_is_threaded_with_a_NON_EMPTY_session_key(
+        self, home, monkeypatch
+    ):
         """`enforce_action(session_key="")` classifies as ATTENDED and skips the SafetyProfile
         layer — a quieter version of not enforcing. Asserted on the ARGUMENT the seam passes,
         because the call being present proves nothing about that."""
         seen: list[str] = []
 
         def spy(provider_name, action_config, ctx=None, session_key=""):
-            from gideon.guardrails.denylist import DenyDecision
+            from gideon.security.guardrails.denylist import DenyDecision
 
             seen.append(session_key)
             return DenyDecision(blocked=False, verdict="allow", reason="", matched="")
 
-        monkeypatch.setattr("gideon.guardrails.denylist.enforce_action", spy)
+        monkeypatch.setattr("gideon.security.guardrails.denylist.enforce_action", spy)
         ref = _live_tile()
         assert (await tile_refresh.refresh_tile("overview", ref)).refreshed is True
 
@@ -446,13 +446,18 @@ class TestAFailedRefreshKeepsLastGood:
         self, home, monkeypatch
     ):
         def refuse(provider_name, action_config, ctx=None, session_key=""):
-            from gideon.guardrails.denylist import DenyDecision
+            from gideon.security.guardrails.denylist import DenyDecision
 
             return DenyDecision(
-                blocked=True, verdict="block", reason="matched a deny glob", matched="test"
+                blocked=True,
+                verdict="block",
+                reason="matched a deny glob",
+                matched="test",
             )
 
-        monkeypatch.setattr("gideon.guardrails.denylist.enforce_action", refuse)
+        monkeypatch.setattr(
+            "gideon.security.guardrails.denylist.enforce_action", refuse
+        )
         ref = _live_tile()
         before = _body()
 
@@ -463,19 +468,20 @@ class TestAFailedRefreshKeepsLastGood:
         assert _body() == before
 
     @pytest.mark.asyncio
-    async def test_a_missing_skeleton_is_recorded_rather_than_silently_skipped(self, home):
+    async def test_a_missing_skeleton_is_recorded_rather_than_silently_skipped(
+        self, home
+    ):
         ref = _live_tile()
         views_store.set_tile_refresh(
-            "overview", ref, {"mode": "ttl", "ttl_secs": 60, "skeleton": "gone", "data": []}
+            "overview",
+            ref,
+            {"mode": "ttl", "ttl_secs": 60, "skeleton": "gone", "data": []},
         )
         result = await tile_refresh.refresh_tile("overview", ref)
 
         assert result.refreshed is False
         assert result.reason == "skeleton_missing"
         assert tile_refresh.last_row("overview", ref)["ok"] is False
-
-
-# ── the binding round-trips through the store ────────────────────────────────
 
 
 class TestTheTileBindingRoundTrips:
@@ -487,7 +493,12 @@ class TestTheTileBindingRoundTrips:
         views_store.set_tile_refresh(
             "overview",
             "artifact:sales",
-            {"mode": "ttl", "ttl_secs": 30, "skeleton": "tile-skeleton", "data": [HEALTH_NODE]},
+            {
+                "mode": "ttl",
+                "ttl_secs": 30,
+                "skeleton": "tile-skeleton",
+                "data": [HEALTH_NODE],
+            },
         )
         tile = views_store.find_tile("overview", "artifact:sales")
         assert tile is not None
@@ -501,7 +512,9 @@ class TestTheTileBindingRoundTrips:
         views_store.set_tile_refresh("overview", "artifact:sales", {"mode": "view"})
         tile = views_store.find_tile("overview", "artifact:sales")
         assert tile is not None
-        assert tile.refresh.mode == "manual", "a declared-but-unimplemented mode must not fire"
+        assert (
+            tile.refresh.mode == "manual"
+        ), "a declared-but-unimplemented mode must not fire"
 
     def test_a_tile_still_carries_no_coordinates(self, home):
         views_store.add_tile("overview", "artifact:sales")

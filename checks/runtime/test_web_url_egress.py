@@ -8,7 +8,7 @@ unguarded. Now both go through net.fetch(policy=CONNECTOR).
 import asyncio
 import socket
 
-from gideon.knowledge.connectors.web_url import WebUrlConnector
+from gideon.cognition.knowledge.connectors.web_url import WebUrlConnector
 
 
 def _run(coro):
@@ -27,7 +27,9 @@ def _fake_dns(mapping):
 
 def test_web_url_fetch_blocks_private(monkeypatch):
     """A bookmark resolving to a private/LAN IP is blocked (returns error_kind=blocked)."""
-    monkeypatch.setattr(socket, "getaddrinfo", _fake_dns({"intranet.local": ["10.0.0.5"]}))
+    monkeypatch.setattr(
+        socket, "getaddrinfo", _fake_dns({"intranet.local": ["10.0.0.5"]})
+    )
     text, meta = _run(WebUrlConnector().fetch({"uri": "http://intranet.local/page"}))
     assert text == ""
     assert meta.get("error_kind") == "blocked"
@@ -49,16 +51,20 @@ def test_web_url_fetch_blocks_imds(monkeypatch):
 def test_web_url_detect_changes_blocks_private(monkeypatch):
     """detect_changes (the scheduled HEAD refresh) is guarded too — a private host
     returns False (no change / not probed), never an unguarded HEAD."""
-    monkeypatch.setattr(socket, "getaddrinfo", _fake_dns({"nas.local": ["192.168.1.9"]}))
+    monkeypatch.setattr(
+        socket, "getaddrinfo", _fake_dns({"nas.local": ["192.168.1.9"]})
+    )
     changed = _run(WebUrlConnector().detect_changes({"uri": "http://nas.local/feed"}))
     assert changed is False
 
 
 def test_web_url_fetch_public_attempts(monkeypatch):
     """A public host passes the guard and the fetch is attempted (stubbed transport)."""
-    import gideon.net.client as client
+    import gideon.security.net.client as client
 
-    monkeypatch.setattr(socket, "getaddrinfo", _fake_dns({"example.com": ["93.184.216.34"]}))
+    monkeypatch.setattr(
+        socket, "getaddrinfo", _fake_dns({"example.com": ["93.184.216.34"]})
+    )
 
     async def fake_fetch(url, **kw):
         return client.FetchResponse(
@@ -68,7 +74,7 @@ def test_web_url_fetch_public_attempts(monkeypatch):
             body=b"<html><head><title>Hi</title></head><body><p>Hello world content</p></body></html>",  # noqa: E501
         )
 
-    import gideon.net as net
+    import gideon.security.net as net
 
     monkeypatch.setattr(net, "fetch", fake_fetch)
     text, meta = _run(WebUrlConnector().fetch({"uri": "https://example.com/"}))

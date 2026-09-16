@@ -12,19 +12,16 @@ import json
 
 import pytest
 
-from gideon.providers import use_cases as uc
+from gideon.extensions.providers import use_cases as uc
 
 
 @pytest.fixture
 def isolated_store(tmp_path, monkeypatch):
-    import gideon.config.loader as cfg
+    import gideon.core.config.loader as cfg
 
     monkeypatch.setattr(cfg, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(cfg, "config_path", lambda: tmp_path / "config.json")
     return tmp_path
-
-
-# ── T1.1: vocabulary ─────────────────────────────────────────────────────────
 
 
 def test_vocabulary_has_all_five_subcategories():
@@ -43,9 +40,6 @@ def test_vocabulary_has_all_five_subcategories():
 def test_capabilities_are_their_own_parent():
     assert uc.parent_capability("chat") == "chat"
     assert uc.parent_capability("embedding") == "embedding"
-
-
-# ── T1.2: tolerant reads + resolution_chain ──────────────────────────────────
 
 
 class TestTolerantChainReads:
@@ -98,9 +92,6 @@ class TestResolutionChain:
         assert uc.resolution_chain("chat", session_override="native:x") == ["native:x"]
 
 
-# ── T1.3: the chain-aware seam walk ──────────────────────────────────────────
-
-
 class TestChainWalk:
     """Drive resolve_provider_for_use_case through chains via a stubbed config
     registry — the walk logic (breaker skip, unbuildable skip, exhausted raise)
@@ -109,7 +100,7 @@ class TestChainWalk:
     def _stub_registry(self, monkeypatch, buildable: dict[str, object]):
         """_resolve_from_config_registry returns buildable[provider_hint] or None.
         Also widens _known_provider_names so the test refs survive store pruning."""
-        from gideon.providers import provider_bridge as pb
+        from gideon.extensions.providers import provider_bridge as pb
 
         def fake_resolve(capability, **kw):
             hint = kw.get("provider_hint", "")
@@ -123,12 +114,14 @@ class TestChainWalk:
         )
 
     def _reset_breakers(self):
-        from gideon.guardrails.breaker import reset_breakers
+        from gideon.security.guardrails.breaker import reset_breakers
 
         reset_breakers()
 
     def test_first_entry_wins_when_buildable(self, isolated_store, monkeypatch):
-        from gideon.providers.provider_bridge import resolve_provider_for_use_case
+        from gideon.extensions.providers.provider_bridge import (
+            resolve_provider_for_use_case,
+        )
 
         self._reset_breakers()
         uc.save_active_models({"reasoning": ["p1:m1", "p2:m2"]})
@@ -137,8 +130,10 @@ class TestChainWalk:
         assert resolve_provider_for_use_case("reasoning") is sentinel1
 
     def test_breaker_open_skips_to_next_entry(self, isolated_store, monkeypatch):
-        from gideon.guardrails.breaker import get_breaker
-        from gideon.providers.provider_bridge import resolve_provider_for_use_case
+        from gideon.extensions.providers.provider_bridge import (
+            resolve_provider_for_use_case,
+        )
+        from gideon.security.guardrails.breaker import get_breaker
 
         self._reset_breakers()
         uc.save_active_models({"reasoning": ["p1:m1", "p2:m2"]})
@@ -151,12 +146,16 @@ class TestChainWalk:
         assert resolve_provider_for_use_case("reasoning") is sentinel2
         self._reset_breakers()
 
-    def test_breaker_open_on_last_entry_still_tries_it(self, isolated_store, monkeypatch):
+    def test_breaker_open_on_last_entry_still_tries_it(
+        self, isolated_store, monkeypatch
+    ):
         """A one-entry chain with an OPEN breaker still ATTEMPTS the build — skip
         only routes around an entry when a later one exists (never skip into the
         exhausted-raise when the provider might actually build)."""
-        from gideon.guardrails.breaker import get_breaker
-        from gideon.providers.provider_bridge import resolve_provider_for_use_case
+        from gideon.extensions.providers.provider_bridge import (
+            resolve_provider_for_use_case,
+        )
+        from gideon.security.guardrails.breaker import get_breaker
 
         self._reset_breakers()
         uc.save_active_models({"reasoning": ["p1:m1"]})
@@ -168,8 +167,12 @@ class TestChainWalk:
         assert resolve_provider_for_use_case("reasoning") is sentinel
         self._reset_breakers()
 
-    def test_unbuildable_mid_chain_skips_with_later_entry(self, isolated_store, monkeypatch):
-        from gideon.providers.provider_bridge import resolve_provider_for_use_case
+    def test_unbuildable_mid_chain_skips_with_later_entry(
+        self, isolated_store, monkeypatch
+    ):
+        from gideon.extensions.providers.provider_bridge import (
+            resolve_provider_for_use_case,
+        )
 
         self._reset_breakers()
         uc.save_active_models({"reasoning": ["dead:m1", "p2:m2"]})
@@ -180,7 +183,7 @@ class TestChainWalk:
     def test_one_entry_dead_chain_raises_stale_pin(self, isolated_store, monkeypatch):
         """The stale-pin rule is preserved: a single dead pinned ref still raises
         (never silently falls back past the user's selection)."""
-        from gideon.providers.provider_bridge import (
+        from gideon.extensions.providers.provider_bridge import (
             ProviderResolutionError,
             resolve_provider_for_use_case,
         )
@@ -192,7 +195,7 @@ class TestChainWalk:
             resolve_provider_for_use_case("reasoning")
 
     def test_fully_dead_chain_raises(self, isolated_store, monkeypatch):
-        from gideon.providers.provider_bridge import (
+        from gideon.extensions.providers.provider_bridge import (
             ProviderResolutionError,
             resolve_provider_for_use_case,
         )
@@ -204,25 +207,25 @@ class TestChainWalk:
             resolve_provider_for_use_case("reasoning")
 
 
-# ── T2.1-T2.3: consumer axes ─────────────────────────────────────────────────
-
-
 class TestConsumerAxes:
     @pytest.mark.asyncio
     async def test_one_shot_ingestion_collapses_to_background(self):
         from unittest.mock import AsyncMock, patch
 
-        from gideon import llm_helpers
+        from gideon.integrations import llm_helpers
 
         provider = AsyncMock()
         provider.start = AsyncMock()
         provider.shutdown = AsyncMock()
         with (
             patch(
-                "gideon.providers.provider_bridge.resolve_provider_for_use_case",
+                "gideon.extensions.providers.provider_bridge.resolve_provider_for_use_case",
                 return_value=provider,
             ) as resolve,
-            patch("gideon.llm_helpers.stream_and_collect", AsyncMock(return_value="ok")),
+            patch(
+                "gideon.integrations.llm_helpers.stream_and_collect",
+                AsyncMock(return_value="ok"),
+            ),
         ):
             out = await llm_helpers.one_shot_completion("hi", use_case="ingestion")
         assert out == "ok"
@@ -232,15 +235,18 @@ class TestConsumerAxes:
     async def test_one_shot_loops_axis_honored(self):
         from unittest.mock import AsyncMock, patch
 
-        from gideon import llm_helpers
+        from gideon.integrations import llm_helpers
 
         provider = AsyncMock()
         with (
             patch(
-                "gideon.providers.provider_bridge.resolve_provider_for_use_case",
+                "gideon.extensions.providers.provider_bridge.resolve_provider_for_use_case",
                 return_value=provider,
             ) as resolve,
-            patch("gideon.llm_helpers.stream_and_collect", AsyncMock(return_value="ok")),
+            patch(
+                "gideon.integrations.llm_helpers.stream_and_collect",
+                AsyncMock(return_value="ok"),
+            ),
         ):
             await llm_helpers.one_shot_completion("hi", use_case="loops")
         assert resolve.call_args.args[0] == "loops"
@@ -256,38 +262,37 @@ class TestConsumerAxes:
         """
         from pathlib import Path
 
-        from gideon.loop import gates, judge
+        from gideon.automation.loop import gates, judge
 
         gates_src = Path(gates.__file__).read_text(encoding="utf-8")
         judge_src = Path(judge.__file__).read_text(encoding="utf-8")
         assert 'resolve_provider_for_use_case("loops")' not in gates_src
         assert 'resolve_provider_for_use_case("loops")' not in judge_src
         assert "resolve_provider_for_use_case(judge_use_case())" in gates_src
-        # Both assess_cycle and assess_cycle_skeptic.
         assert judge_src.count("resolve_provider_for_use_case(judge_use_case())") == 2
 
     def test_background_session_factory_passes_axis(self):
         from pathlib import Path
 
-        from gideon import session
+        from gideon.engine import session
 
         src = Path(session.__file__).read_text(encoding="utf-8")
         assert 'model_axis="background"' in src
 
     def test_model_less_subagent_spawn_passes_orchestration_axis(self):
-        # Read the module FILE (inspect.getsource on the class raises "is a
-        # built-in class" on CI's 3.12 when linecache misses under xdist).
         from pathlib import Path
 
-        from gideon import subagent
+        from gideon.engine import subagent
 
         src = Path(subagent.__file__).read_text(encoding="utf-8")
         assert 'extra_kwargs["model_axis"] = "orchestration"' in src
 
-    def test_guard_extends_to_all_noninteractive_axes(self, isolated_store, monkeypatch):
+    def test_guard_extends_to_all_noninteractive_axes(
+        self, isolated_store, monkeypatch
+    ):
         """Resolving each non-interactive axis threads _guard_use_case (breaker +
         audit see the true axis)."""
-        from gideon.providers import provider_bridge as pb
+        from gideon.extensions.providers import provider_bridge as pb
 
         seen: dict[str, str] = {}
 
@@ -310,7 +315,7 @@ class TestInnerModelAxis:
     sub-category binding cosmetic for native agents)."""
 
     def _capture_inner(self, monkeypatch):
-        from gideon.providers import provider_bridge as pb
+        from gideon.extensions.providers import provider_bridge as pb
 
         captured: dict[str, str] = {}
         real = pb.resolve_provider_for_use_case
@@ -324,8 +329,10 @@ class TestInnerModelAxis:
         monkeypatch.setattr(pb, "resolve_provider_for_use_case", spy)
         return captured
 
-    def test_code_tools_session_resolves_code_tools_chain(self, isolated_store, monkeypatch):
-        from gideon.providers import provider_bridge as pb
+    def test_code_tools_session_resolves_code_tools_chain(
+        self, isolated_store, monkeypatch
+    ):
+        from gideon.extensions.providers import provider_bridge as pb
 
         captured = self._capture_inner(monkeypatch)
         with pytest.raises(RuntimeError, match="stop after capture"):
@@ -340,7 +347,7 @@ class TestInnerModelAxis:
         assert captured["inner_axis"] == "code_tools"
 
     def test_background_axis_threads_through(self, isolated_store, monkeypatch):
-        from gideon.providers import provider_bridge as pb
+        from gideon.extensions.providers import provider_bridge as pb
 
         captured = self._capture_inner(monkeypatch)
         with pytest.raises(RuntimeError, match="stop after capture"):
@@ -355,7 +362,7 @@ class TestInnerModelAxis:
         assert captured["inner_axis"] == "background"
 
     def test_no_axis_defaults_to_chat(self, isolated_store, monkeypatch):
-        from gideon.providers import provider_bridge as pb
+        from gideon.extensions.providers import provider_bridge as pb
 
         captured = self._capture_inner(monkeypatch)
         with pytest.raises(RuntimeError, match="stop after capture"):
@@ -367,9 +374,6 @@ class TestInnerModelAxis:
                 cwd=None,
             )
         assert captured["inner_axis"] == "chat"
-
-
-# ── T2.4: call-failure chain advance in one_shot_completion ──────────────────
 
 
 class TestCallFailureAdvance:
@@ -389,12 +393,14 @@ class TestCallFailureAdvance:
     async def test_entry0_failure_advances_to_entry1(self, isolated_store, monkeypatch):
         from unittest.mock import AsyncMock, patch
 
-        from gideon import llm_helpers
+        from gideon.integrations import llm_helpers
 
         monkeypatch.setattr(uc, "_known_provider_names", lambda: {"p1", "p2"})
         uc.save_active_models({"background": ["p1:m1", "p2:m2"]})
 
-        providers = self._providers({"p1:m1": RuntimeError("boom"), "p2:m2": "recovered"})
+        providers = self._providers(
+            {"p1:m1": RuntimeError("boom"), "p2:m2": "recovered"}
+        )
 
         def fake_resolve(use_case, **kw):
             return providers[kw["model_override"]][0]
@@ -407,21 +413,24 @@ class TestCallFailureAdvance:
 
         with (
             patch(
-                "gideon.providers.provider_bridge.resolve_provider_for_use_case",
+                "gideon.extensions.providers.provider_bridge.resolve_provider_for_use_case",
                 side_effect=fake_resolve,
             ),
             patch(
-                "gideon.llm_helpers.stream_and_collect", AsyncMock(side_effect=fake_stream)
+                "gideon.integrations.llm_helpers.stream_and_collect",
+                AsyncMock(side_effect=fake_stream),
             ),
         ):
             out = await llm_helpers.one_shot_completion("hi", use_case="background")
         assert out == "recovered"
 
     @pytest.mark.asyncio
-    async def test_whole_chain_failure_surfaces_one_error(self, isolated_store, monkeypatch):
+    async def test_whole_chain_failure_surfaces_one_error(
+        self, isolated_store, monkeypatch
+    ):
         from unittest.mock import AsyncMock, patch
 
-        from gideon import llm_helpers
+        from gideon.integrations import llm_helpers
 
         monkeypatch.setattr(uc, "_known_provider_names", lambda: {"p1", "p2"})
         uc.save_active_models({"background": ["p1:m1", "p2:m2"]})
@@ -438,24 +447,27 @@ class TestCallFailureAdvance:
 
         with (
             patch(
-                "gideon.providers.provider_bridge.resolve_provider_for_use_case",
+                "gideon.extensions.providers.provider_bridge.resolve_provider_for_use_case",
                 side_effect=fake_resolve,
             ),
             patch(
-                "gideon.llm_helpers.stream_and_collect", AsyncMock(side_effect=fake_stream)
+                "gideon.integrations.llm_helpers.stream_and_collect",
+                AsyncMock(side_effect=fake_stream),
             ),
             pytest.raises(RuntimeError, match="fallback chain failed"),
         ):
             await llm_helpers.one_shot_completion("hi", use_case="background")
 
     @pytest.mark.asyncio
-    async def test_output_contract_error_does_not_advance(self, isolated_store, monkeypatch):
+    async def test_output_contract_error_does_not_advance(
+        self, isolated_store, monkeypatch
+    ):
         """A schema miss means the model RESPONDED — never burn the fallback chain
         on it (the chain exists for provider outages)."""
         from unittest.mock import AsyncMock, patch
 
-        from gideon import llm_helpers
-        from gideon.guardrails.failure import OutputContractError
+        from gideon.integrations import llm_helpers
+        from gideon.security.guardrails.failure import OutputContractError
 
         monkeypatch.setattr(uc, "_known_provider_names", lambda: {"p1", "p2"})
         uc.save_active_models({"background": ["p1:m1", "p2:m2"]})
@@ -469,43 +481,46 @@ class TestCallFailureAdvance:
 
         with (
             patch(
-                "gideon.providers.provider_bridge.resolve_provider_for_use_case",
+                "gideon.extensions.providers.provider_bridge.resolve_provider_for_use_case",
                 side_effect=fake_resolve,
             ),
             patch(
-                "gideon.llm_helpers.stream_and_collect",
+                "gideon.integrations.llm_helpers.stream_and_collect",
                 AsyncMock(return_value="not json"),
             ),
             pytest.raises(OutputContractError),
         ):
-            await llm_helpers.one_shot_completion("hi", use_case="background", output_type=dict)
-        assert calls == ["p1:m1"]  # entry 1 never tried
+            await llm_helpers.one_shot_completion(
+                "hi", use_case="background", output_type=dict
+            )
+        assert calls == ["p1:m1"]
 
     @pytest.mark.asyncio
-    async def test_single_entry_chain_takes_plain_path(self, isolated_store, monkeypatch):
+    async def test_single_entry_chain_takes_plain_path(
+        self, isolated_store, monkeypatch
+    ):
         """A one-entry chain behaves exactly as the single binding always did (no
         wrapper, no advance)."""
         from unittest.mock import AsyncMock, patch
 
-        from gideon import llm_helpers
+        from gideon.integrations import llm_helpers
 
         monkeypatch.setattr(uc, "_known_provider_names", lambda: {"p1"})
         uc.save_active_models({"background": ["p1:m1"]})
         with (
             patch(
-                "gideon.providers.provider_bridge.resolve_provider_for_use_case",
+                "gideon.extensions.providers.provider_bridge.resolve_provider_for_use_case",
                 return_value=AsyncMock(),
             ) as resolve,
-            patch("gideon.llm_helpers.stream_and_collect", AsyncMock(return_value="ok")),
+            patch(
+                "gideon.integrations.llm_helpers.stream_and_collect",
+                AsyncMock(return_value="ok"),
+            ),
         ):
             out = await llm_helpers.one_shot_completion("hi", use_case="background")
         assert out == "ok"
-        # plain path: resolved once with NO model_override
         assert resolve.call_count == 1
         assert not resolve.call_args.kwargs.get("model_override")
-
-
-# ── T1.4: the PUT accepts ordered chains for every use case ──────────────────
 
 
 class TestChainPut:
@@ -513,7 +528,9 @@ class TestChainPut:
     def client_app(self):
         from aiohttp import web
 
-        from gideon.dashboard.handlers.model_registry import api_models_active_set
+        from gideon.interfaces.dashboard.handlers.model_registry import (
+            api_models_active_set,
+        )
 
         app = web.Application()
         app.router.add_put("/api/models/active/{use_case}", api_models_active_set)

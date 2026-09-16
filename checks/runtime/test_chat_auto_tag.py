@@ -9,7 +9,8 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 from chat_test_helpers import _make_state
 
-from gideon.dashboard.chat_retag import (
+from gideon.integrations.llm.base import EVENT_COMPLETE, EVENT_TEXT_CHUNK, LLMEvent
+from gideon.interfaces.dashboard.chat_retag import (
     _apply_tags,
     _Candidate,
     _collect_candidates,
@@ -19,24 +20,43 @@ from gideon.dashboard.chat_retag import (
     api_retag_cancel,
     api_retag_status,
 )
-from gideon.dashboard.chat_tags import create_tag, find_tag_by_name
-from gideon.dashboard.chat_title import (
+from gideon.interfaces.dashboard.chat_tags import create_tag, find_tag_by_name
+from gideon.interfaces.dashboard.chat_title import (
     _apply_auto_tags,
     _build_tags_suffix,
     _maybe_auto_title,
     _parse_tags_line,
 )
-from gideon.dashboard.state import _ChatSession
-from gideon.llm.base import EVENT_COMPLETE, EVENT_TEXT_CHUNK, LLMEvent
+from gideon.interfaces.dashboard.state import _ChatSession
 
 
 def _state_with_tags(tmp_path, monkeypatch):
-    monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+    )
     state = _make_state(tmp_path)
     state._tags = [
-        {"id": "t-work", "name": "Work", "color": "#111111", "order": 0, "status": False},
-        {"id": "t-done", "name": "Done", "color": "#10b981", "order": 1, "status": True},
-        {"id": "t-prog", "name": "In-Progress", "color": "#3b82f6", "order": 2, "status": True},
+        {
+            "id": "t-work",
+            "name": "Work",
+            "color": "#111111",
+            "order": 0,
+            "status": False,
+        },
+        {
+            "id": "t-done",
+            "name": "Done",
+            "color": "#10b981",
+            "order": 1,
+            "status": True,
+        },
+        {
+            "id": "t-prog",
+            "name": "In-Progress",
+            "color": "#3b82f6",
+            "order": 2,
+            "status": True,
+        },
     ]
     return state
 
@@ -57,9 +77,6 @@ def _mock_title_stream(state, text):
     return _stream
 
 
-# ── Shared tag helpers (chat_tags) ──────────────────────────────────────────
-
-
 class TestTagHelpers:
     def test_find_tag_by_name_case_insensitive(self, tmp_path, monkeypatch):
         state = _state_with_tags(tmp_path, monkeypatch)
@@ -74,9 +91,8 @@ class TestTagHelpers:
         assert tag is not None
         assert set(tag) == {"id", "name", "color", "order", "status"}
         assert len(tag["id"]) == 12
-        assert tag["order"] == 3  # appended after existing
+        assert tag["order"] == 3
         assert tag in state._tags
-        # persisted to disk via save_tags
         saved = json.loads((tmp_path / "tags.json").read_text())
         assert any(t["name"] == "Research" for t in saved)
 
@@ -85,12 +101,12 @@ class TestTagHelpers:
         assert create_tag(state, "   ") is None
 
 
-# ── Feature A: title-time auto-tagging ──────────────────────────────────────
-
-
 class TestParseTagsLine:
     def test_parses_names(self):
-        assert _parse_tags_line("My Title\nTAGS: Work, Research") == ["Work", "Research"]
+        assert _parse_tags_line("My Title\nTAGS: Work, Research") == [
+            "Work",
+            "Research",
+        ]
 
     def test_none_marker(self):
         assert _parse_tags_line("Title\nTAGS: none") == []
@@ -100,7 +116,7 @@ class TestParseTagsLine:
 
     def test_dedupes_and_caps(self):
         out = _parse_tags_line("T\nTAGS: a, A, b, c, d, e")
-        assert out == ["a", "b", "c", "d"]  # 4 max, case-insensitive dedupe
+        assert out == ["a", "b", "c", "d"]
 
     def test_drops_oversized_names(self):
         assert _parse_tags_line("T\nTAGS: " + "x" * 50 + ", ok") == ["ok"]
@@ -130,7 +146,7 @@ class TestApplyAutoTags:
         session = _ChatSession("s1")
         state._sessions["s1"] = session
         assigned = _apply_auto_tags(state, session, ["N1", "N2", "N3", "N4"])
-        assert len(assigned) == 2  # only 2 new tags may be created
+        assert len(assigned) == 2
         assert find_tag_by_name(state, "N3") is None
 
     def test_skips_restricted_session(self, tmp_path, monkeypatch):
@@ -161,7 +177,6 @@ class TestMaybeAutoTitleTagging:
         await _maybe_auto_title(state, session)
         assert session.title == "Offsite Planning"
         assert session._titled is True
-        # ONE LLM call carried both title and tags
         assert "TAGS:" in stream.last_prompt
         assert session.tags[0] == "t-work"
         assert find_tag_by_name(state, "Events") is not None
@@ -179,8 +194,8 @@ class TestMaybeAutoTitleTagging:
         state._sessions["s1"] = session
         stream = _mock_title_stream(state, "Hello Chat\nTAGS: Done")
         await _maybe_auto_title(state, session)
-        assert "TAGS:" not in stream.last_prompt  # tag ask omitted entirely
-        assert session.tags == ["t-work"]  # untouched
+        assert "TAGS:" not in stream.last_prompt
+        assert session.tags == ["t-work"]
 
     @pytest.mark.asyncio
     async def test_incognito_session_never_tagged(self, tmp_path, monkeypatch):
@@ -193,8 +208,6 @@ class TestMaybeAutoTitleTagging:
         state._sessions["s1"] = session
         stream = _mock_title_stream(state, "Secret\nTAGS: Work")
         await _maybe_auto_title(state, session)
-        # incognito still gets a title, but is_restricted → the tag ask is
-        # omitted from the prompt and no tags are ever applied
         assert session.title == "Secret"
         assert "TAGS:" not in stream.last_prompt
         assert session.tags == []
@@ -222,9 +235,12 @@ class TestMaybeAutoTitleTagging:
         ]
         state._sessions["s1"] = session
         stream = _mock_title_stream(state, "Hello Chat\nTAGS: Work")
-        with patch("gideon.dashboard.chat_title._auto_tag_enabled", return_value=False):
+        with patch(
+            "gideon.interfaces.dashboard.chat_title._auto_tag_enabled",
+            return_value=False,
+        ):
             await _maybe_auto_title(state, session)
-        assert session.title == "Hello Chat"  # title still applied
+        assert session.title == "Hello Chat"
         assert "TAGS:" not in stream.last_prompt
         assert session.tags == []
 
@@ -243,46 +259,43 @@ class TestMaybeAutoTitleTagging:
         assert session.tags == []
 
 
-# ── Config chain ─────────────────────────────────────────────────────────────
-
-
 class TestAutoTagConfig:
     def test_default_true_and_roundtrip(self, tmp_path, monkeypatch):
-        from gideon.config.loader import AppConfig, DashboardConfig
+        from gideon.core.config.loader import AppConfig, DashboardConfig
 
         assert DashboardConfig().auto_tag_sessions is True
         cfg_path = tmp_path / "config.json"
         cfg_path.write_text(json.dumps({"dashboard": {"auto_tag_sessions": False}}))
-        monkeypatch.setattr("gideon.config.loader.config_path", lambda: cfg_path)
+        monkeypatch.setattr("gideon.core.config.loader.config_path", lambda: cfg_path)
         cfg = AppConfig.load()
         assert cfg.dashboard.auto_tag_sessions is False
         assert cfg.to_dict()["dashboard"]["auto_tag_sessions"] is False
 
     @pytest.mark.asyncio
     async def test_dashboard_config_api_roundtrip(self, tmp_path, monkeypatch):
-        from gideon.dashboard.handlers.files import api_dashboard_config
+        from gideon.interfaces.dashboard.handlers.files import api_dashboard_config
 
         cfg_path = tmp_path / "config.json"
         cfg_path.write_text("{}")
-        monkeypatch.setattr("gideon.config.loader.config_path", lambda: cfg_path)
+        monkeypatch.setattr("gideon.core.config.loader.config_path", lambda: cfg_path)
         app = web.Application()
         app.router.add_get("/api/dashboard/config", api_dashboard_config)
         app.router.add_put("/api/dashboard/config", api_dashboard_config)
         async with TestClient(TestServer(app)) as client:
             resp = await client.get("/api/dashboard/config")
             data = await resp.json()
-            assert data["auto_tag_sessions"] is True  # default on
-            resp = await client.put("/api/dashboard/config", json={"auto_tag_sessions": False})
+            assert data["auto_tag_sessions"] is True
+            resp = await client.put(
+                "/api/dashboard/config", json={"auto_tag_sessions": False}
+            )
             assert resp.status == 200
             resp = await client.get("/api/dashboard/config")
             data = await resp.json()
             assert data["auto_tag_sessions"] is False
-            # non-bool rejected
-            resp = await client.put("/api/dashboard/config", json={"auto_tag_sessions": "yes"})
+            resp = await client.put(
+                "/api/dashboard/config", json={"auto_tag_sessions": "yes"}
+            )
             assert resp.status == 400
-
-
-# ── Feature B: magic re-tag batch ────────────────────────────────────────────
 
 
 class TestParseRetagReply:
@@ -307,12 +320,12 @@ class TestCollectCandidates:
         state._sessions["live1"] = live
         state._sessions["incog"] = _ChatSession("incog", memory_mode="incognito")
         state._sessions["temp"] = _ChatSession("temp", memory_mode="temporary")
-        # a persisted disk-only session
         state.conversation_log.append("dashboard:old1", "user", "hello there")
         state.conversation_log.update_metadata("dashboard:old1", {"tags": ["t-done"]})
-        # a persisted incognito session must be excluded
         state.conversation_log.append("dashboard:old2", "user", "sneaky")
-        state.conversation_log.update_metadata("dashboard:old2", {"memory_mode": "incognito"})
+        state.conversation_log.update_metadata(
+            "dashboard:old2", {"memory_mode": "incognito"}
+        )
         cands = _collect_candidates(state)
         keys = {c.key for c in cands}
         assert "live1" in keys and "old1" in keys
@@ -333,7 +346,9 @@ class TestRetagApply:
     def test_apply_to_disk_session_persists_metadata(self, tmp_path, monkeypatch):
         state = _state_with_tags(tmp_path, monkeypatch)
         state.conversation_log.append("dashboard:old1", "user", "hello")
-        cand = _Candidate(key="old1", history_key="dashboard:old1", in_memory=False, tags=[])
+        cand = _Candidate(
+            key="old1", history_key="dashboard:old1", in_memory=False, tags=[]
+        )
         assert _apply_tags(state, cand, ["t-work"]) is True
         meta = state.conversation_log.get_metadata("dashboard:old1")
         assert meta["tags"] == ["t-work"]
@@ -347,7 +362,7 @@ class TestRetagApply:
         state = _state_with_tags(tmp_path, monkeypatch)
         ids = _resolve_tag_ids(state, ["Work", "Fresh1", "Fresh2", "Fresh3"])
         assert ids[0] == "t-work"
-        assert len(ids) == 3  # Work + 2 new (third new capped)
+        assert len(ids) == 3
         assert find_tag_by_name(state, "Fresh1") is not None
         assert find_tag_by_name(state, "Fresh3") is None
 
@@ -366,7 +381,7 @@ class TestRetagEndpoint:
     async def test_batch_updates_stale_status_tag(self, tmp_path, monkeypatch):
         state = _state_with_tags(tmp_path, monkeypatch)
         session = _ChatSession("s1")
-        session.tags = ["t-prog"]  # stale: conversation says it's done
+        session.tags = ["t-prog"]
         session.messages = [
             {"role": "user", "content": "is the migration finished?"},
             {"role": "assistant", "content": "yes, fully deployed and done"},
@@ -376,15 +391,16 @@ class TestRetagEndpoint:
         state.broadcast_ws = MagicMock(side_effect=lambda t, d: events.append((t, d)))
 
         async def fake_llm(prompt, *, use_case="background"):
-            assert "In-Progress" in prompt  # current tags shown
+            assert "In-Progress" in prompt
             return "TAGS: Work, Done"
 
-        with patch("gideon.llm_helpers.one_shot_completion", side_effect=fake_llm):
+        with patch(
+            "gideon.integrations.llm_helpers.one_shot_completion", side_effect=fake_llm
+        ):
             async with TestClient(TestServer(_retag_app(state))) as client:
                 resp = await client.post("/api/sessions/retag-all")
                 assert resp.status == 202
                 job_id = (await resp.json())["id"]
-                # wait for the background task to finish
                 for _ in range(100):
                     resp = await client.get("/api/sessions/retag-all")
                     data = await resp.json()
@@ -395,7 +411,6 @@ class TestRetagEndpoint:
         assert data["id"] == job_id
         assert data["updated"] == 1
         assert sorted(session.tags) == sorted(["t-work", "t-done"])
-        # progress + terminal events were broadcast
         types = [t for t, _ in events]
         assert "retag_progress" in types and "retag_done" in types
 
@@ -415,7 +430,9 @@ class TestRetagEndpoint:
             calls.append(prompt)
             return "TAGS: Work"
 
-        with patch("gideon.llm_helpers.one_shot_completion", side_effect=fake_llm):
+        with patch(
+            "gideon.integrations.llm_helpers.one_shot_completion", side_effect=fake_llm
+        ):
             async with TestClient(TestServer(_retag_app(state))) as client:
                 await client.post("/api/sessions/retag-all")
                 for _ in range(100):
@@ -424,8 +441,8 @@ class TestRetagEndpoint:
                     if data["status"] != "running":
                         break
                     await asyncio.sleep(0.02)
-        assert data["total"] == 0  # incognito never enumerated
-        assert calls == []  # and never sent to the LLM
+        assert data["total"] == 0
+        assert calls == []
         assert incog.tags == []
 
     @pytest.mark.asyncio
@@ -444,12 +461,14 @@ class TestRetagEndpoint:
             await gate.wait()
             return "TAGS: unchanged"
 
-        with patch("gideon.llm_helpers.one_shot_completion", side_effect=slow_llm):
+        with patch(
+            "gideon.integrations.llm_helpers.one_shot_completion", side_effect=slow_llm
+        ):
             async with TestClient(TestServer(_retag_app(state))) as client:
                 first = await (await client.post("/api/sessions/retag-all")).json()
                 second_resp = await client.post("/api/sessions/retag-all")
                 second = await second_resp.json()
-                assert second_resp.status == 200  # not a new job
+                assert second_resp.status == 200
                 assert second["id"] == first["id"]
                 gate.set()
                 for _ in range(100):
@@ -473,7 +492,9 @@ class TestRetagEndpoint:
         async def hang_llm(prompt, *, use_case="background"):
             await asyncio.sleep(3600)
 
-        with patch("gideon.llm_helpers.one_shot_completion", side_effect=hang_llm):
+        with patch(
+            "gideon.integrations.llm_helpers.one_shot_completion", side_effect=hang_llm
+        ):
             async with TestClient(TestServer(_retag_app(state))) as client:
                 await client.post("/api/sessions/retag-all")
                 resp = await client.post("/api/sessions/retag-all/cancel")

@@ -26,10 +26,13 @@ from pathlib import Path
 
 import pytest
 
-from gideon.apps.manager import apps_dir
-from gideon.apps.native_contract import namespaced_module_name
-from gideon.providers import loader
-from gideon.providers.registry import get_provider_registry, reset_provider_registry
+from gideon.extensions.apps.manager import apps_dir
+from gideon.extensions.apps.native_contract import namespaced_module_name
+from gideon.extensions.providers import loader
+from gideon.extensions.providers.registry import (
+    get_provider_registry,
+    reset_provider_registry,
+)
 
 _APP = "es3-bootstrap-probe"
 
@@ -84,7 +87,9 @@ def _only_the_probe_app(monkeypatch):
     """Neutralise the native-app seeding + bundled discovery so the registration pass
     processes ONLY the fake installed app under test — fast + hermetic. Restores the
     process-global provider registry and drops the fake module afterwards."""
-    monkeypatch.setattr("gideon.apps.app_manager.seed_builtin_apps", lambda: [])
+    monkeypatch.setattr(
+        "gideon.extensions.apps.app_manager.seed_builtin_apps", lambda: []
+    )
     monkeypatch.setattr(loader, "discover_bundled_extensions", lambda: [])
     try:
         yield
@@ -100,7 +105,6 @@ def test_register_extension_providers_imports_an_enabled_installed_app(
     receipt = tmp_path / "imported.flag"
     _install_provider_app(enabled=True, receipt=receipt)
 
-    # A standalone process that has NOT bootstrapped has not imported the app.
     assert not receipt.exists()
 
     loader.register_extension_providers()
@@ -112,7 +116,9 @@ def test_register_extension_providers_imports_an_enabled_installed_app(
     assert get_provider_registry().get(_APP) is not None
 
 
-def test_register_extension_providers_skips_a_disabled_installed_app(tmp_path, _only_the_probe_app):
+def test_register_extension_providers_skips_a_disabled_installed_app(
+    tmp_path, _only_the_probe_app
+):
     receipt = tmp_path / "imported.flag"
     _install_provider_app(enabled=False, receipt=receipt)
 
@@ -126,13 +132,15 @@ def test_bootstrap_cli_providers_registers_then_syncs_config(monkeypatch):
     extension providers, migrate legacy bindings, then replay config.json entries into
     the LLM registry — so config-defined providers resolve in the CLI process too."""
     order: list[str] = []
-    monkeypatch.setattr(loader, "register_extension_providers", lambda: order.append("register"))
     monkeypatch.setattr(
-        "gideon.providers.use_cases.migrate_legacy_bindings",
+        loader, "register_extension_providers", lambda: order.append("register")
+    )
+    monkeypatch.setattr(
+        "gideon.extensions.providers.use_cases.migrate_legacy_bindings",
         lambda: order.append("migrate") or True,
     )
     monkeypatch.setattr(
-        "gideon.llm.registry.sync_entries_from_config",
+        "gideon.integrations.llm.registry.sync_entries_from_config",
         lambda: order.append("sync") or 0,
     )
 
@@ -147,29 +155,38 @@ def test_load_all_extensions_delegates_and_keeps_the_gateway_tail(monkeypatch):
     watchdogs (which a plain CLI bootstrap deliberately does not)."""
     calls: list[str] = []
     monkeypatch.setattr(
-        "gideon.apps.app_manager.recover_interrupted_updates",
+        "gideon.extensions.apps.app_manager.recover_interrupted_updates",
         lambda: calls.append("recover") or [],
     )
-    monkeypatch.setattr(loader, "register_extension_providers", lambda: calls.append("register"))
     monkeypatch.setattr(
-        "gideon.apps.app_manager.start_enabled_app_backends",
+        loader, "register_extension_providers", lambda: calls.append("register")
+    )
+    monkeypatch.setattr(
+        "gideon.extensions.apps.app_manager.start_enabled_app_backends",
         lambda: calls.append("backends") or [],
     )
     monkeypatch.setattr(
-        "gideon.apps.backend_runtime.start_backend_watchdog",
+        "gideon.extensions.apps.backend_runtime.start_backend_watchdog",
         lambda: calls.append("backend_watchdog"),
     )
     monkeypatch.setattr(
-        "gideon.apps.worker_runtime.start_worker_watchdog",
+        "gideon.extensions.apps.worker_runtime.start_worker_watchdog",
         lambda: calls.append("worker_watchdog"),
     )
     monkeypatch.setattr(
-        "gideon.local_models.sidecar.start_sidecar_watchdog",
+        "gideon.integrations.local_models.sidecar.start_sidecar_watchdog",
         lambda: calls.append("sidecar_watchdog"),
     )
 
     loader.load_all_extensions()
 
-    assert "register" in calls, "the gateway path must delegate to register_extension_providers"
-    for expected in ("backends", "backend_watchdog", "worker_watchdog", "sidecar_watchdog"):
+    assert (
+        "register" in calls
+    ), "the gateway path must delegate to register_extension_providers"
+    for expected in (
+        "backends",
+        "backend_watchdog",
+        "worker_watchdog",
+        "sidecar_watchdog",
+    ):
         assert expected in calls, f"the gateway tail lost its {expected!r} launch"

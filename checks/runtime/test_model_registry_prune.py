@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import json
 
-import gideon.config.loader as loader
-from gideon.providers import use_cases as uc
+import gideon.core.config.loader as loader
+from gideon.extensions.providers import use_cases as uc
 
 
 def _setup(monkeypatch, tmp_path, *, providers, active):
@@ -25,7 +25,6 @@ def _setup(monkeypatch, tmp_path, *, providers, active):
 
 
 def test_prunes_refs_from_removed_provider(monkeypatch, tmp_path):
-    # Alibaba removed; only "openrouter" remains configured.
     _setup(
         monkeypatch,
         tmp_path,
@@ -44,7 +43,6 @@ def test_prunes_refs_from_removed_provider(monkeypatch, tmp_path):
 
 
 def test_keeps_bundled_provider_refs(monkeypatch, tmp_path):
-    # Bundled in-process providers have no config.json entry but are valid.
     _setup(
         monkeypatch,
         tmp_path,
@@ -71,7 +69,6 @@ def test_keeps_image_gen_bundle_refs(monkeypatch, tmp_path):
         providers=[],
         active={"image_gen": ["fal:fal-ai/flux/schnell"]},
     )
-    # Simulate the fal provider being registered (as it is when FAL_KEY resolves).
     monkeypatch.setattr(uc, "_dynamic_media_provider_names", lambda: {"fal"})
     loaded = uc.load_active_models()
     assert loaded["image_gen"] == ["fal:fal-ai/flux/schnell"]
@@ -91,7 +88,6 @@ def test_prunes_image_gen_ref_when_bundle_absent(monkeypatch, tmp_path):
 
 
 def test_keeps_provider_agnostic_refs(monkeypatch, tmp_path):
-    # A ref with no "provider:" prefix is provider-agnostic — never pruned.
     _setup(
         monkeypatch,
         tmp_path,
@@ -102,13 +98,13 @@ def test_keeps_provider_agnostic_refs(monkeypatch, tmp_path):
 
 
 def test_does_not_prune_when_config_unreadable(monkeypatch, tmp_path):
-    # Transient config read failure must not discard valid selections.
-    (tmp_path / "active_models.json").write_text(json.dumps({"chat": ["alibaba:glm-5.1"]}))
+    (tmp_path / "active_models.json").write_text(
+        json.dumps({"chat": ["alibaba:glm-5.1"]})
+    )
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
     bad = tmp_path / "config.json"
     bad.write_text("{ this is not valid json")
     monkeypatch.setattr(loader, "config_path", lambda: bad)
-    # config.json unreadable → known set is None → prune skipped, ref retained.
     assert uc.load_active_models()["chat"] == ["alibaba:glm-5.1"]
 
 
@@ -118,20 +114,11 @@ def test_empty_file_yields_empty(monkeypatch, tmp_path):
     assert uc.load_active_models() == {}
 
 
-# ── PUT /api/models/active/{use_case} — set-time provider validation ──
-# Regression: the setter saved ANY string, so a ref naming an uninstalled provider
-# (e.g. "NoProvider:no-model", or an embedding ref that got clobbered) silently
-# stranded the use-case on a dead binding. It now rejects a ref whose PROVIDER
-# prefix is unknown (config + bundled + media), fail-fast — matching the campaign's
-# "block, don't silently accept unresolvable refs" principle. Conservative: only the
-# provider prefix is validated, never the model id (a slow-to-enumerate real provider
-# must not be false-rejected).
-
 import pytest  # noqa: E402
 from aiohttp import web  # noqa: E402
 from aiohttp.test_utils import TestClient, TestServer  # noqa: E402
 
-import gideon.dashboard.handlers.model_registry as mr  # noqa: E402
+import gideon.interfaces.dashboard.handlers.model_registry as mr  # noqa: E402
 
 
 def _mr_app(monkeypatch, tmp_path, *, providers):
@@ -147,13 +134,16 @@ def _mr_app(monkeypatch, tmp_path, *, providers):
 @pytest.mark.asyncio
 async def test_set_rejects_unknown_provider_ref(monkeypatch, tmp_path):
     app = _mr_app(
-        monkeypatch, tmp_path, providers=[{"name": "OpenAI", "type": "openai_compatible"}]
+        monkeypatch,
+        tmp_path,
+        providers=[{"name": "OpenAI", "type": "openai_compatible"}],
     )
     async with TestClient(TestServer(app)) as c:
-        resp = await c.put("/api/models/active/chat", json={"models": ["NoProvider:no-model"]})
+        resp = await c.put(
+            "/api/models/active/chat", json={"models": ["NoProvider:no-model"]}
+        )
         assert resp.status == 400
         assert "Unknown provider" in (await resp.json())["error"]
-        # And nothing was persisted for the use-case.
         assert (
             not (tmp_path / "active_models.json").exists()
             or "NoProvider" not in (tmp_path / "active_models.json").read_text()
@@ -163,12 +153,14 @@ async def test_set_rejects_unknown_provider_ref(monkeypatch, tmp_path):
 @pytest.mark.asyncio
 async def test_set_accepts_known_provider_ref(monkeypatch, tmp_path):
     app = _mr_app(
-        monkeypatch, tmp_path, providers=[{"name": "OpenAI", "type": "openai_compatible"}]
+        monkeypatch,
+        tmp_path,
+        providers=[{"name": "OpenAI", "type": "openai_compatible"}],
     )
     async with TestClient(TestServer(app)) as c:
-        # A known config provider + an arbitrary (not-yet-enumerated) model id → accepted
-        # (we validate the PREFIX, not the model catalog).
-        resp = await c.put("/api/models/active/chat", json={"models": ["OpenAI:gpt-anything-99"]})
+        resp = await c.put(
+            "/api/models/active/chat", json={"models": ["OpenAI:gpt-anything-99"]}
+        )
         assert resp.status == 200
         assert (await resp.json())["models"] == ["OpenAI:gpt-anything-99"]
 
@@ -177,12 +169,10 @@ async def test_set_accepts_known_provider_ref(monkeypatch, tmp_path):
 async def test_set_allows_bare_id_and_bundled(monkeypatch, tmp_path):
     app = _mr_app(monkeypatch, tmp_path, providers=[])
     async with TestClient(TestServer(app)) as c:
-        # A bundled provider (sentence-transformers) is always known.
         r1 = await c.put(
             "/api/models/active/embedding",
             json={"models": ["sentence-transformers:all-MiniLM-L6-v2"]},
         )
         assert r1.status == 200
-        # A bare id (no provider prefix) is left alone (some use-cases store bare ids).
         r2 = await c.put("/api/models/active/chat", json={"models": ["just-a-bare-id"]})
         assert r2.status == 200

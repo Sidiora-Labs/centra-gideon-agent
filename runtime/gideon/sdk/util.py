@@ -18,10 +18,11 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from gideon.apps.manager import app_data_dir, shared_dir_env_name  # noqa: F401
-from gideon.atomic_write import atomic_write  # noqa: F401
-from gideon.config.loader import config_dir  # noqa: F401
-from gideon.sandbox import wrap_argv as sandbox_wrap_argv  # noqa: F401
+from gideon.core.atomic_write import atomic_write  # noqa: F401
+from gideon.core.config.loader import config_dir  # noqa: F401
+from gideon.extensions.apps.manager import shared_dir_env_name  # noqa: F401
+from gideon.extensions.apps.manager import app_data_dir
+from gideon.security.sandbox import wrap_argv as sandbox_wrap_argv  # noqa: F401
 
 
 class _ReadOnlyPath(type(Path())):  # type: ignore[misc]

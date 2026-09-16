@@ -38,17 +38,12 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.dashboard.handlers.onboarding_import import (
+from gideon.cognition.onboarding_import import ImportCategory
+from gideon.interfaces.dashboard.handlers.onboarding_import import (
     register_onboarding_import_routes,
 )
-from gideon.onboarding_import import ImportCategory
 
-#: The planted credential. If this string reaches the wire or any byte under the home,
-#: a test fails. Shaped like a real key so the redactors engage.
 SECRET = "sk-ant-api03-PEP5PLANTEDSECRET00000000000000000000000000000AA"
-
-
-# ── fixtures ──────────────────────────────────────────────────────────────────
 
 
 @pytest.fixture
@@ -87,16 +82,14 @@ def home(tmp_path: Path, foreign: Path, monkeypatch: pytest.MonkeyPatch) -> Path
     the point: an env var that failed to take effect would leave this suite scanning the
     developer's real machine while still passing.
     """
-    from gideon.config.loader import config_dir
-    from gideon.onboarding_import.sources import claude_code, codex
+    from gideon.cognition.onboarding_import.sources import claude_code, codex
+    from gideon.core.config.loader import config_dir
 
-    h = tmp_path / "pclaw-home"
+    h = tmp_path / "gideon-home"
     h.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(h))
     monkeypatch.setenv("GIDEON_SKIP_SKILL_SEED", "1")
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(foreign))
-    # A directory that does not exist: Codex must come back `present: false`, which is
-    # also what proves "not installed" is distinguishable from "installed but empty".
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "no-codex-here"))
 
     assert config_dir() == h, "GIDEON_HOME did not bind — the real home is at risk"
@@ -131,11 +124,10 @@ def _bytes_under(root: Path) -> bytes:
     return blob
 
 
-# ── 1. the scan ───────────────────────────────────────────────────────────────
-
-
 @pytest.mark.asyncio
-async def test_fresh_home_scan_shows_the_source_with_nothing_already_imported(make_client, home):
+async def test_fresh_home_scan_shows_the_source_with_nothing_already_imported(
+    make_client, home
+):
     async with make_client() as client:
         resp = await client.get("/api/onboarding/import")
         assert resp.status == 200
@@ -147,13 +139,10 @@ async def test_fresh_home_scan_shows_the_source_with_nothing_already_imported(ma
     assert claude["present"] is True
     assert claude["counts"]["instructions"] >= 1
     assert claude["counts"]["mcp_servers"] >= 1
-    # A fresh home has imported nothing, so every item is on offer, none marked existing.
     assert claude["items"], "the step would have nothing to render"
     assert [i["existing"] for i in claude["items"]] == [False] * len(claude["items"])
-    # "not installed" is its own answer, not an error and not an empty detected source.
     assert by_name["codex"]["present"] is False
     assert by_name["codex"]["detected"] is False
-    # The checkbox vocabulary comes from the enum, so it cannot drift from the writers.
     assert body["categories"] == [c.value for c in ImportCategory]
 
 
@@ -163,7 +152,6 @@ async def test_planted_secret_appears_nowhere_in_the_scan_response(make_client):
         resp = await client.get("/api/onboarding/import")
         raw = await resp.text()
     assert SECRET not in raw
-    # Vacuity: the response really did carry the file the secret was planted in.
     assert "CLAUDE.md" in raw or "instructions" in raw
 
 
@@ -175,37 +163,37 @@ async def test_the_scan_writes_nothing_to_the_home(make_client, home):
     assert sorted(p.name for p in home.rglob("*")) == before
 
 
-# ── 2. the import ─────────────────────────────────────────────────────────────
-
-
 async def _import(client, **body):
     resp = await client.post("/api/onboarding/import", json=body)
     return resp.status, await resp.json()
 
 
 @pytest.mark.asyncio
-async def test_import_writes_the_picked_categories_and_reports_every_outcome(make_client, home):
+async def test_import_writes_the_picked_categories_and_reports_every_outcome(
+    make_client, home
+):
     async with make_client() as client:
         status, report = await _import(
             client, sources=["claude_code"], categories=["instructions", "mcp_servers"]
         )
     assert status == 200
     assert report["counts"]["imported"] >= 2, report
-    # The MCP entry really landed in the user-owned override file.
     mcp = json.loads((home / "mcp.json").read_text(encoding="utf-8"))
     assert "weather" in mcp["mcpServers"]
-    # Every row names its destination, so the step can say where a thing went.
-    assert all(r["destination"] for r in report["results"] if r["outcome"] == "imported")
+    assert all(
+        r["destination"] for r in report["results"] if r["outcome"] == "imported"
+    )
 
 
 @pytest.mark.asyncio
-async def test_planted_secret_never_reaches_the_home_through_the_route(make_client, home):
+async def test_planted_secret_never_reaches_the_home_through_the_route(
+    make_client, home
+):
     async with make_client() as client:
-        status, report = await _import(client)  # no axes = everything
+        status, report = await _import(client)
     assert status == 200
     assert report["counts"]["imported"] >= 1
     assert SECRET.encode() not in _bytes_under(home)
-    # The user is TOLD something was withheld — a count, never the value.
     assert report["secrets_skipped"] + report["redactions"] >= 1
     assert all(SECRET not in note for note in report["notes"])
 
@@ -214,7 +202,9 @@ async def test_planted_secret_never_reaches_the_home_through_the_route(make_clie
 async def test_reentry_marks_already_imported_items_existing(make_client):
     """The atom's re-entry clause, over the wire: import, then scan again."""
     async with make_client() as client:
-        status, _ = await _import(client, sources=["claude_code"], categories=["mcp_servers"])
+        status, _ = await _import(
+            client, sources=["claude_code"], categories=["mcp_servers"]
+        )
         assert status == 200
         again = await (await client.get("/api/onboarding/import")).json()
 
@@ -222,25 +212,27 @@ async def test_reentry_marks_already_imported_items_existing(make_client):
     mcp_items = [i for i in claude["items"] if i["category"] == "mcp_servers"]
     other = [i for i in claude["items"] if i["category"] != "mcp_servers"]
     assert mcp_items and all(i["existing"] for i in mcp_items)
-    # Only what was imported is marked: a blanket "existing" would be just as wrong.
     assert other and not any(i["existing"] for i in other)
 
 
 @pytest.mark.asyncio
 async def test_reimport_reports_existing_and_imports_nothing(make_client):
     async with make_client() as client:
-        first = (await _import(client, sources=["claude_code"], categories=["mcp_servers"]))[1]
-        second = (await _import(client, sources=["claude_code"], categories=["mcp_servers"]))[1]
+        first = (
+            await _import(client, sources=["claude_code"], categories=["mcp_servers"])
+        )[1]
+        second = (
+            await _import(client, sources=["claude_code"], categories=["mcp_servers"])
+        )[1]
     assert first["counts"]["imported"] >= 1
     assert second["counts"]["imported"] == 0
     assert second["counts"]["existing"] == first["counts"]["imported"]
 
 
-# ── 3. failures are reported, never swallowed ─────────────────────────────────
-
-
 @pytest.mark.asyncio
-async def test_a_write_failure_is_reported_with_the_secret_redacted(make_client, monkeypatch):
+async def test_a_write_failure_is_reported_with_the_secret_redacted(
+    make_client, monkeypatch
+):
     """A writer that raises must not become a 200 with a zero in it.
 
     The exception carries the planted secret on purpose: a path or a value from a
@@ -251,7 +243,7 @@ async def test_a_write_failure_is_reported_with_the_secret_redacted(make_client,
     def boom(*_a, **_kw):
         raise OSError(f"cannot write /tmp/x?key={SECRET}")
 
-    monkeypatch.setattr("gideon.onboarding_import.run_import", boom)
+    monkeypatch.setattr("gideon.cognition.onboarding_import.run_import", boom)
     async with make_client() as client:
         resp = await client.post("/api/onboarding/import", json={})
         assert resp.status == 500
@@ -259,9 +251,10 @@ async def test_a_write_failure_is_reported_with_the_secret_redacted(make_client,
         body = json.loads(raw)
 
     assert body["error"]["code"] == "onboarding_import_failed"
-    assert "cannot write" in body["error"]["message"], "the failure's own words are the point"
+    assert (
+        "cannot write" in body["error"]["message"]
+    ), "the failure's own words are the point"
     assert SECRET not in raw
-    # And it says the retry is safe, because the ledger recorded whatever landed.
     assert "again" in body["error"]["message"]
 
 
@@ -272,16 +265,13 @@ async def test_a_scan_failure_is_reported_rather_than_rendering_an_empty_step(
     def boom(*_a, **_kw):
         raise OSError("the foreign root is unreadable")
 
-    monkeypatch.setattr("gideon.onboarding_import.scan_all", boom)
+    monkeypatch.setattr("gideon.cognition.onboarding_import.scan_all", boom)
     async with make_client() as client:
         resp = await client.get("/api/onboarding/import")
         body = await resp.json()
     assert resp.status == 500
     assert body["error"]["code"] == "onboarding_import_failed"
     assert "unreadable" in body["error"]["message"]
-
-
-# ── 4. the selection axes are validated, not trusted ──────────────────────────
 
 
 @pytest.mark.asyncio
@@ -291,7 +281,6 @@ async def test_an_unknown_source_is_refused_before_anything_is_read(make_client,
         body = await resp.json()
     assert resp.status == 400
     assert "nope" in body["error"]["message"]
-    # It names what it DOES know, so the caller can correct itself.
     assert "claude_code" in body["error"]["message"]
     assert not (home / "mcp.json").exists(), "a refused request must write nothing"
 
@@ -299,7 +288,9 @@ async def test_an_unknown_source_is_refused_before_anything_is_read(make_client,
 @pytest.mark.asyncio
 async def test_an_unknown_category_is_refused(make_client):
     async with make_client() as client:
-        resp = await client.post("/api/onboarding/import", json={"categories": ["passwords"]})
+        resp = await client.post(
+            "/api/onboarding/import", json={"categories": ["passwords"]}
+        )
         body = await resp.json()
     assert resp.status == 400
     assert "passwords" in body["error"]["message"]
@@ -307,7 +298,9 @@ async def test_an_unknown_category_is_refused(make_client):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("body", [{"sources": []}, {"categories": []}])
-async def test_an_empty_selection_is_refused_rather_than_importing_nothing(make_client, body):
+async def test_an_empty_selection_is_refused_rather_than_importing_nothing(
+    make_client, body
+):
     """An empty list is a request for no work; answering `0 imported` would look like
     a successful import that simply found nothing."""
     async with make_client() as client:
@@ -343,9 +336,6 @@ async def test_unparseable_json_is_a_400(make_client):
     assert payload["error"]["code"] == "invalid_json"
 
 
-# ── 5. the routes are MOUNTED, not merely defined ─────────────────────────────
-
-
 def test_both_routes_resolve_on_a_registered_app():
     app = web.Application()
     register_onboarding_import_routes(app)
@@ -364,7 +354,7 @@ def _registrars_called_by_the_gateway() -> set[str]:
     A registrar that is defined but never CALLED is a route that exists in a module and
     on no running server, which is the failure this guard exists for.
     """
-    import gideon.dashboard.server as server_mod
+    import gideon.interfaces.dashboard.server as server_mod
 
     tree = ast.parse(Path(server_mod.__file__).read_text(encoding="utf-8"))
     return {
@@ -378,8 +368,6 @@ def _registrars_called_by_the_gateway() -> set[str]:
 
 def test_the_gateway_builder_mounts_the_import_routes():
     called = _registrars_called_by_the_gateway()
-    # Vacuity: the walk can find a registrar (a long-mounted neighbour) and does not
-    # invent one — so a green here means the call is really in the builder.
     assert "register_pack_routes" in called
     assert "register_nothing_at_all_routes" not in called
     assert "register_onboarding_import_routes" in called

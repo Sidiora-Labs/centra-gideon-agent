@@ -2,7 +2,7 @@
 
 A spec is a markdown file with a YAML frontmatter block (delimited by ``---`` lines)
 followed by a free-text body written FOR a coding agent. Three kinds live under
-``harness/specs/{rules,scenarios,tasks}/``:
+``checks/harness/specs/{rules,scenarios,tasks}/``:
 
 - **rule** (``type: ai-coding-rule``) — one architectural invariant each.
 - **scenario** (``type: triage-scenario``) — a diagnosis playbook for a symptom family.
@@ -33,8 +33,6 @@ KIND_TASK = "task"
 _TYPE_TO_SUBDIR = {KIND_RULE: "rules", KIND_SCENARIO: "scenarios", KIND_TASK: "tasks"}
 _SUBDIR_TO_TYPE = {v: k for k, v in _TYPE_TO_SUBDIR.items()}
 
-# id shape: kebab/underscore slug (rules), or T<session>.<n> / V<session> for task-ish
-# ids the roadmap already uses. We keep it permissive but non-empty and space-free.
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
 
 _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n?(.*)$", re.DOTALL)
@@ -64,7 +62,7 @@ class Spec:
     """
 
     path: Path
-    kind: str  # one of KIND_*
+    kind: str
     meta: dict[str, Any]
     body: str
 
@@ -109,19 +107,24 @@ def parse_spec(path: str | Path) -> Spec:
     kind = str(meta.get("type", "")).strip()
     if kind not in _TYPE_TO_SUBDIR:
         raise SpecError(
-            p, f"unknown or missing type {kind!r}; expected one of {sorted(_TYPE_TO_SUBDIR)}"
+            p,
+            f"unknown or missing type {kind!r}; expected one of {sorted(_TYPE_TO_SUBDIR)}",
         )
     return Spec(path=p, kind=kind, meta=meta, body=m.group(2))
 
 
 def specs_root(repo_root: Path | None = None) -> Path:
-    """Absolute path to ``harness/specs`` (repo-root relative)."""
-    root = repo_root if repo_root is not None else Path(__file__).resolve().parent.parent
-    return root / "harness" / "specs"
+    """Absolute path to ``checks/harness/specs`` (repo-root relative)."""
+    root = (
+        repo_root
+        if repo_root is not None
+        else Path(__file__).resolve().parent.parent.parent
+    )
+    return root / "checks/harness" / "specs"
 
 
 def load_specs(root: Path | None = None) -> list[Spec]:
-    """Load every ``*.md`` spec under ``harness/specs/{rules,scenarios,tasks}/``.
+    """Load every ``*.md`` spec under ``checks/harness/specs/{rules,scenarios,tasks}/``.
 
     Sorted by path for deterministic output. Malformed files raise (surfaced by the CLI)
     rather than being silently skipped — a spec that won't parse is a defect to see, not
@@ -138,10 +141,6 @@ def load_specs(root: Path | None = None) -> list[Spec]:
     return out
 
 
-# ── Validation ────────────────────────────────────────────────────────────────
-
-# Required frontmatter keys per kind. Body is required for rules/scenarios (they are
-# written for the coding agent); task specs are frontmatter-only by design (§1.1).
 _REQUIRED: dict[str, tuple[str, ...]] = {
     KIND_RULE: ("id", "type", "statement", "appliesTo", "source"),
     KIND_SCENARIO: ("id", "type", "symptom", "appliesTo", "acceptance"),
@@ -155,11 +154,13 @@ class ValidationIssue:
     ``warning`` (reported, does not fail)."""
 
     path: Path
-    level: str  # "error" | "warning"
+    level: str
     message: str
 
 
-def validate_spec(spec: Spec, known_ids: set[str] | None = None) -> list[ValidationIssue]:
+def validate_spec(
+    spec: Spec, known_ids: set[str] | None = None
+) -> list[ValidationIssue]:
     """Shape-validate one already-parsed spec. Returns issues (empty == clean).
 
     Checks: required keys present + non-empty; ``id`` well-formed; the file lives in the
@@ -184,16 +185,16 @@ def validate_spec(spec: Spec, known_ids: set[str] | None = None) -> list[Validat
     if spec.id and not _ID_RE.match(spec.id):
         err(f"malformed id {spec.id!r} (no spaces; slug or T<n>.<m>/V<n>)")
 
-    # Directory ↔ type coherence: a rule dropped in scenarios/ is a filing mistake.
     parent = spec.path.parent.name
     expected_type = _SUBDIR_TO_TYPE.get(parent)
     if expected_type and spec.kind != expected_type:
-        err(f"type {spec.kind!r} but filed under {parent}/ (expected {expected_type!r})")
+        err(
+            f"type {spec.kind!r} but filed under {parent}/ (expected {expected_type!r})"
+        )
 
     if spec.kind in (KIND_RULE, KIND_SCENARIO) and not spec.body.strip():
         err(f"{spec.kind} must have a body written for the coding agent (why + how)")
 
-    # Task acceptance must be a mapping with a mandatory negative clause.
     if spec.kind == KIND_TASK:
         acc = spec.meta.get("acceptance")
         if isinstance(acc, dict):
@@ -202,7 +203,6 @@ def validate_spec(spec: Spec, known_ids: set[str] | None = None) -> list[Validat
         elif acc is not None:
             err("task 'acceptance' must be a mapping with 'positive'/'negative' lists")
 
-    # Cross-reference resolution (when the caller supplies the id universe).
     if known_ids is not None:
         for ref in spec.get_list("requiredRules"):
             if ref not in known_ids:

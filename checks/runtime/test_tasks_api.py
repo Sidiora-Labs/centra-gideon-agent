@@ -10,8 +10,8 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.tasks import registry
-from gideon.tasks.handlers import register_task_routes
+from gideon.engine.tasks import registry
+from gideon.engine.tasks.handlers import register_task_routes
 
 
 @asynccontextmanager
@@ -19,17 +19,14 @@ async def _client(tmp_path):
     """A test client over the task routes with isolated filesystem stores."""
     registry._providers.clear()
     with (
-        patch("gideon.tasks.native.config_dir", return_value=tmp_path),
-        patch("gideon.tasks.hierarchy.config_dir", return_value=tmp_path),
+        patch("gideon.engine.tasks.native.config_dir", return_value=tmp_path),
+        patch("gideon.engine.tasks.hierarchy.config_dir", return_value=tmp_path),
     ):
         app = web.Application()
         register_task_routes(app)
         async with TestClient(TestServer(app)) as client:
             yield client
     registry._providers.clear()
-
-
-# ── Projects ──
 
 
 @pytest.mark.asyncio
@@ -56,43 +53,55 @@ async def test_project_create_get_update_delete(tmp_path):
 
 @pytest.mark.asyncio
 async def test_project_linked_lists_bound_loops_and_code(tmp_path):
-    # The /linked endpoint surfaces the Goal Loops + Code projects scoped under a
-    # project (the integration payoff). Seed one of each bound to the project.
-    from gideon.loop import store as loop_store
-    from gideon.loop.loop import Loop
+    from gideon.automation.loop import store as loop_store
+    from gideon.automation.loop.loop import Loop
 
-    with patch("gideon.loop.files.config_dir", return_value=tmp_path):
+    with patch("gideon.automation.loop.files.config_dir", return_value=tmp_path):
         async with _client(tmp_path) as client:
-            pid = (await (await client.post("/api/projects", json={"name": "Effort"})).json())["id"]
-            loop_store.create(Loop(id="", kind="goal", name="Loopy", task="g" * 30, project_id=pid))
+            pid = (
+                await (
+                    await client.post("/api/projects", json={"name": "Effort"})
+                ).json()
+            )["id"]
             loop_store.create(
-                Loop(id="", kind="code", name="Codey", task="t" * 20, tasks_project_id=pid)
+                Loop(id="", kind="goal", name="Loopy", task="g" * 30, project_id=pid)
             )
-            # an UNbound loop must NOT appear under this project
+            loop_store.create(
+                Loop(
+                    id="",
+                    kind="code",
+                    name="Codey",
+                    task="t" * 20,
+                    tasks_project_id=pid,
+                )
+            )
             loop_store.create(Loop(id="", kind="goal", name="Other", task="x" * 30))
-            # a project-tied artifact surfaces under linked work too
-            from gideon.artifacts import registry as art_reg
-            from gideon.artifacts.native import NativeArtifactProvider
+            from gideon.workspace.artifacts import registry as art_reg
+            from gideon.workspace.artifacts.native import NativeArtifactProvider
 
             prov = NativeArtifactProvider(root=tmp_path / "artifacts")
             prov.create(name="Spec", content="<p>x</p>", project_id=pid)
-            # #639: a loop DELIVERABLE carries a `loop:<id>` tag and an empty
-            # project_id (the convention predates the project stamp). It must
-            # surface under the project that owns the loop — this was the one
-            # artifact class guaranteed to exist and guaranteed not to show.
-            own_loop_id = next(lp.id for lp in loop_store.list_all() if lp.project_id == pid)
-            code_id = next(lp.id for lp in loop_store.list_all() if lp.tasks_project_id == pid)
+            own_loop_id = next(
+                lp.id for lp in loop_store.list_all() if lp.project_id == pid
+            )
+            code_id = next(
+                lp.id for lp in loop_store.list_all() if lp.tasks_project_id == pid
+            )
             other_id = next(
                 lp.id
                 for lp in loop_store.list_all()
                 if pid not in (lp.project_id, lp.tasks_project_id)
             )
-            prov.create(name="Deliverable", content="x", tags=["loop", f"loop:{own_loop_id}"])
+            prov.create(
+                name="Deliverable", content="x", tags=["loop", f"loop:{own_loop_id}"]
+            )
             prov.create(name="CodeOut", content="x", tags=[f"loop:{code_id}"])
-            # ...and another loop's deliverable must NOT leak in.
-            prov.create(name="ForeignDeliverable", content="x", tags=[f"loop:{other_id}"])
-            # Belt-and-braces: stamped AND tagged must appear exactly once.
-            prov.create(name="Both", content="x", project_id=pid, tags=[f"loop:{own_loop_id}"])
+            prov.create(
+                name="ForeignDeliverable", content="x", tags=[f"loop:{other_id}"]
+            )
+            prov.create(
+                name="Both", content="x", project_id=pid, tags=[f"loop:{own_loop_id}"]
+            )
             with patch.object(art_reg, "get_provider", lambda name=None: prov):
                 r = await client.get(f"/api/projects/{pid}/linked")
             assert r.status == 200
@@ -101,9 +110,10 @@ async def test_project_linked_lists_bound_loops_and_code(tmp_path):
             assert [c["name"] for c in body["code"]] == ["Codey"]
             got = sorted(a["name"] for a in body["artifacts"])
             assert got == ["Both", "CodeOut", "Deliverable", "Spec"]
-            # each row carries error_message so the FE can tell a genuine 'complete'
-            # from a budget-exhausted finish ('Ended early') — present (None when unset).
-            assert "error_message" in body["loops"][0] and "error_message" in body["code"][0]
+            assert (
+                "error_message" in body["loops"][0]
+                and "error_message" in body["code"][0]
+            )
 
 
 @pytest.mark.asyncio
@@ -114,14 +124,14 @@ async def test_project_linked_missing_404(tmp_path):
 
 @pytest.mark.asyncio
 async def test_project_delete_blocked_by_bound_work_unless_forced(tmp_path):
-    # Deleting a project with bound Goal Loops / Code must 409 (would orphan live work
-    # + rmtree its worktrees) — unless ?force=true.
-    from gideon.loop import store as loop_store
-    from gideon.loop.loop import Loop
+    from gideon.automation.loop import store as loop_store
+    from gideon.automation.loop.loop import Loop
 
-    with patch("gideon.loop.files.config_dir", return_value=tmp_path):
+    with patch("gideon.automation.loop.files.config_dir", return_value=tmp_path):
         async with _client(tmp_path) as client:
-            pid = (await (await client.post("/api/projects", json={"name": "Busy"})).json())["id"]
+            pid = (
+                await (await client.post("/api/projects", json={"name": "Busy"})).json()
+            )["id"]
             lp = loop_store.create(
                 Loop(id="", kind="goal", name="L", task="g" * 30, project_id=pid)
             )
@@ -129,19 +139,15 @@ async def test_project_delete_blocked_by_bound_work_unless_forced(tmp_path):
             assert r.status == 409
             body = await r.json()
             assert body["loops"] == 1 and body["code"] == 0
-            # force deletes the project AND tears down the bound loop (no orphan with a
-            # dangling project_id + leaked worktrees).
-            assert (await client.delete(f"/api/projects/{pid}?force=true")).status == 200
+            assert (
+                await client.delete(f"/api/projects/{pid}?force=true")
+            ).status == 200
             assert (await client.get(f"/api/projects/{pid}")).status == 404
-            assert loop_store.get(lp.id) is None  # bound loop torn down, not orphaned
+            assert loop_store.get(lp.id) is None
 
 
 @pytest.mark.asyncio
 async def test_project_delete_guard_counts_chats_and_force_unbinds_them(tmp_path):
-    # Project-bound CHATS are first-class project work (surfaced in /linked), so the
-    # delete-guard must count them too — and force-delete UNBINDS them (clears
-    # project_id) rather than leaving them dangling at a gone project. Chats are the
-    # user's conversations: detached, never deleted.
     class _FakeChat:
         def __init__(self, key, pid):
             self.key = key
@@ -150,42 +156,45 @@ async def test_project_delete_guard_counts_chats_and_force_unbinds_them(tmp_path
             self.title = key
 
     async with _client(tmp_path) as client:
-        # inject a state with a project-bound chat onto the app the test client serves
         chat = _FakeChat("chat-1-999", None)
         client.app["state"] = type("S", (), {"_sessions": {}})()
-        pid = (await (await client.post("/api/projects", json={"name": "Chatty"})).json())["id"]
+        pid = (
+            await (await client.post("/api/projects", json={"name": "Chatty"})).json()
+        )["id"]
         chat.project_id = pid
         client.app["state"]._sessions["chat-1-999"] = chat
-        # plain delete → 409 naming the bound chat
         r = await client.delete(f"/api/projects/{pid}")
         assert r.status == 409
         body = await r.json()
         assert body["chats"] == 1 and body["loops"] == 0 and body["code"] == 0
-        # force → project deleted AND the chat unbound (kept, project_id cleared)
         assert (await client.delete(f"/api/projects/{pid}?force=true")).status == 200
         assert (await client.get(f"/api/projects/{pid}")).status == 404
-        assert chat.project_id == ""  # unbound, not deleted
-        assert "chat-1-999" in client.app["state"]._sessions  # conversation preserved
+        assert chat.project_id == ""
+        assert "chat-1-999" in client.app["state"]._sessions
 
 
 @pytest.mark.asyncio
 async def test_project_delete_clean_when_no_bound_work(tmp_path):
     async with _client(tmp_path) as client:
-        pid = (await (await client.post("/api/projects", json={"name": "Free"})).json())["id"]
+        pid = (
+            await (await client.post("/api/projects", json={"name": "Free"})).json()
+        )["id"]
         assert (await client.delete(f"/api/projects/{pid}")).status == 200
 
 
 @pytest.mark.asyncio
 async def test_project_payload_includes_context_dir_and_counts(tmp_path):
     async with _client(tmp_path) as client:
-        r = await client.post("/api/projects", json={"name": "Rich", "workspace_dir": "/tmp/repo"})
+        r = await client.post(
+            "/api/projects", json={"name": "Rich", "workspace_dir": "/tmp/repo"}
+        )
         body = await r.json()
-        # S2 enrichment: context_dir path, workspace_dir round-trip, task-list count.
         assert body["workspace_dir"] == "/tmp/repo"
         assert body["context_dir"].endswith(f"/projects/{body['id']}/context")
         assert body["task_list_count"] == 0
-        # add a list → the list endpoint reflects the count
-        await client.post("/api/task-lists", json={"name": "L1", "project_id": body["id"]})
+        await client.post(
+            "/api/task-lists", json={"name": "L1", "project_id": body["id"]}
+        )
         projects = (await (await client.get("/api/projects")).json())["projects"]
         rich = next(p for p in projects if p["id"] == body["id"])
         assert rich["task_list_count"] == 1 and "context_dir" in rich
@@ -209,49 +218,49 @@ async def test_default_project_undeletable(tmp_path):
 
 @pytest.mark.asyncio
 async def test_default_project_rename_refused_no_duplicate(tmp_path):
-    # Renaming a default must 400 and must NOT spawn a re-seeded duplicate (ensure_defaults
-    # would otherwise re-create the missing name), while a non-name update still succeeds.
     async with _client(tmp_path) as client:
         projects = (await (await client.get("/api/projects")).json())["projects"]
         personal = next(p for p in projects if p["name"] == "Personal")
-        r = await client.put(f"/api/projects/{personal['id']}", json={"name": "Renamed"})
+        r = await client.put(
+            f"/api/projects/{personal['id']}", json={"name": "Renamed"}
+        )
         assert r.status == 400
         assert "cannot be renamed" in (await r.json())["error"]
-        # A non-name update to the same default still writes.
-        r = await client.put(f"/api/projects/{personal['id']}", json={"brief": "Catch-all"})
+        r = await client.put(
+            f"/api/projects/{personal['id']}", json={"brief": "Catch-all"}
+        )
         assert r.status == 200 and (await r.json())["brief"] == "Catch-all"
-        # Exactly one Personal — no duplicate default was seeded.
         after = (await (await client.get("/api/projects")).json())["projects"]
         assert len([p for p in after if p["name"] == "Personal"]) == 1
 
 
-# ── Update: the allowlist + the workspace path gate ──
-
-
 @pytest.mark.asyncio
 async def test_project_update_refuses_sensitive_workspace_dir(tmp_path):
-    # A bound workspace is the cwd for an unsandboxed worker, and a chat opened under the
-    # project inherits it — so a credential dir must be refused on the SAME two helpers
-    # the terminal endpoint uses, and the previous value must survive the refusal.
     async with _client(tmp_path) as client:
         pid = (
             await (
                 await client.post(
-                    "/api/projects", json={"name": "Bound", "workspace_dir": "/tmp/repo"}
+                    "/api/projects",
+                    json={"name": "Bound", "workspace_dir": "/tmp/repo"},
                 )
             ).json()
         )["id"]
-        # ~/.ssh + ~/.aws are is_sensitive_path; a bare /tmp and /etc are is_system_path —
-        # both helpers have to be consulted, as terminal.py and loop/validation.py do.
-        for unsafe in (str(Path.home() / ".ssh"), str(Path.home() / ".aws"), "/etc", "/tmp"):
+        for unsafe in (
+            str(Path.home() / ".ssh"),
+            str(Path.home() / ".aws"),
+            "/etc",
+            "/tmp",
+        ):
             r = await client.put(f"/api/projects/{pid}", json={"workspace_dir": unsafe})
             assert r.status == 403, unsafe
             assert "system or sensitive" in (await r.json())["error"]
-            # NOT persisted — the refusal has to be a refusal, not a 403 after the write.
-            stored = (await (await client.get(f"/api/projects/{pid}")).json())["workspace_dir"]
+            stored = (await (await client.get(f"/api/projects/{pid}")).json())[
+                "workspace_dir"
+            ]
             assert stored == "/tmp/repo", unsafe
-        # a safe dir still binds, and clearing the binding still works
-        r = await client.put(f"/api/projects/{pid}", json={"workspace_dir": "/tmp/other"})
+        r = await client.put(
+            f"/api/projects/{pid}", json={"workspace_dir": "/tmp/other"}
+        )
         assert r.status == 200 and (await r.json())["workspace_dir"] == "/tmp/other"
         r = await client.put(f"/api/projects/{pid}", json={"workspace_dir": ""})
         assert r.status == 200 and (await r.json())["workspace_dir"] == ""
@@ -259,24 +268,25 @@ async def test_project_update_refuses_sensitive_workspace_dir(tmp_path):
 
 @pytest.mark.asyncio
 async def test_project_create_refuses_sensitive_workspace_dir(tmp_path):
-    # Create binds the same field, so it carries the same gate — else the refused value
-    # just moves to POST.
     async with _client(tmp_path) as client:
         r = await client.post(
-            "/api/projects", json={"name": "Creds", "workspace_dir": str(Path.home() / ".ssh")}
+            "/api/projects",
+            json={"name": "Creds", "workspace_dir": str(Path.home() / ".ssh")},
         )
         assert r.status == 403
-        names = {p["name"] for p in (await (await client.get("/api/projects")).json())["projects"]}
+        names = {
+            p["name"]
+            for p in (await (await client.get("/api/projects")).json())["projects"]
+        }
         assert "Creds" not in names
 
 
 @pytest.mark.asyncio
 async def test_project_update_rejects_unknown_and_reserved_keys(tmp_path):
-    # Unknown keys are REPORTED, not dropped (a silent drop answers 200 for a write that
-    # did not happen), and a key colliding with the store method's own parameters is a 400
-    # naming the field — it used to reach the **kwargs splat as a bare 500.
     async with _client(tmp_path) as client:
-        pid = (await (await client.post("/api/projects", json={"name": "Strict"})).json())["id"]
+        pid = (
+            await (await client.post("/api/projects", json={"name": "Strict"})).json()
+        )["id"]
         for key, value in (
             ("id", "p-hijack"),
             ("is_builtin", True),
@@ -288,8 +298,9 @@ async def test_project_update_rejects_unknown_and_reserved_keys(tmp_path):
             r = await client.put(f"/api/projects/{pid}", json={key: value})
             assert r.status == 400, key
             assert key in (await r.json())["error"], key
-        # a rejected body changes NOTHING, and the legitimate fields still write
-        assert (await (await client.get(f"/api/projects/{pid}")).json())["name"] == "Strict"
+        assert (await (await client.get(f"/api/projects/{pid}")).json())[
+            "name"
+        ] == "Strict"
         r = await client.put(
             f"/api/projects/{pid}",
             json={
@@ -311,9 +322,10 @@ async def test_project_update_rejects_unknown_and_reserved_keys(tmp_path):
 
 @pytest.mark.asyncio
 async def test_task_list_update_rejects_unknown_and_reserved_keys(tmp_path):
-    # Same splat, same shape: `list_id` collided with the store method's parameter.
     async with _client(tmp_path) as client:
-        pid = (await (await client.post("/api/projects", json={"name": "Holder"})).json())["id"]
+        pid = (
+            await (await client.post("/api/projects", json={"name": "Holder"})).json()
+        )["id"]
         tl = await (
             await client.post("/api/task-lists", json={"name": "L", "project_id": pid})
         ).json()
@@ -321,17 +333,20 @@ async def test_task_list_update_rejects_unknown_and_reserved_keys(tmp_path):
             r = await client.put(f"/api/task-lists/{tl['id']}", json={key: "x"})
             assert r.status == 400, key
             assert key in (await r.json())["error"], key
-        assert (await (await client.get(f"/api/task-lists/{tl['id']}")).json())["name"] == "L"
+        assert (await (await client.get(f"/api/task-lists/{tl['id']}")).json())[
+            "name"
+        ] == "L"
         r = await client.put(
             f"/api/task-lists/{tl['id']}",
-            json={"name": "Renamed", "project_id": pid, "agent_instructions_template": "go"},
+            json={
+                "name": "Renamed",
+                "project_id": pid,
+                "agent_instructions_template": "go",
+            },
         )
         assert r.status == 200
         body = await r.json()
         assert body["name"] == "Renamed" and body["agent_instructions_template"] == "go"
-
-
-# ── Task lists ──
 
 
 @pytest.mark.asyncio
@@ -346,43 +361,44 @@ async def test_task_list_routes_to_personal_by_default(tmp_path):
 @pytest.mark.asyncio
 async def test_task_list_under_project_and_filter(tmp_path):
     async with _client(tmp_path) as client:
-        pid = (await (await client.post("/api/projects", json={"name": "P"})).json())["id"]
+        pid = (await (await client.post("/api/projects", json={"name": "P"})).json())[
+            "id"
+        ]
         await client.post("/api/task-lists", json={"name": "L1", "project_id": pid})
         await client.post("/api/task-lists", json={"name": "L2", "project_id": pid})
         r = await client.get(f"/api/task-lists?project_id={pid}")
         assert len((await r.json())["task_lists"]) == 2
 
 
-# ── Create: project_id → find-or-create "General" list ──
-
-
 @pytest.mark.asyncio
 async def test_create_with_project_id_attaches_general_list(tmp_path):
-    # A task created with a project choice but no explicit list must land on
-    # that project's "General" list (created on demand) so the project label
-    # sticks; a second create reuses the same list. An explicit task_list_id
-    # always wins over project_id.
     async with _client(tmp_path) as client:
-        pid = (await (await client.post("/api/projects", json={"name": "Proj"})).json())["id"]
-        t1 = await (await client.post("/api/tasks", json={"title": "T1", "project_id": pid})).json()
+        pid = (
+            await (await client.post("/api/projects", json={"name": "Proj"})).json()
+        )["id"]
+        t1 = await (
+            await client.post("/api/tasks", json={"title": "T1", "project_id": pid})
+        ).json()
         assert t1["project"] == "Proj"
         assert t1["task_list_id"]
-        t2 = await (await client.post("/api/tasks", json={"title": "T2", "project_id": pid})).json()
+        t2 = await (
+            await client.post("/api/tasks", json={"title": "T2", "project_id": pid})
+        ).json()
         assert t2["task_list_id"] == t1["task_list_id"]
         lists = await (await client.get(f"/api/task-lists?project_id={pid}")).json()
         assert [tl["name"] for tl in lists["task_lists"]] == ["General"]
         named = await (
-            await client.post("/api/task-lists", json={"name": "Named", "project_id": pid})
+            await client.post(
+                "/api/task-lists", json={"name": "Named", "project_id": pid}
+            )
         ).json()
         t3 = await (
             await client.post(
-                "/api/tasks", json={"title": "T3", "project_id": pid, "task_list_id": named["id"]}
+                "/api/tasks",
+                json={"title": "T3", "project_id": pid, "task_list_id": named["id"]},
             )
         ).json()
         assert t3["task_list_id"] == named["id"]
-
-
-# ── Create: non-string title guard (#774) ──
 
 
 @pytest.mark.asyncio
@@ -397,11 +413,7 @@ async def test_non_string_title_is_400_not_500(tmp_path, shape):
         r = await client.post("/api/tasks", json={"title": shape})
         assert r.status == 400
         assert (await r.json())["error"] == "title required"
-        # Refused means nothing was written — not a task titled "12345"/"None".
         assert (await (await client.get("/api/tasks")).json())["total"] == 0
-
-
-# ── Ready / search ──
 
 
 @pytest.mark.asyncio
@@ -413,18 +425,22 @@ async def test_ready_excludes_blocked_then_includes_after_done(tmp_path):
                 "/api/tasks",
                 json={
                     "title": "B",
-                    "dependencies": [{"depends_on_task_id": a["id"], "dependency_type": "BLOCKS"}],
+                    "dependencies": [
+                        {"depends_on_task_id": a["id"], "dependency_type": "BLOCKS"}
+                    ],
                 },
             )
         ).json()
         ready_ids = {
-            t["id"] for t in (await (await client.get("/api/tasks/ready")).json())["tasks"]
+            t["id"]
+            for t in (await (await client.get("/api/tasks/ready")).json())["tasks"]
         }
         assert a["id"] in ready_ids
         assert b["id"] not in ready_ids
         await client.put(f"/api/tasks/{a['id']}", json={"status": "done"})
         ready_ids = {
-            t["id"] for t in (await (await client.get("/api/tasks/ready")).json())["tasks"]
+            t["id"]
+            for t in (await (await client.get("/api/tasks/ready")).json())["tasks"]
         }
         assert b["id"] in ready_ids
 
@@ -433,10 +449,13 @@ async def test_ready_excludes_blocked_then_includes_after_done(tmp_path):
 async def test_search_query_and_priority_filter(tmp_path):
     async with _client(tmp_path) as client:
         await client.post(
-            "/api/tasks", json={"title": "Migrate database schema", "priority": "critical"}
+            "/api/tasks",
+            json={"title": "Migrate database schema", "priority": "critical"},
         )
         await client.post("/api/tasks", json={"title": "Write docs", "priority": "low"})
-        body = await (await client.post("/api/tasks/search", json={"query": "database"})).json()
+        body = await (
+            await client.post("/api/tasks/search", json={"query": "database"})
+        ).json()
         assert body["total"] == 1
         body = await (
             await client.post("/api/tasks/search", json={"priority": ["critical"]})
@@ -445,30 +464,24 @@ async def test_search_query_and_priority_filter(tmp_path):
         assert body["tasks"][0]["priority"] == "critical"
 
 
-# ── Comment count (surfaced for the comment badge) ──
-
-
 @pytest.mark.asyncio
 async def test_comment_count_in_list_and_get(tmp_path):
     async with _client(tmp_path) as client:
-        t = await (await client.post("/api/tasks", json={"title": "Has comments"})).json()
-        # no comments yet → 0
+        t = await (
+            await client.post("/api/tasks", json={"title": "Has comments"})
+        ).json()
         listed = await (await client.get("/api/tasks")).json()
         assert listed["tasks"][0]["comment_count"] == 0
-        assert (await (await client.get(f"/api/tasks/{t['id']}")).json())["comment_count"] == 0
-        # add two comments → count reflects them in both list and single-get
+        assert (await (await client.get(f"/api/tasks/{t['id']}")).json())[
+            "comment_count"
+        ] == 0
         await client.post(f"/api/tasks/{t['id']}/comments", json={"body": "one"})
         await client.post(f"/api/tasks/{t['id']}/comments", json={"body": "two"})
         listed = await (await client.get("/api/tasks")).json()
         assert listed["tasks"][0]["comment_count"] == 2
-        assert (await (await client.get(f"/api/tasks/{t['id']}")).json())["comment_count"] == 2
-
-
-# ── Comment attribution + deletion (#554) ──
-#
-# The endpoint used to pass the caller's `author` string straight to the store, so any
-# authenticated client could sign a comment as anyone, and there was no DELETE to take
-# a forged one back. These assert stored state, not just status codes.
+        assert (await (await client.get(f"/api/tasks/{t['id']}")).json())[
+            "comment_count"
+        ] == 2
 
 
 def _comments_on_disk(tmp_path, task_id):
@@ -480,10 +493,14 @@ def _comments_on_disk(tmp_path, task_id):
 @pytest.mark.asyncio
 async def test_comment_author_is_server_derived_not_caller_supplied(tmp_path):
     """The whole point of #554: the stored author is the server's handle."""
-    with patch("gideon.tasks.handlers._owner_username", return_value="keyur-golani"):
+    with patch(
+        "gideon.engine.tasks.handlers._owner_username", return_value="keyur-golani"
+    ):
         async with _client(tmp_path) as client:
             t = await (await client.post("/api/tasks", json={"title": "T"})).json()
-            r = await client.post(f"/api/tasks/{t['id']}/comments", json={"body": "mine"})
+            r = await client.post(
+                f"/api/tasks/{t['id']}/comments", json={"body": "mine"}
+            )
             assert r.status == 201
             assert (await r.json())["author"] == "keyur-golani"
             stored = _comments_on_disk(tmp_path, t["id"])
@@ -494,16 +511,20 @@ async def test_comment_author_is_server_derived_not_caller_supplied(tmp_path):
 async def test_supplied_comment_author_is_refused_and_stores_nothing(tmp_path):
     """A body-supplied author is rejected outright rather than silently dropped: a 201
     that stored a different author than asked would tell a forging client it worked."""
-    with patch("gideon.tasks.handlers._owner_username", return_value="keyur-golani"):
+    with patch(
+        "gideon.engine.tasks.handlers._owner_username", return_value="keyur-golani"
+    ):
         async with _client(tmp_path) as client:
             t = await (await client.post("/api/tasks", json={"title": "T"})).json()
             r = await client.post(
                 f"/api/tasks/{t['id']}/comments",
-                json={"body": "looks good", "author": "Keyur Golani <keyurrgolani@gmail.com>"},
+                json={
+                    "body": "looks good",
+                    "author": "Keyur Golani <keyurrgolani@gmail.com>",
+                },
             )
             assert r.status == 400
             assert "author" in (await r.json())["error"]
-            # Refused means nothing was written — not "written under a different name".
             assert _comments_on_disk(tmp_path, t["id"]) == []
 
 
@@ -511,7 +532,9 @@ async def test_supplied_comment_author_is_refused_and_stores_nothing(tmp_path):
 async def test_supplied_comment_author_refused_even_when_it_matches_the_owner(tmp_path):
     """The field is refused on principle. Accepting the ones that happen to match would
     make the endpoint's contract depend on the current username."""
-    with patch("gideon.tasks.handlers._owner_username", return_value="keyur-golani"):
+    with patch(
+        "gideon.engine.tasks.handlers._owner_username", return_value="keyur-golani"
+    ):
         async with _client(tmp_path) as client:
             t = await (await client.post("/api/tasks", json={"title": "T"})).json()
             r = await client.post(
@@ -564,21 +587,27 @@ async def test_comment_delete_removes_it_from_the_store(tmp_path):
     async with _client(tmp_path) as client:
         t = await (await client.post("/api/tasks", json={"title": "T"})).json()
         first = await (
-            await client.post(f"/api/tasks/{t['id']}/comments", json={"body": "keep me"})
+            await client.post(
+                f"/api/tasks/{t['id']}/comments", json={"body": "keep me"}
+            )
         ).json()
         doomed = await (
-            await client.post(f"/api/tasks/{t['id']}/comments", json={"body": "delete me"})
+            await client.post(
+                f"/api/tasks/{t['id']}/comments", json={"body": "delete me"}
+            )
         ).json()
         r = await client.delete(f"/api/tasks/{t['id']}/comments/{doomed['id']}")
         assert r.status == 200
         assert (await r.json()) == {"ok": True, "id": doomed["id"]}
-        # Gone from the store, and the sibling survived.
         stored = _comments_on_disk(tmp_path, t["id"])
         assert [c["id"] for c in stored] == [first["id"]]
-        listed = (await (await client.get(f"/api/tasks/{t['id']}/comments")).json())["comments"]
+        listed = (await (await client.get(f"/api/tasks/{t['id']}/comments")).json())[
+            "comments"
+        ]
         assert [c["body"] for c in listed] == ["keep me"]
-        # And the derived badge count follows.
-        assert (await (await client.get(f"/api/tasks/{t['id']}")).json())["comment_count"] == 1
+        assert (await (await client.get(f"/api/tasks/{t['id']}")).json())[
+            "comment_count"
+        ] == 1
 
 
 @pytest.mark.asyncio
@@ -588,11 +617,7 @@ async def test_comment_delete_unknown_id_is_404(tmp_path):
         await client.post(f"/api/tasks/{t['id']}/comments", json={"body": "one"})
         r = await client.delete(f"/api/tasks/{t['id']}/comments/c-nope")
         assert r.status == 404
-        # A HANDLED 404, not aiohttp's unrouted text/plain one — an absent route also
-        # answers 404, so status alone cannot tell "no such comment" from "no such
-        # endpoint" (which is exactly the pre-fix state this asserts against).
         assert (await r.json()) == {"error": "not found"}
-        # A miss must not take the real comment with it.
         assert len(_comments_on_disk(tmp_path, t["id"])) == 1
 
 
@@ -611,13 +636,13 @@ async def test_comment_delete_is_not_captured_by_the_task_id_matcher(tmp_path):
     register_task_routes comment warns about)."""
     async with _client(tmp_path) as client:
         t = await (await client.post("/api/tasks", json={"title": "T"})).json()
-        c = await (await client.post(f"/api/tasks/{t['id']}/comments", json={"body": "x"})).json()
-        assert (await client.delete(f"/api/tasks/{t['id']}/comments/{c['id']}")).status == 200
-        # The task itself is untouched by a comment delete.
+        c = await (
+            await client.post(f"/api/tasks/{t['id']}/comments", json={"body": "x"})
+        ).json()
+        assert (
+            await client.delete(f"/api/tasks/{t['id']}/comments/{c['id']}")
+        ).status == 200
         assert (await client.get(f"/api/tasks/{t['id']}")).status == 200
-
-
-# ── Bulk ──
 
 
 @pytest.mark.asyncio
@@ -625,7 +650,8 @@ async def test_bulk_create(tmp_path):
     async with _client(tmp_path) as client:
         body = await (
             await client.post(
-                "/api/tasks/bulk", json={"op": "create", "items": [{"title": "A"}, {"title": "B"}]}
+                "/api/tasks/bulk",
+                json={"op": "create", "items": [{"title": "A"}, {"title": "B"}]},
             )
         ).json()
         assert body["succeeded"] == 2
@@ -636,22 +662,20 @@ async def test_bulk_create(tmp_path):
 async def test_bulk_validate_all_aborts(tmp_path):
     async with _client(tmp_path) as client:
         r = await client.post(
-            "/api/tasks/bulk", json={"op": "create", "items": [{"title": "A"}, {"title": ""}]}
+            "/api/tasks/bulk",
+            json={"op": "create", "items": [{"title": "A"}, {"title": ""}]},
         )
         assert r.status == 400
         assert (await (await client.get("/api/tasks")).json())["total"] == 0
-
-
-# ── Repeatable reset ──
 
 
 @pytest.mark.asyncio
 async def test_reset_requires_repeatable_project(tmp_path):
     async with _client(tmp_path) as client:
         tl = await (await client.post("/api/task-lists", json={"name": "L"})).json()
-        # Send the confirm, so this still tests the REPEATABLE guard rather than passing on
-        # the confirm gate added in #604 — a 400 from the wrong check is a vacuous pass.
-        r = await client.post(f"/api/task-lists/{tl['id']}/reset", json={"confirm": True})
+        r = await client.post(
+            f"/api/task-lists/{tl['id']}/reset", json={"confirm": True}
+        )
         assert r.status == 400
         assert "Repeatable" in (await r.text())
 
@@ -660,14 +684,19 @@ async def test_reset_requires_repeatable_project(tmp_path):
 async def test_reset_repeatable_list(tmp_path):
     async with _client(tmp_path) as client:
         tl = await (
-            await client.post("/api/task-lists", json={"name": "Weekly", "repeatable": True})
+            await client.post(
+                "/api/task-lists", json={"name": "Weekly", "repeatable": True}
+            )
         ).json()
         t = await (
-            await client.post("/api/tasks", json={"title": "step", "task_list_id": tl["id"]})
+            await client.post(
+                "/api/tasks", json={"title": "step", "task_list_id": tl["id"]}
+            )
         ).json()
         await client.put(f"/api/tasks/{t['id']}", json={"status": "done"})
-        # `confirm: true` is required by the route (#604) — reset wipes execution_notes.
-        r = await client.post(f"/api/task-lists/{tl['id']}/reset", json={"confirm": True})
+        r = await client.post(
+            f"/api/task-lists/{tl['id']}/reset", json={"confirm": True}
+        )
         assert r.status == 200
         reloaded = await (await client.get(f"/api/tasks/{t['id']}")).json()
         assert reloaded["status"] == "open"
@@ -677,13 +706,16 @@ async def test_reset_repeatable_list(tmp_path):
 async def test_reset_blocked_when_incomplete(tmp_path):
     async with _client(tmp_path) as client:
         tl = await (
-            await client.post("/api/task-lists", json={"name": "Weekly", "repeatable": True})
+            await client.post(
+                "/api/task-lists", json={"name": "Weekly", "repeatable": True}
+            )
         ).json()
-        await client.post("/api/tasks", json={"title": "step", "task_list_id": tl["id"]})
-        assert (await client.post(f"/api/task-lists/{tl['id']}/reset", json={})).status == 400
-
-
-# ── Exit-criteria complete gate ──
+        await client.post(
+            "/api/tasks", json={"title": "step", "task_list_id": tl["id"]}
+        )
+        assert (
+            await client.post(f"/api/task-lists/{tl['id']}/reset", json={})
+        ).status == 400
 
 
 @pytest.mark.asyncio
@@ -713,13 +745,9 @@ async def test_invalid_status_is_400_not_silent_noop(tmp_path):
         r = await client.put(f"/api/tasks/{t['id']}", json={"status": "completed"})
         assert r.status == 400
         err = (await r.json())["error"]
-        assert "completed" in err and "done" in err  # names the fix
-        # And the task is untouched.
+        assert "completed" in err and "done" in err
         got = await (await client.get(f"/api/tasks/{t['id']}")).json()
         assert got["status"] == "open"
-
-
-# ── project_id resolves on BOTH write paths (issue 2142) ──────────────────────
 
 
 @pytest.mark.asyncio
@@ -736,16 +764,21 @@ async def test_picking_a_project_while_EDITING_moves_the_task(tmp_path):
     payload worked on one surface and was a no-op on the other.
     """
     async with _client(tmp_path) as client:
-        pid = (await (await client.post("/api/projects", json={"name": "Website"})).json())["id"]
-        task_id = (await (await client.post("/api/tasks", json={"title": "t"})).json())["id"]
+        pid = (
+            await (await client.post("/api/projects", json={"name": "Website"})).json()
+        )["id"]
+        task_id = (await (await client.post("/api/tasks", json={"title": "t"})).json())[
+            "id"
+        ]
 
-        r = await client.put(f"/api/tasks/{task_id}", json={"title": "t", "project_id": pid})
+        r = await client.put(
+            f"/api/tasks/{task_id}", json={"title": "t", "project_id": pid}
+        )
         assert r.status == 200
 
-        # The task now belongs to a list under that project — which is what "in the project" MEANS
-        # here. Asserting on the returned `task_list_id` rather than a label, because the label is
-        # derived and could agree while the row did not move.
-        lists = (await (await client.get(f"/api/task-lists?project_id={pid}")).json())["task_lists"]
+        lists = (await (await client.get(f"/api/task-lists?project_id={pid}")).json())[
+            "task_lists"
+        ]
         assert [tl["name"] for tl in lists] == ["General"]
         assert (await r.json())["task_list_id"] == lists[0]["id"]
 
@@ -759,12 +792,18 @@ async def test_the_two_write_paths_resolve_a_project_IDENTICALLY(tmp_path):
     what create does", derived by running the same body through both.
     """
     async with _client(tmp_path) as client:
-        pid = (await (await client.post("/api/projects", json={"name": "Website"})).json())["id"]
+        pid = (
+            await (await client.post("/api/projects", json={"name": "Website"})).json()
+        )["id"]
         body = {"title": "shared payload", "task_list_id": "", "project_id": pid}
 
         created = await (await client.post("/api/tasks", json=dict(body))).json()
-        other_id = (await (await client.post("/api/tasks", json={"title": "x"})).json())["id"]
-        updated = await (await client.put(f"/api/tasks/{other_id}", json=dict(body))).json()
+        other_id = (
+            await (await client.post("/api/tasks", json={"title": "x"})).json()
+        )["id"]
+        updated = await (
+            await client.put(f"/api/tasks/{other_id}", json=dict(body))
+        ).json()
 
         assert created["task_list_id"], "create stopped resolving the project"
         assert updated["task_list_id"] == created["task_list_id"]
@@ -773,21 +812,29 @@ async def test_the_two_write_paths_resolve_a_project_IDENTICALLY(tmp_path):
 @pytest.mark.asyncio
 async def test_an_explicit_task_list_WINS_over_project_id(tmp_path):
     """🪤 The floor. "Resolve the project" one step too far would overwrite a list the user picked
-    deliberately, which is a worse bug than the one being fixed — it would move tasks."""
+    deliberately, which is a worse bug than the one being fixed — it would move tasks.
+    """
     async with _client(tmp_path) as client:
-        pid = (await (await client.post("/api/projects", json={"name": "Website"})).json())["id"]
+        pid = (
+            await (await client.post("/api/projects", json={"name": "Website"})).json()
+        )["id"]
         chosen = await (
-            await client.post("/api/task-lists", json={"name": "Backlog", "project_id": pid})
+            await client.post(
+                "/api/task-lists", json={"name": "Backlog", "project_id": pid}
+            )
         ).json()
-        task_id = (await (await client.post("/api/tasks", json={"title": "t"})).json())["id"]
+        task_id = (await (await client.post("/api/tasks", json={"title": "t"})).json())[
+            "id"
+        ]
 
         r = await client.put(
             f"/api/tasks/{task_id}",
             json={"title": "t", "task_list_id": chosen["id"], "project_id": pid},
         )
         assert (await r.json())["task_list_id"] == chosen["id"]
-        # And no "General" list was conjured on the side.
-        lists = (await (await client.get(f"/api/task-lists?project_id={pid}")).json())["task_lists"]
+        lists = (await (await client.get(f"/api/task-lists?project_id={pid}")).json())[
+            "task_lists"
+        ]
         assert [tl["name"] for tl in lists] == ["Backlog"]
 
 
@@ -800,12 +847,19 @@ async def test_an_EMPTY_task_list_id_still_resolves_the_project(tmp_path):
     `if "task_list_id" in body` refactor cannot invert it silently.
     """
     async with _client(tmp_path) as client:
-        pid = (await (await client.post("/api/projects", json={"name": "Website"})).json())["id"]
-        task_id = (await (await client.post("/api/tasks", json={"title": "t"})).json())["id"]
+        pid = (
+            await (await client.post("/api/projects", json={"name": "Website"})).json()
+        )["id"]
+        task_id = (await (await client.post("/api/tasks", json={"title": "t"})).json())[
+            "id"
+        ]
         r = await client.put(
-            f"/api/tasks/{task_id}", json={"title": "t", "task_list_id": "  ", "project_id": pid}
+            f"/api/tasks/{task_id}",
+            json={"title": "t", "task_list_id": "  ", "project_id": pid},
         )
-        assert (await r.json())["task_list_id"], "a blank list defeated the project resolution"
+        assert (await r.json())[
+            "task_list_id"
+        ], "a blank list defeated the project resolution"
 
 
 @pytest.mark.asyncio
@@ -813,7 +867,9 @@ async def test_a_task_without_a_project_id_is_left_alone(tmp_path):
     """The other floor: the resolution must be a no-op for every edit that does not mention a
     project, which is nearly all of them."""
     async with _client(tmp_path) as client:
-        task_id = (await (await client.post("/api/tasks", json={"title": "t"})).json())["id"]
+        task_id = (await (await client.post("/api/tasks", json={"title": "t"})).json())[
+            "id"
+        ]
         r = await client.put(f"/api/tasks/{task_id}", json={"title": "renamed"})
         body = await r.json()
         assert body["title"] == "renamed"

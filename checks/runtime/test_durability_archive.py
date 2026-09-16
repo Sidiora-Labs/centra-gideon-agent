@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from gideon.durability import archive as arch
+from gideon.operations.durability import archive as arch
 
 
 @pytest.fixture
@@ -23,11 +23,8 @@ def home(tmp_path, monkeypatch):
     h = tmp_path / "home"
     h.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(h))
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: h)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: h)
     return h
-
-
-# ── the manifest sidecar ─────────────────────────────────────────────────────
 
 
 def _tar_with_manifest(path: Path, manifest: dict) -> None:
@@ -41,9 +38,12 @@ def _tar_with_manifest(path: Path, manifest: dict) -> None:
 
 def test_domain_counts_come_from_the_sidecar_when_present(tmp_path):
     tar = tmp_path / "snap.tar.gz"
-    _tar_with_manifest(tar, {"version": 3, "domains": {"memory": {"files": 1, "rows": 7}}})
-    arch.write_sidecar(tar, {"version": 3, "domains": {"memory": {"files": 1, "rows": 99}}})
-    # The sidecar wins — it is the cheap read, and it is written from the same bytes.
+    _tar_with_manifest(
+        tar, {"version": 3, "domains": {"memory": {"files": 1, "rows": 7}}}
+    )
+    arch.write_sidecar(
+        tar, {"version": 3, "domains": {"memory": {"files": 1, "rows": 99}}}
+    )
     assert arch.domain_counts(tar) == {"memory": {"files": 1, "rows": 99}}
 
 
@@ -54,7 +54,9 @@ def test_a_missing_sidecar_is_backfilled_from_the_tar_once(tmp_path):
     it twice produces the same answer.
     """
     tar = tmp_path / "snap.tar.gz"
-    _tar_with_manifest(tar, {"version": 3, "domains": {"work": {"files": 2, "rows": 2}}})
+    _tar_with_manifest(
+        tar, {"version": 3, "domains": {"work": {"files": 2, "rows": 2}}}
+    )
     assert not arch.sidecar_path(tar).exists()
 
     first = arch.domain_counts(tar)
@@ -93,7 +95,7 @@ def test_retention_removes_the_sidecar_with_its_archive(tmp_path):
     future snapshot's manifest if a name were ever reused."""
     from datetime import datetime, timedelta, timezone
 
-    from gideon.durability import retention
+    from gideon.operations.durability import retention
 
     directory = tmp_path / "snaps"
     directory.mkdir()
@@ -109,11 +111,7 @@ def test_retention_removes_the_sidecar_with_its_archive(tmp_path):
     plan = retention.apply_retention(directory, daily=2, weekly=1, monthly=1)
     assert plan["pruned"], "the fixture must actually prune something"
     for p in made:
-        # A sidecar exists exactly when its archive does.
         assert arch.sidecar_path(p).exists() == p.exists(), p.name
-
-
-# ── the snapshot manifest's domains block ────────────────────────────────────
 
 
 def test_snapshot_manifest_records_real_per_domain_row_counts(home, tmp_path):
@@ -121,11 +119,13 @@ def test_snapshot_manifest_records_real_per_domain_row_counts(home, tmp_path):
     database, and rows are what §6 asks the browser to show."""
     import argparse
 
-    from gideon.snapshot import snapshot_main
+    from gideon.workspace.snapshot import snapshot_main
 
     conn = sqlite3.connect(str(home / "memory.db"))
     try:
-        conn.execute("CREATE TABLE semantic_memory (key TEXT PRIMARY KEY, value_json TEXT)")
+        conn.execute(
+            "CREATE TABLE semantic_memory (key TEXT PRIMARY KEY, value_json TEXT)"
+        )
         conn.executemany(
             "INSERT INTO semantic_memory (key, value_json) VALUES (?, ?)",
             [(f"k{i}", "{}") for i in range(5)],
@@ -152,15 +152,11 @@ def test_snapshot_manifest_records_real_per_domain_row_counts(home, tmp_path):
     assert domains["memory"]["rows"] == 5, domains
     assert domains["work"]["rows"] == 3, domains
     assert domains["config"]["files"] >= 1, domains
-    # The sidecar is written at snapshot time, not lazily on first read.
     assert arch.sidecar_path(tars[0]).exists()
 
 
-# ── the drill verdict ────────────────────────────────────────────────────────
-
-
 def test_last_drill_reports_not_run_on_a_fresh_home(home):
-    from gideon.durability import service
+    from gideon.operations.durability import service
 
     drill = service.last_drill()
     assert drill["ran"] is False
@@ -173,7 +169,7 @@ def test_a_stamp_without_a_recorded_outcome_reports_unknown(home):
     The alternative — defaulting the missing field to True — would show green for every
     home that drilled once before this atom landed.
     """
-    from gideon.durability import service
+    from gideon.operations.durability import service
 
     service.save_state({"last_drill": 1_700_000_000.0})
     drill = service.last_drill()
@@ -183,12 +179,16 @@ def test_a_stamp_without_a_recorded_outcome_reports_unknown(home):
 
 @pytest.mark.parametrize("ok", [True, False])
 def test_a_drill_result_round_trips_through_state(home, ok):
-    from gideon.durability import service
+    from gideon.operations.durability import service
 
     result = service.JobResult(
         "restore_drill",
         ok=ok,
-        detail="snap-1: 3 database(s) verified" if ok else "snap-1: integrity_check said bad",
+        detail=(
+            "snap-1: 3 database(s) verified"
+            if ok
+            else "snap-1: integrity_check said bad"
+        ),
         extra={"snapshot": "snap-1.tar.gz", "databases_checked": 3},
     )
     service.persist_drill_result(result, at=1_800_000_000.0)
@@ -208,7 +208,7 @@ def test_the_scheduled_tick_records_the_verdict_too(home, monkeypatch):
     disagree about what the archive browser shows — `run_due_jobs`' trailing `save_state`
     would clobber whatever a drill had recorded on its own.
     """
-    from gideon.durability import service
+    from gideon.operations.durability import service
 
     monkeypatch.setattr(
         service,

@@ -13,12 +13,12 @@ from pathlib import Path
 
 import pytest
 
-from gideon.apps import app_manager, manager, mcp_bridge
+from gideon.extensions.apps import app_manager, manager, mcp_bridge
 
 
 @pytest.fixture(autouse=True)
 def _isolate(tmp_path, monkeypatch):
-    import gideon.config.loader as loader
+    import gideon.core.config.loader as loader
 
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(manager, "config_dir", lambda: tmp_path)
@@ -59,7 +59,9 @@ def test_install_registers_mcp_servers(tmp_path):
 
 
 def test_disable_enable_toggles_mcp(tmp_path):
-    app_manager.install(_app(tmp_path, "notesync", servers={"gdrive": {"url": "http://x"}}))
+    app_manager.install(
+        _app(tmp_path, "notesync", servers={"gdrive": {"url": "http://x"}})
+    )
     assert mcp_bridge.app_mcp_server_keys("notesync") == ["notesync:gdrive"]
     app_manager.disable("notesync")
     assert mcp_bridge.app_mcp_server_keys("notesync") == []
@@ -68,14 +70,17 @@ def test_disable_enable_toggles_mcp(tmp_path):
 
 
 def test_uninstall_removes_mcp(tmp_path):
-    app_manager.install(_app(tmp_path, "notesync", servers={"gdrive": {"url": "http://x"}}))
+    app_manager.install(
+        _app(tmp_path, "notesync", servers={"gdrive": {"url": "http://x"}})
+    )
     app_manager.uninstall("notesync")
     assert mcp_bridge.app_mcp_server_keys("notesync") == []
 
 
 def test_namespacing_no_collision(tmp_path):
-    # Two apps each ship a server named "gdrive" — both coexist, namespaced.
-    app_manager.install(_app(tmp_path, "app-a", servers={"gdrive": {"url": "http://a"}}))
+    app_manager.install(
+        _app(tmp_path, "app-a", servers={"gdrive": {"url": "http://a"}})
+    )
     app_manager.install(
         _app(tmp_path, "app-b", subdir="s2", servers={"gdrive": {"url": "http://b"}})
     )
@@ -83,7 +88,6 @@ def test_namespacing_no_collision(tmp_path):
     assert "app-a:gdrive" in servers and "app-b:gdrive" in servers
     assert servers["app-a:gdrive"]["url"] == "http://a"
     assert servers["app-b:gdrive"]["url"] == "http://b"
-    # uninstalling one leaves the other
     app_manager.uninstall("app-a")
     servers = _live_servers(tmp_path)
     assert "app-a:gdrive" not in servers and "app-b:gdrive" in servers
@@ -95,10 +99,6 @@ def test_no_mcp_servers_is_noop(tmp_path):
 
 
 def test_stdio_server_gets_app_dir_cwd(tmp_path):
-    # A stdio server shipped INSIDE the app (relative command/args) must be
-    # registered with cwd=<app dir> so the MCP client can actually spawn it —
-    # the client doesn't chdir per server, so a relative path otherwise resolves
-    # against the gateway cwd and never starts.
     app_manager.install(
         _app(
             tmp_path,
@@ -115,8 +115,6 @@ def test_stdio_server_gets_app_dir_cwd(tmp_path):
 
 
 def test_remote_and_absolute_cwd_servers_untouched(tmp_path):
-    # A url (remote) server gets no cwd; a server that already set an absolute
-    # cwd keeps its own.
     app_manager.install(
         _app(
             tmp_path,

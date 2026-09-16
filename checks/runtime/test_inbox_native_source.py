@@ -11,9 +11,9 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import make_mocked_request
 
-import gideon.inbox_providers.native_source as ns
-from gideon.dashboard import handlers_inbox as H
-from gideon.inbox import InboxItem, InboxState, InboxStore, ItemStatus
+import gideon.integrations.inbox_providers.native_source as ns
+from gideon.integrations.inbox import InboxItem, InboxState, InboxStore, ItemStatus
+from gideon.interfaces.dashboard import handlers_inbox as H
 
 
 def _run(coro):
@@ -34,9 +34,6 @@ def state(tmp_path):
     return st
 
 
-# ── model ──
-
-
 def test_item_source_can_reply_round_trip():
     item = InboxItem(
         id="agent_1",
@@ -51,10 +48,9 @@ def test_item_source_can_reply_round_trip():
         reply_target="cron:x",
     )
     rt = InboxItem.from_dict(item.to_dict())
-    assert rt.source == "native" and rt.can_reply is True and rt.reply_target == "cron:x"
-
-
-# ── native source push ──
+    assert (
+        rt.source == "native" and rt.can_reply is True and rt.reply_target == "cron:x"
+    )
 
 
 def test_post_notification_is_fyi_no_reply(state):
@@ -85,9 +81,6 @@ def test_post_without_state_is_noop():
     assert ns.post_to_inbox("x") is None
 
 
-# ── /send native routing ──
-
-
 def _send_req(state, body):
     app = web.Application()
     app["state"] = state
@@ -101,21 +94,17 @@ async def _coro(v):
 
 
 def test_send_routes_native_reply_to_live_session(state, monkeypatch):
-    item = ns.post_to_inbox("approve?", kind="question", sender_name="coder", reply_target="chat:1")
+    item = ns.post_to_inbox(
+        "approve?", kind="question", sender_name="coder", reply_target="chat:1"
+    )
     session = MagicMock()
     state.get_session = lambda key: session if key == "chat:1" else None
-    # Stub the chat runner so no real turn is dispatched. MUST be monkeypatch-scoped: a bare
-    # `chat_runner.run_chat = MagicMock()` is never undone, so it outlived this test and every
-    # later test on the same xdist worker that reads that attribute — including run_chat's own
-    # queue-processing recursion — then awaited a MagicMock and died with "object MagicMock
-    # can't be used in 'await' expression". CI-only, because worksteal decides co-location.
-    monkeypatch.setattr("gideon.dashboard.chat_runner.run_chat", MagicMock())
+    monkeypatch.setattr("gideon.interfaces.dashboard.chat_runner.run_chat", MagicMock())
     resp = _run(H.api_inbox_send(_send_req(state, {"id": item.id, "text": "yes, go"})))
     assert resp.status == 200
     body = json.loads(resp.body)
     assert body["delivered_to_session"] is True
     session.enqueue_or_run_prompt.assert_called_once()
-    # item marked handled
     assert state._inbox_store.items[item.id].status == ItemStatus.HANDLED.value
 
 
@@ -136,9 +125,6 @@ def test_send_captures_when_session_gone(state):
     assert state._inbox_store.items[item.id].draft == "do it"
 
 
-# ── malformed bodies are client errors, not crashes (#339) ──
-
-
 @pytest.mark.parametrize("body", [None, [], 5, "text"])
 def test_send_rejects_a_non_object_body(state, body):
     """A body that isn't an object parses fine, then used to 500 on body.get()."""
@@ -148,7 +134,8 @@ def test_send_rejects_a_non_object_body(state, body):
 
 
 @pytest.mark.parametrize(
-    "body", [{"id": 123, "text": "x"}, {"id": "a", "text": ["x"]}, {"id": "a", "draft": {}}]
+    "body",
+    [{"id": 123, "text": "x"}, {"id": "a", "text": ["x"]}, {"id": "a", "draft": {}}],
 )
 def test_send_rejects_a_non_string_id_or_text(state, body):
     """`(body.get("id") or "").strip()` raised AttributeError on a number/list."""
@@ -175,9 +162,6 @@ def test_favorite_tolerates_a_non_object_body(state, body):
     assert resp.status == 200
     assert json.loads(resp.body)["favorited"] is True
     assert state._inbox_store.items[item.id].favorited is True
-
-
-# ── /status per-source health ──
 
 
 def test_status_reports_native_source_active(state, monkeypatch):

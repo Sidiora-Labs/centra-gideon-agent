@@ -7,12 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from gideon.vector_memory import VectorMemoryStore
+from gideon.cognition.vector_memory import SemanticArchive
 
 
 @pytest.fixture
 def vs():
-    store = VectorMemoryStore(db_path=Path(tempfile.mkdtemp()) / "m.db")
+    store = SemanticArchive(db_path=Path(tempfile.mkdtemp()) / "m.db")
     store.init()
     return store
 
@@ -39,7 +39,7 @@ def test_undo_create_soft_deletes(vs):
 
 def test_undo_update_restores_old_value(vs):
     vs.set_semantic("pref.x", "A", 1.0, "user_explicit")
-    vs.set_semantic("pref.x", "B", 1.0, "user_explicit")  # update
+    vs.set_semantic("pref.x", "B", 1.0, "user_explicit")
     ok, _ = vs.undo_event(_event_id(vs, "update", "pref.x"))
     assert ok
     import json
@@ -85,19 +85,22 @@ def test_undo_marks_undone_at(vs):
     vs.set_semantic("pref.x", "A", 1.0, "user_explicit")
     eid = _event_id(vs, "create", "pref.x")
     vs.undo_event(eid)
-    row = vs.db.execute("SELECT undone_at FROM memory_events WHERE id=?", (eid,)).fetchone()
+    row = vs.db.execute(
+        "SELECT undone_at FROM memory_events WHERE id=?", (eid,)
+    ).fetchone()
     assert row["undone_at"] is not None
 
 
 def test_undo_logs_an_undo_event(vs):
     vs.set_semantic("pref.x", "A", 1.0, "user_explicit")
     vs.undo_event(_event_id(vs, "create", "pref.x"))
-    undo_events = vs.db.execute("SELECT * FROM memory_events WHERE event_type='undo'").fetchall()
+    undo_events = vs.db.execute(
+        "SELECT * FROM memory_events WHERE event_type='undo'"
+    ).fetchall()
     assert undo_events
 
 
 def test_non_semantic_event_not_reversible(vs):
-    # Manually log an episodic event; it must not be reversible via this path.
     vs._log_event("create", "episodic", "ep.1", None, "x", "test")
     eid = _event_id(vs, "create", "ep.1")
     ok, msg = vs.undo_event(eid)

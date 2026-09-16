@@ -24,9 +24,11 @@ from pathlib import Path
 
 import pytest
 
-from gideon.durability import state_history as sh
+from gideon.operations.durability import state_history as sh
 
-pytestmark = pytest.mark.skipif(not sh.git_available(), reason="git is required for time-travel")
+pytestmark = pytest.mark.skipif(
+    not sh.git_available(), reason="git is required for time-travel"
+)
 
 
 @pytest.fixture(autouse=True)
@@ -50,8 +52,6 @@ def _memory_root(home: Path) -> sh.HistoryRoot:
 
 
 def _write_note(root: sh.HistoryRoot, text: str) -> None:
-    # `memory/` is on the root's include allowlist; a file outside it would be
-    # deny-by-default excluded and commit() would correctly return None.
     notes = root.worktree / "memory"
     notes.mkdir(parents=True, exist_ok=True)
     (notes / "note.md").write_text(text, encoding="utf-8")
@@ -81,16 +81,13 @@ def test_partially_destroyed_repo_heals_and_recording_resumes(home) -> None:
     gd = sh.git_dir(root, home=home)
     _partially_destroy(gd)
 
-    # The old code failed here forever; the heal must land a commit instead.
     _write_note(root, "after the heal\n")
     sha = sh.commit(root, reason="post-heal", home=home)
     assert sha, "commit after heal must succeed"
 
-    # Fresh history: exactly the post-heal commit, and the husk retired aside.
     assert sh.commit_count(root, home=home) == 1
     husks = list(gd.parent.glob(f"{gd.name}.broken-*"))
     assert len(husks) == 1, f"expected one retired husk, found {husks}"
-    # The husk left the .git namespace, so the service refuses to touch it.
     assert not husks[0].name.endswith(".git")
 
 
@@ -112,7 +109,6 @@ def test_healthy_repo_is_left_alone(home) -> None:
     _write_note(root, "second\n")
     second = sh.commit(root, reason="normal", home=home)
     assert second and second != first
-    # History intact (no silent re-init), and no husk was created.
     assert sh.commit_count(root, home=home) == 2
     assert list(gd.parent.glob(f"{gd.name}.broken-*")) == []
 

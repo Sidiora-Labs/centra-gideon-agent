@@ -8,7 +8,7 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.dashboard.handlers import (
+from gideon.interfaces.dashboard.handlers import (
     _sanitize_blocks,
     api_create_dir,
     api_file_create,
@@ -20,7 +20,7 @@ from gideon.dashboard.handlers import (
     api_file_write,
     api_send_message,
 )
-from gideon.dashboard.session_store import KEY_FILE, SESSIONS_FILE
+from gideon.interfaces.dashboard.session_store import KEY_FILE, SESSIONS_FILE
 
 
 def _make_app() -> web.Application:
@@ -32,16 +32,13 @@ def _make_app() -> web.Application:
     app.router.add_post("/api/file-move", api_file_move)
     app.router.add_post("/api/file-delete", api_file_delete)
     app.router.add_post("/api/file-upload", api_file_upload)
-    # `create-dir` is a SEPARATE handler that takes a whole path rather than a parent+name,
-    # so it never met the name rules — which is exactly why it answered 500 for an over-long
-    # component (#652). It was absent from this app, so nothing here covered it.
     app.router.add_post("/api/create-dir", api_create_dir)
     return app
 
 
 @pytest.fixture
 def mock_sel():
-    with patch("gideon.sel.sel") as m:
+    with patch("gideon.security.sel.sel") as m:
         instance = MagicMock()
         m.return_value = instance
         yield instance
@@ -74,7 +71,7 @@ def home_patch(tmp_path):
         patch("os.path.realpath", side_effect=real_realpath),
         patch("pathlib.Path.home", return_value=tmp_path),
         patch(
-            "gideon.dashboard.handlers.files._dashboard_roots",
+            "gideon.interfaces.dashboard.handlers.files._dashboard_roots",
             return_value=[("Test", str(tmp_path))],
         ),
     ):
@@ -124,7 +121,7 @@ class TestFileRead:
         """Paths outside the dashboard allowlist are denied (sandbox boundary)."""
         async with TestClient(TestServer(_make_app())) as client:
             resp = await client.get("/api/file-read?path=/etc/passwd")
-            assert resp.status == 400  # outside allowed roots → forbidden
+            assert resp.status == 400
 
     @pytest.mark.asyncio
     async def test_read_sensitive_path(self, mock_sel, home_patch):
@@ -180,14 +177,18 @@ class TestFileWrite:
     async def test_write_outside_allowlist(self, mock_sel, home_patch):
         """Writes outside the dashboard allowlist are denied (sandbox boundary)."""
         async with TestClient(TestServer(_make_app())) as client:
-            resp = await client.post("/api/file-write", json={"path": "/etc/evil", "content": "x"})
-            assert resp.status == 400  # outside allowed roots → forbidden
+            resp = await client.post(
+                "/api/file-write", json={"path": "/etc/evil", "content": "x"}
+            )
+            assert resp.status == 400
 
     @pytest.mark.asyncio
     async def test_write_invalid_json(self, mock_sel):
         async with TestClient(TestServer(_make_app())) as client:
             resp = await client.post(
-                "/api/file-write", data=b"not json", headers={"Content-Type": "application/json"}
+                "/api/file-write",
+                data=b"not json",
+                headers={"Content-Type": "application/json"},
             )
             assert resp.status == 400
 
@@ -195,7 +196,8 @@ class TestFileWrite:
     async def test_write_sensitive_path(self, mock_sel, home_patch):
         async with TestClient(TestServer(_make_app())) as client:
             resp = await client.post(
-                "/api/file-write", json={"path": str(home_patch / ".ssh/id_rsa"), "content": "x"}
+                "/api/file-write",
+                json={"path": str(home_patch / ".ssh/id_rsa"), "content": "x"},
             )
             assert resp.status == 400
 
@@ -207,7 +209,10 @@ class TestFileList:
             resp = await client.get("/api/file-list")
             assert resp.status == 200
             data = await resp.json()
-            assert any(r["label"] == "Test" and r["path"] == str(home_patch) for r in data["roots"])
+            assert any(
+                r["label"] == "Test" and r["path"] == str(home_patch)
+                for r in data["roots"]
+            )
 
     @pytest.mark.asyncio
     async def test_list_directory_dirs_first(self, mock_sel, home_patch):
@@ -219,7 +224,6 @@ class TestFileList:
             assert resp.status == 200
             data = await resp.json()
             names = [e["name"] for e in data["entries"]]
-            # Directory sorts before files, then alphabetical.
             assert names == ["a_dir", "a.txt", "b.txt"]
             assert data["entries"][0]["is_dir"] is True
 
@@ -236,7 +240,12 @@ class TestFileCreate:
         async with TestClient(TestServer(_make_app())) as client:
             resp = await client.post(
                 "/api/file-create",
-                json={"path": str(home_patch), "name": "new.md", "kind": "file", "content": "hi"},
+                json={
+                    "path": str(home_patch),
+                    "name": "new.md",
+                    "kind": "file",
+                    "content": "hi",
+                },
             )
             assert resp.status == 200
             assert (home_patch / "new.md").read_text() == "hi"
@@ -245,7 +254,8 @@ class TestFileCreate:
     async def test_create_dir(self, mock_sel, home_patch):
         async with TestClient(TestServer(_make_app())) as client:
             resp = await client.post(
-                "/api/file-create", json={"path": str(home_patch), "name": "sub", "kind": "dir"}
+                "/api/file-create",
+                json={"path": str(home_patch), "name": "sub", "kind": "dir"},
             )
             assert resp.status == 200
             assert (home_patch / "sub").is_dir()
@@ -274,7 +284,8 @@ class TestFileCreate:
     async def test_create_outside_allowlist_denied(self, mock_sel, home_patch):
         async with TestClient(TestServer(_make_app())) as client:
             resp = await client.post(
-                "/api/file-create", json={"path": "/etc", "name": "evil.txt", "kind": "file"}
+                "/api/file-create",
+                json={"path": "/etc", "name": "evil.txt", "kind": "file"},
             )
             assert resp.status == 400
 
@@ -309,9 +320,9 @@ def _seed_cron_trigger(
     `(None, None)` and went nowhere. `session_key_of` strips the store's `pinned:` prefix, so the
     stored value keeps the legacy spelling this contract was written against.
     """
-    from gideon.config import loader
-    from gideon.triggers.models import Trigger
-    from gideon.triggers.store import TriggerStore
+    from gideon.automation.triggers.models import Trigger
+    from gideon.automation.triggers.store import TriggerStore
+    from gideon.core.config import loader
 
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
     TriggerStore(base_dir=tmp_path).upsert(
@@ -353,7 +364,9 @@ class TestSendMessage:
         state = _mock_state(channel_delivery=slack, owner_id="U123")
         app = _make_send_app(state)
         async with TestClient(TestServer(app)) as client:
-            resp = await client.post("/api/send-message", json={"text": "hello", "title": "Test"})
+            resp = await client.post(
+                "/api/send-message", json={"text": "hello", "title": "Test"}
+            )
             assert resp.status == 200
             data = await resp.json()
             assert data == {
@@ -468,7 +481,6 @@ class TestSendMessage:
                 "/api/send-message", json={"text": "fallback", "blocks": blocks}
             )
             assert resp.status == 200
-            # Verify blocks were passed (sanitized) — content should survive intact
             call_args = slack.deliver_rich.call_args
             sent_blocks = call_args[0][1]
             assert sent_blocks[0]["text"]["text"] == "safe text"
@@ -477,7 +489,6 @@ class TestSendMessage:
     async def test_send_message_session_origin(self, tmp_path, monkeypatch):
         """session='origin' injects into the cron's originating session and triggers a turn."""
         state = _mock_state()
-        # Mock a session that the cron originated from
         mock_session = MagicMock()
         mock_session.running = False
         mock_session.task = None
@@ -489,10 +500,11 @@ class TestSendMessage:
         app = _make_send_app(state)
         with (
             patch(
-                "gideon.dashboard.chat_runner.run_chat", new_callable=AsyncMock
+                "gideon.interfaces.dashboard.chat_runner.run_chat",
+                new_callable=AsyncMock,
             ) as mock_run,
             patch(
-                "gideon.dashboard.handlers.messaging._rehydrate_session_from_history"
+                "gideon.interfaces.dashboard.handlers.messaging._rehydrate_session_from_history"
             ) as mock_rehydrate,
         ):
             async with TestClient(TestServer(app)) as client:
@@ -507,25 +519,15 @@ class TestSendMessage:
                 assert resp.status == 200
                 data = await resp.json()
                 assert data == {"ok": True, "channel": False, "session": True}
-                # Hot-path: in-memory session found, no rehydrate needed.
                 state.get_session.assert_called_once_with("chat-1-1712793600")
                 mock_rehydrate.assert_not_called()
-                # Injected as user message to trigger agent turn
                 call_args = mock_session.append.call_args
                 assert call_args[0][0] == "inject"
                 assert '[Cron notification from "check pipeline"]' in call_args[0][1]
                 assert "build failed" in call_args[0][1]
                 assert json.loads(call_args[0][2]) == {"cronLabel": "check pipeline"}
                 mock_run.assert_called_once()
-                # Drain the fire-and-forget turn INSIDE the patch scope. The endpoint
-                # spawns `run_chat` with `create_task` (messaging.py:626) and returns
-                # immediately; leaving that task pending past the `with` block let it run
-                # against a half-unpatched module, which showed up on CI as
-                # `TestAcpProcessDiedRecovery` dying on `await` with a MagicMock — a
-                # cross-file leak that never reproduced locally because it depends on
-                # xdist worker placement.
                 await _drain_background(state)
-                # Should NOT fall back to notify/Slack
                 state.notify.assert_not_called()
 
     @pytest.mark.asyncio
@@ -542,7 +544,7 @@ class TestSendMessage:
         _seed_cron_trigger(tmp_path, monkeypatch)
         app = _make_send_app(state)
         with patch(
-            "gideon.dashboard.handlers.messaging._rehydrate_session_from_history"
+            "gideon.interfaces.dashboard.handlers.messaging._rehydrate_session_from_history"
         ) as mock_rehydrate:
             async with TestClient(TestServer(app)) as client:
                 resp = await client.post(
@@ -556,17 +558,17 @@ class TestSendMessage:
                 assert resp.status == 200
                 data = await resp.json()
                 assert data["session"] is True
-                # Message queued, not triggering a new turn
                 assert len(mock_session._queue) == 1
                 assert "build failed" in mock_session._queue[0]["content"]
                 call_args = mock_session.append.call_args
                 assert call_args[0][0] == "queued"
-                # Hot-path: no rehydrate when session is in memory.
                 mock_rehydrate.assert_not_called()
                 state.notify.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_send_message_session_origin_revives_missing_session(self, tmp_path, monkeypatch):
+    async def test_send_message_session_origin_revives_missing_session(
+        self, tmp_path, monkeypatch
+    ):
         """When session isn't in memory (e.g. after gateway restart), rehydrate via
         _rehydrate_session_from_history and still trigger an agent turn on the revived
         session. Regression test for silent-fail bug where cron→origin injection fell
@@ -578,13 +580,11 @@ class TestSendMessage:
 
         This is a focused routing test: it mocks _rehydrate_session_from_history so
         we can assert the handler calls it exactly when get_session returns None. The
-        end-to-end rehydrate path (real ConversationLog, real DashboardState,
+        end-to-end rehydrate path (real ConversationLog, real ConsoleState,
         real _ChatSession creation) is covered by
         TestRehydrateSessionFromHistory in test_session_restore.py."""
         state = _mock_state()
-        # Simulate cold-start: session not loaded in memory yet.
         state.get_session = MagicMock(return_value=None)
-        # Rehydrate helper returns a session reconstructed from persisted history.
         mock_session = MagicMock()
         mock_session.running = False
         mock_session.task = None
@@ -595,36 +595,34 @@ class TestSendMessage:
         app = _make_send_app(state)
         with (
             patch(
-                "gideon.dashboard.chat_runner.run_chat", new_callable=AsyncMock
+                "gideon.interfaces.dashboard.chat_runner.run_chat",
+                new_callable=AsyncMock,
             ) as mock_run,
             patch(
-                "gideon.dashboard.handlers.messaging._rehydrate_session_from_history",
+                "gideon.interfaces.dashboard.handlers.messaging._rehydrate_session_from_history",
                 return_value=mock_session,
             ) as mock_rehydrate,
         ):
             async with TestClient(TestServer(app)) as client:
                 resp = await client.post(
                     "/api/send-message",
-                    json={"text": "update", "session": "origin", "caller_session": "cron:abc12345"},
+                    json={
+                        "text": "update",
+                        "session": "origin",
+                        "caller_session": "cron:abc12345",
+                    },
                 )
                 assert resp.status == 200
                 data = await resp.json()
-                # Session delivery succeeded — no Slack DM fallback.
                 assert data == {"ok": True, "channel": False, "session": True}
-                # Hot-path miss: get_session called first, then rehydrate helper.
                 state.get_session.assert_called_once_with("chat-1-1712793600")
                 mock_rehydrate.assert_called_once_with(state, "chat-1-1712793600")
-                # Agent turn was triggered on the revived session (the whole point of the fix).
                 mock_run.assert_called_once()
-                # Injected as user message with cron-notification contract.
                 call_args = mock_session.append.call_args
                 assert call_args[0][0] == "inject"
                 assert '[Cron notification from "test-cron"]' in call_args[0][1]
                 assert "update" in call_args[0][1]
-                # Drain the fire-and-forget turn inside the patch scope (see the note on
-                # the origin-session test above).
                 await _drain_background(state)
-                # Message was injected, not sent as a notification.
                 state.notify.assert_not_called()
 
     @pytest.mark.asyncio
@@ -640,17 +638,20 @@ class TestSendMessage:
         _seed_cron_trigger(tmp_path, monkeypatch, name="test-cron")
         app = _make_send_app(state)
         with patch(
-            "gideon.dashboard.handlers.messaging._rehydrate_session_from_history",
+            "gideon.interfaces.dashboard.handlers.messaging._rehydrate_session_from_history",
             return_value=None,
         ) as mock_rehydrate:
             async with TestClient(TestServer(app)) as client:
                 resp = await client.post(
                     "/api/send-message",
-                    json={"text": "update", "session": "origin", "caller_session": "cron:abc12345"},
+                    json={
+                        "text": "update",
+                        "session": "origin",
+                        "caller_session": "cron:abc12345",
+                    },
                 )
                 assert resp.status == 200
                 data = await resp.json()
-                # No session delivery — fell through to notification.
                 assert data["session"] is False
                 mock_rehydrate.assert_called_once_with(state, "chat-1-1712793600")
                 state.notify.assert_called_once()
@@ -666,7 +667,11 @@ class TestSendMessage:
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
                 "/api/send-message",
-                json={"text": "update", "session": "origin", "caller_session": "dashboard:chat-1"},
+                json={
+                    "text": "update",
+                    "session": "origin",
+                    "caller_session": "dashboard:chat-1",
+                },
             )
             assert resp.status == 200
             data = await resp.json()
@@ -680,7 +685,7 @@ class TestSendMessage:
         state.get_session = MagicMock()
         app = _make_send_app(state)
         with patch(
-            "gideon.dashboard.handlers.messaging._rehydrate_session_from_history"
+            "gideon.interfaces.dashboard.handlers.messaging._rehydrate_session_from_history"
         ) as mock_rehydrate:
             async with TestClient(TestServer(app)) as client:
                 resp = await client.post(
@@ -694,13 +699,14 @@ class TestSendMessage:
                 assert resp.status == 200
                 data = await resp.json()
                 assert data["session"] is False
-                # Should NOT attempt any session lookup or rehydrate for a non-"origin" key.
                 state.get_session.assert_not_called()
                 mock_rehydrate.assert_not_called()
                 state.notify.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_send_message_session_channel_bypasses_origin(self, tmp_path, monkeypatch):
+    async def test_send_message_session_channel_bypasses_origin(
+        self, tmp_path, monkeypatch
+    ):
         """session='channel' is the explicit opt-out: skip origin routing
         entirely and fall through to the channel-delivery path (+ dashboard
         notification). Even if the cron has a valid originating session that
@@ -710,12 +716,10 @@ class TestSendMessage:
         mock_session = MagicMock()
         mock_session.running = False
         state.get_session = MagicMock(return_value=mock_session)
-        # Cron has an origin that WOULD be resolvable — proves session='channel'
-        # suppresses resolution regardless.
         _seed_cron_trigger(tmp_path, monkeypatch)
         app = _make_send_app(state)
         with patch(
-            "gideon.dashboard.handlers.messaging._rehydrate_session_from_history"
+            "gideon.interfaces.dashboard.handlers.messaging._rehydrate_session_from_history"
         ) as mock_rehydrate:
             async with TestClient(TestServer(app)) as client:
                 resp = await client.post(
@@ -728,12 +732,9 @@ class TestSendMessage:
                 )
                 assert resp.status == 200
                 data = await resp.json()
-                # No origin injection despite a valid origin being available.
                 assert data["session"] is False
-                # Rehydrate and origin get_session path never engage for session='channel'.
                 state.get_session.assert_not_called()
                 mock_rehydrate.assert_not_called()
-                # Dashboard notification always fires (contract invariant).
                 state.notify.assert_called_once()
 
 
@@ -744,10 +745,11 @@ class TestSanitizeBlocks:
         def mock_redactor(s):
             return s.replace("SECRET", "[REDACTED]"), [s] if "SECRET" in s else []
 
-        blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": "has SECRET here"}}]
+        blocks = [
+            {"type": "section", "text": {"type": "mrkdwn", "text": "has SECRET here"}}
+        ]
         result = _sanitize_blocks(blocks, mock_redactor)
         assert result[0]["text"]["text"] == "has [REDACTED] here"
-        # Original not mutated
         assert blocks[0]["text"]["text"] == "has SECRET here"
 
     def test_truncates_to_50_blocks(self):
@@ -757,17 +759,12 @@ class TestSanitizeBlocks:
 
     def test_depth_limit(self):
         """Beyond _MAX_WALK_DEPTH: strings are still sanitized, containers are dropped."""
-        # Build a 20-level deep nested dict (exceeds _MAX_WALK_DEPTH=10)
         obj: dict = {"text": "deep_leaf"}
         for _ in range(20):
             obj = {"nested": obj}
         blocks = [obj]
-        # Use a targeted redactor that only modifies values containing "deep"
-        # so structural keys pass through unchanged
         result = _sanitize_blocks(blocks, lambda s: (s.replace("deep", "DEEP"), []))
-        # Should not raise
         assert isinstance(result, list)
-        # Walk to depth boundary — containers beyond limit are dropped to {}
         node = result[0]
         for i in range(20):
             if "nested" not in node:
@@ -776,7 +773,6 @@ class TestSanitizeBlocks:
         assert (
             "text" not in node
         ), f"deep leaf should have been truncated but was reached at depth {i}"
-        # A shallow value SHOULD be sanitized
         shallow = [{"text": "deep_value"}]
         result2 = _sanitize_blocks(shallow, lambda s: (s.replace("deep", "DEEP"), []))
         assert result2[0]["text"] == "DEEP_value"
@@ -789,7 +785,8 @@ class TestFileMove:
         src.write_text("x")
         async with TestClient(TestServer(_make_app())) as client:
             r = await client.post(
-                "/api/file-move", json={"src": str(src), "dest": str(home_patch / "b.txt")}
+                "/api/file-move",
+                json={"src": str(src), "dest": str(home_patch / "b.txt")},
             )
             assert r.status == 200
         assert not src.exists()
@@ -802,7 +799,9 @@ class TestFileMove:
         dest = home_patch / "b.txt"
         dest.write_text("y")
         async with TestClient(TestServer(_make_app())) as client:
-            r = await client.post("/api/file-move", json={"src": str(src), "dest": str(dest)})
+            r = await client.post(
+                "/api/file-move", json={"src": str(src), "dest": str(dest)}
+            )
             assert r.status == 409
 
     @pytest.mark.asyncio
@@ -810,7 +809,9 @@ class TestFileMove:
         src = home_patch / "a.txt"
         src.write_text("x")
         async with TestClient(TestServer(_make_app())) as client:
-            r = await client.post("/api/file-move", json={"src": str(src), "dest": "/etc/evil.txt"})
+            r = await client.post(
+                "/api/file-move", json={"src": str(src), "dest": "/etc/evil.txt"}
+            )
             assert r.status == 400
         assert src.exists()
 
@@ -819,7 +820,10 @@ class TestFileMove:
         async with TestClient(TestServer(_make_app())) as client:
             r = await client.post(
                 "/api/file-move",
-                json={"src": str(home_patch / "nope.txt"), "dest": str(home_patch / "x.txt")},
+                json={
+                    "src": str(home_patch / "nope.txt"),
+                    "dest": str(home_patch / "x.txt"),
+                },
             )
             assert r.status == 404
 
@@ -841,7 +845,6 @@ class TestFileMove:
             assert r.status == 400
             body = await r.json()
             assert "root" in body["error"]
-        # The root and its contents are untouched — no move happened.
         assert home_patch.is_dir()
         assert sentinel.read_text() == "precious"
 
@@ -875,7 +878,9 @@ class TestFileDelete:
     @pytest.mark.asyncio
     async def test_delete_not_found_404(self, mock_sel, home_patch):
         async with TestClient(TestServer(_make_app())) as client:
-            r = await client.post("/api/file-delete", json={"path": str(home_patch / "nope.txt")})
+            r = await client.post(
+                "/api/file-delete", json={"path": str(home_patch / "nope.txt")}
+            )
             assert r.status == 404
 
     @pytest.mark.asyncio
@@ -894,7 +899,6 @@ class TestFileDelete:
             assert r.status == 400
             body = await r.json()
             assert "root" in body["error"]
-        # The root dir and its contents are untouched — no rmtree happened.
         assert home_patch.is_dir()
         assert sentinel.read_text() == "precious"
 
@@ -906,7 +910,9 @@ class TestFileUpload:
 
         async with TestClient(TestServer(_make_app())) as client:
             fd = FormData()
-            fd.add_field("file", b"payload", filename="up.txt", content_type="text/plain")
+            fd.add_field(
+                "file", b"payload", filename="up.txt", content_type="text/plain"
+            )
             r = await client.post(f"/api/file-upload?path={home_patch}", data=fd)
             assert r.status == 200
             data = await r.json()
@@ -948,19 +954,19 @@ class TestDashboardRootsProjectWorkspace:
 
     @pytest.fixture
     def _isolated_home(self, tmp_path, monkeypatch):
-        import gideon.config.loader as cfg
-        import gideon.tasks.hierarchy as hier
+        import gideon.core.config.loader as cfg
+        import gideon.engine.tasks.hierarchy as hier
 
         monkeypatch.setattr(cfg, "config_dir", lambda: tmp_path)
         monkeypatch.setattr(hier, "config_dir", lambda: tmp_path, raising=False)
         return tmp_path
 
     def test_bound_project_workspace_is_allowlisted(self, _isolated_home, tmp_path):
-        from gideon.dashboard.handlers.files import (
+        from gideon.cognition.projects import _store
+        from gideon.interfaces.dashboard.handlers.files import (
             _dashboard_roots,
             _validate_dashboard_path,
         )
-        from gideon.projects import _store
 
         ws = tmp_path / "codebase"
         ws.mkdir()
@@ -971,17 +977,16 @@ class TestDashboardRootsProjectWorkspace:
         assert any(
             label.startswith("Project: ZZ-Roots-Probe") for label, _ in roots
         ), "bound project workspace must be surfaced as a dashboard root"
-        # The bound workspace dir AND files under it are admitted by the allowlist.
         assert _validate_dashboard_path(str(ws)) is not None
         assert _validate_dashboard_path(str(ws / "main.py")) is not None
         assert proj.workspace_dir == str(ws)
 
     def test_unbound_project_adds_no_root(self, _isolated_home, tmp_path):
         """A project with no bound workspace ("" ) contributes no extra root."""
-        from gideon.dashboard.handlers.files import _dashboard_roots
-        from gideon.projects import _store
+        from gideon.cognition.projects import _store
+        from gideon.interfaces.dashboard.handlers.files import _dashboard_roots
 
-        _store().create_project(name="ZZ-NoWs-Probe")  # no workspace_dir
+        _store().create_project(name="ZZ-NoWs-Probe")
         labels = [label for label, _ in _dashboard_roots()]
         assert not any(label.startswith("Project: ZZ-NoWs-Probe") for label in labels)
 
@@ -989,24 +994,22 @@ class TestDashboardRootsProjectWorkspace:
         """A project (or loop) bound to a protected system root must NOT become a
         browsable root — else /etc, /usr, / etc. would leak via a workspace binding.
         Surfacing bound workspaces (the fix above) must not widen that surface."""
-        from gideon.dashboard.handlers.files import (
+        from gideon.cognition.projects import _store
+        from gideon.engine.tasks.models import Project
+        from gideon.interfaces.dashboard.handlers.files import (
             _dashboard_roots,
             _validate_dashboard_path,
         )
-        from gideon.projects import _store
-        from gideon.tasks.models import Project
 
-        # Binding a system root is refused at the front door (#358's bind-time guard)…
         with pytest.raises(ValueError):
             _store().create_project(name="ZZ-Sys-Probe", workspace_dir="/etc")
-        # …and a legacy record that predates the guard (seeded past validation, as an old
-        # store could hold) must STILL not become a browsable root.
-        _store()._write_project(Project(id="p-a1b2c3d4", name="ZZ-Sys-Probe", workspace_dir="/etc"))
+        _store()._write_project(
+            Project(id="p-a1b2c3d4", name="ZZ-Sys-Probe", workspace_dir="/etc")
+        )
         labels = [label for label, _ in _dashboard_roots()]
         assert not any(
             label.startswith("Project: ZZ-Sys-Probe") for label in labels
         ), "a system-root workspace must not be surfaced as a browsable root"
-        # /etc (and files under it) stay blocked — not admitted via the binding.
         assert _validate_dashboard_path("/etc") is None
         assert _validate_dashboard_path("/etc/passwd") is None
 
@@ -1022,7 +1025,6 @@ class TestBlocklistCaseInsensitive:
     covers both the read and write directions.
     """
 
-    # Extensionless / dotfile basenames — layer-1 spelling defence.
     BLOCKED_BASENAMES = (
         "sel_hmac.key",
         ".local_secret",
@@ -1031,7 +1033,6 @@ class TestBlocklistCaseInsensitive:
         "session_key",
         "sessions.json",
     )
-    # Blocked suffixes — a name that only matches via its extension.
     BLOCKED_SUFFIX_NAMES = (
         "cert.key",
         "cert.pem",
@@ -1048,7 +1049,6 @@ class TestBlocklistCaseInsensitive:
         out: list[str] = []
         for name in self.BLOCKED_BASENAMES + self.BLOCKED_SUFFIX_NAMES:
             out.extend(self._variants(name))
-        # Explicit spellings named in the issue so a regression is unmistakable.
         out += [
             ".LOCAL_SECRET",
             ".Local_Secret",
@@ -1068,10 +1068,8 @@ class TestBlocklistCaseInsensitive:
         the identity layer also has a real inode to see; on a case-sensitive volume
         the spelling layer alone must still refuse it.
         """
-        from gideon.dashboard.handlers.files import _validate_dashboard_path
+        from gideon.interfaces.dashboard.handlers.files import _validate_dashboard_path
 
-        # One real credential file per canonical name, so a case-variant request on a
-        # case-insensitive FS opens the SAME inode the exploit would have leaked.
         for canonical in self.BLOCKED_BASENAMES + self.BLOCKED_SUFFIX_NAMES:
             (home_patch / canonical).write_bytes(b"REALSECRET")
 
@@ -1085,7 +1083,7 @@ class TestBlocklistCaseInsensitive:
     def test_non_sensitive_names_still_allowed(self, home_patch):
         """The case-fold must not over-block ordinary files that merely resemble a
         blocked name (a longer stem, a different extension)."""
-        from gideon.dashboard.handlers.files import _validate_dashboard_path
+        from gideon.interfaces.dashboard.handlers.files import _validate_dashboard_path
 
         for ok_name in ("keynote.md", "notes.txt", "README.md", "my_session_key.md"):
             (home_patch / ok_name).write_text("ok")
@@ -1096,14 +1094,11 @@ class TestBlocklistCaseInsensitive:
     def test_nonexistent_target_not_rejected_by_identity_layer(self, home_patch):
         """create/write/move/upload validate paths for files that need not exist yet.
         A non-sensitive, not-yet-created target must pass (identity layer skipped)."""
-        from gideon.dashboard.handlers.files import _validate_dashboard_path
+        from gideon.interfaces.dashboard.handlers.files import _validate_dashboard_path
 
         target = str(home_patch / "brand-new-doc.md")
         assert not os.path.exists(target)
         assert _validate_dashboard_path(target) is not None
-
-
-# ── an over-long name is a 400, not a 500 (#652) ──────────────────────────────
 
 
 class TestOverLongNames:
@@ -1114,7 +1109,6 @@ class TestOverLongNames:
     input, so the four disagreed about one class of input.
     """
 
-    #: 300 bytes: over the 255 every mainstream filesystem enforces.
     LONG = "y" * 300
 
     @pytest.mark.asyncio
@@ -1125,19 +1119,14 @@ class TestOverLongNames:
                 json={"path": str(home_patch), "name": self.LONG, "kind": "file"},
             )
             assert resp.status == 400
-            # Specific, not "invalid name": the user can only act on a message that says
-            # which rule was broken.
-            #
-            # 🔁 Reads `["error"]["message"]` now, not `["error"]`. This route emits the typed
-            # envelope, so the old form asserted a substring against a DICT — where `in` tests
-            # KEYS, not the sentence. The message itself is byte-identical; only its position
-            # moved, which is the whole point of the conversion.
             body = await resp.json()
             assert body["error"]["code"] == "invalid_name"
             assert "255 bytes" in body["error"]["message"]
 
     @pytest.mark.asyncio
-    async def test_file_create_refuses_an_over_long_dir_name(self, mock_sel, home_patch):
+    async def test_file_create_refuses_an_over_long_dir_name(
+        self, mock_sel, home_patch
+    ):
         async with TestClient(TestServer(_make_app())) as client:
             resp = await client.post(
                 "/api/file-create",
@@ -1146,23 +1135,34 @@ class TestOverLongNames:
             assert resp.status == 400
 
     @pytest.mark.asyncio
-    async def test_create_dir_refuses_an_over_long_component(self, mock_sel, home_patch):
+    async def test_create_dir_refuses_an_over_long_component(
+        self, mock_sel, home_patch
+    ):
         """`create-dir` takes a whole PATH, so it never met the name rules at all — which is
         why the bound also lives in the shared path validator."""
         async with TestClient(TestServer(_make_app())) as client:
-            resp = await client.post("/api/create-dir", json={"path": str(home_patch / self.LONG)})
+            resp = await client.post(
+                "/api/create-dir", json={"path": str(home_patch / self.LONG)}
+            )
             assert resp.status == 400
 
     @pytest.mark.asyncio
-    async def test_file_move_refuses_an_over_long_destination(self, mock_sel, home_patch):
+    async def test_file_move_refuses_an_over_long_destination(
+        self, mock_sel, home_patch
+    ):
         (home_patch / "src.txt").write_text("x")
         async with TestClient(TestServer(_make_app())) as client:
             resp = await client.post(
                 "/api/file-move",
-                json={"src": str(home_patch / "src.txt"), "dest": str(home_patch / self.LONG)},
+                json={
+                    "src": str(home_patch / "src.txt"),
+                    "dest": str(home_patch / self.LONG),
+                },
             )
             assert resp.status == 400
-        assert (home_patch / "src.txt").exists(), "a refused move must not have moved anything"
+        assert (
+            home_patch / "src.txt"
+        ).exists(), "a refused move must not have moved anything"
 
     @pytest.mark.asyncio
     async def test_a_name_at_the_limit_is_still_accepted(self, mock_sel, home_patch):
@@ -1171,7 +1171,8 @@ class TestOverLongNames:
         name = "y" * 255
         async with TestClient(TestServer(_make_app())) as client:
             resp = await client.post(
-                "/api/file-create", json={"path": str(home_patch), "name": name, "kind": "file"}
+                "/api/file-create",
+                json={"path": str(home_patch), "name": name, "kind": "file"},
             )
             assert resp.status in (200, 201), await resp.text()
         assert (home_patch / name).exists()
@@ -1180,7 +1181,7 @@ class TestOverLongNames:
         """An emoji costs four bytes, so a 64-character name is 256 bytes — over the limit the
         OS enforces while looking short. `len(name)` would have passed exactly the input that
         fails, which is the whole reason this counts encoded length."""
-        from gideon.dashboard.handlers.files import _reject_name
+        from gideon.interfaces.dashboard.handlers.files import _reject_name
 
         assert _reject_name("🎨" * 64), "64 chars / 256 bytes must be refused"
         assert not _reject_name("🎨" * 63), "63 chars / 252 bytes is legal"
@@ -1188,7 +1189,7 @@ class TestOverLongNames:
     def test_the_shared_validator_keeps_the_older_rules(self):
         """The three original conditions moved into one function; losing one while adding the
         length check would trade a 500 for a traversal."""
-        from gideon.dashboard.handlers.files import _reject_name
+        from gideon.interfaces.dashboard.handlers.files import _reject_name
 
         assert _reject_name("")
         assert _reject_name("a/b")

@@ -15,7 +15,7 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 from chat_test_helpers import _make_state
 
-from gideon.dashboard.handlers.sessions import api_session_detail
+from gideon.interfaces.dashboard.handlers.sessions import api_session_detail
 
 
 def _app(state) -> web.Application:
@@ -27,7 +27,9 @@ def _app(state) -> web.Application:
 
 @pytest.mark.asyncio
 async def test_missing_session_is_a_coded_404(tmp_path, monkeypatch):
-    monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+    )
     state = _make_state(tmp_path)
     async with TestClient(TestServer(_app(state))) as client:
         resp = await client.get("/api/sessions/nonexistent-xyz")
@@ -40,11 +42,12 @@ async def test_missing_session_is_a_coded_404(tmp_path, monkeypatch):
 async def test_live_session_without_a_file_still_answers_empty(tmp_path, monkeypatch):
     """A just-opened tab has a live session and no file yet — that is a real
     session with no messages, not a 404."""
-    monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+    )
     state = _make_state(tmp_path)
     state.get_or_create_session("chat-1-123")
     async with TestClient(TestServer(_app(state))) as client:
-        # Exact live key, and the prefixed history form that maps to it.
         for key in ("chat-1-123", "dashboard_chat-1-123"):
             resp = await client.get(f"/api/sessions/{key}")
             assert resp.status == 200, key
@@ -52,8 +55,12 @@ async def test_live_session_without_a_file_still_answers_empty(tmp_path, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_saved_session_round_trips_and_deletion_becomes_404(tmp_path, monkeypatch):
-    monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+async def test_saved_session_round_trips_and_deletion_becomes_404(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+    )
     state = _make_state(tmp_path)
     log = state.conversation_log
     key = "dashboard_chat-9-999"
@@ -64,8 +71,6 @@ async def test_saved_session_round_trips_and_deletion_becomes_404(tmp_path, monk
         msgs = await resp.json()
         assert msgs and msgs[0]["content"] == "hello"
 
-        # The polling-client story: once deleted, the key must stop reading as
-        # an empty-but-real session.
         assert log.delete_session(key) is True
         resp = await client.get(f"/api/sessions/{key}")
         assert resp.status == 404

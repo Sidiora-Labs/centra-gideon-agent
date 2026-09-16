@@ -5,15 +5,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
-# ── SessionManager cold-start semaphore ──
+# ── ConversationDirectory cold-start semaphore ──
 
 
 class TestSessionStartSemaphore:
-    """Verify SessionManager limits concurrent provider.start() calls."""
+    """Verify ConversationDirectory limits concurrent provider.start() calls."""
 
     @pytest.mark.asyncio
     async def test_semaphore_exists_on_session_manager(self):
-        from gideon.session import SessionManager
+        from gideon.engine.session import ConversationDirectory
 
         cfg = MagicMock()
         cfg.default_agent = ""
@@ -21,15 +21,14 @@ class TestSessionStartSemaphore:
         cfg.session.pool_size = 0
         cfg.session.pool_agent = ""
         cfg.session.pool_ttl_secs = 0
-        sm = SessionManager(cfg)
+        sm = ConversationDirectory(cfg)
         assert hasattr(sm, "_start_sem")
-        # Semaphore(4) limits concurrent cold-starts for memory safety
         assert sm._start_sem._value == 4
 
     @pytest.mark.asyncio
     async def test_semaphore_limits_concurrent_starts(self):
         """Simulate 5 concurrent get_or_create calls, verify max 4 start simultaneously."""
-        from gideon.session import SessionManager
+        from gideon.engine.session import ConversationDirectory
 
         cfg = MagicMock()
         cfg.default_agent = ""
@@ -37,7 +36,7 @@ class TestSessionStartSemaphore:
         cfg.session.pool_size = 0
         cfg.session.pool_agent = ""
         cfg.session.pool_ttl_secs = 0
-        sm = SessionManager(cfg)
+        sm = ConversationDirectory(cfg)
 
         concurrent_count = 0
         max_concurrent = 0
@@ -48,7 +47,7 @@ class TestSessionStartSemaphore:
             nonlocal concurrent_count, max_concurrent
             concurrent_count += 1
             max_concurrent = max(max_concurrent, concurrent_count)
-            await asyncio.sleep(0.05)  # simulate cold-start
+            await asyncio.sleep(0.05)
             concurrent_count -= 1
 
         mock_provider = MagicMock()
@@ -60,7 +59,6 @@ class TestSessionStartSemaphore:
             async with original_sem:
                 await mock_start()
 
-        # Fire 5 concurrent starts — more than semaphore(4) allows
         await asyncio.gather(
             acquire_and_start(),
             acquire_and_start(),
@@ -70,19 +68,21 @@ class TestSessionStartSemaphore:
         )
 
         assert max_concurrent <= 4, f"Expected max 4 concurrent, got {max_concurrent}"
-        assert max_concurrent > 1, f"Expected concurrent execution, got {max_concurrent}"
+        assert (
+            max_concurrent > 1
+        ), f"Expected concurrent execution, got {max_concurrent}"
 
 
-# ── SubagentManager + semaphore interaction ──
+# ── DelegationSupervisor + semaphore interaction ──
 
 
 class TestSubagentSemaphoreInteraction:
-    """Verify SubagentManager's agents run with semaphore(4) on cold-start."""
+    """Verify DelegationSupervisor's agents run with semaphore(4) on cold-start."""
 
     @pytest.mark.asyncio
     async def test_three_agents_all_complete(self):
         """3 subagents should all complete with semaphore(4) on cold-start."""
-        from gideon.session import SessionManager
+        from gideon.engine.session import ConversationDirectory
 
         cfg = MagicMock()
         cfg.default_agent = ""
@@ -90,13 +90,13 @@ class TestSubagentSemaphoreInteraction:
         cfg.session.pool_size = 0
         cfg.session.pool_agent = ""
         cfg.session.pool_ttl_secs = 0
-        sm = SessionManager(cfg)
+        sm = ConversationDirectory(cfg)
 
         completed = []
 
         async def simulate_agent(agent_id: int):
             async with sm._start_sem:
-                await asyncio.sleep(0.02)  # cold-start
+                await asyncio.sleep(0.02)
             await asyncio.sleep(0.02)
             completed.append(agent_id)
 

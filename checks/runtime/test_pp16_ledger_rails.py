@@ -36,8 +36,8 @@ import pathlib
 
 import pytest
 
-from gideon.workflows import introspection
-from gideon.workflows.introspection import (
+from gideon.automation.workflows import introspection
+from gideon.automation.workflows.introspection import (
     ABSENT_VERDICT_SCORES,
     PRODUCER_ENGINE,
     PRODUCER_NONE,
@@ -48,12 +48,9 @@ from gideon.workflows.introspection import (
     verdict_rail,
 )
 
-#: The four kinds PP-16's ledger-rails clause names, quoted above. Pinned here rather than read out
-#: of `RAIL_PRODUCERS` so the plan's list and the code's table are two independent statements — a
-#: kind dropped from the table reds this instead of silently shrinking the rail's own scope.
 PLAN_RAIL_KINDS = ("step_completed", "judge_verdict", "breaker_trip", "watcher_reaped")
 
-_SRC = pathlib.Path(__file__).resolve().parent.parent / "src" / "gideon"
+_SRC = pathlib.Path(__file__).resolve().parent.parent.parent / "runtime" / "gideon"
 
 
 @pytest.fixture()
@@ -69,18 +66,19 @@ def _run_with(run_id: str, events: list[tuple[str, dict]]) -> str:
     Uses the engine's own `Journal`, so the field names and kinds are whatever the engine actually
     writes.
     """
-    from gideon.workflows import journal as J
-    from gideon.workflows import store
-    from gideon.workflows.models import RunStatus, WorkflowRun
+    from gideon.automation.workflows import journal as J
+    from gideon.automation.workflows import store
+    from gideon.automation.workflows.models import RunStatus, WorkflowRun
 
-    store.save(WorkflowRun(id=run_id, workflow_name="rails-tmpl", status=RunStatus.RUNNING))
+    store.save(
+        WorkflowRun(id=run_id, workflow_name="rails-tmpl", status=RunStatus.RUNNING)
+    )
     journal = J.Journal(run_id)
     for kind, payload in events:
         journal.write(kind, **payload)
     return run_id
 
 
-#: A run-shaped `step_completed`, exactly as `journal.RunJournal.step_completed` writes it.
 _RUN_STEP = {
     "instance_path": "plan",
     "node_id": "plan",
@@ -98,7 +96,6 @@ _RUN_STEP = {
     "output_ref": "outputs/plan.json",
 }
 
-#: A run-shaped `judge_verdict`, exactly as `controller._emit_judge_verdict` writes it.
 _RUN_VERDICT = {
     "instance_path": "gate",
     "node_id": "gate",
@@ -109,8 +106,6 @@ _RUN_VERDICT = {
     "evidence": {"overall": 4.25, "sample_count": 3, "shortfalls": []},
 }
 
-#: A LOOP-shaped `step_completed`, exactly as `loop/journal.py::cycle` writes it. The whole point of
-#: PP-16 is that these rows will one day flow through the run-side projection.
 _LOOP_STEP = {
     "cycle": 3,
     "node_id": "cycle",
@@ -118,9 +113,6 @@ _LOOP_STEP = {
     "source_file": "cycle_003.json",
     "finding": {"cycle": 3, "summary": "found the thing"},
 }
-
-
-# ── reachability: the four kinds the plan names ──
 
 
 def test_every_plan_named_rail_kind_has_a_row_in_the_producer_table(run_home):
@@ -143,7 +135,7 @@ def test_the_two_rails_reach_every_produced_kinds_own_payload(run_home):
     not reach what it finished with. Each assertion below names a field the timeline row does NOT
     carry, so a rail that merely re-counted events would fail here.
     """
-    from gideon.workflows import service
+    from gideon.automation.workflows import service
 
     run_id = _run_with(
         "rails-reach",
@@ -159,24 +151,24 @@ def test_the_two_rails_reach_every_produced_kinds_own_payload(run_home):
     payload = service.ledger_rails(run_id)
     assert payload["ok"] is True
 
-    assert len(payload["findings"]) == 1, "vacuity floor: the findings rail found no row to project"
+    assert (
+        len(payload["findings"]) == 1
+    ), "vacuity floor: the findings rail found no row to project"
     finding = payload["findings"][0]
-    # The four fields the introspection timeline drops. Reaching them IS the rail.
     assert finding["output_ref"] == "outputs/plan.json"
     assert finding["provider"] == "p1"
     assert finding["retries"] == 0
     assert finding["degraded_reason"] == ""
 
-    assert len(payload["verdicts"]) == 1, "vacuity floor: the verdict rail found no row to project"
+    assert (
+        len(payload["verdicts"]) == 1
+    ), "vacuity floor: the verdict rail found no row to project"
     verdict = payload["verdicts"][0]
     assert verdict["verdict"] == "PASS"
     assert verdict["node_id"] == "gate"
-    # The ROI axis the run side DOES carry, lifted out of the ledgered evidence payload.
     assert verdict["overall"] == pytest.approx(4.25)
     assert verdict["sample_count"] == 3
 
-    # `watcher_reaped` has no rail of its own — it is a coverage row, which is what makes it
-    # reachable at all. Before this change nothing on the run side reported it.
     reaped = {row["kind"]: row for row in payload["coverage"]}["watcher_reaped"]
     assert reaped["producer"] == PRODUCER_ENGINE
     assert reaped["events"] == 1
@@ -190,13 +182,12 @@ def test_an_unknown_run_is_a_named_failure_not_empty_rails(run_home):
     `WF_RUN_NOT_FOUND` is the service vocabulary `handlers._fail` already maps to a 404, so this
     reuses the existing code rather than minting one.
     """
-    from gideon.workflows import service
-    from gideon.workflows.handlers import _STATUS_MAP
+    from gideon.automation.workflows import service
+    from gideon.automation.workflows.handlers import _STATUS_MAP
 
     result = service.ledger_rails("no-such-run")
     assert result["ok"] is False
     assert result["code"] == "WF_RUN_NOT_FOUND"
-    # And that code really translates to a 404 — a named failure nothing maps is still a 500.
     assert _STATUS_MAP["WF_RUN_NOT_FOUND"][0] == 404
 
 
@@ -208,15 +199,16 @@ def test_the_route_is_registered_and_answers_the_service_read(run_home):
     """
     from aiohttp import web
 
-    from gideon.workflows.handlers import register_workflow_routes
+    from gideon.automation.workflows.handlers import register_workflow_routes
 
     app = web.Application()
     register_workflow_routes(app)
-    paths = {getattr(r.resource, "canonical", "") for r in app.router.routes() if r.method == "GET"}
+    paths = {
+        getattr(r.resource, "canonical", "")
+        for r in app.router.routes()
+        if r.method == "GET"
+    }
     assert "/api/workflows/runs/{run_id}/ledger-rails" in paths
-
-
-# ── absent is not zero ──
 
 
 def test_a_loop_shaped_step_reads_absent_not_zero_for_money(run_home):
@@ -234,14 +226,11 @@ def test_a_loop_shaped_step_reads_absent_not_zero_for_money(run_home):
     assert row["cost_usd"] is None
     assert row["tokens"] is None
     assert row["duration_secs"] is None
-    # The loop's own work-unit key survives, untranslated: a cycle and a node+epoch are different
-    # facts and the store-retirement seam owns the mapping.
     assert row["cycle"] == 3
 
     totals = rail_totals(rows, []).to_dict()
     assert totals["cost_usd"] is None
     assert totals["tokens"] is None
-    # The count is still real: a step DID complete, and that fact needs no cost key.
     assert totals["steps_completed"] == 1
 
 
@@ -274,8 +263,6 @@ def test_a_kind_with_no_run_side_producer_reports_absent_never_zero(run_home):
     assert (
         coverage["breaker_trip"]["events"] is None
     ), "a kind nothing writes must read absent; 0 would be a claim, not an observation"
-    # A kind that IS produced earns a real zero on an empty ledger — the contrast that makes the
-    # None above mean something.
     assert coverage["step_completed"]["producer"] == PRODUCER_ENGINE
     assert coverage["step_completed"]["events"] == 0
 
@@ -294,7 +281,6 @@ def test_the_loop_rails_roi_axis_is_declared_absent_not_plotted_as_zero(run_home
         assert rows[0][key] is None, f"{key} must read absent on a run-side verdict row"
     totals = rail_totals([], rows).to_dict()
     assert list(totals["absent_scores"]) == list(ABSENT_VERDICT_SCORES)
-    # And the axis it CAN plot is populated, so the panel is not merely empty.
     assert totals["overall_series"] == [pytest.approx(4.25)]
 
 
@@ -321,17 +307,20 @@ def test_a_loop_shaped_verdict_row_does_carry_the_loop_axes(run_home):
     assert rows[0]["quality_score"] == pytest.approx(4.0)
 
 
-def test_no_verdict_series_is_None_and_a_scoreless_verdict_is_not_a_zero_series(run_home):
+def test_no_verdict_series_is_None_and_a_scoreless_verdict_is_not_a_zero_series(
+    run_home,
+):
     """`None` means no judge scored; `[]` would mean the judge scored nothing. Only one is emitted.
 
     A zero-length series rendered as a chart is a chart claiming the judge produced flat zeros.
     """
     assert rail_totals([], []).to_dict()["overall_series"] is None
-    scoreless = verdict_rail([{"kind": "judge_verdict", "ts": "t", "verdict": "REJECT"}])
+    scoreless = verdict_rail(
+        [{"kind": "judge_verdict", "ts": "t", "verdict": "REJECT"}]
+    )
     assert len(scoreless) == 1, "vacuity floor: no verdict row was projected"
     totals = rail_totals([], scoreless).to_dict()
     assert totals["overall_series"] is None
-    # The verdict itself is still counted — an unscored REJECT is a real judge outcome.
     assert totals["verdicts"] == 1
     assert totals["verdicts_by_word"] == {"REJECT": 1}
 
@@ -343,14 +332,18 @@ def test_an_uncoercible_value_reads_absent_rather_than_zero(run_home):
     0.0 would put a confident wrong number on the cost column.
     """
     rows = findings_rail(
-        [{"kind": "step_completed", "ts": "t", "node_id": "n", "cost_usd": "not-a-number"}]
+        [
+            {
+                "kind": "step_completed",
+                "ts": "t",
+                "node_id": "n",
+                "cost_usd": "not-a-number",
+            }
+        ]
     )
     assert len(rows) == 1, "vacuity floor: no row was projected"
     assert rows[0]["cost_usd"] is None
     assert rail_totals(rows, []).to_dict()["cost_usd"] is None
-
-
-# ── the declaration cannot rot ──
 
 
 def _kinds_written_under(package: str) -> set[str]:
@@ -370,17 +363,13 @@ def _kinds_written_under(package: str) -> set[str]:
             if not isinstance(node, ast.Call):
                 continue
             func = node.func
-            name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+            name = (
+                func.attr
+                if isinstance(func, ast.Attribute)
+                else getattr(func, "id", "")
+            )
             if name != "write":
                 continue
-            # Only the ARGUMENT counts, never the calling method's name. An earlier version also
-            # credited a kind when a call was NAMED for it (`journal.breaker_trip(...)`), and a
-            # mutation measured the cost: emptying `LoopJournal.breaker_trip`'s body so it wrote a
-            # different kind entirely left the breaker rail green, because the call SITES still
-            # spelled the method name. A method named for a kind it no longer writes is exactly the
-            # drift this scan exists to catch. Both producers reach their kind through the argument
-            # anyway — `self.write(BREAKER_TRIP, ...)` on the loop side (an `ast.Name`) and
-            # `journal.write(journal_mod.WATCHER_REAPED, ...)` on the run side (an `ast.Attribute`).
             for arg in node.args[:1]:
                 if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
                     written.add(arg.value)
@@ -401,8 +390,9 @@ def test_the_producer_table_matches_the_engines_real_emitters(run_home):
     """
     written = _kinds_written_under("workflows")
     assert written, "vacuity floor: the AST scan found no journal writes at all"
-    # The scanner must be able to SEE a kind it should see, or every assertion below is vacuous.
-    assert "judge_verdict" in written, "the scan missed a kind the engine demonstrably writes"
+    assert (
+        "judge_verdict" in written
+    ), "the scan missed a kind the engine demonstrably writes"
 
     for kind, producer in sorted(RAIL_PRODUCERS.items()):
         if producer == PRODUCER_ENGINE:
@@ -457,7 +447,11 @@ def test_the_totals_and_the_rows_cannot_disagree(run_home):
     """
     events = [
         {"kind": "step_completed", "ts": "t", **_RUN_STEP},
-        {"kind": "step_completed", "ts": "t", **dict(_RUN_STEP, cost_usd=0.75, tokens=30)},
+        {
+            "kind": "step_completed",
+            "ts": "t",
+            **dict(_RUN_STEP, cost_usd=0.75, tokens=30),
+        },
         {"kind": "judge_verdict", "ts": "t", **_RUN_VERDICT},
     ]
     findings = findings_rail(events)
@@ -476,7 +470,7 @@ def test_the_rails_agree_with_the_ledgers_own_step_aggregate(run_home):
     different numbers for the same run, with no way to tell which was right — and it is exactly
     the equality the LOOP side pins between `len(get_findings())` and `cycles_completed()`.
     """
-    from gideon.workflows import journal as J
+    from gideon.automation.workflows import journal as J
 
     run_id = _run_with(
         "rails-agree",
@@ -492,7 +486,9 @@ def test_the_rails_agree_with_the_ledgers_own_step_aggregate(run_home):
     assert len(rows) == int(J.run_totals(run_id)["steps_completed"])
 
 
-def test_the_rails_project_the_same_kinds_the_loop_rails_do(run_home, monkeypatch, tmp_path):
+def test_the_rails_project_the_same_kinds_the_loop_rails_do(
+    run_home, monkeypatch, tmp_path
+):
     """One ledger, two nouns: the run rails read exactly the kinds the LOOP rails read.
 
     The atom's clause is "one ledger". If the run-side findings rail read a different kind than
@@ -503,24 +499,26 @@ def test_the_rails_project_the_same_kinds_the_loop_rails_do(run_home, monkeypatc
     elsewhere in the module. So this drives the real loop rails over a real loop ledger and asks
     which kind each one actually picks up.
     """
-    from gideon.loop import files as loop_files
-    from gideon.loop.journal import LoopJournal
+    from gideon.automation.loop import files as loop_files
+    from gideon.automation.loop.journal import LoopJournal
 
-    # The isolation seam PP-16 seam 4b established. A loop id is eight hex chars
-    # (`files._LOOP_ID_RE`); anything else resolves to no dir at all and every read returns [].
-    monkeypatch.setattr("gideon.loop.files.config_dir", lambda: tmp_path / "loophome")
+    monkeypatch.setattr(
+        "gideon.automation.loop.files.config_dir", lambda: tmp_path / "loophome"
+    )
     loop_id = "abcd1234"
 
-    # One of each kind on ONE loop, so a rail that read the wrong one picks up the other's row
-    # rather than finding nothing — which is what makes the two assertions below discriminating.
     journal = LoopJournal.open(loop_id)
     journal.cycle(1, {"cycle": 1, "summary": "the finding"})
     journal.verdict({"cycle": 1, "verdict": "PASS", "marginal_value": 0.5})
 
     loop_findings = loop_files.get_findings(loop_id)
     loop_verdicts = loop_files.get_verdicts(loop_id)
-    assert len(loop_findings) == 1, "vacuity floor: the LOOP findings rail projected nothing"
-    assert len(loop_verdicts) == 1, "vacuity floor: the LOOP verdict rail projected nothing"
+    assert (
+        len(loop_findings) == 1
+    ), "vacuity floor: the LOOP findings rail projected nothing"
+    assert (
+        len(loop_verdicts) == 1
+    ), "vacuity floor: the LOOP verdict rail projected nothing"
     assert (
         loop_findings[0].get("summary") == "the finding"
     ), "the loop findings rail is not reading step_completed's carried finding any more"
@@ -528,13 +526,9 @@ def test_the_rails_project_the_same_kinds_the_loop_rails_do(run_home, monkeypatc
         loop_verdicts[0].get("verdict") == "PASS"
     ), "the loop verdict rail is not reading judge_verdict any more"
 
-    # The run rails, over the SAME ledger file. Same kinds in, same row counts out — which is the
-    # equality the noun retirement rests on.
     events = loop_files.read_jsonl(loop_id, "events.jsonl")
     assert len(findings_rail(events)) == len(loop_findings)
     assert len(verdict_rail(events)) == len(loop_verdicts)
-    # And the loop's own ROI axis survives the run-side projection, since a loop verdict row
-    # carries it flat.
     assert verdict_rail(events)[0]["marginal_value"] == pytest.approx(0.5)
 
 
@@ -549,23 +543,27 @@ def test_a_secret_written_through_the_journal_never_reaches_the_rails(run_home):
     the one that pins that. Keeping both is the point: this one catches a writer that stops
     redacting, that one catches a reader that starts trusting the file.
     """
-    from gideon.workflows import service
+    from gideon.automation.workflows import service
 
     run_id = _run_with(
         "rails-redact",
         [
             (
                 "step_completed",
-                dict(_RUN_STEP, degraded_reason="token sk-ABCDEF1234567890abcdef fell back"),
+                dict(
+                    _RUN_STEP,
+                    degraded_reason="token sk-ABCDEF1234567890abcdef fell back",
+                ),
             )
         ],
     )
     payload = service.ledger_rails(run_id)
     assert payload["findings"], "vacuity floor: nothing was projected to redact"
-    assert "sk-ABCDEF1234567890abcdef" not in str(payload), "a secret reached the rails payload"
+    assert "sk-ABCDEF1234567890abcdef" not in str(
+        payload
+    ), "a secret reached the rails payload"
 
 
-#: A credential shape `ledger/redaction.py` really does catch, asserted before it is relied on.
 _SECRET = "sk-ZYXWVU9876543210zyxwvuQP"
 
 
@@ -582,11 +580,17 @@ _SECRET = "sk-ZYXWVU9876543210zyxwvuQP"
         ),
         (
             "verdicts",
-            {"kind": "judge_verdict", "node_id": "raw", "verdict": f"REJECT because {_SECRET}"},
+            {
+                "kind": "judge_verdict",
+                "node_id": "raw",
+                "verdict": f"REJECT because {_SECRET}",
+            },
         ),
     ],
 )
-def test_a_raw_row_that_bypassed_the_writer_is_still_redacted_on_read(run_home, rail, raw_row):
+def test_a_raw_row_that_bypassed_the_writer_is_still_redacted_on_read(
+    run_home, rail, raw_row
+):
     """The read-side redaction, railed against a row the writer never saw — on BOTH rails.
 
     A ledger is append-only history: `events.jsonl` accumulates rows written by whatever core was
@@ -602,17 +606,15 @@ def test_a_raw_row_that_bypassed_the_writer_is_still_redacted_on_read(run_home, 
 
     Reuses the writer's redactor rather than re-deriving one, so the two cannot drift.
     """
-    from gideon.ledger import EVENTS_FILE
-    from gideon.ledger.redaction import redact
-    from gideon.workflows import service, store
+    from gideon.assurance.ledger import EVENTS_FILE
+    from gideon.assurance.ledger.redaction import redact
+    from gideon.automation.workflows import service, store
 
-    # Floor for the floor: if the redactor does not recognise this shape, every assertion below
-    # would pass on a payload that leaked. Measured here rather than assumed — a shorter token was
-    # not matched, which is exactly how this test first passed while proving nothing.
-    assert _SECRET not in redact(f"token {_SECRET} fell"), "the fixture is not a redactable shape"
+    assert _SECRET not in redact(
+        f"token {_SECRET} fell"
+    ), "the fixture is not a redactable shape"
 
     run_id = _run_with(f"rails-raw-{rail}", [("step_completed", _RUN_STEP)])
-    # BELOW the writer: no `redact`, no `seq`, no `event_id` — the file as a foreign core left it.
     store.append_jsonl(run_id, EVENTS_FILE, {"ts": "2026-09-06T00:00:00Z", **raw_row})
     payload = service.ledger_rails(run_id)
     planted = [row for row in payload[rail] if row["node_id"] == "raw"]
@@ -644,18 +646,25 @@ def test_the_rails_carry_no_state_between_calls(run_home):
     assert first[0]["cost_usd"] == 1.0
     assert introspection.verdict_rail(events()) == []
 
-    # Poison the first result. A cache would hand the poisoned row back on the next call.
     first[0]["cost_usd"] = 999.0
     first.append({"kind": "smuggled"})
     second = introspection.findings_rail(events())
-    assert len(second) == 1, "a second call returned rows the first call appended — state leaked"
-    assert second[0]["cost_usd"] == 1.0, "a second call returned the first call's mutated row"
+    assert (
+        len(second) == 1
+    ), "a second call returned rows the first call appended — state leaked"
+    assert (
+        second[0]["cost_usd"] == 1.0
+    ), "a second call returned the first call's mutated row"
 
-    # And the input list survives untouched, keys and all.
     original = events()
     snapshot = [dict(row) for row in original]
     introspection.findings_rail(original)
     introspection.verdict_rail(original)
     introspection.rail_coverage(original)
     assert original == snapshot, "a rail modified the event list its caller still holds"
-    assert introspection.rail_totals(introspection.findings_rail(original), []).steps_completed == 1
+    assert (
+        introspection.rail_totals(
+            introspection.findings_rail(original), []
+        ).steps_completed
+        == 1
+    )

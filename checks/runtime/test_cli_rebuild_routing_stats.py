@@ -27,8 +27,9 @@ import sys
 
 import pytest
 
-from gideon import cli, cli_doctor
-from gideon.routing import stats
+from gideon.engine.routing import stats
+from gideon.interfaces.cli import doctor as cli_doctor
+from gideon.interfaces.cli import main as cli
 
 
 def _row(**over):
@@ -59,15 +60,25 @@ class TestItDispatches:
 
     def test_the_flag_reaches_the_executor(self, monkeypatch):
         called: list[bool] = []
-        monkeypatch.setattr(cli, "_doctor_rebuild_routing_stats", lambda: called.append(True))
-        monkeypatch.setattr(sys, "argv", ["gideon", "doctor", "--rebuild-routing-stats"])
+        monkeypatch.setattr(
+            cli, "_doctor_rebuild_routing_stats", lambda: called.append(True)
+        )
+        monkeypatch.setattr(
+            sys, "argv", ["gideon", "doctor", "--rebuild-routing-stats"]
+        )
         cli.main()
-        assert called == [True], "cli.main did not dispatch the flag to the rebuild executor"
+        assert called == [
+            True
+        ], "cli.main did not dispatch the flag to the rebuild executor"
 
-    def test_it_does_not_shadow_the_other_doctor_flag_or_plain_doctor(self, monkeypatch):
+    def test_it_does_not_shadow_the_other_doctor_flag_or_plain_doctor(
+        self, monkeypatch
+    ):
         """Three mutually exclusive doctor paths. A new branch must not swallow the other two."""
         seen: list[str] = []
-        monkeypatch.setattr(cli, "_doctor_rebuild_routing_stats", lambda: seen.append("rebuild"))
+        monkeypatch.setattr(
+            cli, "_doctor_rebuild_routing_stats", lambda: seen.append("rebuild")
+        )
         monkeypatch.setattr(cli, "_doctor_paths", lambda: seen.append("paths"))
         monkeypatch.setattr(cli, "_doctor", lambda: seen.append("doctor"))
 
@@ -79,27 +90,35 @@ class TestItDispatches:
             seen.clear()
             monkeypatch.setattr(sys, "argv", argv)
             cli.main()
-            assert seen == [expected], f"{argv[1:]} dispatched {seen} instead of [{expected!r}]"
+            assert seen == [
+                expected
+            ], f"{argv[1:]} dispatched {seen} instead of [{expected!r}]"
 
 
 class TestItRecovers:
-    def test_a_deleted_fold_is_restored_from_the_audit_log(self, home, monkeypatch, capsys):
+    def test_a_deleted_fold_is_restored_from_the_audit_log(
+        self, home, monkeypatch, capsys
+    ):
         audit = home / "model_calls.jsonl"
         rows = [_row(), _row(passed=False, latency_ms=2200.0), _row(use_case="chat")]
-        audit.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
-        monkeypatch.setattr("gideon.guardrails.audit._audit_path", lambda: audit)
+        audit.write_text(
+            "\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8"
+        )
+        monkeypatch.setattr(
+            "gideon.security.guardrails.audit._audit_path", lambda: audit
+        )
 
-        # The starting condition IS the bug's condition: no fold on disk at all.
         assert not (home / "routing_stats.json").exists()
 
         cli_doctor._doctor_rebuild_routing_stats()
 
         folded = stats.load_stats(home)
-        assert folded["use_cases"]["reasoning"]["summarize"]["ollama-models:qwen3:8b"]["n"] == 2
+        assert (
+            folded["use_cases"]["reasoning"]["summarize"]["ollama-models:qwen3:8b"]["n"]
+            == 2
+        )
         assert "chat" in folded["use_cases"]
         out = capsys.readouterr().out
-        # The COUNT is load-bearing: the audit JSONL is capped, so a rebuild recovers the retained
-        # tail. A caller not told the number cannot tell a recovery from an empty fold.
         assert "3 attempt row(s)" in out
         assert "routing_stats.json" in out
 
@@ -107,20 +126,22 @@ class TestItRecovers:
         self, home, monkeypatch, capsys
     ):
         monkeypatch.setattr(
-            "gideon.guardrails.audit._audit_path", lambda: home / "absent.jsonl"
+            "gideon.security.guardrails.audit._audit_path",
+            lambda: home / "absent.jsonl",
         )
         cli_doctor._doctor_rebuild_routing_stats()
         out = capsys.readouterr().out
         assert "refolded 0 attempt row(s)" in out
         assert "the fold is empty, not broken" in out
-        # Still wrote a well-formed empty fold rather than leaving nothing behind.
         assert stats.load_stats(home)["use_cases"] == {}
 
     def test_it_overwrites_a_corrupt_fold(self, home, monkeypatch, capsys):
         (home / "routing_stats.json").write_text("{ not json", encoding="utf-8")
         audit = home / "model_calls.jsonl"
         audit.write_text(json.dumps(_row()) + "\n", encoding="utf-8")
-        monkeypatch.setattr("gideon.guardrails.audit._audit_path", lambda: audit)
+        monkeypatch.setattr(
+            "gideon.security.guardrails.audit._audit_path", lambda: audit
+        )
 
         cli_doctor._doctor_rebuild_routing_stats()
 

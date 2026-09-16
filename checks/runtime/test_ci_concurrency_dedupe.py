@@ -29,7 +29,7 @@ matter:
    cross-contributor cancellation).
 
 Parsed from source with a line scan rather than PyYAML, matching the convention its sibling
-``tests/test_ci_tier_enforcement.py`` states: PyYAML is not a declared test dependency.
+``checks/runtime/test_ci_tier_enforcement.py`` states: PyYAML is not a declared test dependency.
 """
 
 from __future__ import annotations
@@ -38,12 +38,9 @@ import re
 from pathlib import Path
 from typing import Any
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 CI_YML = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 
-# ---------------------------------------------------------------------------
-# A deliberately tiny evaluator for the GitHub expression shapes this key uses.
-# ---------------------------------------------------------------------------
 
 _EXPR = re.compile(r"\$\{\{(.+?)\}\}")
 
@@ -94,10 +91,6 @@ def _concurrency_group() -> str:
     raise AssertionError("no workflow-level `concurrency:` / `group:` found in ci.yml")
 
 
-# ---------------------------------------------------------------------------
-# Synthetic contexts: the same branch, seen through each trigger.
-# ---------------------------------------------------------------------------
-
 _REPO = "Gideon/Gideon"
 _BRANCH = "bugfix-some-branch"
 
@@ -111,7 +104,7 @@ def _pull_request_ctx(
             "ref": "refs/pull/42/merge",
             "ref_name": "42/merge",
             "head_ref": branch,
-            "sha": "merge999",  # the MERGE commit — deliberately not the head sha
+            "sha": "merge999",
             "event_name": "pull_request",
             "event": {
                 "pull_request": {
@@ -129,17 +122,12 @@ def _push_ctx(*, branch: str = _BRANCH, sha: str = "aaaa111") -> dict[str, Any]:
             "repository": _REPO,
             "ref": f"refs/heads/{branch}",
             "ref_name": branch,
-            "head_ref": "",  # empty on push — this is why `||` is needed
+            "head_ref": "",
             "sha": sha,
             "event_name": "push",
             "event": {},
         }
     }
-
-
-# ---------------------------------------------------------------------------
-# Vacuity floors, first: every relation below is trivially true on an empty key.
-# ---------------------------------------------------------------------------
 
 
 def test_the_group_expression_was_actually_found() -> None:
@@ -156,8 +144,12 @@ def test_the_evaluator_resolves_the_real_key_to_something() -> None:
     group = _concurrency_group()
     for label, ctx in (("pull_request", _pull_request_ctx()), ("push", _push_ctx())):
         resolved = _evaluate(group, ctx)
-        assert "${{" not in resolved, f"{label}: unresolved expression left in {resolved!r}"
-        assert resolved.strip("-"), f"{label}: the key resolved to nothing: {resolved!r}"
+        assert (
+            "${{" not in resolved
+        ), f"{label}: unresolved expression left in {resolved!r}"
+        assert resolved.strip(
+            "-"
+        ), f"{label}: the key resolved to nothing: {resolved!r}"
         assert _BRANCH in resolved, (
             f"{label}: the resolved key {resolved!r} does not mention the branch, so it "
             "cannot be distinguishing branches from one another"
@@ -172,11 +164,6 @@ def test_the_evaluator_itself_distinguishes_the_two_contexts() -> None:
     """
     assert _evaluate("${{ github.ref }}", _pull_request_ctx()) == "refs/pull/42/merge"
     assert _evaluate("${{ github.ref }}", _push_ctx()) == f"refs/heads/{_BRANCH}"
-
-
-# ---------------------------------------------------------------------------
-# The four relations.
-# ---------------------------------------------------------------------------
 
 
 def test_both_triggers_produce_one_key_for_the_same_branch() -> None:
@@ -239,11 +226,6 @@ def test_two_forks_with_the_same_branch_name_do_not_share_a_key() -> None:
     )
 
 
-# ---------------------------------------------------------------------------
-# The regression the dedupe would otherwise cause.
-# ---------------------------------------------------------------------------
-
-
 def _feedback_step_conditions() -> list[tuple[str, str]]:
     """``(step name, its `if:` expression)`` for the steps that feed pr-feedback.yml."""
     lines = CI_YML.read_text(encoding="utf-8").splitlines()
@@ -282,7 +264,11 @@ def test_the_lint_remediation_does_not_depend_on_which_trigger_survived() -> Non
     throughput bug for a silence bug, which is worse — a contributor sees a red check and no
     explanation.
     """
-    offenders = [(name, cond) for name, cond in _feedback_step_conditions() if "event_name" in cond]
+    offenders = [
+        (name, cond)
+        for name, cond in _feedback_step_conditions()
+        if "event_name" in cond
+    ]
     assert not offenders, (
         "a lint-feedback step is gated on `github.event_name`, so the remediation is only "
         "produced when the `pull_request` run is the one that survives the shared concurrency "

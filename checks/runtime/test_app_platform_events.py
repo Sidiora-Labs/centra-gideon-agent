@@ -37,24 +37,21 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.apps import app_events, app_manager, manager
-from gideon.apps.app_events import (
+from gideon.extensions.apps import app_events, app_manager, manager
+from gideon.extensions.apps.app_events import (
     KNOWLEDGE_INGESTED,
     PLATFORM_EVENTS,
     PLATFORM_SENDER,
     SESSION_CREATED,
     TASK_COMPLETED,
 )
-from gideon.apps.manifest import Permissions
-from gideon.apps.permissions import PermissionChecker
-from gideon.dashboard.handlers.apps import register_app_routes
+from gideon.extensions.apps.manifest import Permissions
+from gideon.extensions.apps.permissions import PermissionChecker
+from gideon.interfaces.dashboard.handlers.apps import register_app_routes
 
 
 def _checker(**perms) -> PermissionChecker:
     return PermissionChecker(app_name="listener", permissions=Permissions(**perms))
-
-
-# ── unit: the gate (deny by default, EXACT match, separate axis) ──
 
 
 def test_can_receive_platform_event_deny_by_default():
@@ -76,9 +73,12 @@ def test_can_receive_platform_event_is_exact_match_only():
     assert not c.can_receive_platform_event("task.completedX")
     assert not c.can_receive_platform_event("task.")
     assert not c.can_receive_platform_event("")
-    # …and a declared pattern is a literal name, never a pattern.
-    assert not _checker(eventSubscriptions=["task.*"]).can_receive_platform_event(TASK_COMPLETED)
-    assert not _checker(eventSubscriptions=["*"]).can_receive_platform_event(TASK_COMPLETED)
+    assert not _checker(eventSubscriptions=["task.*"]).can_receive_platform_event(
+        TASK_COMPLETED
+    )
+    assert not _checker(eventSubscriptions=["*"]).can_receive_platform_event(
+        TASK_COMPLETED
+    )
 
 
 def test_the_two_event_vocabularies_stay_separate():
@@ -108,9 +108,6 @@ def test_appmessaging_and_platform_events_are_different_grants():
     assert not listener.can_use_app_messaging("other")
 
 
-# ── unit: the registry ──
-
-
 def test_registry_holds_exactly_the_three_declared_events():
     assert set(PLATFORM_EVENTS) == {SESSION_CREATED, KNOWLEDGE_INGESTED, TASK_COMPLETED}
     for name, spec in PLATFORM_EVENTS.items():
@@ -127,9 +124,10 @@ def test_payloads_carry_identifiers_not_prose():
     assert PLATFORM_EVENTS[SESSION_CREATED].payload_keys == ("session",)
     assert PLATFORM_EVENTS[KNOWLEDGE_INGESTED].payload_keys == ("item_id", "status")
     assert PLATFORM_EVENTS[TASK_COMPLETED].payload_keys == ("task_id", "status")
-    # No key anywhere that names free text.
     for spec in PLATFORM_EVENTS.values():
-        assert not {"title", "content", "text", "body", "summary"} & set(spec.payload_keys)
+        assert not {"title", "content", "text", "body", "summary"} & set(
+            spec.payload_keys
+        )
 
 
 def test_payload_is_projected_onto_the_declared_keys():
@@ -137,7 +135,7 @@ def test_payload_is_projected_onto_the_declared_keys():
     body = app_events._coerce_payload(
         spec, {"task_id": "t1", "status": "done", "title": "secret task title"}
     )
-    assert body == {"task_id": "t1", "status": "done"}  # undeclared key dropped
+    assert body == {"task_id": "t1", "status": "done"}
 
 
 def test_long_string_values_are_capped():
@@ -151,9 +149,6 @@ def test_platform_sender_can_never_be_an_app_name():
     holds if no installed app can be NAMED ``@platform``."""
     with pytest.raises(ValueError):
         manager._validate_app_name(PLATFORM_SENDER)
-
-
-# ── dispatch: the path an app actually receives an event by ──
 
 
 @asynccontextmanager
@@ -182,20 +177,27 @@ def _isolated(tmp_path, monkeypatch):
     Both patches are needed: ``apps_dir`` reads ``manager.config_dir`` while the inbox path
     reads ``config.loader.config_dir``, and a test that patched only one would write half
     its state into the real home."""
-    monkeypatch.setenv("GIDEON_HOME", str(tmp_path))  # SEL + queue bind here
+    monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     with (
-        patch("gideon.config.loader.config_dir", return_value=tmp_path),
+        patch("gideon.core.config.loader.config_dir", return_value=tmp_path),
         patch.object(manager, "config_dir", return_value=tmp_path),
     ):
         yield
 
 
-def _install(tmp_path: Path, name: str, *, subscriptions: list[str] | None = None, **perms):
+def _install(
+    tmp_path: Path, name: str, *, subscriptions: list[str] | None = None, **perms
+):
     """Install a fixture app for real (``app_manager.install``) so the subscriber it
     resolves is an INSTALLED, ENABLED app, not a hand-built manifest."""
     d = tmp_path / "src" / name
     d.mkdir(parents=True)
-    mani: dict = {"name": name, "version": "1.0.0", "displayName": name, "description": "x"}
+    mani: dict = {
+        "name": name,
+        "version": "1.0.0",
+        "displayName": name,
+        "description": "x",
+    }
     block: dict = dict(perms)
     if subscriptions is not None:
         block["eventSubscriptions"] = subscriptions
@@ -217,7 +219,9 @@ async def _inbox(client, app_name: str) -> list[dict]:
 
 
 @pytest.mark.asyncio
-async def test_subscriber_receives_and_every_non_subscriber_never_does(tmp_path, monkeypatch):
+async def test_subscriber_receives_and_every_non_subscriber_never_does(
+    tmp_path, monkeypatch
+):
     """THE clause. Four apps installed and enabled at once, one emit, four drains.
 
     ``quiet`` is the deny-by-default proof and is deliberately a RUNNING installed app
@@ -226,11 +230,13 @@ async def test_subscriber_receives_and_every_non_subscriber_never_does(tmp_path,
     glob match WOULD have accepted."""
     async with _client(tmp_path, monkeypatch) as client:
         _install(tmp_path, "listener", subscriptions=[TASK_COMPLETED])
-        _install(tmp_path, "quiet")  # no permissions block at all
+        _install(tmp_path, "quiet")
         _install(tmp_path, "nearmiss", subscriptions=["task.completed.extra"])
         _install(tmp_path, "wildcard", subscriptions=["task.*"])
 
-        delivered = app_events.emit(TASK_COMPLETED, {"task_id": "t-1", "status": "done"})
+        delivered = app_events.emit(
+            TASK_COMPLETED, {"task_id": "t-1", "status": "done"}
+        )
         assert delivered == ["listener"]
 
         msgs = await _inbox(client, "listener")
@@ -240,7 +246,9 @@ async def test_subscriber_receives_and_every_non_subscriber_never_does(tmp_path,
         assert json.loads(msgs[0]["payload"]) == {"task_id": "t-1", "status": "done"}
 
         for other in ("quiet", "nearmiss", "wildcard"):
-            assert await _inbox(client, other) == [], f"{other} received an undeclared event"
+            assert (
+                await _inbox(client, other) == []
+            ), f"{other} received an undeclared event"
 
 
 @pytest.mark.asyncio
@@ -250,9 +258,14 @@ async def test_a_subscriber_receives_only_the_events_it_declared(tmp_path, monke
     async with _client(tmp_path, monkeypatch) as client:
         _install(tmp_path, "listener", subscriptions=[TASK_COMPLETED])
         assert app_events.emit(SESSION_CREATED, {"session": "s1"}) == []
-        assert app_events.emit(KNOWLEDGE_INGESTED, {"item_id": "i1", "status": "done"}) == []
+        assert (
+            app_events.emit(KNOWLEDGE_INGESTED, {"item_id": "i1", "status": "done"})
+            == []
+        )
         assert await _inbox(client, "listener") == []
-        assert app_events.emit(TASK_COMPLETED, {"task_id": "t1", "status": "done"}) == ["listener"]
+        assert app_events.emit(TASK_COMPLETED, {"task_id": "t1", "status": "done"}) == [
+            "listener"
+        ]
         assert len(await _inbox(client, "listener")) == 1
 
 
@@ -262,11 +275,15 @@ async def test_a_disabled_app_stops_receiving(tmp_path, monkeypatch):
     touching the manifest."""
     async with _client(tmp_path, monkeypatch) as client:
         _install(tmp_path, "listener", subscriptions=[TASK_COMPLETED])
-        assert app_events.emit(TASK_COMPLETED, {"task_id": "t1", "status": "done"}) == ["listener"]
-        await _inbox(client, "listener")  # drain
+        assert app_events.emit(TASK_COMPLETED, {"task_id": "t1", "status": "done"}) == [
+            "listener"
+        ]
+        await _inbox(client, "listener")
 
         assert app_manager.disable("listener") is True
-        assert app_events.emit(TASK_COMPLETED, {"task_id": "t2", "status": "done"}) == []
+        assert (
+            app_events.emit(TASK_COMPLETED, {"task_id": "t2", "status": "done"}) == []
+        )
         assert await _inbox(client, "listener") == []
 
 
@@ -276,11 +293,10 @@ async def test_an_app_messaging_grant_delivers_no_platform_event(tmp_path, monke
     (and no subscription) receives no platform event."""
     async with _client(tmp_path, monkeypatch) as client:
         _install(tmp_path, "talker", appMessaging=["listener"])
-        assert app_events.emit(TASK_COMPLETED, {"task_id": "t1", "status": "done"}) == []
+        assert (
+            app_events.emit(TASK_COMPLETED, {"task_id": "t1", "status": "done"}) == []
+        )
         assert await _inbox(client, "talker") == []
-
-
-# ── audit posture ──
 
 
 def test_an_unregistered_emit_is_refused_and_audited(tmp_path, monkeypatch):
@@ -288,26 +304,29 @@ def test_an_unregistered_emit_is_refused_and_audited(tmp_path, monkeypatch):
     "no rows" assertion means silence, not a broken emitter. An unregistered name is a
     code defect at an emit site that would otherwise be delivered to nobody, forever,
     with no trace."""
-    from gideon.sel import sel
+    from gideon.security.sel import sel
 
     with _isolated(tmp_path, monkeypatch):
         assert app_events.emit("task.exploded", {"x": 1}) == []
         rows = [
             e
             for e in sel().recent(50)
-            if e.get("event_type") == "app_platform_event" and e.get("outcome") == "rejected"
+            if e.get("event_type") == "app_platform_event"
+            and e.get("outcome") == "rejected"
         ]
         assert rows, "an unregistered emit wrote no audit row"
         assert "event=task.exploded" in rows[0].get("resources", "")
 
 
 @pytest.mark.asyncio
-async def test_ordinary_fan_out_and_ordinary_non_delivery_write_no_sel(tmp_path, monkeypatch):
+async def test_ordinary_fan_out_and_ordinary_non_delivery_write_no_sel(
+    tmp_path, monkeypatch
+):
     """SEL clean. An app never REQUESTS a platform event — dispatch is host-initiated — so
     a non-delivery is not an access attempt, and one row per (installed app × emitted
     event) would drown the real rows in the HMAC chain. Both the delivered and the
     filtered app are present here, and neither produces a row."""
-    from gideon.sel import sel
+    from gideon.security.sel import sel
 
     async with _client(tmp_path, monkeypatch) as client:
         _install(tmp_path, "listener", subscriptions=[TASK_COMPLETED])
@@ -317,18 +336,17 @@ async def test_ordinary_fan_out_and_ordinary_non_delivery_write_no_sel(tmp_path,
         assert len(await _inbox(client, "listener")) == 3
         assert await _inbox(client, "quiet") == []
 
-        rows = [e for e in sel().recent(200) if e.get("event_type") == "app_platform_event"]
+        rows = [
+            e for e in sel().recent(200) if e.get("event_type") == "app_platform_event"
+        ]
         assert rows == [], f"ordinary delivery polluted the SEL: {rows}"
-
-
-# ── the three emit sites, driven from production code ──
 
 
 @pytest.mark.asyncio
 async def test_session_created_fires_at_its_emit_site(tmp_path, monkeypatch):
-    """Driven through ``DashboardState.get_or_create_session`` — the function that inserts
+    """Driven through ``ConsoleState.get_or_create_session`` — the function that inserts
     the session row — not by calling ``emit`` and hoping a call site exists."""
-    from tests.chat_test_helpers import _make_state
+    from checks.runtime.chat_test_helpers import _make_state
 
     async with _client(tmp_path, monkeypatch) as client:
         _install(tmp_path, "listener", subscriptions=[SESSION_CREATED])
@@ -339,7 +357,6 @@ async def test_session_created_fires_at_its_emit_site(tmp_path, monkeypatch):
         assert [m["type"] for m in msgs] == [SESSION_CREATED]
         assert json.loads(msgs[0]["payload"]) == {"session": "s1"}
 
-        # Idempotent lookup of an EXISTING session is not a creation.
         state.get_or_create_session("s1")
         assert await _inbox(client, "listener") == []
 
@@ -354,46 +371,49 @@ async def test_a_rehydrated_session_is_not_announced_as_created(tmp_path, monkey
 
     Driven the way it actually happens: persist a session's history, drop it from the
     in-memory map (a restart), then materialize it again."""
-    from gideon.dashboard.chat_utils import _history_key_for
-    from tests.chat_test_helpers import _make_state
+    from checks.runtime.chat_test_helpers import _make_state
+    from gideon.interfaces.dashboard.chat_utils import _history_key_for
 
     async with _client(tmp_path, monkeypatch) as client:
         _install(tmp_path, "listener", subscriptions=[SESSION_CREATED])
         state = _make_state(tmp_path)
         state.get_or_create_session("s1")
-        assert [m["type"] for m in await _inbox(client, "listener")] == [SESSION_CREATED]
+        assert [m["type"] for m in await _inbox(client, "listener")] == [
+            SESSION_CREATED
+        ]
 
-        # The restart: the session is gone from memory but its history is on disk (the
-        # real ConversationLog write path — appending a message mints the metadata line
-        # `resolve_history_key` looks for).
         state.conversation_log.append(_history_key_for("s1"), "user", "hello")
         state._sessions.pop("s1")
-        assert state._has_persisted_history("s1"), "the fixture did not persist any history"
+        assert state._has_persisted_history(
+            "s1"
+        ), "the fixture did not persist any history"
         state.get_or_create_session("s1")
-        assert await _inbox(client, "listener") == [], "a rehydrated session was re-announced"
+        assert (
+            await _inbox(client, "listener") == []
+        ), "a rehydrated session was re-announced"
 
 
 @pytest.mark.asyncio
 async def test_knowledge_ingested_fires_at_its_emit_site(tmp_path, monkeypatch):
     """Driven through the real ingestion pipeline (``ingest_item``) on a note item, at the
     same terminal point the SSE ``ingest_complete`` fires from."""
-    from gideon.knowledge.pipeline import ensure_nodes_registered
-    from gideon.knowledge.pipeline.runner import ingest_item
-    from gideon.knowledge.store import KnowledgeStore
+    from gideon.cognition.knowledge.pipeline import ensure_nodes_registered
+    from gideon.cognition.knowledge.pipeline.runner import ingest_item
+    from gideon.cognition.knowledge.store import KnowledgeStore
 
     async with _client(tmp_path, monkeypatch) as client:
         _install(tmp_path, "listener", subscriptions=[KNOWLEDGE_INGESTED])
         ensure_nodes_registered()
         store = KnowledgeStore(str(tmp_path / "k.db"))
-        item_id = store.create_typed_item(item_type="note", title="N", content="the body text")
+        item_id = store.create_typed_item(
+            item_type="note", title="N", content="the body text"
+        )
         status = await ingest_item(store, item_id)
         assert status == "done"
 
         msgs = await _inbox(client, "listener")
         assert [m["type"] for m in msgs] == [KNOWLEDGE_INGESTED]
         assert json.loads(msgs[0]["payload"]) == {"item_id": item_id, "status": "done"}
-        # The item's text is NOT in the event — the app fetches content through its own
-        # granted API scope, so the subscription grants timing, not content.
         assert "body text" not in msgs[0]["payload"]
 
 
@@ -406,13 +426,13 @@ async def test_a_failed_ingest_is_not_announced_as_ingested(tmp_path, monkeypatc
     Driven with a real failing node on the NORMAL terminal path — the one that DOES reach
     the emit site. An early-return failure would pass this test under either design, which
     would make it vacuous."""
-    from gideon.knowledge.pipeline import ensure_nodes_registered
-    from gideon.knowledge.pipeline import runner as pipeline_runner
-    from gideon.knowledge.pipeline.graph import NodeSpec, PipelineGraph
-    from gideon.knowledge.pipeline.registry import register_node
-    from gideon.knowledge.pipeline.runner import ingest_item
-    from gideon.knowledge.pipeline.types import NodeOutput
-    from gideon.knowledge.store import KnowledgeStore
+    from gideon.cognition.knowledge.pipeline import ensure_nodes_registered
+    from gideon.cognition.knowledge.pipeline import runner as pipeline_runner
+    from gideon.cognition.knowledge.pipeline.graph import NodeSpec, PipelineGraph
+    from gideon.cognition.knowledge.pipeline.registry import register_node
+    from gideon.cognition.knowledge.pipeline.runner import ingest_item
+    from gideon.cognition.knowledge.pipeline.types import NodeOutput
+    from gideon.cognition.knowledge.store import KnowledgeStore
 
     class _FailingNode:
         node_type = "ape2-boom"
@@ -421,7 +441,10 @@ async def test_a_failed_ingest_is_not_announced_as_ingested(tmp_path, monkeypatc
 
         async def run(self, inputs, ctx):
             return NodeOutput(
-                node_type=self.node_type, backend=self.backend, success=False, error="boom"
+                node_type=self.node_type,
+                backend=self.backend,
+                success=False,
+                error="boom",
             )
 
     def _only_boom(item_type, *, enrichment=""):
@@ -438,7 +461,9 @@ async def test_a_failed_ingest_is_not_announced_as_ingested(tmp_path, monkeypatc
         store = KnowledgeStore(str(tmp_path / "k.db"))
         item_id = store.create_typed_item(item_type="note", title="N", content="x")
         status = await ingest_item(store, item_id)
-        assert status == "failed", f"the fixture did not reach a failed TERMINAL run: {status}"
+        assert (
+            status == "failed"
+        ), f"the fixture did not reach a failed TERMINAL run: {status}"
         assert await _inbox(client, "listener") == []
 
 
@@ -447,24 +472,25 @@ async def test_task_completed_fires_at_its_emit_site_on_the_edge(tmp_path, monke
     """Driven through ``NativeTaskProvider.update_task`` on the same edge-triggered
     boundary the ``TaskComplete`` user hook fires on — and NOT on a non-completion edit,
     which is what makes it an edge rather than a level."""
-    import gideon.tasks.native as nat
+    import gideon.engine.tasks.native as nat
 
     async with _client(tmp_path, monkeypatch) as client:
         _install(tmp_path, "listener", subscriptions=[TASK_COMPLETED])
         with patch.object(nat, "config_dir", lambda: tmp_path):
             provider = nat.NativeTaskProvider()
             task = await provider.create_task(title="A")
-            # A plain edit is not a completion.
             await provider.update_task(task.id, title="A2")
             assert await _inbox(client, "listener") == []
 
             await provider.update_task(task.id, status="done")
             msgs = await _inbox(client, "listener")
             assert [m["type"] for m in msgs] == [TASK_COMPLETED]
-            assert json.loads(msgs[0]["payload"]) == {"task_id": task.id, "status": "done"}
-            assert "A2" not in msgs[0]["payload"]  # no title in the payload
+            assert json.loads(msgs[0]["payload"]) == {
+                "task_id": task.id,
+                "status": "done",
+            }
+            assert "A2" not in msgs[0]["payload"]
 
-            # Re-saving an already-done task must not fire again (edge, not level).
             await provider.update_task(task.id, status="done")
             assert await _inbox(client, "listener") == []
 
@@ -474,25 +500,35 @@ def test_emit_never_raises_into_its_call_site(tmp_path, monkeypatch):
     must not fail the session creation, ingest or task edit that produced the fact."""
     with _isolated(tmp_path, monkeypatch):
         with patch.object(app_events, "subscribers", side_effect=RuntimeError("boom")):
-            assert app_events.emit(TASK_COMPLETED, {"task_id": "t1", "status": "done"}) == []
+            assert (
+                app_events.emit(TASK_COMPLETED, {"task_id": "t1", "status": "done"})
+                == []
+            )
         with patch.object(app_events, "_deliver", side_effect=OSError("read-only fs")):
             _install(tmp_path, "listener", subscriptions=[TASK_COMPLETED])
-            assert app_events.emit(TASK_COMPLETED, {"task_id": "t1", "status": "done"}) == []
+            assert (
+                app_events.emit(TASK_COMPLETED, {"task_id": "t1", "status": "done"})
+                == []
+            )
 
 
 def test_a_failed_delivery_to_a_subscriber_is_audited(tmp_path, monkeypatch):
     """The other bounded audit case: an app that EARNED the event and did not get it. Rare
     and real, unlike ordinary non-delivery."""
-    from gideon.sel import sel
+    from gideon.security.sel import sel
 
     with _isolated(tmp_path, monkeypatch):
         _install(tmp_path, "listener", subscriptions=[TASK_COMPLETED])
         with patch.object(app_events, "_deliver", side_effect=OSError("read-only fs")):
-            assert app_events.emit(TASK_COMPLETED, {"task_id": "t1", "status": "done"}) == []
+            assert (
+                app_events.emit(TASK_COMPLETED, {"task_id": "t1", "status": "done"})
+                == []
+            )
         rows = [
             e
             for e in sel().recent(50)
-            if e.get("event_type") == "app_platform_event" and e.get("outcome") == "error"
+            if e.get("event_type") == "app_platform_event"
+            and e.get("outcome") == "error"
         ]
         assert rows, "a subscriber silently missed an event it declared"
         assert rows[0].get("caller_identity") == "app:listener"

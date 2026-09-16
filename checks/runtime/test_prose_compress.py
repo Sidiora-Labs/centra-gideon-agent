@@ -12,11 +12,11 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from gideon.tool_providers.prose_compress import compress_prose
+from gideon.integrations.tool_providers.prose_compress import compress_prose
 
 
 def _isolate_store(tmp_path, monkeypatch):
-    import gideon.config.loader as cfg
+    import gideon.core.config.loader as cfg
 
     monkeypatch.setattr(cfg, "config_dir", lambda: tmp_path)
 
@@ -31,36 +31,40 @@ async def test_model_summary_used_when_it_succeeds(tmp_path, monkeypatch):
     _isolate_store(tmp_path, monkeypatch)
     long = "the quick brown fox jumps over the lazy dog. " * 500
     with patch(
-        "gideon.llm_helpers.one_shot_completion",
+        "gideon.integrations.llm_helpers.one_shot_completion",
         new=AsyncMock(return_value="A concise summary of fox activity."),
     ) as m:
         out = await compress_prose(long, cap=2000)
     assert out == "A concise summary of fox activity."
     m.assert_awaited_once()
-    # the call went through the background use case (never the chat runtime)
     assert m.await_args.kwargs.get("use_case") == "background"
 
 
 @pytest.mark.asyncio
 async def test_model_failure_degrades_to_log_projector(tmp_path, monkeypatch):
     _isolate_store(tmp_path, monkeypatch)
-    long = "line of prose\n" * 3000 + "ERROR the important bit\n" + "line of prose\n" * 100
+    long = (
+        "line of prose\n" * 3000 + "ERROR the important bit\n" + "line of prose\n" * 100
+    )
     with patch(
-        "gideon.llm_helpers.one_shot_completion",
+        "gideon.integrations.llm_helpers.one_shot_completion",
         new=AsyncMock(side_effect=RuntimeError("no model")),
     ):
         out = await compress_prose(long, cap=2000)
     assert len(out) < len(long)
-    assert "ERROR the important bit" in out  # the log projector kept the signal
+    assert "ERROR the important bit" in out
 
 
 @pytest.mark.asyncio
 async def test_empty_summary_degrades(tmp_path, monkeypatch):
     _isolate_store(tmp_path, monkeypatch)
     long = "x words here\n" * 3000
-    with patch("gideon.llm_helpers.one_shot_completion", new=AsyncMock(return_value="   ")):
+    with patch(
+        "gideon.integrations.llm_helpers.one_shot_completion",
+        new=AsyncMock(return_value="   "),
+    ):
         out = await compress_prose(long, cap=1000)
-    assert out and len(out) < len(long)  # fallback produced a bounded result
+    assert out and len(out) < len(long)
 
 
 @pytest.mark.asyncio
@@ -68,11 +72,11 @@ async def test_overlong_summary_treated_as_failure(tmp_path, monkeypatch):
     _isolate_store(tmp_path, monkeypatch)
     long = "y words here\n" * 3000
     with patch(
-        "gideon.llm_helpers.one_shot_completion",
-        new=AsyncMock(return_value="z" * 10_000),  # "summary" bigger than 2×cap
+        "gideon.integrations.llm_helpers.one_shot_completion",
+        new=AsyncMock(return_value="z" * 10_000),
     ):
         out = await compress_prose(long, cap=1000)
-    assert len(out) <= 1000 + 200  # deterministic fallback, bounded
+    assert len(out) <= 1000 + 200
 
 
 @pytest.mark.asyncio
@@ -80,13 +84,13 @@ async def test_raw_ref_line_survives_both_paths(tmp_path, monkeypatch):
     _isolate_store(tmp_path, monkeypatch)
     long = "prose " * 3000
     with patch(
-        "gideon.llm_helpers.one_shot_completion",
+        "gideon.integrations.llm_helpers.one_shot_completion",
         new=AsyncMock(return_value="Summary."),
     ):
         out = await compress_prose(long, cap=2000, raw_ref="r_abc123def456")
     assert 'tool_result_get(result_id="r_abc123def456")' in out
     with patch(
-        "gideon.llm_helpers.one_shot_completion",
+        "gideon.integrations.llm_helpers.one_shot_completion",
         new=AsyncMock(side_effect=RuntimeError("down")),
     ):
         out = await compress_prose(long, cap=2000, raw_ref="r_abc123def456")
@@ -96,12 +100,12 @@ async def test_raw_ref_line_survives_both_paths(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_savings_recorded_under_prose_key(tmp_path, monkeypatch):
     _isolate_store(tmp_path, monkeypatch)
-    import gideon.tool_providers.savings as savings_mod
+    import gideon.integrations.tool_providers.savings as savings_mod
 
     monkeypatch.setattr(savings_mod, "config_dir", lambda: tmp_path)
     long = "words " * 5000
     with patch(
-        "gideon.llm_helpers.one_shot_completion",
+        "gideon.integrations.llm_helpers.one_shot_completion",
         new=AsyncMock(return_value="Short summary."),
     ):
         await compress_prose(long, cap=2000)
@@ -112,7 +116,7 @@ async def test_savings_recorded_under_prose_key(tmp_path, monkeypatch):
 def test_never_in_synchronous_dispatch():
     """The prose compressor must NOT be a project_output projector (the tool-dispatch
     path cannot await an LLM) — background callers invoke it explicitly."""
-    from gideon.tool_providers.projection import _PROJECTORS
+    from gideon.integrations.tool_providers.projection import _PROJECTORS
 
     assert "prose" not in _PROJECTORS
     for fn in _PROJECTORS.values():

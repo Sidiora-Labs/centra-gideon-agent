@@ -24,11 +24,16 @@ import time
 
 import pytest
 
-from gideon.workflows import journal as J
-from gideon.workflows import store
-from gideon.workflows.controller import EngineServices, RunController
-from gideon.workflows.journal import CacheKey, Journal, inputs_hash, spec_region_hash
-from gideon.workflows.models import (
+from gideon.automation.workflows import journal as J
+from gideon.automation.workflows import store
+from gideon.automation.workflows.controller import EngineServices, RunController
+from gideon.automation.workflows.journal import (
+    CacheKey,
+    Journal,
+    inputs_hash,
+    spec_region_hash,
+)
+from gideon.automation.workflows.models import (
     Failure,
     FailureClass,
     InstanceState,
@@ -38,7 +43,7 @@ from gideon.workflows.models import (
     RunStatus,
     WorkflowRun,
 )
-from gideon.workflows.tick import Limits
+from gideon.automation.workflows.tick import Limits
 
 pytestmark = pytest.mark.anyio
 
@@ -54,13 +59,15 @@ def _isolated_home(tmp_path, monkeypatch):
     must never see a real home."""
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
     return home
 
 
 def _make_run(spec: dict, inputs: dict | None = None, **kw) -> WorkflowRun:
     run = store.create(
-        WorkflowRun(id="", workflow_name=spec.get("name", "wf"), inputs=inputs or {}, **kw)
+        WorkflowRun(
+            id="", workflow_name=spec.get("name", "wf"), inputs=inputs or {}, **kw
+        )
     )
     store.write_spec(run.id, spec)
     return run
@@ -94,7 +101,11 @@ SEQ_SPEC = {
                 "id": "think",
                 "config": {"prompt": "double {{nodes.seed.output.n}}"},
             },
-            {"kind": "transform", "id": "final", "config": {"expr": "got {{nodes.think.output}}"}},
+            {
+                "kind": "transform",
+                "id": "final",
+                "config": {"expr": "got {{nodes.think.output}}"},
+            },
         ],
     },
 }
@@ -132,7 +143,9 @@ class TestHappyPath:
         c = RunController(
             run,
             SEQ_SPEC,
-            services=EngineServices(completion=_echo(), publish=lambda e, p: seen.append((e, p))),
+            services=EngineServices(
+                completion=_echo(), publish=lambda e, p: seen.append((e, p))
+            ),
         )
         await c.run_to_completion(timeout=20)
         kinds = [e for e, _ in seen]
@@ -146,7 +159,9 @@ class TestHappyPath:
             raise RuntimeError("observer exploded")
 
         run = _make_run(SEQ_SPEC)
-        c = RunController(run, SEQ_SPEC, services=EngineServices(completion=_echo(), publish=boom))
+        c = RunController(
+            run, SEQ_SPEC, services=EngineServices(completion=_echo(), publish=boom)
+        )
         assert await c.run_to_completion(timeout=20) == RunStatus.COMPLETE
 
 
@@ -154,7 +169,6 @@ class TestArtifactOffload:
     """WV-11 end to end: a node whose output offloads populates `node_artifacts`, so a
     downstream `{{nodes.x.artifact}}` resolves to a live pointer."""
 
-    #: A big output goes to the model node; the transform below binds its ARTIFACT ref.
     _BIG_SPEC = {
         "name": "offload",
         "root": {
@@ -179,12 +193,10 @@ class TestArtifactOffload:
         c = RunController(run, self._BIG_SPEC, services=EngineServices(completion=big))
         assert await c.run_to_completion(timeout=20) == RunStatus.COMPLETE
 
-        # The writer: the offloaded node's id maps to an artifacts/ ref (not outputs/).
         arts = c._node_artifacts()
         assert arts is not None and "big" in arts
         assert arts["big"].startswith("artifacts/")
 
-        # The reader: the downstream transform resolved `{{nodes.big.artifact}}` to that ref.
         assert c._outputs["pointer"] == f"ref={arts['big']}"
 
     async def test_a_small_output_populates_no_artifact(self) -> None:
@@ -205,7 +217,7 @@ class TestResumeCache:
         run.status = RunStatus.RUNNING
         c = RunController(run, spec, services=EngineServices(completion=fn))
         for inst in c.instances.values():
-            inst.state = InstanceState.PENDING  # re-schedule everything
+            inst.state = InstanceState.PENDING
         await c.run_to_completion(timeout=20)
         return run, c
 
@@ -256,7 +268,9 @@ class TestResumeCache:
         jr = Journal("r1")
         key = CacheKey(path="root", epoch=0, inputs_hash="h", spec_hash="s")
         jr.step_failed("root", "n", epoch=0, failure=Failure(cause_plain="x"))
-        jr.write(J.STEP_COMPLETED, cache_key=key.to_str(), state=InstanceState.FAILED.value)
+        jr.write(
+            J.STEP_COMPLETED, cache_key=key.to_str(), state=InstanceState.FAILED.value
+        )
         assert Journal("r1").lookup(key) is None
 
     async def test_the_cache_key_needs_all_four_parts(self) -> None:
@@ -372,7 +386,9 @@ class TestRetry:
         assert any(r.get("retries_exhausted") for r in failures)
         assert failures[-1]["failure_signature"]["failing_node"] == "i"
 
-    async def test_no_retry_modes_blocks_a_class_that_would_otherwise_retry(self) -> None:
+    async def test_no_retry_modes_blocks_a_class_that_would_otherwise_retry(
+        self,
+    ) -> None:
         attempts = {"n": 0}
 
         async def flaky(prompt, *, use_case="background", output_type=None):
@@ -404,12 +420,17 @@ class TestTimeouts:
             await asyncio.sleep(30)
             return "never"
 
-        spec = {"name": "to", "root": {"kind": "infer", "id": "i", "config": {"prompt": "go"}}}
+        spec = {
+            "name": "to",
+            "root": {"kind": "infer", "id": "i", "config": {"prompt": "go"}},
+        }
         run = _make_run(spec)
         c = RunController(
             run,
             spec,
-            services=EngineServices(completion=hang, node_timeout_total=1, node_timeout_stall=0),
+            services=EngineServices(
+                completion=hang, node_timeout_total=1, node_timeout_stall=0
+            ),
         )
         started = time.time()
         assert await c.run_to_completion(timeout=20) == RunStatus.FAILED
@@ -421,12 +442,17 @@ class TestTimeouts:
             await asyncio.sleep(1.5)
             return "finished slowly"
 
-        spec = {"name": "ok", "root": {"kind": "infer", "id": "i", "config": {"prompt": "go"}}}
+        spec = {
+            "name": "ok",
+            "root": {"kind": "infer", "id": "i", "config": {"prompt": "go"}},
+        }
         run = _make_run(spec)
         c = RunController(
             run,
             spec,
-            services=EngineServices(completion=slow, node_timeout_total=30, node_timeout_stall=20),
+            services=EngineServices(
+                completion=slow, node_timeout_total=30, node_timeout_stall=20
+            ),
         )
         assert await c.run_to_completion(timeout=25) == RunStatus.COMPLETE
 
@@ -443,7 +469,7 @@ class TestPerNodeStallWindow:
     """
 
     def _window(self, cfg: dict, *, run_default: int = 300) -> int:
-        from gideon.workflows.controller import RunController
+        from gideon.automation.workflows.controller import RunController
 
         class _Svc:
             node_timeout_stall = run_default
@@ -480,7 +506,7 @@ class TestPerNodeStallWindow:
         assert self._window(cfg) == 300
 
     def test_an_unknown_path_falls_back_rather_than_raising(self) -> None:
-        from gideon.workflows.controller import RunController
+        from gideon.automation.workflows.controller import RunController
 
         class _Svc:
             node_timeout_stall = 300
@@ -503,7 +529,9 @@ class TestPerNodeStallWindow:
 
         declared: list[tuple[str, int]] = []
         for path in sorted(
-            pathlib.Path("src/gideon/workflows/bundled").glob("*/workflow.json")
+            pathlib.Path("runtime/gideon/automation/workflows/bundled").glob(
+                "*/workflow.json"
+            )
         ):
             spec = json.loads(path.read_text())
 
@@ -511,7 +539,9 @@ class TestPerNodeStallWindow:
                 if isinstance(node, dict):
                     cfg = node.get("config")
                     if isinstance(cfg, dict) and "timeout_stall_secs" in cfg:
-                        declared.append((path.parent.name, int(cfg["timeout_stall_secs"])))
+                        declared.append(
+                            (path.parent.name, int(cfg["timeout_stall_secs"]))
+                        )
                     for value in node.values():
                         walk(value)
                 elif isinstance(node, list):
@@ -531,7 +561,10 @@ class TestWaitAndGates:
     async def test_a_wait_resolves_at_its_deadline(self) -> None:
         """The controller resolves it rather than re-dispatching: a dispatcher is
         stateless, so re-entry would recompute `now + duration` and wait forever."""
-        spec = {"name": "w", "root": {"kind": "wait", "id": "w", "config": {"duration_secs": 1}}}
+        spec = {
+            "name": "w",
+            "root": {"kind": "wait", "id": "w", "config": {"duration_secs": 1}},
+        }
         run = _make_run(spec)
         c = RunController(run, spec, services=EngineServices())
         started = time.time()
@@ -541,7 +574,11 @@ class TestWaitAndGates:
     async def test_an_unanswered_gate_surfaces_needs_input(self) -> None:
         spec = {
             "name": "g",
-            "root": {"kind": "gate", "id": "g", "config": {"kind": "approval", "prompt": "ok?"}},
+            "root": {
+                "kind": "gate",
+                "id": "g",
+                "config": {"kind": "approval", "prompt": "ok?"},
+            },
         }
         run = _make_run(spec)
         c = RunController(run, spec, services=EngineServices())
@@ -561,7 +598,10 @@ class TestWaitAndGates:
         await c.start()
         for _ in range(40):
             await asyncio.sleep(0.1)
-            if c.instances.get("root", NodeInstance("root")).state == InstanceState.WAITING:
+            if (
+                c.instances.get("root", NodeInstance("root")).state
+                == InstanceState.WAITING
+            ):
                 break
         await c.stop()
 
@@ -569,7 +609,6 @@ class TestWaitAndGates:
         assert on_disk.state == InstanceState.WAITING
         assert on_disk.wake_at > 0, "the deadline was not persisted"
 
-        # A fresh controller (a restarted gateway) must still know when to wake it.
         c2 = RunController(store.get(run.id), spec, services=EngineServices())
         assert c2._next_wake_delay() is not None
 
@@ -602,7 +641,11 @@ class TestWaitAndGates:
         anything (WF2-R7)."""
         spec = {
             "name": "gt",
-            "root": {"kind": "gate", "id": "g", "config": {"kind": "approval", "timeout_secs": 1}},
+            "root": {
+                "kind": "gate",
+                "id": "g",
+                "config": {"kind": "approval", "timeout_secs": 1},
+            },
         }
         run = _make_run(spec)
         c = RunController(run, spec, services=EngineServices())
@@ -650,7 +693,10 @@ class TestCancellation:
             await asyncio.sleep(10)
             return "x"
 
-        spec = {"name": "s", "root": {"kind": "infer", "id": "i", "config": {"prompt": "p"}}}
+        spec = {
+            "name": "s",
+            "root": {"kind": "infer", "id": "i", "config": {"prompt": "p"}},
+        }
         run = _make_run(spec)
         c = RunController(run, spec, services=EngineServices(completion=slow))
         await c.start()
@@ -672,7 +718,8 @@ class TestBudget:
                 "kind": "sequence",
                 "id": "s",
                 "children": [
-                    {"kind": "infer", "id": f"n{i}", "config": {"prompt": "p"}} for i in range(4)
+                    {"kind": "infer", "id": f"n{i}", "config": {"prompt": "p"}}
+                    for i in range(4)
                 ],
             },
         }
@@ -691,7 +738,7 @@ class TestBudget:
         assert spent > 0
 
         fresh = store.get(run.id)
-        fresh.total_tokens = 0  # simulate a row that lost its counter
+        fresh.total_tokens = 0
         fresh.status = RunStatus.RUNNING
         c2 = RunController(fresh, SEQ_SPEC, services=EngineServices(completion=_echo()))
         await c2._prepare()
@@ -715,7 +762,9 @@ class TestRedaction:
         c = RunController(run, spec, services=EngineServices(completion=leaky))
         await c.run_to_completion(timeout=20)
         blob = "".join(
-            p.read_text(errors="replace") for p in store.run_dir(run.id).rglob("*") if p.is_file()
+            p.read_text(errors="replace")
+            for p in store.run_dir(run.id).rglob("*")
+            if p.is_file()
         )
         assert secret not in blob
 
@@ -780,7 +829,9 @@ class TestLedger:
         c = RunController(run, SEQ_SPEC, services=EngineServices(completion=_echo()))
         await c.run_to_completion(timeout=20)
         infer = [
-            r for r in J.ledger(run.id) if r["kind"] == J.STEP_COMPLETED and r["node_id"] == "think"
+            r
+            for r in J.ledger(run.id)
+            if r["kind"] == J.STEP_COMPLETED and r["node_id"] == "think"
         ][0]
         ref = infer["resolved_prompt_ref"]
         assert ref
@@ -839,7 +890,11 @@ class TestBranchAndJoinIntegration:
                         "id": "router",
                         "config": {"on": "{{inputs.kind}}"},
                         "cases": {
-                            "bug": {"kind": "transform", "id": "fix", "config": {"expr": "fixed"}},
+                            "bug": {
+                                "kind": "transform",
+                                "id": "fix",
+                                "config": {"expr": "fixed"},
+                            },
                             "feat": {
                                 "kind": "transform",
                                 "id": "build",
@@ -861,7 +916,9 @@ class TestBranchAndJoinIntegration:
         assert await c.run_to_completion(timeout=20) == RunStatus.COMPLETE
         assert c._outputs["merge"] == "merged after bug"
         assert "build" not in c._outputs
-        assert c.instances["root.children[0].cases[feat]"].state == InstanceState.SKIPPED
+        assert (
+            c.instances["root.children[0].cases[feat]"].state == InstanceState.SKIPPED
+        )
 
     async def test_an_async_fan_out_join_waits_for_the_slowest_leg(self) -> None:
         """WF2-R18 regression #2, end to end: the timing IS the assertion."""
@@ -887,7 +944,9 @@ class TestBranchAndJoinIntegration:
         c = RunController(run, spec, services=EngineServices())
         started = time.time()
         assert await c.run_to_completion(timeout=25) == RunStatus.COMPLETE
-        assert time.time() - started >= 1.8, "the join fired before the slow legs finished"
+        assert (
+            time.time() - started >= 1.8
+        ), "the join fired before the slow legs finished"
         assert c._outputs["join"] == "joined quick"
 
     async def test_a_skipped_subtree_is_skipped_all_the_way_down(self) -> None:
@@ -915,7 +974,9 @@ class TestBranchAndJoinIntegration:
         run = _make_run(spec, {"k": "a"})
         c = RunController(run, spec, services=EngineServices())
         assert await c.run_to_completion(timeout=20) == RunStatus.COMPLETE
-        skipped = [p for p, i in c.instances.items() if i.state == InstanceState.SKIPPED]
+        skipped = [
+            p for p, i in c.instances.items() if i.state == InstanceState.SKIPPED
+        ]
         assert "root.cases[b]" in skipped
         assert "root.cases[b].children[0]" in skipped
         assert "root.cases[b].children[1]" in skipped
@@ -929,12 +990,20 @@ class TestForeachAndLoopIntegration:
                 "kind": "sequence",
                 "id": "s",
                 "children": [
-                    {"kind": "transform", "id": "seed", "config": {"expr": ["a", "b", "c"]}},
+                    {
+                        "kind": "transform",
+                        "id": "seed",
+                        "config": {"expr": ["a", "b", "c"]},
+                    },
                     {
                         "kind": "foreach",
                         "id": "fan",
                         "config": {"items": "{{nodes.seed.output}}"},
-                        "body": {"kind": "infer", "id": "w", "config": {"prompt": "do {{item}}"}},
+                        "body": {
+                            "kind": "infer",
+                            "id": "w",
+                            "config": {"prompt": "do {{item}}"},
+                        },
                     },
                 ],
             },
@@ -952,7 +1021,11 @@ class TestForeachAndLoopIntegration:
                 "kind": "loop",
                 "id": "l",
                 "config": {"mode": "counted", "n": 3},
-                "body": {"kind": "transform", "id": "b", "config": {"expr": "i{{iter}}"}},
+                "body": {
+                    "kind": "transform",
+                    "id": "b",
+                    "config": {"expr": "i{{iter}}"},
+                },
             },
         }
         run = _make_run(spec)
@@ -973,7 +1046,11 @@ class TestForeachAndLoopIntegration:
                 "kind": "loop",
                 "id": "l",
                 "config": {"mode": "until_dry", "streak": 1, "max_iterations": 6},
-                "body": {"kind": "infer", "id": "b", "config": {"prompt": "sweep {{iter}}"}},
+                "body": {
+                    "kind": "infer",
+                    "id": "b",
+                    "config": {"prompt": "sweep {{iter}}"},
+                },
             },
         }
         run = _make_run(spec)
@@ -1027,7 +1104,8 @@ class TestLaneEnforcement:
             run,
             spec,
             services=EngineServices(
-                completion=track, lane_limits=Limits(lanes={"llm": 1, "io": 1, "compute": 8})
+                completion=track,
+                lane_limits=Limits(lanes={"llm": 1, "io": 1, "compute": 8}),
             ),
         )
         assert await c.run_to_completion(timeout=25) == RunStatus.COMPLETE
@@ -1051,7 +1129,8 @@ class TestLaneEnforcement:
             run,
             spec,
             services=EngineServices(
-                completion=_echo(), lane_limits=Limits(lanes={"llm": 1, "io": 1, "compute": 8})
+                completion=_echo(),
+                lane_limits=Limits(lanes={"llm": 1, "io": 1, "compute": 8}),
             ),
         )
         assert await c.run_to_completion(timeout=20) == RunStatus.COMPLETE
@@ -1178,20 +1257,29 @@ class TestResilienceIntegration:
                 "kind": "loop",
                 "id": "l",
                 "config": {"mode": "counted", "n": 20, "identical_streak": 2},
-                "body": {"kind": "transform", "id": "b", "config": {"expr": "same every time"}},
+                "body": {
+                    "kind": "transform",
+                    "id": "b",
+                    "config": {"expr": "same every time"},
+                },
             },
         }
         run = _make_run(spec)
         c = RunController(run, spec, services=EngineServices())
         assert await c.run_to_completion(timeout=30) == RunStatus.ESCALATED
         iterations = [p for p in c.instances if "@" in p]
-        assert len(iterations) < 20, f"the thrash ran to its cap ({len(iterations)} times)"
+        assert (
+            len(iterations) < 20
+        ), f"the thrash ran to its cap ({len(iterations)} times)"
         assert c.instances["root"].state == InstanceState.ESCALATED
-        # It surfaced through the ladder, and the cheap tier was tried first.
         entry = next(iter((c.run.extra.get("convergence") or {}).values()), {})
         rungs = [d.get("rung") for d in entry.get("log") or []]
-        assert rungs and rungs[-1] == "surface", f"it did not surface through the ladder: {rungs}"
-        assert rungs[0] is None, f"the first trip cost a rung instead of a nudge: {rungs}"
+        assert (
+            rungs and rungs[-1] == "surface"
+        ), f"it did not surface through the ladder: {rungs}"
+        assert (
+            rungs[0] is None
+        ), f"the first trip cost a rung instead of a nudge: {rungs}"
 
     async def test_escalated_is_distinct_from_failed(self) -> None:
         """ "I gave up, a human must decide" is a different fact from "this broke"."""
@@ -1222,7 +1310,8 @@ class TestResilienceIntegration:
                 "kind": "sequence",
                 "id": "s",
                 "children": [
-                    {"kind": "infer", "id": f"n{i}", "config": {"prompt": "p"}} for i in range(6)
+                    {"kind": "infer", "id": f"n{i}", "config": {"prompt": "p"}}
+                    for i in range(6)
                 ],
             },
         }
@@ -1232,7 +1321,9 @@ class TestResilienceIntegration:
             spec,
             services=EngineServices(
                 completion=chatty,
-                publish=lambda e, p: warnings.append(p) if p.get("budget_warning") else None,
+                publish=lambda e, p: (
+                    warnings.append(p) if p.get("budget_warning") else None
+                ),
             ),
         )
         assert await c.run_to_completion(timeout=30) == RunStatus.PAUSED
@@ -1248,24 +1339,20 @@ class TestProjectOverviewOnComplete:
 
     @pytest.fixture(autouse=True)
     def _project_home(self, _isolated_home, monkeypatch):
-        # The project store binds `config_dir` BY VALUE at import (from config.loader), so
-        # patching the loader module alone leaves it pointed at the real home. Patch both
-        # the loader and the hierarchy module's own binding — project_context resolves the
-        # context dir through HierarchyStore, so that one is the load-bearing patch.
-        import gideon.config.loader as cfg
-        import gideon.tasks.hierarchy as hierarchy
+        import gideon.core.config.loader as cfg
+        import gideon.engine.tasks.hierarchy as hierarchy
 
         monkeypatch.setattr(cfg, "config_dir", lambda: _isolated_home)
         monkeypatch.setattr(hierarchy, "config_dir", lambda: _isolated_home)
         return _isolated_home
 
     def _project(self):
-        from gideon.tasks.hierarchy import HierarchyStore
+        from gideon.engine.tasks.hierarchy import HierarchyStore
 
         return HierarchyStore().create_project("Board Test", brief="ship the board")
 
     async def test_a_completed_run_appends_to_the_overview_and_ledger(self) -> None:
-        from gideon import project_context
+        from gideon.cognition import project_context
 
         project = self._project()
         run = _make_run(SEQ_SPEC, project_id=project.id)
@@ -1277,13 +1364,14 @@ class TestProjectOverviewOnComplete:
         assert any("seq" in line and "complete" in line for line in decisions)
 
     async def test_a_run_with_no_project_writes_nothing(self) -> None:
-        # project_id is empty → the hook is a no-op (the guard), and the run still completes.
         run = _make_run(SEQ_SPEC)
         c = RunController(run, SEQ_SPEC, services=EngineServices(completion=_echo()))
         assert await c.run_to_completion(timeout=20) == RunStatus.COMPLETE
 
-    async def test_a_raising_overview_writer_does_not_break_finish(self, monkeypatch) -> None:
-        from gideon import project_context
+    async def test_a_raising_overview_writer_does_not_break_finish(
+        self, monkeypatch
+    ) -> None:
+        from gideon.cognition import project_context
 
         project = self._project()
 
@@ -1293,16 +1381,15 @@ class TestProjectOverviewOnComplete:
         monkeypatch.setattr(project_context, "write_overview", boom)
         run = _make_run(SEQ_SPEC, project_id=project.id)
         c = RunController(run, SEQ_SPEC, services=EngineServices(completion=_echo()))
-        # `_finish` must not raise despite the broken writer — the run still completes.
         assert await c.run_to_completion(timeout=20) == RunStatus.COMPLETE
 
     async def test_a_failed_run_does_not_revise_the_overview(self) -> None:
-        from gideon import project_context
+        from gideon.cognition import project_context
 
         project = self._project()
 
         async def denied(prompt, *, use_case="background", output_type=None):
-            from gideon.workflows.models import Failure, FailureClass
+            from gideon.automation.workflows.models import Failure, FailureClass
 
             raise Failure(FailureClass.PERMISSION_DENIED, "nope")
 
@@ -1317,7 +1404,6 @@ class TestProjectOverviewOnComplete:
         run = _make_run(spec, project_id=project.id)
         c = RunController(run, spec, services=EngineServices(completion=denied))
         assert await c.run_to_completion(timeout=25) == RunStatus.FAILED
-        # Only COMPLETE revises the overview; a FAILED run leaves it empty.
         assert project_context.read_overview(project.id) == ""
 
 
@@ -1337,8 +1423,8 @@ class TestWorkspaceProvisioningAtRunStart:
 
     @pytest.fixture(autouse=True)
     def _home(self, _isolated_home, monkeypatch):
-        import gideon.config.loader as cfg
-        import gideon.tasks.hierarchy as hierarchy
+        import gideon.core.config.loader as cfg
+        import gideon.engine.tasks.hierarchy as hierarchy
 
         monkeypatch.setattr(cfg, "config_dir", lambda: _isolated_home)
         monkeypatch.setattr(hierarchy, "config_dir", lambda: _isolated_home)
@@ -1352,7 +1438,9 @@ class TestWorkspaceProvisioningAtRunStart:
             "root": {
                 "kind": "sequence",
                 "id": "s",
-                "children": [{"kind": "transform", "id": "a", "config": {"expr": {"n": 1}}}],
+                "children": [
+                    {"kind": "transform", "id": "a", "config": {"expr": {"n": 1}}}
+                ],
             },
         }
         if workspace is not None:
@@ -1368,7 +1456,6 @@ class TestWorkspaceProvisioningAtRunStart:
         c = RunController(run, spec, services=EngineServices(completion=_echo()))
         assert await c.run_to_completion(timeout=20) == RunStatus.FAILED
         assert "workspace declaration refused" in run.error_message
-        # No node ran: the refusal happened before the first tick scheduled anything.
         assert all(i.state == InstanceState.PENDING for i in c.instances.values())
 
     async def test_a_greedy_preserve_pattern_refuses_the_run(self) -> None:
@@ -1382,18 +1469,24 @@ class TestWorkspaceProvisioningAtRunStart:
 
     async def test_a_spec_with_NO_workspace_block_provisions_nothing(self) -> None:
         """Measured: provisioning every run made every stale RUNNING run look isolated to the boot
-        sweep, so a journal-resumable crash-survivor would be SUSPENDED instead of adopted."""
+        sweep, so a journal-resumable crash-survivor would be SUSPENDED instead of adopted.
+        """
         spec = self._spec(None)
         run = _make_run(spec)
-        c = RunController(run, spec, services=EngineServices(completion=_echo(), cwd="/tmp"))
+        c = RunController(
+            run, spec, services=EngineServices(completion=_echo(), cwd="/tmp")
+        )
         assert await c.run_to_completion(timeout=20) == RunStatus.COMPLETE
         assert "worktree_path" not in run.extra
         assert "workspace" not in run.extra
         assert c.services.cwd == "/tmp", "an undeclared workspace leaves the cwd alone"
 
-    async def test_a_declared_scratch_workspace_lands_on_the_record_and_the_cwd(self) -> None:
+    async def test_a_declared_scratch_workspace_lands_on_the_record_and_the_cwd(
+        self,
+    ) -> None:
         """`worktree_path` had a live READER (`watchdog._substrate_for`) and zero writers before
-        this atom. The cwd repoint is what makes the isolation real rather than decorative."""
+        this atom. The cwd repoint is what makes the isolation real rather than decorative.
+        """
         import os
 
         spec = self._spec({"mode": "scratch"})
@@ -1406,10 +1499,11 @@ class TestWorkspaceProvisioningAtRunStart:
         assert c.services.cwd == path, "the stages ran IN the workspace"
         assert run.extra["workspace"]["mode"] == "scratch"
         assert run.extra["workspace"]["isolated"] is True
-        # It round-trips on disk, which is what a restart replays.
         assert store.get(run.id).extra["worktree_path"] == path
 
-    async def test_setup_runs_through_the_INJECTED_runner_never_a_real_subprocess(self) -> None:
+    async def test_setup_runs_through_the_INJECTED_runner_never_a_real_subprocess(
+        self,
+    ) -> None:
         """`teardown_runner` is the established injection seam (its docstring: "injected so tests
         never run real teardown subprocesses"). Reused for setup rather than adding a second
         seam — two injection points would let one path escape into a real spawn."""
@@ -1422,7 +1516,9 @@ class TestWorkspaceProvisioningAtRunStart:
             return True, "ok"
 
         c = RunController(
-            run, spec, services=EngineServices(completion=_echo(), teardown_runner=runner)
+            run,
+            spec,
+            services=EngineServices(completion=_echo(), teardown_runner=runner),
         )
         assert await c.run_to_completion(timeout=20) == RunStatus.COMPLETE
         assert [s[0] for s in seen] == ["npm ci", "make build"]
@@ -1438,7 +1534,9 @@ class TestWorkspaceProvisioningAtRunStart:
             return False, "ENOTFOUND registry.example"
 
         c = RunController(
-            run, spec, services=EngineServices(completion=_echo(), teardown_runner=runner)
+            run,
+            spec,
+            services=EngineServices(completion=_echo(), teardown_runner=runner),
         )
         assert await c.run_to_completion(timeout=20) == RunStatus.COMPLETE
         assert run.extra["workspace"]["setup"]["failed"], "the failure is recorded"
@@ -1455,10 +1553,13 @@ class TestWorkspaceProvisioningAtRunStart:
         kinds = [e.get("kind") for e in J.ledger(run.id)]
         assert J.WORKSPACE_PROVISIONED in kinds
 
-    async def test_a_provisioning_CRASH_costs_the_isolation_not_the_run(self, monkeypatch) -> None:
+    async def test_a_provisioning_CRASH_costs_the_isolation_not_the_run(
+        self, monkeypatch
+    ) -> None:
         """Guarded on everything except the deliberate refusal: a run that could not start because
-        a `mkdir` failed would be strictly worse than one that runs in the project workspace."""
-        from gideon.workflows import provisioning
+        a `mkdir` failed would be strictly worse than one that runs in the project workspace.
+        """
+        from gideon.automation.workflows import provisioning
 
         async def boom(*a, **k):
             raise RuntimeError("the filesystem is on fire")
@@ -1475,13 +1576,15 @@ class TestStaleProcessAdoption:
     """A process that cannot import the ENGINE must not render a verdict on a RUN.
 
     The measured incident: a gateway left running from a deleted worktree adopted a healthy
-    run, raised `cannot import name 'provisioning' from 'gideon.workflows'` from the
+    run, raised `cannot import name 'provisioning' from 'gideon.automation.workflows'` from the
     tick path, and wrote `failed` over work that completed successfully seconds later under a
     current process. The run's own journal showed the node finishing AFTER the recorded
     failure — the terminal write was a claim about the installation, not about the run.
     """
 
-    async def test_an_engine_ImportError_leaves_an_adopted_run_RUNNING(self, monkeypatch) -> None:
+    async def test_an_engine_ImportError_leaves_an_adopted_run_RUNNING(
+        self, monkeypatch
+    ) -> None:
         """Left RUNNING, the run is re-adopted by a process whose code can import. Written
         FAILED, the work is lost and the UI lies. `audit.STALE_RUNNING_SECS` is the existing
         backstop, so this is not an unbounded zombie.
@@ -1495,21 +1598,29 @@ class TestStaleProcessAdoption:
 
         async def stale_import(*a, **k):
             raise ImportError(
-                "cannot import name 'provisioning' from 'gideon.workflows'",
-                name="gideon.workflows",
+                "cannot import name 'provisioning' from 'gideon.automation.workflows'",
+                name="gideon.automation.workflows",
             )
 
         monkeypatch.setattr(c, "_prepare", stale_import)
         await c.start()
         await c.wait_for_terminal(timeout=20)
 
-        assert run.status is RunStatus.RUNNING, "a stale process must not decide the run"
-        assert not run.error_message, f"no failure may be recorded, got {run.error_message!r}"
-        assert store.get(run.id).status is RunStatus.RUNNING, "and it must not be persisted"
+        assert (
+            run.status is RunStatus.RUNNING
+        ), "a stale process must not decide the run"
+        assert (
+            not run.error_message
+        ), f"no failure may be recorded, got {run.error_message!r}"
+        assert (
+            store.get(run.id).status is RunStatus.RUNNING
+        ), "and it must not be persisted"
         kinds = [e.get("kind") for e in J.ledger(run.id)]
         assert J.RUN_FINISHED not in kinds, "no terminal record may enter the journal"
 
-    async def test_a_REAL_engine_crash_still_fails_the_run_loudly(self, monkeypatch) -> None:
+    async def test_a_REAL_engine_crash_still_fails_the_run_loudly(
+        self, monkeypatch
+    ) -> None:
         """The guard must not become a blanket swallow: a controller crash that IS about the
         run still terminally fails it, or a broken run waits forever looking busy."""
         run = _make_run(SEQ_SPEC)
@@ -1525,7 +1636,9 @@ class TestStaleProcessAdoption:
         assert run.status is RunStatus.FAILED
         assert "engine error" in run.error_message
 
-    async def test_a_THIRD_PARTY_ImportError_still_fails_the_run(self, monkeypatch) -> None:
+    async def test_a_THIRD_PARTY_ImportError_still_fails_the_run(
+        self, monkeypatch
+    ) -> None:
         """A dependency a node genuinely needs is a RUN failure, not an installation fault.
         Treating every ImportError as stale would convert real failures into runs that never
         finish — the discriminator is whose module is missing."""
@@ -1533,7 +1646,9 @@ class TestStaleProcessAdoption:
         c = RunController(run, SEQ_SPEC, services=EngineServices(completion=_echo()))
 
         async def missing_dep(*a, **k):
-            raise ModuleNotFoundError("No module named 'some_scraper_lib'", name="some_scraper_lib")
+            raise ModuleNotFoundError(
+                "No module named 'some_scraper_lib'", name="some_scraper_lib"
+            )
 
         monkeypatch.setattr(c, "_prepare", missing_dep)
         await c.start()
@@ -1547,28 +1662,27 @@ class TestEngineInstallFaultDiscriminator:
     """The predicate itself, at every shape that reaches it."""
 
     def test_it_recognizes_both_engine_import_shapes(self) -> None:
-        from gideon.workflows.controller import _is_engine_install_fault
+        from gideon.automation.workflows.controller import _is_engine_install_fault
 
-        # `from gideon.x import y` where y is gone — the measured incident's shape.
         assert _is_engine_install_fault(
-            ImportError("cannot import name 'provisioning'", name="gideon.workflows")
+            ImportError(
+                "cannot import name 'provisioning'", name="gideon.automation.workflows"
+            )
         )
-        # A whole engine module missing (a partially-deleted install).
         assert _is_engine_install_fault(
-            ModuleNotFoundError("No module named 'gideon.workflows'", name="gideon")
+            ModuleNotFoundError(
+                "No module named 'gideon.automation.workflows'", name="gideon"
+            )
         )
 
     def test_it_does_not_claim_anything_it_cannot_attribute(self) -> None:
-        from gideon.workflows.controller import _is_engine_install_fault
+        from gideon.automation.workflows.controller import _is_engine_install_fault
 
         assert not _is_engine_install_fault(
             ModuleNotFoundError("No module named 'httpx'", name="httpx")
         )
-        # A hand-raised ImportError carries no `name`: unattributable reads as "not ours",
-        # keeping the fail-loudly default rather than silently parking a run.
         assert not _is_engine_install_fault(ImportError("something went wrong"))
         assert not _is_engine_install_fault(RuntimeError("not an import problem"))
-        # A package that merely starts with the same letters is not the engine.
         assert not _is_engine_install_fault(
             ModuleNotFoundError("No module named 'gideonx'", name="gideonx")
         )

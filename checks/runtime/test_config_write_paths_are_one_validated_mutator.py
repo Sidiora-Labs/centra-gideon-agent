@@ -45,7 +45,7 @@ class _RecordingSel:
     def log_api_access(self, **kw) -> None:
         self.rows.append(kw)
 
-    def __getattr__(self, name):  # any other SEL call is a no-op here
+    def __getattr__(self, name):
         return lambda *a, **k: None
 
     def outcomes(self, operation: str) -> list[str]:
@@ -55,7 +55,7 @@ class _RecordingSel:
 @pytest.fixture
 def sel_rows(monkeypatch) -> _RecordingSel:
     rec = _RecordingSel()
-    import gideon.dashboard.handlers as handlers_pkg
+    import gideon.interfaces.dashboard.handlers as handlers_pkg
 
     monkeypatch.setattr(handlers_pkg, "sel", lambda: rec, raising=False)
     return rec
@@ -67,28 +67,18 @@ def cfg_file(tmp_path, monkeypatch):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     path = tmp_path / "config.json"
     path.write_text("{}", encoding="utf-8")
-    # `cli_config` does `from gideon.config.loader import config_path` at MODULE
-    # import, so patching the loader attribute alone leaves that binding pointing at the
-    # real one. It agreed by accident here (both resolve through GIDEON_HOME) until
-    # this file ran in an xdist worker alongside other config tests, where the CLI wrote
-    # somewhere else entirely and the assertion read a default back. Both bindings are
-    # patched, so which one a call site captured stops mattering.
     with (
-        patch("gideon.config.loader.config_path", return_value=path),
-        patch("gideon.cli_config.config_path", return_value=path),
+        patch("gideon.core.config.loader.config_path", return_value=path),
+        patch("gideon.interfaces.cli.config.config_path", return_value=path),
     ):
-        # Normalise ONCE up front. `AppConfig.load()` persists the full defaulted config
-        # (22 KB from `{}`), and every handler here loads before it does anything else — so
-        # without this the before/after snapshot would catch the LOADER's write and read as
-        # "the handler changed the file" on a request the handler refused.
-        from gideon.config.loader import AppConfig
+        from gideon.core.config.loader import AppConfig
 
         AppConfig.load()
         yield path
 
 
 def _memory_app() -> web.Application:
-    from gideon.dashboard.handlers import api_memory_settings
+    from gideon.interfaces.dashboard.handlers import api_memory_settings
 
     app = web.Application()
     app["state"] = type("_S", (), {"consolidator": None})()
@@ -97,7 +87,7 @@ def _memory_app() -> web.Application:
 
 
 def _config_app() -> web.Application:
-    from gideon.dashboard.handlers import (
+    from gideon.interfaces.dashboard.handlers import (
         api_gideon_config,
         api_gideon_config_patch,
     )
@@ -127,11 +117,10 @@ async def _unchanged(cfg_file, section: str, request_fn):
     return resp, json.dumps(_section(cfg_file, section), sort_keys=True) == before
 
 
-# ── PUT /api/memory/settings ──────────────────────────────────────────────
-
-
 @pytest.mark.asyncio
-async def test_a_truthy_STRING_no_longer_turns_a_memory_behaviour_on(cfg_file, sel_rows):
+async def test_a_truthy_STRING_no_longer_turns_a_memory_behaviour_on(
+    cfg_file, sel_rows
+):
     """The sharpest form: the caller asked for OFF and got ON.
 
     `bool("false")` is `True`. A client sending the string it read out of a form field
@@ -154,7 +143,9 @@ async def test_a_truthy_STRING_no_longer_turns_a_memory_behaviour_on(cfg_file, s
 async def test_a_real_boolean_still_writes(cfg_file, sel_rows):
     """Vacuity. Rejecting every value would satisfy the test above."""
     async with TestClient(TestServer(_memory_app())) as c:
-        assert (await c.put("/api/memory/settings", json={"active_recall": False})).status == 200
+        assert (
+            await c.put("/api/memory/settings", json={"active_recall": False})
+        ).status == 200
     assert _section(cfg_file, "memory")["active_recall"] is False
     assert sel_rows.outcomes("memory.settings.update") == ["success"]
 
@@ -169,7 +160,9 @@ async def test_the_unchanged_snapshot_can_actually_detect_a_change(cfg_file):
     """
     async with TestClient(TestServer(_memory_app())) as c:
         resp, unchanged = await _unchanged(
-            cfg_file, "memory", lambda: c.put("/api/memory/settings", json={"l1_manifest": False})
+            cfg_file,
+            "memory",
+            lambda: c.put("/api/memory/settings", json={"l1_manifest": False}),
         )
     assert resp.status == 200
     assert not unchanged, "_unchanged sees no difference after a write that DID land"
@@ -180,10 +173,14 @@ async def test_a_typod_field_name_is_a_400_not_a_silent_200(cfg_file, sel_rows):
     """`actve_recall` used to be dropped without a word, and the response was 200."""
     async with TestClient(TestServer(_memory_app())) as c:
         resp, unchanged = await _unchanged(
-            cfg_file, "memory", lambda: c.put("/api/memory/settings", json={"actve_recall": True})
+            cfg_file,
+            "memory",
+            lambda: c.put("/api/memory/settings", json={"actve_recall": True}),
         )
         assert resp.status == 400
-        assert "actve_recall" in (await resp.json())["error"], "the reply does not name the key"
+        assert (
+            "actve_recall" in (await resp.json())["error"]
+        ), "the reply does not name the key"
     assert unchanged
     assert sel_rows.outcomes("memory.settings.update") == ["denied"]
 
@@ -197,7 +194,9 @@ async def test_a_PATCH_only_field_is_refused_here_rather_than_ignored(cfg_file):
     """
     async with TestClient(TestServer(_memory_app())) as c:
         resp, unchanged = await _unchanged(
-            cfg_file, "memory", lambda: c.put("/api/memory/settings", json={"slot_size_cap": 1000})
+            cfg_file,
+            "memory",
+            lambda: c.put("/api/memory/settings", json={"slot_size_cap": 1000}),
         )
         assert resp.status == 400
         assert "slot_size_cap" in (await resp.json())["error"]
@@ -228,9 +227,13 @@ async def test_an_empty_body_is_refused_rather_than_reported_as_saved(cfg_file):
 @pytest.mark.asyncio
 async def test_writing_the_vault_mode_still_prunes_the_retired_flag(cfg_file):
     """Behaviour the rewrite had to preserve: config.json must not keep two answers."""
-    cfg_file.write_text(json.dumps({"memory": {"vault_enabled": True}}), encoding="utf-8")
+    cfg_file.write_text(
+        json.dumps({"memory": {"vault_enabled": True}}), encoding="utf-8"
+    )
     async with TestClient(TestServer(_memory_app())) as c:
-        assert (await c.put("/api/memory/settings", json={"vault_mode": "mirror"})).status == 200
+        assert (
+            await c.put("/api/memory/settings", json={"vault_mode": "mirror"})
+        ).status == 200
     mem = _section(cfg_file, "memory")
     assert mem["vault_mode"] == "mirror" and "vault_enabled" not in mem
 
@@ -239,11 +242,10 @@ async def test_writing_the_vault_mode_still_prunes_the_retired_flag(cfg_file):
 async def test_an_empty_vault_path_still_normalises_to_the_default(cfg_file):
     """The `sanitize` half of the spec: the file must match what `load()` reads back."""
     async with TestClient(TestServer(_memory_app())) as c:
-        assert (await c.put("/api/memory/settings", json={"vault_path": "  "})).status == 200
+        assert (
+            await c.put("/api/memory/settings", json={"vault_path": "  "})
+        ).status == 200
     assert _section(cfg_file, "memory")["vault_path"] == "memory-vault"
-
-
-# ── PUT /api/config/gideon ──────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -270,7 +272,9 @@ async def test_a_valid_agent_put_still_writes(cfg_file):
         assert (
             await c.put("/api/config/gideon", json={"agent": {"max_subagents": 4}})
         ).status == 200
-    assert json.loads(cfg_file.read_text(encoding="utf-8"))["agent"]["max_subagents"] == 4
+    assert (
+        json.loads(cfg_file.read_text(encoding="utf-8"))["agent"]["max_subagents"] == 4
+    )
 
 
 @pytest.mark.asyncio
@@ -293,16 +297,15 @@ async def test_the_two_endpoints_agree_on_the_same_field(cfg_file):
     assert "max_subagents" in put_err, "the PUT does not say which field it refused"
 
 
-# ── gideon config set ───────────────────────────────────────────────
-
-
 def _config_set(key: str, value: str):
     """Drive the real CLI entry point, not a re-implementation of its rules."""
     import argparse
 
-    from gideon.cli_config import _config_cmd
+    from gideon.interfaces.cli.config import _config_cmd
 
-    return _config_cmd(argparse.Namespace(config_action="set", key=key, value=value, file=None))
+    return _config_cmd(
+        argparse.Namespace(config_action="set", key=key, value=value, file=None)
+    )
 
 
 def test_the_cli_cannot_write_past_the_bounds_the_api_enforces(cfg_file):
@@ -336,25 +339,26 @@ def test_the_cli_still_writes_a_key_the_allowlist_does_not_declare(cfg_file):
     undeclared key keeps today's behaviour. Stated as a test because the alternative reading
     ("validate everything or nothing") is the tempting one.
     """
-    from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+    from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
-    assert "session.timeout_secs" in _EDITABLE_CONFIG or True  # documented either way
+    assert "session.timeout_secs" in _EDITABLE_CONFIG or True
     _config_set("auto_update", "true")
     assert json.loads(cfg_file.read_text(encoding="utf-8"))["auto_update"] is True
-
-
-# ── The registry is the single source ─────────────────────────────────────
 
 
 def test_every_field_the_memory_put_writes_has_a_declared_spec():
     """The consolidation's structural claim: this endpoint declares WHICH fields, not what
     a valid value is. A field without a spec would `KeyError` at request time."""
-    from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
-    from gideon.dashboard.handlers.memory import _SETTINGS_FIELDS
+    from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
+    from gideon.interfaces.dashboard.handlers.memory import _SETTINGS_FIELDS
 
-    assert _SETTINGS_FIELDS, "the writable set is empty — this test would pass vacuously"
+    assert (
+        _SETTINGS_FIELDS
+    ), "the writable set is empty — this test would pass vacuously"
     missing = [f for f in _SETTINGS_FIELDS if f"memory.{f}" not in _EDITABLE_CONFIG]
-    assert not missing, f"writable memory fields with no _EDITABLE_CONFIG spec: {missing}"
+    assert (
+        not missing
+    ), f"writable memory fields with no _EDITABLE_CONFIG spec: {missing}"
 
 
 def test_no_write_path_hand_rolls_a_boolean_again():
@@ -368,9 +372,13 @@ def test_no_write_path_hand_rolls_a_boolean_again():
     import re
     from pathlib import Path
 
-    root = Path(__file__).resolve().parent.parent / "src/gideon"
+    root = Path(__file__).resolve().parent.parent.parent / "runtime/gideon"
     offenders = {}
-    for rel in ("dashboard/handlers/memory.py", "dashboard/handlers/core.py", "cli_config.py"):
+    for rel in (
+        "interfaces/dashboard/handlers/memory.py",
+        "interfaces/dashboard/handlers/core.py",
+        "interfaces/cli/config.py",
+    ):
         code = "\n".join(
             ln
             for ln in (root / rel).read_text(encoding="utf-8").splitlines()
@@ -379,7 +387,9 @@ def test_no_write_path_hand_rolls_a_boolean_again():
         hits = re.findall(r"bool\(\s*(?:body|agent_settings)\[", code)
         if hits:
             offenders[rel] = len(hits)
-    assert not offenders, f"a JSON value is being coerced to bool instead of validated: {offenders}"
+    assert (
+        not offenders
+    ), f"a JSON value is being coerced to bool instead of validated: {offenders}"
 
 
 def test_the_shared_validator_rejects_a_bool_for_a_numeric_field():
@@ -388,14 +398,18 @@ def test_the_shared_validator_rejects_a_bool_for_a_numeric_field():
     The PATCH path allowed `true` for an int field; the PUT it now shares code with did
     not. This pins the stricter answer for both.
     """
-    from gideon.config.edit_spec import ConfigValueError, coerce_edit_value
+    from gideon.core.config.edit_spec import ConfigValueError, coerce_edit_value
 
     with pytest.raises(ConfigValueError):
-        coerce_edit_value("agent.max_subagents", True, {"type": "int", "min": 0, "max": 16})
-    assert coerce_edit_value("agent.max_subagents", 4, {"type": "int", "min": 0, "max": 16}) == 4
-
-
-# ── both write paths serialise under ONE lock (#754) ─────────────────────────
+        coerce_edit_value(
+            "agent.max_subagents", True, {"type": "int", "min": 0, "max": 16}
+        )
+    assert (
+        coerce_edit_value(
+            "agent.max_subagents", 4, {"type": "int", "min": 0, "max": 16}
+        )
+        == 4
+    )
 
 
 @pytest.mark.asyncio
@@ -414,19 +428,17 @@ async def test_put_waits_on_the_same_lock_patch_holds(cfg_file, sel_rows):
     """
     import asyncio
 
-    from gideon.dashboard.handlers.agents import _get_config_lock
+    from gideon.interfaces.dashboard.handlers.agents import _get_config_lock
 
     async with TestClient(TestServer(_config_app())) as client:
         async with _get_config_lock():
             task = asyncio.ensure_future(
                 client.put("/api/config/gideon", json={"agent": {"max_subagents": 4}})
             )
-            # Give the handler every chance to reach the lock and get stuck on it.
             with pytest.raises(asyncio.TimeoutError):
                 await asyncio.wait_for(asyncio.shield(task), timeout=0.5)
             assert not task.done(), "PUT did not wait on the lock PATCH holds"
 
-        # Released — the same request now completes and applies.
         resp = await task
         assert resp.status == 200, await resp.text()
         assert _section(cfg_file, "agent")["max_subagents"] == 4
@@ -443,7 +455,10 @@ async def test_a_put_still_applies_when_nothing_holds_the_lock(cfg_file, sel_row
 
     assert resp.status == 200, await resp.text()
     assert _section(cfg_file, "agent")["subagent_max_turns"] == 7
-    assert any(r["operation"] == "config.update" and r["outcome"] == "ok" for r in sel_rows.rows)
+    assert any(
+        r["operation"] == "config.update" and r["outcome"] == "ok"
+        for r in sel_rows.rows
+    )
 
 
 @pytest.mark.asyncio
@@ -453,7 +468,7 @@ async def test_a_refused_put_does_not_hold_the_lock(cfg_file, sel_rows):
     PUT while the lock is held — it must answer 400 without waiting for the holder."""
     import asyncio
 
-    from gideon.dashboard.handlers.agents import _get_config_lock
+    from gideon.interfaces.dashboard.handlers.agents import _get_config_lock
 
     async with TestClient(TestServer(_config_app())) as client:
         async with _get_config_lock():
@@ -461,6 +476,5 @@ async def test_a_refused_put_does_not_hold_the_lock(cfg_file, sel_rows):
                 client.put("/api/config/gideon", json={"agent": {"nonsense": 1}}),
                 timeout=2.0,
             )
-            # Read the body inside the client's lifetime — `resp.json()` needs the connection.
             assert resp.status == 400
             assert "nonsense" in (await resp.json())["error"]

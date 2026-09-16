@@ -7,7 +7,7 @@ catches — and, just as importantly, that it never issues a PASS.
 
 import pytest
 
-from gideon.workflows.judge_actors import (
+from gideon.automation.workflows.judge_actors import (
     JUDGE_EVIDENCE_ROLES,
     TERMINAL_ACTORS,
     WORKER_ALLOWED,
@@ -19,8 +19,8 @@ from gideon.workflows.judge_actors import (
     resolve_transition,
     validate_judge_model,
 )
-from gideon.workflows.judge_contract import FallbackCheck, Isolation
-from gideon.workflows.judge_pretier import (
+from gideon.automation.workflows.judge_contract import FallbackCheck, Isolation
+from gideon.automation.workflows.judge_pretier import (
     FAILURE_CLASSES,
     MIN_SUBSTANCE_CHARS,
     check_existence,
@@ -31,8 +31,6 @@ from gideon.workflows.judge_pretier import (
     run_fallback_check,
     run_pretier,
 )
-
-# ── the free rules ──
 
 
 def test_empty_output_is_rejected_without_a_model_call():
@@ -90,7 +88,12 @@ def test_a_give_up_outranks_a_tool_error():
 
 @pytest.mark.parametrize(
     "stub",
-    ["raise NotImplementedError", "TODO: implement the parser", "FIXME", "pass  # stub"],
+    [
+        "raise NotImplementedError",
+        "TODO: implement the parser",
+        "FIXME",
+        "pass  # stub",
+    ],
 )
 def test_stub_markers_are_caught(stub):
     """Work replaced by a promise to do the work."""
@@ -103,10 +106,7 @@ def test_clean_output_survives_every_rule():
         artifacts=2,
     )
     assert not result.rejected
-    assert result.should_invoke_judge  # only now is the model worth its cost
-
-
-# ── structural checks ──
+    assert result.should_invoke_judge
 
 
 def test_a_referenced_path_that_does_not_exist_is_a_rejection(tmp_path):
@@ -124,9 +124,6 @@ def test_existing_paths_pass(tmp_path):
 def test_no_referenced_paths_is_not_a_failure():
     assert not check_structural([]).rejected
     assert not check_structural(["", None]).rejected  # type: ignore[list-item]
-
-
-# ── the existence gate ──
 
 
 def test_zero_of_everything_is_rejected():
@@ -149,9 +146,6 @@ def test_the_existence_gate_can_be_disabled():
     assert not result.rejected
 
 
-# ── short-circuiting and auditability ──
-
-
 def test_the_pretier_short_circuits_at_the_first_rejection():
     """Once the work is provably unfinished, further checks cost time and change
     nothing."""
@@ -167,17 +161,27 @@ def test_the_checks_run_are_recorded_for_audit():
 
 
 def test_a_clean_pass_records_every_check():
-    result = run_pretier(worker_output="Real substantial work was completed here.", artifacts=1)
-    for expected in ("mechanical", "failure_patterns", "stubs", "structural", "existence"):
+    result = run_pretier(
+        worker_output="Real substantial work was completed here.", artifacts=1
+    )
+    for expected in (
+        "mechanical",
+        "failure_patterns",
+        "stubs",
+        "structural",
+        "existence",
+    ):
         assert expected in result.checks_run
 
 
 def test_the_pretier_never_issues_a_pass():
     """These rules can prove work is UNFINISHED; they cannot prove it is good. A cheap
     PASS would recreate self-approval with extra steps."""
-    result = run_pretier(worker_output="Everything is perfect and complete.", artifacts=5)
+    result = run_pretier(
+        worker_output="Everything is perfect and complete.", artifacts=5
+    )
     assert not result.rejected
-    assert result.should_invoke_judge  # deferred to the judge, never approved here
+    assert result.should_invoke_judge
 
 
 def test_every_failure_class_is_declared():
@@ -198,18 +202,21 @@ def test_every_failure_class_is_declared():
     assert len(produced) >= 4
 
 
-# ── the deterministic fallback ──
-
-
 @pytest.mark.asyncio
 async def test_artifact_exists_is_evaluated(tmp_path):
     target = tmp_path / "out.txt"
     assert (
-        await run_fallback_check(FallbackCheck.ARTIFACT_EXISTS, artifact_path=str(target)) is False
+        await run_fallback_check(
+            FallbackCheck.ARTIFACT_EXISTS, artifact_path=str(target)
+        )
+        is False
     )
     target.write_text("x")
     assert (
-        await run_fallback_check(FallbackCheck.ARTIFACT_EXISTS, artifact_path=str(target)) is True
+        await run_fallback_check(
+            FallbackCheck.ARTIFACT_EXISTS, artifact_path=str(target)
+        )
+        is True
     )
 
 
@@ -217,7 +224,10 @@ async def test_artifact_exists_is_evaluated(tmp_path):
 async def test_a_check_with_no_input_is_none_not_false():
     """None means "could not run". Collapsing it into False would turn an
     unconfigured check into a failing deliverable."""
-    assert await run_fallback_check(FallbackCheck.ARTIFACT_EXISTS, artifact_path="") is None
+    assert (
+        await run_fallback_check(FallbackCheck.ARTIFACT_EXISTS, artifact_path="")
+        is None
+    )
     assert await run_fallback_check(FallbackCheck.COMMAND_EXIT_CODE, command="") is None
 
 
@@ -230,9 +240,6 @@ async def test_diff_nonempty_reads_the_line_count():
 @pytest.mark.asyncio
 async def test_an_unknown_check_is_none():
     assert await run_fallback_check("not_a_check") is None
-
-
-# ── the actor invariant ──
 
 
 def test_the_worker_may_never_complete_its_own_work():
@@ -282,18 +289,19 @@ def test_the_worker_may_not_set_other_terminal_states():
         assert not check_transition(Actor.WORKER, state).allowed
 
 
-# ── judge isolation ──
-
-
 def test_a_judge_always_gets_a_fresh_session():
     """Asking a model to disagree with its own reasoning trace is something it is
     measurably poor at — and the trace is right there in its context."""
     for mode in (Isolation.FRESH, Isolation.CROSS_MODEL):
-        assert plan_judge_session(isolation=mode, worker_session_key="s-1").fresh_session
+        assert plan_judge_session(
+            isolation=mode, worker_session_key="s-1"
+        ).fresh_session
 
 
 def test_cross_model_requires_a_different_family():
-    spec = plan_judge_session(isolation=Isolation.CROSS_MODEL, worker_model="claude-opus-5")
+    spec = plan_judge_session(
+        isolation=Isolation.CROSS_MODEL, worker_model="claude-opus-5"
+    )
     assert spec.require_different_family
     assert spec.avoid_family == "claude"
 
@@ -301,19 +309,25 @@ def test_cross_model_requires_a_different_family():
 def test_a_same_family_judge_is_refused_under_cross_model():
     """Same-family judges share the blind spots they are supposed to catch — an
     "independent" same-family judge is a control wearing a costume."""
-    spec = plan_judge_session(isolation=Isolation.CROSS_MODEL, worker_model="claude-opus-5")
+    spec = plan_judge_session(
+        isolation=Isolation.CROSS_MODEL, worker_model="claude-opus-5"
+    )
     ok, reason = validate_judge_model(spec, "claude-sonnet-5")
     assert not ok and "different family" in reason
 
 
 def test_a_different_family_judge_is_accepted():
-    spec = plan_judge_session(isolation=Isolation.CROSS_MODEL, worker_model="claude-opus-5")
+    spec = plan_judge_session(
+        isolation=Isolation.CROSS_MODEL, worker_model="claude-opus-5"
+    )
     assert validate_judge_model(spec, "gpt-5")[0]
 
 
 def test_an_undeterminable_family_is_refused_under_cross_model():
     """Silence about the family is not evidence of difference."""
-    spec = plan_judge_session(isolation=Isolation.CROSS_MODEL, worker_model="claude-opus-5")
+    spec = plan_judge_session(
+        isolation=Isolation.CROSS_MODEL, worker_model="claude-opus-5"
+    )
     assert not validate_judge_model(spec, "")[0]
 
 
@@ -326,12 +340,15 @@ def test_an_unknown_isolation_value_falls_back_to_fresh():
     assert plan_judge_session(isolation="nonsense").fresh_session
 
 
-# ── provenance blinding and evidence assembly ──
-
-
 @pytest.mark.parametrize(
     "marker",
-    ["Attempt 4 of 5", "retry #3", "iteration 7 of 8", "cycle 2", "this is the final attempt"],
+    [
+        "Attempt 4 of 5",
+        "retry #3",
+        "iteration 7 of 8",
+        "cycle 2",
+        "this is the final attempt",
+    ],
 )
 def test_provenance_markers_are_stripped(marker):
     """ "Attempt 4 of 5" tells a judge how much patience is left, which is exactly the

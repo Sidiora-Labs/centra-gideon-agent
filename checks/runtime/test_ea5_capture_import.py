@@ -37,7 +37,7 @@ from typing import Any
 
 import pytest
 
-from gideon.inbound.capture_import import (
+from gideon.integrations.inbound.capture_import import (
     FORMATS,
     adapt_json,
     adapt_jsonl,
@@ -48,8 +48,6 @@ from gideon.inbound.capture_import import (
     load_ledger,
 )
 
-# Every field §7.2 declares. Asserted as a set on every record so a future
-# adapter that forgets one cannot pass by omitting the key.
 RECORD_FIELDS = {
     "ts",
     "dialect",
@@ -98,9 +96,6 @@ def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
-# ── Fixture bodies ──
-
-
 def _claude_code_jsonl() -> str:
     """A Claude Code session JSONL built from what ``adapt_jsonl`` reads.
 
@@ -114,7 +109,10 @@ def _claude_code_jsonl() -> str:
             {
                 "type": "user",
                 "timestamp": "2026-08-01T10:00:00Z",
-                "message": {"role": "user", "content": "Summarise the README then note it"},
+                "message": {
+                    "role": "user",
+                    "content": "Summarise the README then note it",
+                },
             },
             {
                 "type": "assistant",
@@ -282,9 +280,6 @@ def _sse_dump() -> str:
     return "\n".join(lines)
 
 
-# ── 1. One test per format: every §7.2 field filled, or absent for a named reason ──
-
-
 def test_jsonl_adapter_fills_the_722_record(tmp_path: Path) -> None:
     """Claude Code session JSONL → one record per assistant turn.
 
@@ -317,7 +312,6 @@ def test_jsonl_adapter_fills_the_722_record(tmp_path: Path) -> None:
     assert first["tokens"] == {"input": 120, "output": 45}
     assert first["read_paths"] == ["/repo/README.md"]
     assert first["wrote_paths"] == []
-    # ok is True because a later line's tool_result said is_error: False.
     assert first["tool_calls"] == [
         {"name": "Read", "args_clipped": '{"file_path": "/repo/README.md"}', "ok": True}
     ]
@@ -326,8 +320,6 @@ def test_jsonl_adapter_fills_the_722_record(tmp_path: Path) -> None:
     assert second["wrote_paths"] == ["/repo/NOTES.md"]
     assert second["read_paths"] == []
     assert second["tokens"] == {"input": 200, "output": 12}
-    # No tool_result followed, so ok stays None. None and False are different
-    # claims: defaulting to False would invent a failure out of a truncated log.
     assert second["tool_calls"][0]["ok"] is None
     assert second["prompt_digest"] is None
     assert second["latency_ms"] is None
@@ -365,8 +357,6 @@ def test_json_adapter_fills_the_722_record(tmp_path: Path) -> None:
     assert full["response_digest"] == "Patching it."
     assert full["tokens"] == {"input": 88, "output": 30}
     assert full["latency_ms"] == 1420
-    # arguments arrive as a JSON *string*; it is decoded only for path
-    # attribution, and args_clipped keeps the wire form.
     assert full["tool_calls"] == [
         {
             "name": "edit_file",
@@ -414,7 +404,6 @@ def test_sse_adapter_fills_the_722_record(tmp_path: Path) -> None:
     assert openai_stream["dialect"] == "openai"
     assert openai_stream["model_requested"] == "gpt-5-mini"
     assert openai_stream["ts"] == 1780000000
-    # Deltas concatenated, not listed: "Hel" + "lo".
     assert openai_stream["response_digest"] == "Hello"
     assert openai_stream["tokens"] == {"input": 12, "output": 7}
     assert openai_stream["tool_calls"] == [
@@ -426,7 +415,6 @@ def test_sse_adapter_fills_the_722_record(tmp_path: Path) -> None:
     assert anthropic_stream["dialect"] == "anthropic"
     assert anthropic_stream["model_requested"] == "claude-opus-4-6"
     assert anthropic_stream["response_digest"] == "Sure."
-    # input_tokens from message_start, output_tokens from message_delta.
     assert anthropic_stream["tokens"] == {"input": 40, "output": 9}
     assert anthropic_stream["ts"] is None
     assert anthropic_stream["tool_calls"] == []
@@ -441,9 +429,6 @@ def test_every_declared_format_has_an_adapter() -> None:
         assert "unknown format" not in " ".join(report["reasons"])
 
 
-# ── 2. Idempotence by content hash, with a vacuity floor ──
-
-
 def test_reimport_is_a_noop_and_a_different_file_still_imports(tmp_path: Path) -> None:
     """N then 0 on the same file — and the vacuity floor that makes "0" mean
     something.
@@ -456,31 +441,34 @@ def test_reimport_is_a_noop_and_a_different_file_still_imports(tmp_path: Path) -
     first_file.write_text(_claude_code_jsonl(), encoding="utf-8")
     store = FakeStore()
 
-    initial = import_capture_file(first_file, fmt="jsonl", source="claude-code", stage=store)
+    initial = import_capture_file(
+        first_file, fmt="jsonl", source="claude-code", stage=store
+    )
     assert initial["imported"] == 2
     assert initial["duplicate"] is False
 
-    repeat = import_capture_file(first_file, fmt="jsonl", source="claude-code", stage=store)
+    repeat = import_capture_file(
+        first_file, fmt="jsonl", source="claude-code", stage=store
+    )
     assert repeat["imported"] == 0
     assert repeat["duplicate"] is True
     assert repeat["skipped"] == 0
     assert any("already imported" in r for r in repeat["reasons"]), repeat["reasons"]
-    # The store was not called a second time: a no-op re-import must not even
-    # reach the redact/fence/persist pipeline.
     assert len(store.calls) == 1
 
-    # Vacuity floor — a DIFFERENT file with the same record count imports.
     other = tmp_path / "b.jsonl"
     other.write_text(
-        _claude_code_jsonl().replace("/repo/README.md", "/repo/CHANGELOG.md"), encoding="utf-8"
+        _claude_code_jsonl().replace("/repo/README.md", "/repo/CHANGELOG.md"),
+        encoding="utf-8",
     )
     fresh = import_capture_file(other, fmt="jsonl", source="claude-code", stage=store)
-    assert fresh["imported"] == 2, "a distinct file must import, or '0' above proves nothing"
+    assert (
+        fresh["imported"] == 2
+    ), "a distinct file must import, or '0' above proves nothing"
     assert fresh["duplicate"] is False
     assert fresh["content_hash"] != initial["content_hash"]
     assert len(store.calls) == 2
 
-    # Both hashes are in the ledger, under the temp home.
     ledger = load_ledger(tmp_path)
     assert set(ledger) == {initial["content_hash"], fresh["content_hash"]}
     assert (tmp_path / "capture" / "import_ledger.json").exists()
@@ -497,8 +485,12 @@ def test_content_hash_is_exact_not_normalised(tmp_path: Path) -> None:
     """
     lower = tmp_path / "lower.jsonl"
     upper = tmp_path / "upper.jsonl"
-    lower.write_text('{"type": "assistant", "message": {"content": "ok"}}\n', encoding="utf-8")
-    upper.write_text('{"type": "assistant", "message": {"content": "OK"}}\n', encoding="utf-8")
+    lower.write_text(
+        '{"type": "assistant", "message": {"content": "ok"}}\n', encoding="utf-8"
+    )
+    upper.write_text(
+        '{"type": "assistant", "message": {"content": "OK"}}\n', encoding="utf-8"
+    )
     assert file_content_hash(lower) != file_content_hash(upper)
 
     store = FakeStore()
@@ -525,9 +517,6 @@ def test_ledger_records_nothing_when_nothing_staged(tmp_path: Path) -> None:
     assert again["duplicate"] is False
 
 
-# ── 3. Malformed lines are skipped and counted, never fatal ──
-
-
 def test_malformed_lines_are_skipped_counted_and_explained(tmp_path: Path) -> None:
     """2 good lines + 3 bad ones → imported 2, skipped 3, three reasons, no raise.
 
@@ -541,12 +530,12 @@ def test_malformed_lines_are_skipped_counted_and_explained(tmp_path: Path) -> No
     log.write_text(
         "\n".join(
             [
-                json.dumps(prompt),  # a user turn: folded in, not a skip
-                json.dumps(good),  # record 1
-                "this line is not json at all",  # skip 1
-                "[1, 2, 3]",  # skip 2
-                json.dumps(good),  # record 2
-                json.dumps({"type": "system", "subtype": "init"}),  # skip 3
+                json.dumps(prompt),
+                json.dumps(good),
+                "this line is not json at all",
+                "[1, 2, 3]",
+                json.dumps(good),
+                json.dumps({"type": "system", "subtype": "init"}),
             ]
         ),
         encoding="utf-8",
@@ -560,15 +549,13 @@ def test_malformed_lines_are_skipped_counted_and_explained(tmp_path: Path) -> No
     assert len(report["reasons"]) == 3, report["reasons"]
     joined = " | ".join(report["reasons"])
 
-    # Each reason names the defect AND the line, so a 40k-line export is
-    # navigable.
     assert "line 3: invalid JSON" in joined, joined
     assert "line 4" in joined and "expected a JSON object, got list" in joined, joined
     assert "line 6" in joined and "'system'" in joined, joined
     assert "carries no request/response turn" in joined, joined
-    # Not a bag of bare "error" strings.
-    assert not any(r.strip().lower() in {"error", "skipped", "bad line"} for r in report["reasons"])
-    # The good records still reached the store — partial import, not abort.
+    assert not any(
+        r.strip().lower() in {"error", "skipped", "bad line"} for r in report["reasons"]
+    )
     assert len(store.records) == 2
 
 
@@ -587,8 +574,8 @@ def test_store_reported_losses_merge_into_the_report(tmp_path: Path) -> None:
 
     report = import_capture_file(log, fmt="jsonl", stage=store)
 
-    assert report["imported"] == 1  # 2 parsed, store rejected 1
-    assert report["skipped"] == 2  # 1 bad line + 1 store rejection
+    assert report["imported"] == 1
+    assert report["skipped"] == 2
     assert any("invalid JSON" in r for r in report["reasons"])
     assert any("redaction" in r for r in report["reasons"])
 
@@ -618,13 +605,10 @@ def test_adapters_never_raise_on_hostile_content() -> None:
     ]
     for adapter in (adapt_jsonl, adapt_json, adapt_sse):
         for blob in hostile:
-            result = adapter(blob)  # must not raise
+            result = adapter(blob)
             assert result.skipped == len(result.reasons) or result.skipped >= 0
             for record in result.records:
                 assert set(record) == RECORD_FIELDS
-
-
-# ── 4. Empty file, and a file that is not the declared format ──
 
 
 def test_empty_file_reports_rather_than_raising(tmp_path: Path) -> None:
@@ -651,12 +635,8 @@ def test_empty_file_reports_rather_than_raising(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("fmt", "body", "expected"),
     [
-        # A JSONL file declared as json: whole-file parse fails, and the reason
-        # names the flag that would have worked.
         ("json", _claude_code_jsonl(), "--format jsonl"),
-        # A JSON array declared as sse: no SSE field lines anywhere.
         ("sse", _openai_request_log(), "not an SSE field line"),
-        # An SSE dump declared as jsonl: 'data: {...}' is not JSON.
         ("jsonl", _sse_dump(), "invalid JSON"),
     ],
 )
@@ -676,8 +656,12 @@ def test_wrong_declared_format_reports_rather_than_raising(
     assert load_ledger(tmp_path) == {}
 
 
-def test_unreadable_path_and_unknown_format_report_rather_than_raising(tmp_path: Path) -> None:
-    missing = import_capture_file(tmp_path / "nope.jsonl", fmt="jsonl", stage=FakeStore())
+def test_unreadable_path_and_unknown_format_report_rather_than_raising(
+    tmp_path: Path,
+) -> None:
+    missing = import_capture_file(
+        tmp_path / "nope.jsonl", fmt="jsonl", stage=FakeStore()
+    )
     assert missing["imported"] == 0
     assert any("cannot read" in r for r in missing["reasons"]), missing["reasons"]
 
@@ -686,7 +670,6 @@ def test_unreadable_path_and_unknown_format_report_rather_than_raising(tmp_path:
     bogus = import_capture_file(log, fmt="yaml", stage=FakeStore())
     assert bogus["imported"] == 0
     assert any("unknown format 'yaml'" in r for r in bogus["reasons"]), bogus["reasons"]
-    # The reason names the valid set so a typo is self-correcting.
     assert all(f in " ".join(bogus["reasons"]) for f in FORMATS)
 
 
@@ -702,9 +685,6 @@ def test_corrupt_ledger_fails_open(tmp_path: Path) -> None:
     assert import_capture_file(log, fmt="jsonl", stage=FakeStore())["imported"] == 2
 
 
-# ── 5. The CLI path, end to end ──
-
-
 def _parse_argv(argv: list[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """Drive the real ``cli.main`` parser and capture the namespace it built.
 
@@ -712,7 +692,7 @@ def _parse_argv(argv: list[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     Namespace built by hand would pass even if the subcommand were never
     registered, or if ``--format``'s dest were misspelled.
     """
-    import gideon.cli as cli
+    import gideon.interfaces.cli.main as cli
 
     seen: dict[str, Any] = {}
 
@@ -762,7 +742,6 @@ def test_cli_registers_capture_import_and_reports_counts(
     assert "claude-code" in out, out
     assert "invalid JSON" in out, out
     assert store.calls[-1][1] == "claude-code"
-    # The CLI wrote the ledger under the temp home, not the real one.
     assert list(load_ledger(tmp_path))
 
 
@@ -774,7 +753,16 @@ def test_cli_json_output_and_exit_codes(
     log.write_text(_claude_code_jsonl(), encoding="utf-8")
 
     args = _parse_argv(
-        ["capture", "import", str(log), "--format", "jsonl", "--source", "cc", "--json"],
+        [
+            "capture",
+            "import",
+            str(log),
+            "--format",
+            "jsonl",
+            "--source",
+            "cc",
+            "--json",
+        ],
         monkeypatch,
         tmp_path,
     )
@@ -788,20 +776,18 @@ def test_cli_json_output_and_exit_codes(
     assert payload["reasons"] == []
     assert payload["source"] == "cc"
 
-    # A duplicate re-import is the requested outcome: exit 0, nothing staged.
     assert capture_cmd(args, stage=store) == 0
     repeat = json.loads(capsys.readouterr().out)
     assert repeat["duplicate"] is True
     assert repeat["imported"] == 0
     assert len(store.calls) == 1
 
-    # Nothing staged and not a duplicate is a failure a script can gate on.
     bad = tmp_path / "bad.jsonl"
     bad.write_text("not json\n", encoding="utf-8")
     bad_args = _parse_argv(
         ["capture", "import", str(bad), "--format", "jsonl"], monkeypatch, tmp_path
     )
-    assert bad_args.source == "import"  # the default label
+    assert bad_args.source == "import"
     assert capture_cmd(bad_args, stage=FakeStore()) == 1
     assert "invalid JSON" in capsys.readouterr().out
 
@@ -814,19 +800,6 @@ def test_cli_bare_capture_prints_usage(
     out = capsys.readouterr().out
     assert "capture import" in out
     assert "jsonl|json|sse" in out
-
-
-# ── 6. The HTTP half — POST /capture/import ──
-#
-# The route's whole job is to reach the SAME `import_capture_file` the CLI reaches, under
-# the SAME admission gate the two `/capture/v1/*` dialects use. So these tests measure two
-# things and nothing else: that the shared gate and the shared pipeline are genuinely on
-# this path (not restated beside it), and that the one thing the route does NOT inherit
-# from the CLI — an any-path file argument — is fenced.
-#
-# The REAL `capture_store` runs here, deliberately, unlike sections 1-5 which inject
-# `FakeStore`. A doubled store would let the route bypass redact→fence and still pass: the
-# fence assertion below is only worth writing against the real pipeline.
 
 
 @pytest.fixture
@@ -847,8 +820,11 @@ def _no_surface_tokens(monkeypatch: pytest.MonkeyPatch):
 
 def _enable_capture(monkeypatch: pytest.MonkeyPatch, *, enabled: bool = True) -> None:
     """Point `AppConfig.load()` at an external-access config without writing config.json."""
-    from gideon.config.external_access import CaptureSurfaceConfig, ExternalAccessConfig
-    from gideon.config.loader import AppConfig
+    from gideon.core.config.external_access import (
+        CaptureSurfaceConfig,
+        ExternalAccessConfig,
+    )
+    from gideon.core.config.loader import AppConfig
 
     cfg = AppConfig()
     cfg.external_access = ExternalAccessConfig(
@@ -861,7 +837,7 @@ async def _import_client():
     from aiohttp import web
     from aiohttp.test_utils import TestClient, TestServer
 
-    from gideon.inbound import capture_proxy
+    from gideon.integrations.inbound import capture_proxy
 
     app = web.Application()
     capture_proxy.register_routes(app)
@@ -871,13 +847,15 @@ async def _import_client():
 
 
 async def _post_import(client, token: str, **body):
-    from gideon.inbound.capture_proxy import ROUTE_IMPORT
+    from gideon.integrations.inbound.capture_proxy import ROUTE_IMPORT
 
-    return await client.post(ROUTE_IMPORT, json=body, headers={"Authorization": f"Bearer {token}"})
+    return await client.post(
+        ROUTE_IMPORT, json=body, headers={"Authorization": f"Bearer {token}"}
+    )
 
 
 def _drop(home: Path, name: str, text: str) -> Path:
-    from gideon.inbound.capture_import import imports_dir
+    from gideon.integrations.inbound.capture_import import imports_dir
 
     path = imports_dir(home) / name
     path.write_text(text, encoding="utf-8")
@@ -895,8 +873,8 @@ async def test_the_route_stages_through_the_same_pipeline_and_fences_what_it_sta
     reached past `stage_records` into its own writer would satisfy every count in the
     report and still persist raw prompts.
     """
-    from gideon.inbound import auth, capture_store
-    from gideon.security import UNTRUSTED_CLOSE, UNTRUSTED_OPEN
+    from gideon.integrations.inbound import auth, capture_store
+    from gideon.security.security import UNTRUSTED_CLOSE, UNTRUSTED_OPEN
 
     _enable_capture(monkeypatch)
     _drop(tmp_path, "session.jsonl", _claude_code_jsonl())
@@ -910,7 +888,6 @@ async def test_the_route_stages_through_the_same_pipeline_and_fences_what_it_sta
     finally:
         await client.close()
 
-    # The CLI's report shape, key for key — one dialect, not two.
     assert report["imported"] == 2, report
     assert report["skipped"] == 0
     assert report["duplicate"] is False
@@ -920,7 +897,9 @@ async def test_the_route_stages_through_the_same_pipeline_and_fences_what_it_sta
 
     sidecars = list(capture_store.capture_dir().glob("*.content.jsonl"))
     assert sidecars, "nothing was persisted, so the fence claim below would be vacuous"
-    written = [json.loads(line) for path in sidecars for line in path.read_text().splitlines()]
+    written = [
+        json.loads(line) for path in sidecars for line in path.read_text().splitlines()
+    ]
     fenced = [row for row in written if row.get("prompt")]
     assert fenced, "no prompt was persisted at all"
     for row in fenced:
@@ -933,7 +912,7 @@ async def test_a_second_post_of_the_same_file_is_a_duplicate_not_a_second_import
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _no_surface_tokens
 ) -> None:
     """Idempotence by content hash is inherited, not re-derived at the route."""
-    from gideon.inbound import auth
+    from gideon.integrations.inbound import auth
 
     _enable_capture(monkeypatch)
     _drop(tmp_path, "session.jsonl", _claude_code_jsonl())
@@ -946,7 +925,6 @@ async def test_a_second_post_of_the_same_file_is_a_duplicate_not_a_second_import
     finally:
         await client.close()
 
-    # `format` defaulted on both calls — the route's default must be the CLI's default.
     assert first["format"] == "jsonl"
     assert first["imported"] == 2 and first["duplicate"] is False
     assert second["imported"] == 0 and second["duplicate"] is True
@@ -963,7 +941,7 @@ async def test_the_route_runs_the_shared_admission_gate(
     handler calls it, and "the new route forgot to call it" is precisely the regression
     this file cannot detect anywhere else.
     """
-    from gideon.inbound import auth, capture_proxy
+    from gideon.integrations.inbound import auth, capture_proxy
 
     _drop(tmp_path, "session.jsonl", _claude_code_jsonl())
 
@@ -971,20 +949,18 @@ async def test_the_route_runs_the_shared_admission_gate(
     token = auth.create_surface_token("capture")
     client = await _import_client()
     try:
-        # 1. A disabled surface does not confirm its own existence.
         assert (await _post_import(client, token, file="session.jsonl")).status == 404
 
         _enable_capture(monkeypatch)
-        # 2. Loopback forever. `allow_remote` is not even in the config above — the refusal
-        #    stands because capture never reads it. Scoped with `monkeypatch.context()`
-        #    rather than `monkeypatch.undo()`: undo() would also roll back the autouse
-        #    fixture's GIDEON_HOME and point the rest of this test at the real home.
         with monkeypatch.context() as loop_off:
             loop_off.setattr(capture_proxy.auth, "is_loopback", lambda _request: False)
-            assert (await _post_import(client, token, file="session.jsonl")).status == 403
+            assert (
+                await _post_import(client, token, file="session.jsonl")
+            ).status == 403
 
-        # 3. A wrong bearer is 401 — and VACUITY: the right one, same request, is 200.
-        assert (await _post_import(client, "not-the-token", file="session.jsonl")).status == 401
+        assert (
+            await _post_import(client, "not-the-token", file="session.jsonl")
+        ).status == 401
         assert (await _post_import(client, token, file="session.jsonl")).status == 200
     finally:
         await client.close()
@@ -1000,15 +976,15 @@ async def test_a_caller_chosen_path_never_becomes_a_file_read(
     through the SAME resolver — a fence that refused everything would pass the four
     refusals and be indistinguishable from a broken route.
     """
-    from gideon.inbound import auth
-    from gideon.inbound.capture_import import imports_dir
+    from gideon.integrations.inbound import auth
+    from gideon.integrations.inbound.capture_import import imports_dir
 
     _enable_capture(monkeypatch)
-    # Valid jsonl, so ONLY the fence can stop it — and byte-different from `ok.jsonl` below,
-    # so a followed symlink would show up as a SECOND ledger hash rather than as a duplicate.
     secret = tmp_path / "id_rsa"
     secret.write_text(
-        _claude_code_jsonl() + "\n" + json.dumps({"type": "user", "message": {"content": "x"}}),
+        _claude_code_jsonl()
+        + "\n"
+        + json.dumps({"type": "user", "message": {"content": "x"}}),
         encoding="utf-8",
     )
     (imports_dir(tmp_path) / "link.jsonl").symlink_to(secret)
@@ -1022,19 +998,15 @@ async def test_a_caller_chosen_path_never_becomes_a_file_read(
             assert resp.status == 400, f"{name!r} was not refused: {await resp.text()}"
             body = await resp.json()
             assert body["error"]["code"] == "invalid_request", body
-        # A SYMLINK out of the drop directory is the escape a name check alone cannot see.
         resp = await _post_import(client, token, file="link.jsonl")
         assert resp.status == 400, await resp.text()
         assert "resolves outside" in (await resp.json())["error"]["message"]
-        # VACUITY: a real bare name in the drop directory imports.
         ok = await _post_import(client, token, file="ok.jsonl")
         assert ok.status == 200, await ok.text()
         assert (await ok.json())["imported"] == 2
     finally:
         await client.close()
 
-    # Nothing the fence refused reached the store: the only staged content is `ok.jsonl`'s,
-    # and `id_rsa` was never opened. Proven by the ledger, which records one hash.
     assert len(load_ledger(tmp_path)) == 1
 
 
@@ -1049,8 +1021,8 @@ async def test_a_malformed_body_is_a_400_and_a_store_fault_is_a_screened_500(
     code — and its message is screened, because an exception raised by a writer names a
     path and a path can look like a credential.
     """
-    from gideon.inbound import auth
-    from gideon.inbound.capture_proxy import ROUTE_IMPORT
+    from gideon.integrations.inbound import auth
+    from gideon.integrations.inbound.capture_proxy import ROUTE_IMPORT
 
     _enable_capture(monkeypatch)
     _drop(tmp_path, "session.jsonl", _claude_code_jsonl())
@@ -1058,7 +1030,10 @@ async def test_a_malformed_body_is_a_400_and_a_store_fault_is_a_screened_500(
 
     client = await _import_client()
     try:
-        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
         resp = await client.post(ROUTE_IMPORT, data=b"{not json", headers=headers)
         assert resp.status == 400
         assert (await resp.json())["error"]["code"] == "invalid_json"
@@ -1071,13 +1046,14 @@ async def test_a_malformed_body_is_a_400_and_a_store_fault_is_a_screened_500(
             raise RuntimeError("token=sk-live-abcdef0123456789 could not be written")
 
         monkeypatch.setattr(
-            "gideon.inbound.capture_import.import_capture_file", _boom, raising=True
+            "gideon.integrations.inbound.capture_import.import_capture_file",
+            _boom,
+            raising=True,
         )
         resp = await _post_import(client, token, file="session.jsonl")
         assert resp.status == 500
         body = await resp.json()
         assert body["error"]["code"] == "capture_import_failed"
-        # Screened: the credential in the exception's own words does not reach the wire.
         assert "sk-live-abcdef0123456789" not in body["error"]["message"]
         assert "RuntimeError" in body["error"]["message"]
     finally:
@@ -1088,10 +1064,9 @@ def test_the_drop_directory_is_owner_only(tmp_path: Path) -> None:
     """0700, matching the recordings beside it. An export is as sensitive as a capture."""
     import stat
 
-    from gideon.inbound.capture_import import imports_dir
+    from gideon.integrations.inbound.capture_import import imports_dir
 
     path = imports_dir(tmp_path)
     assert path.is_dir()
     assert stat.S_IMODE(path.stat().st_mode) == 0o700
-    # And it is INSIDE the capture directory, not a fifth top-level home entry.
     assert path.parent.name == "capture"

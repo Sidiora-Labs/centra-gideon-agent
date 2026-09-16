@@ -26,8 +26,8 @@ from pathlib import Path
 
 import pytest
 
-from gideon.triggers.models import CLOCK_KINDS, SPEC_KEYS, Trigger
-from gideon.triggers.store import (
+from gideon.automation.triggers.models import CLOCK_KINDS, SPEC_KEYS, Trigger
+from gideon.automation.triggers.store import (
     STORE_VERSION,
     LoadedTrigger,
     TriggerStore,
@@ -53,9 +53,6 @@ def _trigger(tid="t1", **over):
     return Trigger(**base)
 
 
-# ── an absent or damaged store degrades, never raises ──
-
-
 def test_a_missing_store_loads_as_empty(store):
     assert store.exists() is False
     assert store.load() == []
@@ -74,7 +71,9 @@ def test_a_corrupt_store_loads_as_empty_and_is_left_on_disk(store):
 
 def test_a_non_dict_row_is_skipped_not_fatal(store):
     store.path.parent.mkdir(parents=True, exist_ok=True)
-    store.path.write_text(json.dumps({"version": 1, "triggers": ["nope", 7, None, {"id": "ok"}]}))
+    store.path.write_text(
+        json.dumps({"version": 1, "triggers": ["nope", 7, None, {"id": "ok"}]})
+    )
     rows = store.load()
     assert len(rows) == 1
 
@@ -84,9 +83,6 @@ def test_a_bare_list_payload_is_accepted(store):
     store.path.parent.mkdir(parents=True, exist_ok=True)
     store.path.write_text(json.dumps([_trigger().to_dict()]))
     assert len(store.load()) == 1
-
-
-# ── §1 property 1: a broken row never disappears ──
 
 
 def test_a_broken_row_is_KEPT_visible_and_inert(store):
@@ -104,7 +100,6 @@ def test_a_broken_row_is_KEPT_visible_and_inert(store):
     bad = next(r for r in rows if r.trigger.id == "bad")
     assert bad.ok is False
     assert bad.errors
-    # Inert, not absent: `parse_trigger`'s own rule.
     assert bad.trigger.enabled is False
 
 
@@ -113,7 +108,9 @@ def test_a_broken_row_carries_the_closest_match_hint(store):
     `parse_trigger` already computes rather than re-deriving it."""
     store.path.parent.mkdir(parents=True, exist_ok=True)
     store.path.write_text(
-        json.dumps({"version": 1, "triggers": [{"id": "x", "name": "n", "kind": "clok"}]})
+        json.dumps(
+            {"version": 1, "triggers": [{"id": "x", "name": "n", "kind": "clok"}]}
+        )
     )
     row = store.load()[0]
     assert "clock" in [i.closest for i in row.issues if i.closest]
@@ -127,7 +124,13 @@ def test_warnings_and_errors_are_separable(store):
             {
                 "version": 1,
                 "triggers": [
-                    {"id": "x", "name": "n", "kind": "clock", "spec": {"kind": "cron"}, "wat": 1}
+                    {
+                        "id": "x",
+                        "name": "n",
+                        "kind": "clock",
+                        "spec": {"kind": "cron"},
+                        "wat": 1,
+                    }
                 ],
             }
         )
@@ -159,9 +162,6 @@ def test_list_triggers_filters_by_kind(store):
     assert [t.id for t in store.list_triggers(kind="clock")] == ["a"]
 
 
-# ── §1 property 2: a write never truncates ──
-
-
 def test_a_save_writes_a_versioned_envelope(store):
     store.save_all([_trigger()])
     payload = json.loads(store.path.read_text())
@@ -191,19 +191,17 @@ def test_saving_an_empty_list_empties_the_store_without_deleting_it(store):
     assert store.load() == []
 
 
-# ── §1 property 3: a concurrent writer is never silently overwritten ──
-
-
 def test_upsert_re_reads_so_another_process_is_not_clobbered(tmp_path):
     """🔴 §6's carried-over gotcha: "MCP tools mutate the store from a separate process". A mutation
-    built on a cached view would silently delete a trigger created in chat seconds ago."""
+    built on a cached view would silently delete a trigger created in chat seconds ago.
+    """
     mine = TriggerStore(base_dir=tmp_path)
     theirs = TriggerStore(base_dir=tmp_path)
 
     mine.save_all([_trigger("a")])
-    mine.load()  # this instance now holds a stale view
-    theirs.upsert(_trigger("from-chat"))  # the other process writes
-    mine.upsert(_trigger("b"))  # and this one writes from its stale view
+    mine.load()
+    theirs.upsert(_trigger("from-chat"))
+    mine.upsert(_trigger("b"))
 
     ids = {t.id for t in mine.list_triggers()}
     assert ids == {"a", "from-chat", "b"}
@@ -254,9 +252,6 @@ def test_the_lock_file_is_separate_from_the_store(store):
     assert store.path.name == "triggers.json"
 
 
-# ── enable/disable ──
-
-
 def test_set_enabled_toggles_a_healthy_row(store):
     store.save_all([_trigger("a")])
     assert store.set_enabled("a", False).enabled is False
@@ -270,7 +265,9 @@ def test_set_enabled_REFUSES_to_enable_a_broken_row(store):
     broken."""
     store.path.parent.mkdir(parents=True, exist_ok=True)
     store.path.write_text(
-        json.dumps({"version": 1, "triggers": [{"id": "bad", "name": "b", "kind": "clok"}]})
+        json.dumps(
+            {"version": 1, "triggers": [{"id": "bad", "name": "b", "kind": "clok"}]}
+        )
     )
     assert store.set_enabled("bad", True) is None
     assert store.load()[0].trigger.enabled is False
@@ -280,7 +277,9 @@ def test_set_enabled_can_still_DISABLE_a_broken_row(store):
     """Turning something off is always safe, and a user cleaning up should not be blocked."""
     store.path.parent.mkdir(parents=True, exist_ok=True)
     store.path.write_text(
-        json.dumps({"version": 1, "triggers": [{"id": "bad", "name": "b", "kind": "clok"}]})
+        json.dumps(
+            {"version": 1, "triggers": [{"id": "bad", "name": "b", "kind": "clok"}]}
+        )
     )
     assert store.set_enabled("bad", False) is not None
 
@@ -294,9 +293,6 @@ def test_get_returns_the_loaded_pair_or_None(store):
     found = store.get("a")
     assert isinstance(found, LoadedTrigger) and found.ok
     assert store.get("nope") is None
-
-
-# ── the cron migration (§6 step 2) ──
 
 
 def _crons(*jobs):
@@ -319,7 +315,9 @@ def test_the_migration_imports_and_KEEPS_the_old_file(store):
     would run it."""
     (store.path.parent).mkdir(parents=True, exist_ok=True)
     source = store.path.parent / "crons.json"
-    source.write_text(json.dumps(_crons(_cron_job("j1", "cron", cron_expr="0 9 * * *"))))
+    source.write_text(
+        json.dumps(_crons(_cron_job("j1", "cron", cron_expr="0 9 * * *")))
+    )
     report = store.migrate_from_crons()
     assert report["written"] == 1
     assert report["source_kept"] is True
@@ -415,7 +413,7 @@ def test_a_converted_row_the_entity_refuses_is_RECORDED_not_dropped(store, monke
     """🔴 How this session found the `interval` bug: `written` was 0 while `converted` said 1, and
     nothing said why. A count that silently disagrees with reality is the worst outcome in the one
     path whose job is not losing the user's automations."""
-    from gideon.triggers import store as store_mod
+    from gideon.automation.triggers import store as store_mod
 
     class _Converted:
         trigger = {"id": "j-bad", "name": "n", "kind": "clock", "spec": {"kind": "wat"}}
@@ -428,15 +426,14 @@ def test_a_converted_row_the_entity_refuses_is_RECORDED_not_dropped(store, monke
             return {"converted": 1, "refused": 0, "lossless": True}
 
     monkeypatch.setattr(store_mod, "parse_trigger", store_mod.parse_trigger)
-    monkeypatch.setattr("gideon.triggers.migrate.migrate_crons", lambda _store: _Report())
+    monkeypatch.setattr(
+        "gideon.automation.triggers.migrate.migrate_crons", lambda _store: _Report()
+    )
     store.path.parent.mkdir(parents=True, exist_ok=True)
     (store.path.parent / "crons.json").write_text(json.dumps(_crons()))
     report = store.migrate_from_crons()
     assert report["written"] == 0
     assert report["unparseable"] and report["unparseable"][0]["id"] == "j-bad"
-
-
-# ── health ──
 
 
 def test_health_NAMES_the_broken_ids(store):
@@ -466,3 +463,48 @@ def test_health_on_a_missing_store_is_honest(store):
     assert report["exists"] is False
     assert report["total"] == 0
     assert Path(report["path"]).name == "triggers.json"
+
+
+def test_real_concurrent_process_mutations_keep_every_trigger(tmp_path):
+    import subprocess
+    import sys
+
+    script = """
+import sys
+from gideon.automation.triggers.store import TriggerStore
+from gideon.automation.triggers.models import Trigger
+store = TriggerStore(sys.argv[1])
+for count in range(8):
+    store.upsert(Trigger(id=f'{sys.argv[2]}-{count}', name='concurrent', kind='manual'))
+"""
+    children = [
+        subprocess.Popen(
+            [sys.executable, "-c", script, str(tmp_path), str(number)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        for number in range(3)
+    ]
+    try:
+        for child in children:
+            _, error = child.communicate(timeout=30)
+            assert child.returncode == 0, error
+    finally:
+        for child in children:
+            if child.poll() is None:
+                child.kill()
+                child.wait()
+    assert {row.trigger.id for row in TriggerStore(tmp_path).load()} == {
+        f"{source}-{number}" for source in range(3) for number in range(8)
+    }
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_serialization_failure_preserves_previous_document(store):
+    store.save_all([_trigger("kept")])
+    before = store.path.read_bytes()
+    with pytest.raises(TypeError):
+        store.upsert(_trigger("unserializable", spec={"value": {1, 2}}))
+    assert store.path.read_bytes() == before
+    assert not list(store.base_dir.glob("*.tmp"))

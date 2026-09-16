@@ -23,11 +23,16 @@ import asyncio
 
 import pytest
 
-from gideon.triggers import claims
-from gideon.triggers import service as svc
-from gideon.triggers.models import FIRE_OUTCOMES, INERT_OUTCOMES, Outcome, Trigger
-from gideon.triggers.service import _budget_remaining
-from gideon.triggers.store import TriggerStore
+from gideon.automation.triggers import claims
+from gideon.automation.triggers import service as svc
+from gideon.automation.triggers.models import (
+    FIRE_OUTCOMES,
+    INERT_OUTCOMES,
+    Outcome,
+    Trigger,
+)
+from gideon.automation.triggers.service import _budget_remaining
+from gideon.automation.triggers.store import TriggerStore
 
 NOW = 1_800_000_000.0
 
@@ -63,14 +68,13 @@ def _run_slots(store, tmp_path, count, tid="clock:t"):
     fires = 0
     rows = []
     for i in range(count):
-        result = asyncio.run(svc.tick(store, now=NOW + i * 120, base_dir=tmp_path, persist=True))
+        result = asyncio.run(
+            svc.tick(store, now=NOW + i * 120, base_dir=tmp_path, persist=True)
+        )
         fires += len(result.fires)
         rows += result.ledger_rows
         claims.release_claim(tid, base_dir=tmp_path)
     return fires, rows
-
-
-# ── the defect ──
 
 
 def test_MAX_FIRES_actually_bounds_the_fires(store, tmp_path):
@@ -90,7 +94,8 @@ def test_NO_cap_still_fires_every_slot(store, tmp_path):
 
 def test_the_production_tick_SUPPLIES_the_budget():
     """A source check, because the property is that the field is POPULATED. A behavioural test alone
-    would pass against a gate that happened to allow everything — the exact hole this closes."""
+    would pass against a gate that happened to allow everything — the exact hole this closes.
+    """
     import inspect
 
     assert "budget_remaining=" in inspect.getsource(svc.tick)
@@ -110,10 +115,9 @@ def test_the_counter_increments_on_a_GRANTED_fire_not_on_completion(store, tmp_p
     _due(store, tmp_path, {"max_fires": 1})
     result = asyncio.run(svc.tick(store, now=NOW, base_dir=tmp_path, persist=True))
     assert len(result.fires) == 1
-    assert store.get("clock:t").trigger.run_count == 1, "counted before any dispatch reported back"
-
-
-# ── the refusal is legible (criterion 8) ──
+    assert (
+        store.get("clock:t").trigger.run_count == 1
+    ), "counted before any dispatch reported back"
 
 
 def test_the_refusal_is_a_TYPED_ledger_row(store, tmp_path):
@@ -140,12 +144,10 @@ def test_a_refused_fire_does_NOT_spend_more_budget(store, tmp_path):
     assert store.get("clock:t").trigger.run_count == 1
 
 
-# ── the helper's contract ──
-
-
 def test_NO_cap_means_NO_budget_not_infinity():
     """None and a large number are different: the gate distinguishes "no budget configured" from
-    "budget exhausted", and a sentinel would make an unset cap indistinguishable from a huge one."""
+    "budget exhausted", and a sentinel would make an unset cap indistinguishable from a huge one.
+    """
     trigger = Trigger(id="t", name="t", kind="clock", gates={})
     assert _budget_remaining(trigger) is None
 
@@ -154,7 +156,10 @@ def test_a_ZERO_cap_means_no_cap():
     """`max_fires: 0` is the documented "unlimited" spelling in `LEGACY_FIELD_MAP`'s source
     entity."""
     assert (
-        _budget_remaining(Trigger(id="t", name="t", kind="clock", gates={"max_fires": 0})) is None
+        _budget_remaining(
+            Trigger(id="t", name="t", kind="clock", gates={"max_fires": 0})
+        )
+        is None
     )
 
 
@@ -180,18 +185,23 @@ def test_a_non_dict_gates_block_is_survived():
     assert _budget_remaining(trigger) is None
 
 
-# ── the caps that are still UNMETERED are named, not implied ──
-
-
 def test_the_doctor_names_an_UNMETERED_cap():
     """🔴 The honest half. `cost_cap` needs per-run spend attribution and `max_runs_per_hour` needs a
     windowed history query — neither meter exists on this path. Inventing one to satisfy the cap
-    would be the inverted dependency S119 and S129 both refused, so the doctor says so instead."""
-    from gideon.triggers.calendar import diagnose
+    would be the inverted dependency S119 and S129 both refused, so the doctor says so instead.
+    """
+    from gideon.automation.triggers.calendar import diagnose
 
-    rows = [{"id": "schedule:clock:x", "gates": {"cost_cap": 5.0, "max_cost_usd_per_run": 1.0}}]
+    rows = [
+        {
+            "id": "schedule:clock:x",
+            "gates": {"cost_cap": 5.0, "max_cost_usd_per_run": 1.0},
+        }
+    ]
     finding = next(
-        f for f in diagnose(rows, known_workflows=None).findings if f.code == "unmetered_cap"
+        f
+        for f in diagnose(rows, known_workflows=None).findings
+        if f.code == "unmetered_cap"
     )
     assert "NOT bounded" in finding.detail
     assert "max_fires" in finding.fix, "and it points at the cap that DOES work"
@@ -199,18 +209,20 @@ def test_the_doctor_names_an_UNMETERED_cap():
 
 def test_the_doctor_is_SILENT_for_max_fires():
     """The fix for a finding must never trip the finding."""
-    from gideon.triggers.calendar import diagnose
+    from gideon.automation.triggers.calendar import diagnose
 
     rows = [{"id": "schedule:clock:y", "gates": {"max_fires": 5}}]
     assert not [
-        f for f in diagnose(rows, known_workflows=None).findings if f.code == "unmetered_cap"
+        f
+        for f in diagnose(rows, known_workflows=None).findings
+        if f.code == "unmetered_cap"
     ]
 
 
 def test_MAX_FIRES_is_not_in_the_unmetered_set():
     """A regression guard on the set itself: adding `max_fires` here would tell users the cap this
     session wired does not work."""
-    from gideon.triggers.calendar import UNMETERED_CAPS
+    from gideon.automation.triggers.calendar import UNMETERED_CAPS
 
     assert "max_fires" not in UNMETERED_CAPS
 
@@ -224,7 +236,7 @@ def test_the_STORM_SPACING_gates_are_named_too():
     `firepath`'s own module docstring names the order as "debounce/quiet/cooldown/condition", so
     three of the four gates it advertises are absent from `GATE_ORDER`.
     """
-    from gideon.triggers.calendar import diagnose
+    from gideon.automation.triggers.calendar import diagnose
 
     rows = [
         {
@@ -239,15 +251,12 @@ def test_the_STORM_SPACING_gates_are_named_too():
         }
     ]
     finding = next(
-        f for f in diagnose(rows, known_workflows=None).findings if f.code == "unmetered_cap"
+        f
+        for f in diagnose(rows, known_workflows=None).findings
+        if f.code == "unmetered_cap"
     )
-    # `debounce_secs`/`cooldown_secs` were in this list at S150 and were WIRED at S151, so they must
-    # no longer be reported as unmetered — reporting a working gate as broken is the same class of
-    # lie as the silence S150 fixed, pointing the other way.
     for key in ("idempotency", "threshold"):
         assert key in finding.detail, key
-    # Wired since S150 named them: debounce/cooldown at S151, the three hourly caps at S152. A key
-    # that has been wired must STOP being reported, or the doctor lies in the opposite direction.
     for wired in ("debounce_secs", "cooldown_secs", "rate_cap"):
         assert wired not in finding.detail, f"{wired} is enforced now"
     assert "NOT bounded" in finding.detail
@@ -256,7 +265,7 @@ def test_the_STORM_SPACING_gates_are_named_too():
 def test_every_ENFORCED_gate_stays_silent():
     """A rule that flagged a working gate would be worse than the gap it closes — it would train the
     user to ignore the doctor. These four are genuinely enforced on the fire path."""
-    from gideon.triggers.calendar import diagnose
+    from gideon.automation.triggers.calendar import diagnose
 
     enforced = {
         "max_fires": 5,
@@ -267,7 +276,9 @@ def test_every_ENFORCED_gate_stays_silent():
     for key, value in enforced.items():
         rows = [{"id": "schedule:clock:ok", "gates": {key: value}}]
         assert not [
-            f for f in diagnose(rows, known_workflows=None).findings if f.code == "unmetered_cap"
+            f
+            for f in diagnose(rows, known_workflows=None).findings
+            if f.code == "unmetered_cap"
         ], key
 
 
@@ -277,11 +288,9 @@ def test_the_unmetered_set_and_the_gate_vocabulary_stay_in_step():
     Every declared gate key must be either ENFORCED on the fire path or named as unmetered. A key
     in neither bucket is the defect this session closed: declared, unread, and silent about it.
     """
-    from gideon.triggers.calendar import UNMETERED_CAPS
-    from gideon.triggers.models import GATE_KEYS
+    from gideon.automation.triggers.calendar import UNMETERED_CAPS
+    from gideon.automation.triggers.models import GATE_KEYS
 
-    # `debounce_secs`/`cooldown_secs` joined the enforced set at S151 (the `spacing` gate), which is
-    # why they are no longer in UNMETERED_CAPS — a key must move buckets, never sit in both.
     enforced = {
         "max_fires",
         "quiet_hours",
@@ -290,14 +299,10 @@ def test_the_unmetered_set_and_the_gate_vocabulary_stay_in_step():
         "condition",
         "debounce_secs",
         "cooldown_secs",
-        # …and the three hourly caps, wired at S152 by `ScheduleRunStore.count_since`.
+        # …and the three hourly caps, wired at S152 by `ExecutionJournal.count_since`.
         "rate_cap",
         "max_runs_per_hour",
         "max_actions_per_hour",
-        # `max_cost_usd_per_run` joined at S154: `ModelCallGuard` checks the ambient run scope
-        # against the ceiling `calendar.run_budget_for` derives from these gates. Enforced in the
-        # guard rather than on the fire path because run spend accrues DURING the run — a pre-fire
-        # gate reads $0.00 on a freshly bound per-fire key and is inert by construction.
         "max_cost_usd_per_run",
     }
     unclassified = set(GATE_KEYS) - enforced - set(UNMETERED_CAPS)
@@ -305,10 +310,9 @@ def test_the_unmetered_set_and_the_gate_vocabulary_stay_in_step():
         f"gate key(s) {sorted(unclassified)} are neither enforced nor named unmetered — wire "
         "them, or add them to UNMETERED_CAPS so a user is not told a cap works when it does not"
     )
-    assert not (enforced & set(UNMETERED_CAPS)), "a gate cannot be both enforced and unmetered"
-
-
-# ── the 24h storm (criterion 8) ──
+    assert not (
+        enforced & set(UNMETERED_CAPS)
+    ), "a gate cannot be both enforced and unmetered"
 
 
 def test_a_24H_STORM_drops_NOTHING(store, tmp_path):
@@ -322,7 +326,9 @@ def test_a_24H_STORM_drops_NOTHING(store, tmp_path):
     rows = 0
     fires = 0
     for i in range(1440):
-        result = asyncio.run(svc.tick(store, now=NOW + i * 60, base_dir=tmp_path, persist=True))
+        result = asyncio.run(
+            svc.tick(store, now=NOW + i * 60, base_dir=tmp_path, persist=True)
+        )
         rows += len(result.ledger_rows)
         fires += len(result.fires)
     assert fires == 0
@@ -350,7 +356,9 @@ def test_the_counter_does_NOT_RESURRECT_a_retired_one_shot(store, tmp_path):
             workflow={"inline": {"provider": "notify", "config": {}}},
         )
     )
-    result = asyncio.run(svc.tick(store, now=NOW + 3601, base_dir=tmp_path, persist=True))
+    result = asyncio.run(
+        svc.tick(store, now=NOW + 3601, base_dir=tmp_path, persist=True)
+    )
     assert [f.trigger.id for f in result.fires] == ["clock:once"]
     assert result.retired == ["clock:once"]
     assert store.get("clock:once") is None, "a retired one-shot must stay deleted"
@@ -387,15 +395,12 @@ def test_the_run_cap_implementation_matches_its_declared_fail_direction():
     than a $0 ceiling. The opposite reading is the dangerous one — a $0 ceiling refuses the
     trigger's very first model call, which looks exactly like a dead automation.
     """
-    from gideon.triggers.calendar import run_budget_for
-    from gideon.triggers.models import gate_failure_mode
+    from gideon.automation.triggers.calendar import run_budget_for
+    from gideon.automation.triggers.models import gate_failure_mode
 
     assert gate_failure_mode("max_cost_usd_per_run") == "open"
     for junk in ("ten", None, [], {}, "", -3):
         assert run_budget_for(
             {"max_cost_usd_per_run": junk}
-        ).is_unlimited, (
-            f"a malformed cap ({junk!r}) must fail OPEN — a $0 ceiling would silence the trigger"
-        )
-    # …and a well-formed one still binds, so failing open is not a blanket excuse.
+        ).is_unlimited, f"a malformed cap ({junk!r}) must fail OPEN — a $0 ceiling would silence the trigger"
     assert run_budget_for({"max_cost_usd_per_run": 0.25}).max_dollars == 0.25

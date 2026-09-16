@@ -1,81 +1,6 @@
 import { expect, type Page } from '@playwright/test'
 
-// ── Two machine-checkable defects axe has no rule for ────────────────────────────────────────────
-//
-// `a11y.spec.ts` states its own limit: "a clean run is the absence of MACHINE-detectable AA
-// violations on the scanned states". Both checks below ARE machine-detectable and axe reports
-// neither, because neither maps to an axe rule:
-//
-//   1. **A click target with no keyboard path.** axe cannot know a `<div>` carries an `onClick` —
-//      nothing in the accessibility tree distinguishes a decorative div from a wired-up one. What
-//      DOES distinguish them is `cursor: pointer`: the app promising an interaction. A pointer cursor
-//      on an element with no interactive tag, no interactive role and no tab stop is a mouse-only
-//      control (WCAG 2.1.1).
-//   2. **A focus ring clipped away by an ancestor.** An outline draws OUTSIDE the border box, so a
-//      control filling an `overflow: hidden` parent computes a correct `outline` that is never
-//      painted. `:focus-visible` matches, the computed style is right, and the user sees nothing
-//      (WCAG 2.4.7) — invisible to every assertion except geometry.
-//
-// 🔑 CALLED FROM `a11y.spec.ts`'s EXISTING LOOPS RATHER THAN GIVEN THEIR OWN SPEC. A standalone spec
-// added 120 tests — a second full traversal of every route — and NAVIGATION is the entire cost here;
-// the detectors themselves run in microseconds. Measured: that spec took 7.1 minutes and timed out on
-// `page.goto` under load while finding nothing, so the extra traversal bought only flakiness. Calling
-// these from the loop that already visits every route costs ~0 and covers MORE — the Tier-3 OPENED
-// surfaces (modals, docks, menus), which is exactly where a mouse-only control hides and where a
-// route-only sweep never looks.
-//
-// 🔑 BOTH WERE FOUND IN ONE COMPONENT AND NEITHER WAS SYSTEMIC. `app/onboarding/StepStack` had both:
-// a completed step row was mouse-only, and once that was fixed its focus ring was clipped on all four
-// sides by the row's own `overflow-hidden`. Sweeping the live DOM afterwards found **zero** further
-// instances — 14 routes for the first check, 8 for the second. These land GREEN; their job is to
-// catch the next one, not to work through a backlog.
-//
-// ⚠️ WHAT "EVERY ROUTE" DOES NOT INCLUDE, because inheriting a loop means inheriting its blind spots.
-// These detectors sweep whatever `a11y.spec.ts` navigates to, so their coverage is exactly that
-// manifest's coverage and no wider — and `web/e2e/routes.ts` carries one deliberate hole:
-// **app-AUTHORED UI is not swept.** Three of ~51 first-party apps render their own surface (two React
-// ESM bundles into the HOST DOM — not iframes — plus a native menu-bar companion), and reaching one
-// needs the app installed WITH its bundle built at install time: a fixture that seeds the e2e home and
-// requires the apps repo to be present. The app-hosting SHELL *is* covered (`app/not-a-real-app`), so
-// the gap is narrower than it was, but it is not closed.
-//
-// This matters because these checks are cheap and land green across the whole manifest, which makes a
-// green run read as "the tree is clean". It means "every surface this manifest reaches is clean". The
-// detectors are route-independent pure DOM functions and would apply to an app's UI unchanged; what is
-// missing is the fixture, not the check.
-//
-// ── THREE FALSE-POSITIVE CLASSES, each removed after reading the data ────────────────────────────
-// Recorded because each made the raw count look alarming and each was wrong:
-//
-//   · **Inherited cursors.** Every descendant of a clickable row inherits `cursor: pointer`, so one
-//     row reported at four nesting levels — 30 "distinct" hits for 6 real elements. Only the element
-//     where the cursor is DECLARED (its parent is not pointer) is the promise.
-//   · **Scrollports.** Counting `overflow: auto/scroll` as clipping gave 67 hits across five routes,
-//     nearly all `[bottom]` — the signature of an element at a scroll container's current edge. A
-//     ring clipped by a scrollport scrolls into view; it is not the defect.
-//   · **The app shell.** `html, body, #root { overflow: hidden }` is this app's own layout, so every
-//     element below the fold reported a phantom loss of 300–2000px against it. A ring is only truly
-//     clipped when the element is ALREADY INSIDE the clipper and the ring alone falls outside, which
-//     is why the loss is bounded to ring size below.
-//
-// A detector that over-reports gets muted, so the narrowing is the feature.
-//
-// 🪤 THESE ARE SOURCE STRINGS, invoked as `(${FN})()` at the call sites. `page.evaluate(str)`
-// evaluates the string as an EXPRESSION, so passing a bare `() => {…}` returns the function object
-// and every assertion then reads `undefined` — which the vacuity probe caught on its first run.
-//
-// 🔑 THE CLIPPED-RING CHECK RESTS ON PROGRAMMATIC `.focus()` MATCHING `:focus-visible`, so that was
-// verified rather than assumed — nearly every focus ring in this app is `:focus-visible`-gated, and a
-// detector reading the un-focused base style would be measuring a state the user never sees.
-// Measured on a settled page: `el.focus({preventScroll:true})` then `el.matches(':focus-visible')`
-// returns TRUE, and the ring computes.
-// The distinction that makes this safe is narrow and worth keeping: focus applied during initial
-// MOUNT (a `useEffect` on first render) does NOT match `:focus-visible` in Chromium — a screenshot
-// taken that way shows a focused control with no ring, which cost two wrong diagnoses while fixing
-// `StepStack`. A focus call on an already-rendered page does match. These checks only ever run
-// post-navigation, so they are in the second case.
 
-/** Elements that PROMISE a click (pointer cursor, declared here) but offer no keyboard path. */
 export const MOUSE_ONLY = `() => {
   const NATIVE = new Set(['A','BUTTON','INPUT','SELECT','TEXTAREA','SUMMARY','OPTION','LABEL'])
   const ROLES = new Set(['button','link','menuitem','menuitemcheckbox','menuitemradio','tab','option',
@@ -115,7 +40,6 @@ export const MOUSE_ONLY = `() => {
   return [...new Set(out)]
 }`
 
-/** Focusable controls whose focus ring falls outside a clipping ancestor. */
 export const CLIPPED_RING = `() => {
   const els = [...document.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]),[tabindex]:not([tabindex="-1"])')]
   const path = (el) => {
@@ -171,29 +95,7 @@ export const CLIPPED_RING = `() => {
   return [...new Set(out)]
 }`
 
-// 🪤 THERE IS NO KNOWN-BUG LIST, AND THE ONE I BRIEFLY WROTE WAS WRONG. An earlier pass reported
-// `ui/InvestigateButton` losing 3.5px of its 4px ring on the bottom edge, on `#/settings/models` and
-// `#/settings/doctor`, and I allowlisted it as "a BUG, not an exemption" while noting the clipper was
-// an unidentifiable class-less `<div>`.
-//
-// Identifying it dissolved the finding. The clipper was `<div id="root">` — the app SHELL, which is
-// `overflow: hidden` by this app's own layout. Measured on `#/settings/doctor`, which renders 14
-// Investigate buttons: their distances from the shell's bottom edge were 444, 332, 113, **1**, then
-// −112, −224, −337, −449 … The negatives sit below the fold and were already excluded for being
-// outside the clipper; the one at **1px** is flush against the viewport bottom, so its ring's bottom
-// 3.5px falls off-screen. Shift the viewport a few pixels and a DIFFERENT button occupies that spot.
-//
-// So the report was a fact about where the fold lands at 1280×720, not a property of a component, and
-// no component could fix it. `#root` and `<body>` are skipped as clipper candidates above, which is
-// what the "app shell" false-positive class in the header always implied — the earlier
-// `insideClipper` guard only caught elements fully BELOW the fold, not the one straddling it.
-//
-// Recorded rather than quietly deleted because the mistake is the instructive part: I had already
-// named this false-positive class, then mislabelled a fresh instance of it as a bug because the
-// clipper was anonymous. **An offender whose owner cannot be identified is a reason to keep
-// investigating, not a reason to write it down as real.**
 
-/** Run both non-axe checks on whatever is already rendered — adds assertions, not page loads. */
 export async function expectNoNonAxeA11yDefects(page: Page, where: string): Promise<void> {
   const mouseOnly = await page.evaluate<string[]>(`(${MOUSE_ONLY})()`)
   expect(

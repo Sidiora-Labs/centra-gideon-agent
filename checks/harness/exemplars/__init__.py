@@ -8,7 +8,7 @@ profile runs their smoke scripts), recorded-trace sources for the replay scenari
 tutorials for future coding agents.
 
 ``discover_exemplars()`` is the single enumeration both the proving test
-(``tests/test_harness_exemplars.py``) and the ``exemplars`` profile read, so a new slice
+(``checks/runtime/test_harness_exemplars.py``) and the ``exemplars`` profile read, so a new slice
 directory is picked up by both the moment it lands — which is what makes the same-PR rule
 (a slice merged without its exemplar is visible) mechanical rather than a matter of memory.
 """
@@ -23,11 +23,11 @@ from pathlib import Path
 class Exemplar:
     """One slice's exemplar bundle, located on disk."""
 
-    slice: str  #: directory name, e.g. ``slice_2``
+    slice: str
     directory: Path
-    exemplar: Path  #: the standalone runnable spec
-    smoke: Path  #: the ≤30s run+assert script
-    rationale: Path  #: the "what this proves" note
+    exemplar: Path
+    smoke: Path
+    rationale: Path
 
     @property
     def module(self) -> str:
@@ -42,7 +42,9 @@ def exemplars_root() -> Path:
 
 def _slice_dirs(base: Path) -> list[Path]:
     """Every ``slice_*`` subdirectory, sorted by name."""
-    return sorted(p for p in base.iterdir() if p.is_dir() and p.name.startswith("slice_"))
+    return sorted(
+        p for p in base.iterdir() if p.is_dir() and p.name.startswith("slice_")
+    )
 
 
 def discover_exemplars(root: Path | None = None) -> list[Exemplar]:

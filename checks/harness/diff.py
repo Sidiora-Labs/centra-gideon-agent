@@ -14,18 +14,18 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# A commit is "fix-shaped" if its subject matches these — the same-PR rule (§1.4) expects
-# such a change to add/update a spec so the fixed bug becomes a permanent machine check.
 _FIX_SHAPED_RE = re.compile(r"\b(fix|bug|bugfix|regression|hotfix)\b", re.IGNORECASE)
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parent.parent
+    return Path(__file__).resolve().parent.parent.parent
 
 
 def _git(args: list[str], root: Path) -> tuple[int, str, str]:
     try:
-        p = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=False)
+        p = subprocess.run(
+            ["git", *args], cwd=root, capture_output=True, text=True, check=False
+        )
         return p.returncode, p.stdout, p.stderr
     except OSError as exc:
         return -1, "", str(exc)
@@ -67,7 +67,9 @@ def compute_diff(root: Path | None = None, base_ref: str = "origin/main") -> Dif
     base = merge_base(r, base_ref)
 
     rc, name_out, _ = _git(["diff", "--name-only", base], r)
-    files = [ln.strip() for ln in name_out.splitlines() if ln.strip()] if rc == 0 else []
+    files = (
+        [ln.strip() for ln in name_out.splitlines() if ln.strip()] if rc == 0 else []
+    )
 
     changed_lines: dict[str, set[int]] = {}
     rc, patch, _ = _git(["diff", "--unified=0", base], r)
@@ -92,7 +94,7 @@ def has_fix_shaped_commit(subjects: list[str]) -> bool:
 
 def touches_specs(files: list[str]) -> bool:
     """True if any changed file is a harness spec (so the same-PR rule is satisfied)."""
-    return any(f.startswith("harness/specs/") for f in files)
+    return any(f.startswith("checks/harness/specs/") for f in files)
 
 
 def _parse_added_lines(patch: str) -> dict[str, set[int]]:
@@ -109,7 +111,9 @@ def _parse_added_lines(patch: str) -> dict[str, set[int]]:
         if line.startswith("+++ "):
             path = line[4:].strip()
             cur_file = (
-                path[2:] if path.startswith("b/") else (None if path == "/dev/null" else path)
+                path[2:]
+                if path.startswith("b/")
+                else (None if path == "/dev/null" else path)
             )
             continue
         if line.startswith("@@"):
@@ -127,5 +131,5 @@ def _parse_added_lines(patch: str) -> dict[str, set[int]]:
             out.setdefault(cur_file, set()).add(new_line)
             new_line += 1
         elif line.startswith("-") and not line.startswith("---"):
-            pass  # deletion — new-side counter unchanged
+            pass
     return out

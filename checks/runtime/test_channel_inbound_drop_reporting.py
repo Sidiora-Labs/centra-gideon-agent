@@ -24,18 +24,18 @@ from typing import Any, cast
 
 import pytest
 
-from gideon import channel_inbound as ci
-from gideon import channel_trust as ct
-from gideon.channel_transports.base import ChannelMessage
-from gideon.testing.channel_conformance import CapturingState
+from gideon.assurance.testing.channel_conformance import CapturingState
+from gideon.integrations import channel_inbound as ci
+from gideon.integrations import channel_trust as ct
+from gideon.integrations.channel_transports.base import ChannelMessage
 
 PROVIDER = "discord"
 
-#: The two loggers that own inbound reporting. Filtering to them keeps an unrelated DEBUG
-#: line from another module (asyncio's selector line, say) out of the counts.
-_OWNED_LOGGERS = ("gideon.channel_trust", "gideon.channel_inbound")
+_OWNED_LOGGERS = (
+    "gideon.integrations.channel_trust",
+    "gideon.integrations.channel_inbound",
+)
 
-#: A body deliberately shaped like something you would never want in an operator log.
 SECRET_BODY = "@Bot my api key is sk-live-000111222333 please remember it"
 
 
@@ -52,12 +52,14 @@ def isolated(tmp_path, monkeypatch, caplog):
     plausible way to make a drop technically "logged" while remaining invisible — would
     still be seen here and fail the level assertions rather than vanish.
     """
-    import gideon.config.loader as cfg
-    import gideon.providers.entity_routes as er
+    import gideon.core.config.loader as cfg
+    import gideon.extensions.providers.entity_routes as er
 
     monkeypatch.setattr(cfg, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(
-        er, "_entity_settings_path", lambda entity: tmp_path / "entity_settings" / f"{entity}.json"
+        er,
+        "_entity_settings_path",
+        lambda entity: tmp_path / "entity_settings" / f"{entity}.json",
     )
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     ci.reset_admissions()
@@ -71,7 +73,9 @@ def isolated(tmp_path, monkeypatch, caplog):
 def lines(caplog) -> list[tuple[str, str, str]]:
     """Every ``(logger, level, message)`` the inbound path emitted, in order."""
     return [
-        (r.name, r.levelname, r.getMessage()) for r in caplog.records if r.name in _OWNED_LOGGERS
+        (r.name, r.levelname, r.getMessage())
+        for r in caplog.records
+        if r.name in _OWNED_LOGGERS
     ]
 
 
@@ -126,9 +130,6 @@ class _Services:
         )
 
 
-# ── the completeness claim: no core drop path is silent ───────────────────────
-
-
 def test_every_core_path_that_drops_a_message_reports_it(caplog):
     """The headline property. Six ways a message dies before a session; all six speak.
 
@@ -146,14 +147,12 @@ def test_every_core_path_that_drops_a_message_reports_it(caplog):
         if not lines(caplog):
             silent.append(label)
 
-    # 1. group, tracked_only, channel not tracked — the reported symptom.
     check(
         "untracked_channel",
         lambda: ct.guard_inbound(
             None, PROVIDER, "user-1", channel_id="chan-a", is_dm=False, text="@Bot hi"
         ),
     )
-    # 2. group, policy off.
     _set_policy("group", "off")
     check(
         "group_policy_off",
@@ -161,35 +160,34 @@ def test_every_core_path_that_drops_a_message_reports_it(caplog):
             None, PROVIDER, "user-1", channel_id="chan-b", is_dm=False, text="@Bot hi"
         ),
     )
-    # 3. DM, unknown sender under the default pairing policy.
     check(
         "unknown_sender",
         lambda: ct.guard_inbound(None, PROVIDER, "stranger", is_dm=True, text="hi"),
     )
-    # 4. DM, owner_only, inside the renotify window: nobody is told anything.
     _set_policy("dm", "owner_only")
     _seed_prior_contact("quiet-stranger")
     check(
         "unknown_sender/told-nobody",
-        lambda: ct.guard_inbound(None, PROVIDER, "quiet-stranger", is_dm=True, text="hi"),
+        lambda: ct.guard_inbound(
+            None, PROVIDER, "quiet-stranger", is_dm=True, text="hi"
+        ),
     )
-    # 5. A valid pairing code: consumed, never a turn.
     _set_policy("dm", "pairing")
     code = ct.create_pairing_code(PROVIDER)
     pair_msg = _msg(text=code, sender="newbie", mid="m-pair")
     check("paired", lambda: ci.admit(None, PROVIDER, pair_msg, is_dm=True))
-    # 6. Allowed, but there is no dashboard state to route into.
     ct.track(PROVIDER, "chan-tracked")
     _set_policy("group", "tracked_only")
     check(
         "no_dashboard_state",
-        lambda: asyncio.run(_Services(None).deliver(_msg(channel="chan-tracked", mid="m-nostate"))),
+        lambda: asyncio.run(
+            _Services(None).deliver(_msg(channel="chan-tracked", mid="m-nostate"))
+        ),
     )
 
-    assert silent == [], f"inbound paths that still drop a message with zero logging: {silent}"
-
-
-# ── the reported symptom, and the two conflated group causes ──────────────────
+    assert (
+        silent == []
+    ), f"inbound paths that still drop a message with zero logging: {silent}"
 
 
 def test_an_untracked_channel_mention_warns_and_names_the_channel_to_track(caplog):
@@ -204,28 +202,43 @@ def test_an_untracked_channel_mention_warns_and_names_the_channel_to_track(caplo
     ``logger.warning`` at the top of the gate, which would bury the real drops in noise.
     """
     verdict = ct.guard_inbound(
-        None, PROVIDER, "user-1", channel_id="chan-general", is_dm=False, text=SECRET_BODY
+        None,
+        PROVIDER,
+        "user-1",
+        channel_id="chan-general",
+        is_dm=False,
+        text=SECRET_BODY,
     )
 
     assert verdict.allowed is False and verdict.reason == "untracked_channel"
     assert levels(caplog) == ["WARNING"]
     _, _, msg = lines(caplog)[0]
     assert "untracked_channel" in msg
-    assert "chan-general" in msg, "the operator cannot act on a line that omits the channel"
+    assert (
+        "chan-general" in msg
+    ), "the operator cannot act on a line that omits the channel"
     assert "tracked_only" in msg, "the line must name the policy that refused it"
     assert "track this channel" in msg
 
-    # FLOOR: the allowed path is routine, so it stays out of the operator's log.
     caplog.clear()
     ct.track(PROVIDER, "chan-general")
     allowed = ct.guard_inbound(
-        None, PROVIDER, "user-1", channel_id="chan-general", is_dm=False, text=SECRET_BODY
+        None,
+        PROVIDER,
+        "user-1",
+        channel_id="chan-general",
+        is_dm=False,
+        text=SECRET_BODY,
     )
     assert allowed.allowed is True
-    assert levels(caplog) == ["DEBUG"], "an admitted message must not be operator-visible"
+    assert levels(caplog) == [
+        "DEBUG"
+    ], "an admitted message must not be operator-visible"
 
 
-def test_group_policy_off_is_reported_as_a_distinct_cause_from_an_untracked_channel(caplog):
+def test_group_policy_off_is_reported_as_a_distinct_cause_from_an_untracked_channel(
+    caplog,
+):
     """``off`` and "not tracked" are one ``track()`` call apart; they must not share a word.
 
     Before this change both returned ``reason="untracked_channel"``, so the one string the
@@ -244,21 +257,20 @@ def test_group_policy_off_is_reported_as_a_distinct_cause_from_an_untracked_chan
     assert levels(caplog) == ["WARNING"]
     _, _, msg = lines(caplog)[0]
     assert "group_policy_off" in msg and "policy=off" in msg
-    # FLOOR: the old, wrong word must be gone — this half fails on unfixed code even if
-    # some future edit made the gate log without fixing the reason.
     assert "untracked_channel" not in msg
 
-    # And the OTHER cause still reports under its own name, on a channel that is untracked.
     caplog.clear()
     _set_policy("group", "tracked_only")
     other = ct.guard_inbound(
-        None, PROVIDER, "user-1", channel_id="chan-elsewhere", is_dm=False, text="@Bot hi"
+        None,
+        PROVIDER,
+        "user-1",
+        channel_id="chan-elsewhere",
+        is_dm=False,
+        text="@Bot hi",
     )
     assert other.reason == "untracked_channel"
     assert "untracked_channel" in lines(caplog)[0][2]
-
-
-# ── the level is derived from the verdict, not from a table ───────────────────
 
 
 def test_the_level_follows_whether_anybody_was_told(caplog):
@@ -268,17 +280,18 @@ def test_the_level_follows_whether_anybody_was_told(caplog):
     constant level. Together they can only pass if the level is actually derived from the
     verdict's ``canned_reply`` / ``fired_notification``.
     """
-    # Told: the sender gets the pairing nudge AND the owner gets a notification.
     state = CapturingState()
     told = ct.guard_inbound(
         state, PROVIDER, "stranger", sender_name="Stranger", is_dm=True, text="hi"
     )
     assert told.canned_reply and told.fired_notification is True
-    assert state.notifications, "the notification half must still fire — logging replaces nothing"
-    assert levels(caplog) == ["INFO"], "a denied sender is a decision, not a debug detail"
+    assert (
+        state.notifications
+    ), "the notification half must still fire — logging replaces nothing"
+    assert levels(caplog) == [
+        "INFO"
+    ], "a denied sender is a decision, not a debug detail"
 
-    # Told nobody: owner_only sends no reply, and the window has already been claimed for
-    # this sender so no notification fires either.
     caplog.clear()
     ct.reset_inbound_reports()
     _set_policy("dm", "owner_only")
@@ -293,7 +306,9 @@ def test_the_level_follows_whether_anybody_was_told(caplog):
     )
 
 
-def test_an_admitted_message_is_logged_so_a_live_socket_is_distinguishable_from_a_dead_one(caplog):
+def test_an_admitted_message_is_logged_so_a_live_socket_is_distinguishable_from_a_dead_one(
+    caplog,
+):
     """The happy path logs too — at DEBUG, because the session is the real evidence.
 
     This is the other half of the issue's complaint: with nothing logged on success either,
@@ -309,12 +324,7 @@ def test_an_admitted_message_is_logged_so_a_live_socket_is_distinguishable_from_
     assert levels(caplog) == ["DEBUG"]
     _, _, msg = lines(caplog)[0]
     assert "admitted" in msg and "sender=friend" in msg
-    # FLOOR: routine traffic must never climb above DEBUG, or the log becomes unreadable
-    # and the WARNING for a real drop stops standing out.
     assert "WARNING" not in levels(caplog) and "INFO" not in levels(caplog)
-
-
-# ── flood control: demoted, never silent ─────────────────────────────────────
 
 
 def test_a_repeated_drop_is_demoted_to_debug_and_is_never_silenced(caplog):
@@ -328,7 +338,12 @@ def test_a_repeated_drop_is_demoted_to_debug_and_is_never_silenced(caplog):
     """
     for i in range(5):
         ct.guard_inbound(
-            None, PROVIDER, f"user-{i}", channel_id="chan-busy", is_dm=False, text="@Bot hi"
+            None,
+            PROVIDER,
+            f"user-{i}",
+            channel_id="chan-busy",
+            is_dm=False,
+            text="@Bot hi",
         )
 
     assert levels(caplog) == ["WARNING", "DEBUG", "DEBUG", "DEBUG", "DEBUG"]
@@ -344,24 +359,24 @@ def test_the_visible_window_is_per_subject_so_a_second_channel_still_announces(c
     of the key too, so the same channel re-announces when the cause changes.
     """
     for channel in ("chan-a", "chan-b"):
-        ct.guard_inbound(None, PROVIDER, "user-1", channel_id=channel, is_dm=False, text="@Bot hi")
+        ct.guard_inbound(
+            None, PROVIDER, "user-1", channel_id=channel, is_dm=False, text="@Bot hi"
+        )
     assert levels(caplog) == ["WARNING", "WARNING"], "each channel is its own subject"
 
-    # Same channel, same reason → demoted. FLOOR: proves the window is real, so the two
-    # WARNINGs above cannot be explained by there being no window at all.
     caplog.clear()
-    ct.guard_inbound(None, PROVIDER, "user-1", channel_id="chan-a", is_dm=False, text="@Bot hi")
+    ct.guard_inbound(
+        None, PROVIDER, "user-1", channel_id="chan-a", is_dm=False, text="@Bot hi"
+    )
     assert levels(caplog) == ["DEBUG"]
 
-    # Same channel, DIFFERENT cause → announces again rather than hiding behind the first.
     caplog.clear()
     _set_policy("group", "off")
-    ct.guard_inbound(None, PROVIDER, "user-1", channel_id="chan-a", is_dm=False, text="@Bot hi")
+    ct.guard_inbound(
+        None, PROVIDER, "user-1", channel_id="chan-a", is_dm=False, text="@Bot hi"
+    )
     assert levels(caplog) == ["WARNING"]
     assert "group_policy_off" in lines(caplog)[0][2]
-
-
-# ── the two paths the gate cannot see, owned by channel_inbound ──────────────
 
 
 def test_an_admission_cache_hit_reports_at_debug_without_re_entering_the_gate(caplog):
@@ -380,13 +395,13 @@ def test_an_admission_cache_hit_reports_at_debug_without_re_entering_the_gate(ca
         return real_guard(*a, **kw)
 
     ci_guard = ci.guard_inbound
-    assert ci_guard is real_guard  # the door calls the gate directly; no shim in between
+    assert ci_guard is real_guard
 
     state = CapturingState()
     msg = _msg(mid="m-dupe")
     services = _Services(state)
 
-    import gideon.channel_inbound as ci_mod
+    import gideon.integrations.channel_inbound as ci_mod
 
     ci_mod.guard_inbound = counting_guard  # type: ignore[assignment]
     try:
@@ -399,12 +414,10 @@ def test_an_admission_cache_hit_reports_at_debug_without_re_entering_the_gate(ca
         ci_mod.guard_inbound = real_guard  # type: ignore[assignment]
 
     assert len(entries) == 1, "the cache must not re-enter the gate"
-    # FLOOR: the first presentation IS operator-visible. Without it, "the second one is
-    # only DEBUG" would also be satisfied by the original silence.
     assert first == ["WARNING"]
     assert [level for _, level, _ in second] == ["DEBUG"]
     logger_name, _, message = second[0]
-    assert logger_name == "gideon.channel_inbound"
+    assert logger_name == "gideon.integrations.channel_inbound"
     assert "already decided" in message
 
 
@@ -421,21 +434,19 @@ def test_the_pairing_short_circuit_reports_through_the_same_owner(caplog):
     code = ct.create_pairing_code(PROVIDER)
     caplog.clear()
 
-    verdict = ci.admit(None, PROVIDER, _msg(text=code, sender="newbie", mid="m-pair"), is_dm=True)
+    verdict = ci.admit(
+        None, PROVIDER, _msg(text=code, sender="newbie", mid="m-pair"), is_dm=True
+    )
 
     assert verdict.allowed is False and verdict.reason == "paired"
     assert ct.is_allowed_sender(PROVIDER, "newbie") is True
     assert levels(caplog) == ["INFO"]
     logger_name, _, msg = lines(caplog)[0]
-    assert logger_name == "gideon.channel_trust", "reporting has exactly one owner"
+    assert (
+        logger_name == "gideon.integrations.channel_trust"
+    ), "reporting has exactly one owner"
     assert "reason=paired" in msg
-    # FLOOR: no remedy hint on a verdict that was not a policy decision — telling the
-    # operator to "pair this sender" on the message that just paired them is worse than
-    # silence, and this is what keeps the hint derived from `policy` rather than guessed.
     assert "policy=-" in msg and "pair or allow this sender" not in msg
-
-
-# ── structural: one owner, enforced rather than hoped for ────────────────────
 
 
 def test_no_inbound_verdict_is_returned_without_passing_through_the_one_reporter():
@@ -453,16 +464,23 @@ def test_no_inbound_verdict_is_returned_without_passing_through_the_one_reporter
     """
     from pathlib import Path
 
-    import gideon.channel_inbound
-    import gideon.channel_trust
+    import gideon.integrations.channel_inbound
+    import gideon.integrations.channel_trust
 
-    gate_source = Path(str(gideon.channel_trust.__file__)).read_text(encoding="utf-8")
-    # FLOOR: a passing check must be a real one — if the class were renamed or the
-    # construction moved elsewhere, the negatives below would pass vacuously.
-    assert "TrustVerdict(" in gate_source, "channel_trust no longer mints a verdict at all"
-    assert "report_inbound_verdict(" in gate_source, "the gate does not reach the reporter"
+    gate_source = Path(str(gideon.integrations.channel_trust.__file__)).read_text(
+        encoding="utf-8"
+    )
+    assert (
+        "TrustVerdict(" in gate_source
+    ), "channel_trust no longer mints a verdict at all"
+    assert (
+        "report_inbound_verdict(" in gate_source
+    ), "the gate does not reach the reporter"
 
-    for module in (gideon.channel_trust, gideon.channel_inbound):
+    for module in (
+        gideon.integrations.channel_trust,
+        gideon.integrations.channel_inbound,
+    ):
         source = Path(str(module.__file__)).read_text(encoding="utf-8")
         name = module.__name__
         assert "return TrustVerdict(" not in source, (
@@ -485,7 +503,6 @@ def test_the_log_line_never_carries_the_message_body(caplog):
     ct.guard_inbound(None, PROVIDER, "friend", is_dm=True, text=SECRET_BODY)
 
     emitted = lines(caplog)
-    # FLOOR: the sweep is only meaningful if it actually saw the lines it claims to check.
     assert len(emitted) >= 3, f"expected a line per branch, got {emitted}"
     for _, _, msg in emitted:
         assert "sk-live-000111222333" not in msg
@@ -502,7 +519,12 @@ def test_the_reporter_hands_back_the_verdict_it_was_given(caplog):
     """
     original = ct.TrustVerdict(allowed=False, reason="untracked_channel")
     returned = ct.report_inbound_verdict(
-        PROVIDER, original, sender_id="u", channel_id="c", is_dm=False, policy="tracked_only"
+        PROVIDER,
+        original,
+        sender_id="u",
+        channel_id="c",
+        is_dm=False,
+        policy="tracked_only",
     )
 
     assert returned is original

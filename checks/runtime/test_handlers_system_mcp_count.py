@@ -12,10 +12,9 @@ def _run_collect() -> dict:
     The remaining system metrics (memory, CPU, network) are all wrapped in
     try/except so they degrade gracefully — only the MCP block matters here.
     """
-    from gideon.dashboard import handlers_system
+    from gideon.interfaces.dashboard import handlers_system
 
     with patch.object(handlers_system, "_get_static_system_info", return_value={}):
-        # Reset cache so each test gets a fresh call
         handlers_system._metrics_cache.clear()
         handlers_system._metrics_cache_ts = 0.0
         return handlers_system._collect_system_metrics()
@@ -25,9 +24,6 @@ class TestMcpProcessCountLinux:
     """Linux path: scans /proc/*/cmdline."""
 
     def test_counts_all_signatures(self) -> None:
-        # agent_cli is detected via the external ACP agent CLIs ("claude" /
-        # "acp-agent") — the native agent runs in-process, and external agents
-        # are wrapped as acp:<cli> bundles, so those binaries are the signature.
         fake_procs = {
             "10": b"python3\x00/tmp/gideon_sandbox_abc.py",
             "20": b"claude\x00acp\x00--agent\x00gideon",
@@ -52,9 +48,15 @@ class TestMcpProcessCountLinux:
             return orig_read_bytes(self_path)
 
         with (
-            patch("gideon.dashboard.handlers_system.sys") as mock_sys,
-            patch("gideon.dashboard.handlers_system.os.getpid", return_value=99999),
-            patch("gideon.dashboard.handlers_system.os.listdir", side_effect=fake_listdir),
+            patch("gideon.interfaces.dashboard.handlers_system.sys") as mock_sys,
+            patch(
+                "gideon.interfaces.dashboard.handlers_system.os.getpid",
+                return_value=99999,
+            ),
+            patch(
+                "gideon.interfaces.dashboard.handlers_system.os.listdir",
+                side_effect=fake_listdir,
+            ),
             patch.object(Path, "read_bytes", fake_read_bytes),
         ):
             mock_sys.platform = "linux"
@@ -77,9 +79,14 @@ class TestMcpProcessCountLinux:
             return b"gideon-cli\x00acp"
 
         with (
-            patch("gideon.dashboard.handlers_system.sys") as mock_sys,
-            patch("gideon.dashboard.handlers_system.os.getpid", return_value=10),
-            patch("gideon.dashboard.handlers_system.os.listdir", side_effect=fake_listdir),
+            patch("gideon.interfaces.dashboard.handlers_system.sys") as mock_sys,
+            patch(
+                "gideon.interfaces.dashboard.handlers_system.os.getpid", return_value=10
+            ),
+            patch(
+                "gideon.interfaces.dashboard.handlers_system.os.listdir",
+                side_effect=fake_listdir,
+            ),
             patch.object(Path, "read_bytes", fake_read_bytes),
         ):
             mock_sys.platform = "linux"
@@ -92,11 +99,6 @@ class TestMcpProcessCountMacOS:
     """macOS path: uses ps -eo pid,command."""
 
     def test_counts_all_signatures(self) -> None:
-        # macOS scans `ps -eo pid,command` for two signatures only:
-        # "gideon_sandbox" and "mcp-server".  agent_cli is NOT tracked on
-        # macOS — sandbox-exec replaces the process image so the launcher's
-        # cmdline is lost (see handlers_system comment), and the macOS _sigs map
-        # intentionally omits an agent_cli signature.
         ps_output = (
             "  PID COMMAND\n"
             "   10 python3 /tmp/gideon_sandbox_abc.py\n"
@@ -106,10 +108,13 @@ class TestMcpProcessCountMacOS:
         )
 
         with (
-            patch("gideon.dashboard.handlers_system.sys") as mock_sys,
-            patch("gideon.dashboard.handlers_system.os.getpid", return_value=99999),
+            patch("gideon.interfaces.dashboard.handlers_system.sys") as mock_sys,
             patch(
-                "gideon.dashboard.handlers_system.subprocess.check_output",
+                "gideon.interfaces.dashboard.handlers_system.os.getpid",
+                return_value=99999,
+            ),
+            patch(
+                "gideon.interfaces.dashboard.handlers_system.subprocess.check_output",
                 return_value=ps_output,
             ),
         ):
@@ -125,10 +130,12 @@ class TestMcpProcessCountMacOS:
         ps_output = "  PID COMMAND\n   42 gideon-cli acp\n"
 
         with (
-            patch("gideon.dashboard.handlers_system.sys") as mock_sys,
-            patch("gideon.dashboard.handlers_system.os.getpid", return_value=42),
+            patch("gideon.interfaces.dashboard.handlers_system.sys") as mock_sys,
             patch(
-                "gideon.dashboard.handlers_system.subprocess.check_output",
+                "gideon.interfaces.dashboard.handlers_system.os.getpid", return_value=42
+            ),
+            patch(
+                "gideon.interfaces.dashboard.handlers_system.subprocess.check_output",
                 return_value=ps_output,
             ),
         ):
@@ -139,10 +146,12 @@ class TestMcpProcessCountMacOS:
 
     def test_ps_failure_returns_zeros(self) -> None:
         with (
-            patch("gideon.dashboard.handlers_system.sys") as mock_sys,
-            patch("gideon.dashboard.handlers_system.os.getpid", return_value=1),
+            patch("gideon.interfaces.dashboard.handlers_system.sys") as mock_sys,
             patch(
-                "gideon.dashboard.handlers_system.subprocess.check_output",
+                "gideon.interfaces.dashboard.handlers_system.os.getpid", return_value=1
+            ),
+            patch(
+                "gideon.interfaces.dashboard.handlers_system.subprocess.check_output",
                 side_effect=OSError("ps not found"),
             ),
         ):

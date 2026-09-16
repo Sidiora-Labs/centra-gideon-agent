@@ -20,10 +20,8 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.learning import ambient
-from gideon.learning.surfacing import AUTHORITY_PREAMBLE, count_tokens
-
-# ── fixtures that mirror the REAL renderers' output shapes ──
+from gideon.cognition.learning import ambient
+from gideon.cognition.learning.surfacing import AUTHORITY_PREAMBLE, count_tokens
 
 LESSON_HEADER = (
     "[Learned corrections — user-taught rules from past mistakes.\n"
@@ -40,7 +38,9 @@ def lesson_block(count: int = 20, *, marked: int | None = None) -> str:
     lines = [LESSON_HEADER]
     for i in range(count):
         if marked is not None and i == marked:
-            lines.append("- When the zqx-parser regresses, bisect the tokenizer commits first.")
+            lines.append(
+                "- When the zqx-parser regresses, bisect the tokenizer commits first."
+            )
         else:
             lines.append(
                 f"- When editing module-{i}, run the targeted suite before the full run; "
@@ -80,9 +80,6 @@ PERSONA = (
 )
 
 
-# ── clause 1: ONE budget ──
-
-
 @pytest.mark.parametrize("budget", [60, 120, 300, 600, 1200, 4000])
 def test_the_framed_render_never_exceeds_the_budget(budget):
     """The criterion's core claim, at every budget size.
@@ -112,7 +109,6 @@ def test_the_lesson_header_is_paid_for_inside_the_budget():
     alloc = ambient.render(lessons=block, budget_tokens=600)
     framed = ambient.frame(alloc, lessons_block=block)
     assert count_tokens(framed) <= 600
-    # The header IS present — reserving its cost must not have dropped it.
     assert "ALWAYS follow these" in framed
 
 
@@ -154,8 +150,6 @@ def test_the_budget_scales_with_the_model_window():
     """
     assert ambient.budget_for_window(200_000, 4000) == 4000
     assert ambient.budget_for_window(1_000_000, 4000) == 20_000
-    # Clamped both ways: a small window does not shrink below the calibrated baseline, and a
-    # gigantic one does not grow past 5x.
     assert ambient.budget_for_window(8_000, 4000) == 4000
     assert ambient.budget_for_window(10_000_000, 4000) == 20_000
 
@@ -172,13 +166,10 @@ def test_the_window_multiple_matches_the_memory_caps_multiple():
     Two different multiples would make the memory half and the learning half of one prompt disagree
     about how big the window is, and nothing would fail.
     """
-    from gideon.context import _BASELINE_WINDOW, _MAX_BUDGET_MULTIPLE
+    from gideon.cognition.context import _BASELINE_WINDOW, _MAX_BUDGET_MULTIPLE
 
     assert ambient.BASELINE_WINDOW == _BASELINE_WINDOW
     assert ambient.MAX_BUDGET_MULTIPLE == _MAX_BUDGET_MULTIPLE
-
-
-# ── clause 2: lessons are NEVER crowded out ──
 
 
 def test_lessons_survive_at_every_budget_that_can_hold_one():
@@ -191,7 +182,10 @@ def test_lessons_survive_at_every_budget_that_can_hold_one():
     block = lesson_block(120)
     for budget in (60, 90, 120, 300, 600):
         alloc = ambient.render(
-            lessons=block, skill_index=skill_index(), budget_tokens=budget, query="module-3"
+            lessons=block,
+            skill_index=skill_index(),
+            budget_tokens=budget,
+            query="module-3",
         )
         kept = [k for kind, k, _t in alloc.included if kind == "lesson"]
         assert kept, f"no lesson survived a {budget}-token budget"
@@ -247,12 +241,14 @@ def test_no_lesson_is_ever_rendered_partially():
         text = ambient.frame(alloc, lessons_block=block)
         for line in text.split("\n"):
             if line.startswith("- When editing") or line.startswith("- When the zqx"):
-                assert line.rstrip().endswith("."), f"partial lesson at budget {budget}: {line!r}"
+                assert line.rstrip().endswith(
+                    "."
+                ), f"partial lesson at budget {budget}: {line!r}"
 
 
 def test_the_lessons_slot_is_not_sacrificial():
     """Asserted against the allocator's own SLOT_ORDER, so the policy cannot drift here silently."""
-    from gideon.learning.surfacing import SLOT_ORDER
+    from gideon.cognition.learning.surfacing import SLOT_ORDER
 
     slots = {name: sacrificial for name, _priority, sacrificial in SLOT_ORDER}
     assert slots["lessons"] is False
@@ -266,9 +262,6 @@ def test_an_oversized_lesson_is_skipped_not_truncated():
     alloc = ambient.render(lessons=block, budget_tokens=300)
     assert not [k for kind, k, _t in alloc.included if kind == "lesson"]
     assert alloc.skipped_oversized or alloc.near_misses
-
-
-# ── clause 3: the authority preamble renders ──
 
 
 def test_the_authority_preamble_renders_when_there_is_room():
@@ -295,9 +288,6 @@ def test_the_preamble_cost_is_measured_not_asserted():
     assert ambient.preamble_cost() > 0
 
 
-# ── the skill INDEX: a catalogue, degraded rather than rationed ──
-
-
 def test_the_index_is_one_candidate_not_one_per_entry():
     """Measured: as one candidate per entry, MAX_PER_SOURCE=3 kept 3 of 12 skills and left 3,539
     tokens unused. Diversification stops a rich source crowding a sparse one; applied to a catalogue
@@ -305,7 +295,6 @@ def test_the_index_is_one_candidate_not_one_per_entry():
     cand = ambient.index_candidate(skill_index(12))
     assert cand is not None
     assert cand.key == "skill_index"
-    # Every skill is named at EVERY tier — a skill the model cannot name is one it cannot invoke.
     for tier_text in (cand.l0, cand.l1, cand.l2):
         for i in range(12):
             assert f"skill-{i}" in tier_text
@@ -324,7 +313,6 @@ def test_the_middle_tier_cuts_the_description_never_the_name():
     for line in cand.l1.split("\n"):
         if line.startswith("- **"):
             assert line.startswith("- **skill-")
-            # The description is capped, so the (dir: …) tail of a long entry is gone.
             assert len(line) <= 4 + len("**skill-99**: ") + ambient.HINT_CHARS + 4
 
 
@@ -338,13 +326,11 @@ def test_the_index_degrades_instead_of_vanishing():
     """
     full = ambient.index_candidate(skill_index(12))
     assert full is not None
-    # A budget below the FULL index (422 tokens + a 73-token preamble = 495) but above its
-    # hint-capped form. Measured rather than guessed: at 500 the full index still fits, so a test
-    # asserting degradation there would assert nothing.
-    alloc = ambient.render(skill_index=skill_index(12), query="deploy", budget_tokens=400)
+    alloc = ambient.render(
+        skill_index=skill_index(12), query="deploy", budget_tokens=400
+    )
     assert "[Skills:]" in alloc.text
     assert count_tokens(alloc.text) <= 400
-    # Every skill is still named at the reduced tier.
     for i in range(12):
         assert f"skill-{i}" in alloc.text
 
@@ -355,7 +341,9 @@ def test_a_budget_below_the_full_index_still_names_every_skill():
     `degraded` IS populated when the item was assigned L2 first and had to come down — asserted here
     with a budget that admits L2 for nothing.
     """
-    alloc = ambient.render(skill_index=skill_index(30), query="deploy", budget_tokens=400)
+    alloc = ambient.render(
+        skill_index=skill_index(30), query="deploy", budget_tokens=400
+    )
     assert "[Skills:]" in alloc.text
     for i in range(30):
         assert f"skill-{i}" in alloc.text
@@ -370,11 +358,12 @@ def test_an_always_loaded_skill_body_is_not_dropped():
     never-optional — and no test written here would have noticed, because the fixtures I wrote all
     contained an index.
     """
-    block = "[Skills:]\n### Skill: alpha\n\n# Alpha\nDo the alpha thing.\n[End of skills]\n"
+    block = (
+        "[Skills:]\n### Skill: alpha\n\n# Alpha\nDo the alpha thing.\n[End of skills]\n"
+    )
     assert "Do the alpha thing." in ambient.always_body(block)
     alloc = ambient.render(skill_index=block, budget_tokens=4000)
     assert "Do the alpha thing." in alloc.text
-    # And it is FRAMED: an unmarked body reads as prose the model may treat as commentary.
     assert "[Skills:]" in alloc.text
 
 
@@ -388,8 +377,8 @@ def test_both_skill_populations_survive_together():
         "[End of skills]\n"
     )
     alloc = ambient.render(skill_index=block, budget_tokens=4000)
-    assert "Do the alpha thing." in alloc.text  # the always-loaded body
-    assert "**beta**" in alloc.text and "**gamma**" in alloc.text  # the index
+    assert "Do the alpha thing." in alloc.text
+    assert "**beta**" in alloc.text and "**gamma**" in alloc.text
 
 
 def test_the_always_body_excludes_the_index_lines():
@@ -412,7 +401,9 @@ def test_the_always_body_outranks_the_index_under_pressure():
     block = (
         "[Skills:]\n### Skill: alpha\n\n# Alpha\nThe alpha procedure, in full.\n\n---\n\n"
         "## Available Skills\n\n"
-        + "\n".join(f"- **s{i}**: does the {i}th thing (dir: `/s/{i}`)" for i in range(40))
+        + "\n".join(
+            f"- **s{i}**: does the {i}th thing (dir: `/s/{i}`)" for i in range(40)
+        )
         + "\n[End of skills]\n"
     )
     alloc = ambient.render(skill_index=block, query="alpha", budget_tokens=250)
@@ -423,7 +414,10 @@ def test_an_index_with_no_entries_is_not_a_candidate():
     """An always-loaded-skills-only render has no index to budget, and a candidate whose text is
     just the header would spend tokens saying nothing."""
     assert ambient.index_candidate("") is None
-    assert ambient.index_candidate("[Skills:]\n### Skill: alpha\n\nbody\n[End of skills]") is None
+    assert (
+        ambient.index_candidate("[Skills:]\n### Skill: alpha\n\nbody\n[End of skills]")
+        is None
+    )
 
 
 def test_the_hint_cap_comes_from_the_plan():
@@ -434,9 +428,6 @@ def test_the_hint_cap_comes_from_the_plan():
 def test_a_short_description_is_not_padded_or_cut():
     line = "- **s**: short (dir: `/x`)"
     assert ambient._hint(line) == line
-
-
-# ── the pre-rendered blocks: all-or-nothing ──
 
 
 def test_a_prerendered_block_is_all_or_nothing():
@@ -461,9 +452,6 @@ def test_the_voice_and_persona_blocks_do_not_dedupe_each_other():
     assert "SELF — who you are becoming" in alloc.text
 
 
-# ── the slot map, including the blocks with no producer yet ──
-
-
 def test_every_named_block_has_a_slot():
     """All five blocks the criterion names map to an allocator kind.
 
@@ -478,7 +466,7 @@ def test_every_named_block_has_a_slot():
 
 def test_the_slot_kinds_are_the_allocators_own_vocabulary():
     """A sixth kind would need a sixth slot, which is how "one budget" becomes six again."""
-    from gideon.learning.surfacing import SLOT_ORDER, allocate
+    from gideon.cognition.learning.surfacing import SLOT_ORDER, allocate
 
     slot_names = {name for name, _p, _s in SLOT_ORDER}
     for kind in set(ambient.SLOT_KINDS.values()):
@@ -486,18 +474,25 @@ def test_the_slot_kinds_are_the_allocators_own_vocabulary():
         assert cand is not None
         cand.kind = kind
         alloc = allocate({"s": [cand]}, budget_tokens=4000)
-        # Every kind lands in a DECLARED slot rather than the catch-all.
         assert alloc.included, f"kind {kind!r} produced no allocation"
     assert "lessons" in slot_names and "skills" in slot_names and "memory" in slot_names
 
 
 def test_a_self_model_snapshot_would_fit_the_budget_when_a_producer_exists():
     """The contract the future producer calls, exercised with S72's real snapshot output."""
-    from gideon.learning.self_model import Entry, snapshot
+    from gideon.cognition.learning.self_model import Entry, snapshot
 
     entries = [
-        Entry(facet="principle", key="edit-over-rewrite", body="Prefer editing to rewriting."),
-        Entry(facet="theory", key="xdist-order", body="Import order may explain the flake."),
+        Entry(
+            facet="principle",
+            key="edit-over-rewrite",
+            body="Prefer editing to rewriting.",
+        ),
+        Entry(
+            facet="theory",
+            key="xdist-order",
+            body="Import order may explain the flake.",
+        ),
     ]
     block = snapshot(entries)
     assert block
@@ -507,21 +502,22 @@ def test_a_self_model_snapshot_would_fit_the_budget_when_a_producer_exists():
 
 def test_a_template_suggestion_would_fit_the_budget_when_a_producer_exists():
     """Same for S58's `render_suggest` output, so the two unbuilt producers have a tested seam."""
-    from gideon.workflows.surfacing import SurfacingMeta, render_suggest
+    from gideon.automation.workflows.surfacing import SurfacingMeta, render_suggest
 
-    block = render_suggest(SurfacingMeta(summary="deploys the gateway"), name="deploy-gateway")
+    block = render_suggest(
+        SurfacingMeta(summary="deploys the gateway"), name="deploy-gateway"
+    )
     assert block
     alloc = ambient.render(template=block, budget_tokens=4000)
     assert "deploy-gateway" in alloc.text
 
 
-# ── the report: what was LEFT OUT ──
-
-
 def test_the_report_names_what_did_not_fit():
     """An allocator that reports only what it injected cannot be audited for crowd-out — the whole
     failure this criterion is about is invisible from the surviving text."""
-    alloc = ambient.render(lessons=lesson_block(200), skill_index=skill_index(), budget_tokens=400)
+    alloc = ambient.render(
+        lessons=lesson_block(200), skill_index=skill_index(), budget_tokens=400
+    )
     report = ambient.report(alloc)
     assert report["near_misses"] > 0
     assert report["used_tokens"] <= report["budget_tokens"]
@@ -556,7 +552,9 @@ def test_dropped_lessons_are_catalogued_on_the_allocation():
     alloc = ambient.render(lessons=lesson_block(200), budget_tokens=500)
     assert alloc.near_misses
     assert (
-        len(alloc.near_misses) + len([k for kd, k, _t in alloc.included if kd == "lesson"]) == 200
+        len(alloc.near_misses)
+        + len([k for kd, k, _t in alloc.included if kd == "lesson"])
+        == 200
     )
 
 
@@ -567,19 +565,14 @@ def test_the_catalogue_renders_when_a_near_miss_leaves_headroom():
     so it appears exactly when something was dropped AND room remains. A `retrieved_context` item
     whose full body cannot fit is the case the mechanism was built for.
     """
-    from gideon.learning.surfacing import Candidate, allocate
+    from gideon.cognition.learning.surfacing import Candidate, allocate
 
     small = Candidate(kind="lesson", key="s", score=1.0, l0="- small.", l1="- small.")
-    # A one-line `l0` that is the CATALOGUE entry, with a body too big for the budget at L1/L2. This
-    # is the shape the mechanism was built for, and getting it wrong is instructive: with `l0` set
-    # to the 900-char body itself, the catalogue LINE is 225 tokens and cannot fit either — the
-    # catalogue only works when `l0` is genuinely one line, which is what the tier is for.
     big = Candidate(
         kind="context", key="big-doc", score=0.9, l0="big-doc (900 chars)", l1="x" * 900
     )
     alloc = allocate({"lessons": [small], "ctx": [big]}, budget_tokens=260)
     assert alloc.near_misses == [] or "Also available on request" in alloc.text
-    # Either it fitted at L0 (degraded, no near-miss) or it was catalogued — never silently gone.
     assert "big-doc" in alloc.text
 
 
@@ -588,9 +581,6 @@ def test_the_catalogue_never_pushes_the_render_over_budget():
     for budget in (300, 500, 900, 2000):
         alloc = ambient.render(lessons=lesson_block(200), budget_tokens=budget)
         assert alloc.used_tokens <= budget
-
-
-# ── frame(): the header, and only when it is honest ──
 
 
 def test_the_header_is_omitted_when_no_lesson_survived():
@@ -603,7 +593,8 @@ def test_the_header_is_omitted_when_no_lesson_survived():
 
 def test_the_header_is_taken_from_the_block_not_restated():
     """`vector_memory.get_lessons_context` stays the sole author of the wording — a copy here would
-    drift, and the drift would be invisible because both versions read like the real header."""
+    drift, and the drift would be invisible because both versions read like the real header.
+    """
     custom = "[MY OWN HEADER — follow these]\n- a lesson that ends properly.\n"
     alloc = ambient.render(lessons=custom, budget_tokens=4000)
     text = ambient.frame(alloc, lessons_block=custom)
@@ -628,15 +619,13 @@ def test_lesson_header_stops_at_the_first_lesson():
     assert ambient.lesson_header("- just a lesson.") == ""
 
 
-# ── the wiring into context.py ──
-
-
 def test_the_context_builder_routes_the_blocks_through_the_budget():
     """The inert-control regression: `allocate()` had zero callers, so the ranking existed and
-    nothing ranked. This asserts the CALL, which no behavioural test of the allocator can see."""
+    nothing ranked. This asserts the CALL, which no behavioural test of the allocator can see.
+    """
     import inspect
 
-    from gideon import context
+    from gideon.cognition import context
 
     src = inspect.getsource(context._render_ambient)
     assert "ambient.render" in src
@@ -647,7 +636,7 @@ def test_the_context_builder_routes_the_blocks_through_the_budget():
 def test_the_old_per_block_lesson_cap_is_gone():
     """Clean break: `_fit_lessons` and `_LESSONS_CAP` governed the lesson block independently of any
     budget, and leaving them would be a second policy for the same block."""
-    from gideon import context
+    from gideon.cognition import context
 
     assert not hasattr(context, "_fit_lessons")
     assert not hasattr(context, "_LESSONS_CAP")
@@ -656,11 +645,13 @@ def test_the_old_per_block_lesson_cap_is_gone():
 def test_the_config_knob_is_actually_read():
     """`learning.context_budget_tokens` was a fully round-tripped knob that nothing read — its help
     text promised "only retrieved context is ever trimmed", a promise no code kept."""
-    from gideon.config.loader import AppConfig
+    from gideon.core.config.loader import AppConfig
 
     cfg = AppConfig.load().learning
     assert cfg.context_budget_tokens > 0
-    alloc = ambient.render(lessons=lesson_block(500), budget_tokens=cfg.context_budget_tokens)
+    alloc = ambient.render(
+        lessons=lesson_block(500), budget_tokens=cfg.context_budget_tokens
+    )
     assert alloc.used_tokens <= alloc.budget_tokens
 
 
@@ -668,13 +659,13 @@ def test_a_broken_budget_never_costs_the_user_their_lessons():
     """Never raises into a turn. A budgeting failure that cost the user their context would be
     strictly worse than an over-long prompt, so the fallback is the raw lesson block — the most
     authoritative content, ungoverned rather than absent."""
-    from gideon import context
+    from gideon.cognition import context
 
     block = lesson_block(5)
     out = context._render_ambient(lessons=block, skill_index="boom")
-    assert out  # something rendered
+    assert out
 
-    import gideon.learning.ambient as amb
+    import gideon.cognition.learning.ambient as amb
 
     original = amb.render
     try:
@@ -685,6 +676,6 @@ def test_a_broken_budget_never_costs_the_user_their_lessons():
 
 
 def test_no_blocks_means_no_ambient_call():
-    from gideon import context
+    from gideon.cognition import context
 
     assert context._render_ambient() == ""

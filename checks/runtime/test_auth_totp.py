@@ -13,11 +13,8 @@ import base64
 
 import pytest
 
-from gideon.auth import totp
+from gideon.security.auth import totp
 
-#: RFC 6238 Appendix B, the SHA-1 rows. Seed is the ASCII "12345678901234567890"; the RFC
-#: prints 8-digit codes, and a 6-digit code is its last six digits (same truncation, smaller
-#: modulus). Keys are the test times in seconds.
 _RFC_SEED_B32 = base64.b32encode(b"12345678901234567890").decode("ascii")
 _RFC_VECTORS = {
     59: "94287082",
@@ -39,12 +36,9 @@ def test_rfc_vectors_also_verify(at: int, expected8: str) -> None:
     assert totp.verify_code(_RFC_SEED_B32, expected8[-totp.DIGITS :], at=at) is True
 
 
-# ── Secrets ───────────────────────────────────────────────────────────────
-
-
 def test_new_secret_is_160_bits_of_base32() -> None:
     secret = totp.new_secret()
-    assert len(secret) == 32  # 20 bytes → 32 base32 chars, unpadded
+    assert len(secret) == 32
     assert set(secret) <= set("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567")
 
 
@@ -55,9 +49,6 @@ def test_secrets_are_unique() -> None:
 def test_a_secret_can_be_verified_immediately() -> None:
     secret = totp.new_secret()
     assert totp.verify_code(secret, totp.code_now(secret)) is True
-
-
-# ── Skew ──────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize("drift", [-30, 0, 30])
@@ -73,9 +64,6 @@ def test_larger_drift_is_rejected(drift: int) -> None:
     secret = totp.new_secret()
     code = totp.code_now(secret, at=1_700_000_000)
     assert totp.verify_code(secret, code, at=1_700_000_000 + drift) is False
-
-
-# ── Malformed input fails closed ──────────────────────────────────────────
 
 
 @pytest.mark.parametrize("code", ["", "12345", "1234567", "abcdef", None, "   "])
@@ -101,9 +89,6 @@ def test_a_wrong_code_is_rejected() -> None:
     right = totp.code_now(secret)
     wrong = f"{(int(right) + 1) % 10**totp.DIGITS:06d}"
     assert totp.verify_code(secret, wrong) is False
-
-
-# ── The provisioning URI ──────────────────────────────────────────────────
 
 
 def test_provisioning_uri_shape() -> None:

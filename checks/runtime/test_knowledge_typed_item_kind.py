@@ -29,10 +29,10 @@ import asyncio
 
 import pytest
 
-from gideon.knowledge import semantics, updates
-from gideon.knowledge.store import KnowledgeStore
-from gideon.knowledge_providers.native import NATIVE_TYPES
-from gideon.learning import proposals
+from gideon.cognition.knowledge import semantics, updates
+from gideon.cognition.knowledge.store import KnowledgeStore
+from gideon.cognition.learning import proposals
+from gideon.integrations.knowledge_providers.native import NATIVE_TYPES
 
 
 def run(coro):
@@ -45,8 +45,8 @@ def home(tmp_path, monkeypatch):
     redirect is asserted rather than assumed: `config/__init__.py` binds `config_dir` at
     import, so patching only `config.loader.config_dir` leaves import-bound readers pointed
     at the developer's real `~/.gideon`."""
-    import gideon.config as config_pkg
-    import gideon.config.loader as config_loader
+    import gideon.core.config as config_pkg
+    import gideon.core.config.loader as config_loader
 
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     monkeypatch.setattr(config_loader, "config_dir", lambda: tmp_path)
@@ -67,9 +67,6 @@ def row(store, item_id: str) -> dict:
     return got
 
 
-# ── 1. the gate FIRES ──
-
-
 def test_the_citation_gate_refuses_an_uncited_synthesized_typed_item(store):
     """The control this write exists to arm. Before the fix this update was ADMITTED."""
     item_id = store.create_typed_item(
@@ -78,7 +75,6 @@ def test_the_citation_gate_refuses_an_uncited_synthesized_typed_item(store):
         content="A synthesis nobody sourced.",
     )
     assert item_id
-    # The column write is the premise, not the claim.
     assert row(store, item_id)["kind"] == "insight"
 
     out = run(
@@ -94,11 +90,8 @@ def test_the_citation_gate_refuses_an_uncited_synthesized_typed_item(store):
     assert out["pending"] is False
     assert "synthesized" in out["reason"]
     assert "citations" in out["reason"]
-    # Refused AT the gate, before the queue: a reason beside a filed draft would mean the
-    # check ran somewhere that no longer decides anything.
     assert out["proposal_id"] == ""
     assert proposals.list_pending(updates.DRAFT_KIND) == []
-    # And nothing landed on the row.
     assert row(store, item_id)["content"] == "A synthesis nobody sourced."
 
 
@@ -127,21 +120,22 @@ def test_the_same_synthesized_edit_is_admitted_once_it_cites_something(store):
 
 
 @pytest.mark.parametrize("item_type", sorted(semantics.SYNTHESIZED_KINDS))
-def test_every_synthesized_item_type_persists_its_kind_and_logical_identity(store, item_type):
+def test_every_synthesized_item_type_persists_its_kind_and_logical_identity(
+    store, item_type
+):
     """`logical_key` moves with `kind` because `set_item_identity` — the only other writer of
     `kind` — never leaves the pair half-set, and that column is the persist path's
     idempotency lookup: a `kind` set beside a NULL key would be a state no other writer can
     produce."""
-    item_id = store.create_typed_item(item_type=item_type, title="Weekly rollup", content="x")
+    item_id = store.create_typed_item(
+        item_type=item_type, title="Weekly rollup", content="x"
+    )
     assert item_id
 
     stored = row(store, item_id)
     assert stored["kind"] == item_type
     assert stored["logical_key"] == semantics.logical_key(item_type, "Weekly rollup")
-    assert stored["item_type"] == item_type  # the ingestion axis is untouched
-
-
-# ── 3. vacuity: the write is NOT indiscriminate ──
+    assert stored["item_type"] == item_type
 
 
 @pytest.mark.parametrize("item_type", [*NATIVE_TYPES, "artifact"])
@@ -149,7 +143,9 @@ def test_an_ingestion_vocabulary_item_type_acquires_no_kind(store, item_type):
     """Every item_type a shipped caller actually passes. None of them is a member of
     `SYNTHESIZED_KINDS`, so none may acquire a `kind` — `item_type` and `kind` answer
     different questions and only their genuine overlap is persisted."""
-    item_id = store.create_typed_item(item_type=item_type, title=f"A {item_type}", content="x")
+    item_id = store.create_typed_item(
+        item_type=item_type, title=f"A {item_type}", content="x"
+    )
     assert item_id
 
     stored = row(store, item_id)
@@ -169,11 +165,14 @@ def test_a_plain_notes_update_behaviour_is_unchanged(store):
     assert not row(store, item_id)["kind"]
 
     out = run(
-        updates.propose_update(store, item_id, content="A model's rewrite.", auto_accept=False)
+        updates.propose_update(
+            store, item_id, content="A model's rewrite.", auto_accept=False
+        )
     )
 
     assert out["pending"] is True
     assert out["proposal_id"]
-    assert [p.id for p in proposals.list_pending(updates.DRAFT_KIND)] == [out["proposal_id"]]
-    # Pending, not applied: the stored writing is still the human's.
+    assert [p.id for p in proposals.list_pending(updates.DRAFT_KIND)] == [
+        out["proposal_id"]
+    ]
     assert row(store, item_id)["content"] == "The cascade I wrote by hand."

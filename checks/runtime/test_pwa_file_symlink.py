@@ -1,4 +1,4 @@
-"""Tests for the dist-ROOT file handlers: /claw.svg, /manifest.webmanifest, /sw.js."""
+"""Tests for the dist-ROOT file handlers: /gideon.svg, /manifest.webmanifest, /sw.js."""
 
 from unittest.mock import MagicMock, patch
 
@@ -8,12 +8,12 @@ from aiohttp import web
 
 @pytest.mark.asyncio
 async def test_favicon_serves_through_symlinked_dist(tmp_path):
-    """In dev, static/dist is a symlink to web/dist (via
+    """In dev, static/dist is a symlink to apps/console/dist (via
     ensure_dev_dist_symlink). The favicon handler must serve the real file
     through the symlink (dist-root files have no static route; without this
     handler the request falls through to the SPA fallback, which serves
     index.html as text/html — a broken favicon)."""
-    from gideon.dashboard.handlers import core
+    from gideon.interfaces.dashboard.handlers import core
 
     real_dist = tmp_path / "real-dist"
     real_dist.mkdir()
@@ -31,7 +31,7 @@ async def test_favicon_serves_through_symlinked_dist(tmp_path):
 @pytest.mark.asyncio
 async def test_favicon_404_when_missing(tmp_path):
     """No claw.svg in dist → clean 404 (not a SPA-fallback HTML response)."""
-    from gideon.dashboard.handlers import core
+    from gideon.interfaces.dashboard.handlers import core
 
     dist = tmp_path / "dist"
     dist.mkdir()
@@ -40,9 +40,6 @@ async def test_favicon_404_when_missing(tmp_path):
     with patch.object(core, "_DIST_DIR", dist):
         with pytest.raises(web.HTTPNotFound):
             await core.favicon(req)
-
-
-# ── PWA dist-root files (MOBILE-COMPANION T3.1) ──
 
 
 @pytest.mark.asyncio
@@ -62,7 +59,7 @@ async def test_pwa_root_file_states_its_content_type(
     so ``FileResponse`` alone would send ``application/octet-stream`` and the browser
     would discard the manifest — no install prompt, no error anywhere.
     """
-    from gideon.dashboard.handlers import core
+    from gideon.interfaces.dashboard.handlers import core
 
     dist = tmp_path / "dist"
     dist.mkdir()
@@ -88,7 +85,7 @@ async def test_pwa_root_file_missing_returns_404_and_does_not_raise(
     still looking perfectly fine. Returning the status directly skips that
     middleware, so the failure is diagnosable.
     """
-    from gideon.dashboard.handlers import core
+    from gideon.interfaces.dashboard.handlers import core
 
     dist = tmp_path / "dist"
     dist.mkdir()
@@ -102,8 +99,8 @@ async def test_pwa_root_file_missing_returns_404_and_does_not_raise(
 
 @pytest.mark.asyncio
 async def test_pwa_root_files_serve_through_symlinked_dist(tmp_path) -> None:
-    """In dev, static/dist is a symlink to web/dist — both handlers must follow it."""
-    from gideon.dashboard.handlers import core
+    """In dev, static/dist is a symlink to apps/console/dist — both handlers must follow it."""
+    from gideon.interfaces.dashboard.handlers import core
 
     real_dist = tmp_path / "real-dist"
     real_dist.mkdir()
@@ -128,7 +125,7 @@ def test_icons_and_pwa_roots_are_excluded_from_the_spa_fallback() -> None:
     """
     from pathlib import Path
 
-    import gideon.dashboard.server as server_mod
+    import gideon.interfaces.dashboard.server as server_mod
 
     source = Path(server_mod.__file__).read_text(encoding="utf-8")
     assert '("/assets/", "/icons/", "/sprites/", "/vendor/")' in source
@@ -143,7 +140,7 @@ def test_unmatched_api_routes_answer_in_the_wire_envelope() -> None:
     """
     from pathlib import Path
 
-    import gideon.dashboard.server as server_mod
+    import gideon.interfaces.dashboard.server as server_mod
 
     source = Path(server_mod.__file__).read_text(encoding="utf-8")
     api_branch = source.find('if request.path.startswith("/api/"):')
@@ -159,7 +156,7 @@ def test_pwa_routes_are_registered_at_the_origin_root() -> None:
     control ``/assets/``, so ``/sw.js`` must be registered at the root."""
     from pathlib import Path
 
-    import gideon.dashboard.server as server_mod
+    import gideon.interfaces.dashboard.server as server_mod
 
     source = Path(server_mod.__file__).read_text(encoding="utf-8")
     assert 'add_get("/sw.js", handlers.service_worker)' in source

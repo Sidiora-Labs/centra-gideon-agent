@@ -66,7 +66,6 @@ def main() -> int:
         by_prov.setdefault(t["provider"], set()).add(t["name"])
     names = {t["name"] for t in tools}
 
-    # 1. projects category redefinition
     proj = by_prov.get("gideon-project-tools", set())
     check(proj == {"project_run_create", "project_run_start", "project_run_status", "project_run_list"},
           f"project-tools provider slice wrong: {sorted(proj)}", fails)
@@ -74,12 +73,10 @@ def main() -> int:
                   "project_create", "project_list"):
         check(stale not in proj, f"stale loop tool {stale!r} back in project provider", fails)
 
-    # 2. no monolithic builtin; removed shell tools gone
     check("builtin" not in by_prov, "monolithic 'builtin' provider reappeared", fails)
     for gone in ("git", "run_tests", "diagnostics"):
         check(gone not in names, f"removed shell-wrapper tool {gone!r} reappeared", fails)
 
-    # 3. MCP per-provider reconnect: probe/{name} works for each configured server
     mcp = _get("/api/mcp")
     servers = mcp.get("servers", mcp) if isinstance(mcp, dict) else mcp
     srv_names = [s.get("name") for s in servers if isinstance(s, dict)]
@@ -88,7 +85,6 @@ def main() -> int:
         st, _ = _req("POST", f"/api/mcp/probe/{n}")
         check(st in (200, 202), f"probe-one [{n}] failed: status={st}", fails)
 
-    # 4. app list is fast + free of garbage (the /api/apps perf regression)
     t0 = time.time()
     apps = _get("/api/apps")["apps"]
     dt = time.time() - t0
@@ -96,7 +92,6 @@ def main() -> int:
     real = [a for a in apps if not a.get("platform") and a.get("origin") != "bundled"]
     check(len(apps) < 200, f"/api/apps returned {len(apps)} entries — garbage dirs?", fails)
 
-    # 5. tool-disable round-trips through the one registry
     st, _ = _req("POST", "/api/tools/provider-toggle",
                  {"provider": "gideon-knowledge-tools", "enabled": False})
     after = _get("/api/tools")["tools"]
@@ -108,7 +103,6 @@ def main() -> int:
     kn2 = [t for t in after2 if t["provider"] == "gideon-knowledge-tools"]
     check(kn2 and not any(t.get("disabled") for t in kn2), "provider re-enable didn't restore", fails)
 
-    # 6. platform provider can't be disabled
     st, _ = _req("POST", "/api/tools/provider-toggle",
                  {"provider": "gideon-filesystem", "enabled": False})
     check(st == 409, f"platform provider disable not refused (status={st})", fails)

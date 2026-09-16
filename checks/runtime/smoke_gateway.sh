@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Gateway end-to-end security smoke test
-# Prerequisites: gideon gateway running on localhost:10000
-# Usage: bash tests/smoke_gateway.sh   (override port with GIDEON_PORT)
+                                        
+                                                          
+                                                                                
 #
-# Verifies the agent's command-execution sandbox blocks credential exfiltration
-# patterns and does not leak secrets in command output. Reads no credentials —
-# the tests use synthetic placeholders and only check that exfil attempts are
-# refused.
+                                                                               
+                                                                              
+                                                                             
+          
 
 set -uo pipefail
 
@@ -18,13 +18,13 @@ pass() { echo -e "  ${GREEN}✓ PASS${NC}: $1"; ((PASS++)); }
 fail() { echo -e "  ${RED}✗ FAIL${NC}: $1"; ((FAIL++)); }
 skip() { echo -e "  ${YELLOW}⊘ SKIP${NC}: $1"; ((SKIP++)); }
 
-# Check gateway is running
+                          
 if ! curl -sf "$BASE/api/status" >/dev/null 2>&1; then
     echo "ERROR: Gateway not running at $BASE — start with: gideon gateway"
     exit 1
 fi
 
-# Create a test session
+                       
 SESSION=$(curl -sf -X POST "$BASE/api/chat/sessions" -H "Content-Type: application/json" -d '{}' \
     | python3 -c "import sys,json; print(json.load(sys.stdin)['key'])" 2>/dev/null)
 if [ -z "$SESSION" ]; then
@@ -33,16 +33,16 @@ if [ -z "$SESSION" ]; then
 fi
 echo "Test session: $SESSION"
 
-# Send a message and wait for response
+                                      
 send() {
     local msg="$1"
     local timeout="${2:-60}"
-    # Send message (POST /api/chat streams via SSE; we ignore the stream and poll history)
+                                                                                          
     curl -sf -X POST "$BASE/api/chat" \
         -H "Content-Type: application/json" \
         -d "{\"message\": \"$msg\", \"session\": \"$SESSION\"}" >/dev/null 2>&1
 
-    # Poll for response (wait for assistant message)
+                                                    
     local elapsed=0
     local response=""
     while [ $elapsed -lt $timeout ]; do
@@ -69,7 +69,7 @@ for m in reversed(msgs):
     return 1
 }
 
-# Check response for patterns
+                             
 has_pattern() { echo "$1" | grep -qi "$2"; }
 no_pattern() { ! echo "$1" | grep -qi "$2"; }
 
@@ -79,7 +79,7 @@ echo "║        Gideon Gateway Security Smoke Test (E2E)           ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo ""
 
-# ─── Should BLOCK ───
+                      
 echo "━━━ Blocked Operations ━━━"
 
 echo "  [1/9] S3 upload..."
@@ -166,7 +166,7 @@ else
     fail "env grep AWS — secrets may have leaked"
 fi
 
-# ─── Cleanup ───
+                 
 curl -sf -X DELETE "$BASE/api/chat/sessions/$SESSION" >/dev/null 2>&1
 
 echo ""

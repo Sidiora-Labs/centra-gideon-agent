@@ -2,7 +2,7 @@
 
 The atom's `done_when` names six unifications: *"One status vocabulary, one adoption/reaping path,
 one attention path, one ledger, one projection to tasks, one cockpit contract."* Three of those six
-are **satisfied** — `PP-5` made the loop a `gideon.ledger` writer, `workflows/attention.py`
+are **satisfied** — `PP-5` made the loop a `gideon.assurance.ledger` writer, `workflows/attention.py`
 was built on the loop watchdog's own inbox seam, and the adoption/reaping slice converged both
 nouns' boot sweeps onto `concurrency.boot_sweep`. A clause that has already converged is as
 load-bearing to record as one that has not: a later slice that "unifies the ledger" would be
@@ -41,38 +41,35 @@ from pathlib import Path
 
 import pytest
 
-_SRC = Path(__file__).resolve().parent.parent / "src" / "gideon"
-_WEB = Path(__file__).resolve().parent.parent / "web" / "src"
+_SRC = Path(__file__).resolve().parent.parent.parent / "runtime" / "gideon"
+_WEB = Path(__file__).resolve().parent.parent.parent / "apps/console" / "src"
 
 
 def _text(rel: str, root: Path = _SRC) -> str:
     """The shipped source of `rel`, with a vacuity floor: a moved or emptied file is a
     failure to MEASURE, not a passing measurement."""
     path = root / rel
-    assert path.is_file(), f"{path} does not exist — module moved? the census is measuring nothing"
+    assert (
+        path.is_file()
+    ), f"{path} does not exist — module moved? the census is measuring nothing"
     body = path.read_text(encoding="utf-8")
     assert body.strip(), f"{path} is empty — the census would pass by being blind"
     return body
 
 
-# ── the three clauses that have already converged (ratchets) ──────────────────────────────
-
-
-#: The loop-side and run-side modules that must remain `gideon.ledger` writers. `PP-5`
-#: ("loops emit the ledger") is what put the first two on this list; `PP-4` extracted the primitive
-#: they all write through.
-# loop/files.py carries the loop store's ledger-writing half since the PP-16 4b split
 _LEDGER_WRITERS = ("loop/journal.py", "loop/files.py", "workflows/journal.py")
 
 
 def test_the_ledger_clause_is_converged_and_stays_converged():
     """`PP-16`'s "one ledger" clause is ALREADY satisfied — both work-unit nouns write
-    `gideon.ledger`, so there is no second ledger left to unify."""
-    assert (_SRC / "ledger").is_dir(), "gideon/ledger/ is gone — PP-4 extraction reverted?"
+    `gideon.assurance.ledger`, so there is no second ledger left to unify."""
+    assert (
+        _SRC / "ledger"
+    ).is_dir(), "gideon/ledger/ is gone — PP-4 extraction reverted?"
     for rel in _LEDGER_WRITERS:
         body = _text(rel)
-        assert "gideon.ledger" in body, (
-            f"{rel} no longer references gideon.ledger. PP-16's 'one ledger' clause was "
+        assert "gideon.assurance.ledger" in body, (
+            f"{rel} no longer references gideon.assurance.ledger. PP-16's 'one ledger' clause was "
             f"satisfied by PP-5; a loop-side module that stops writing the shared ledger re-forks "
             f"it and un-lands that atom."
         )
@@ -93,12 +90,6 @@ def test_the_attention_clause_is_converged_and_stays_converged():
         )
 
 
-#: The two watchdogs whose boot sweep must keep running through `concurrency.boot_sweep`. This
-#: row was in `_UNCONVERGED` — `loop/manager.py::reap_orphaned_loops` vs
-#: `workflows/watchdog.py::_boot_sweep` — until the adoption/reaping slice retired the loop side's
-#: gateway hook onto the shared primitive. Kept as a ratchet, not deleted: the census's whole
-#: point is that a converged clause can rot, and a private sweep re-added to either watchdog
-#: would silently restore the duplication with nothing else objecting.
 _BOOT_SWEEPERS = ("loop/watchdog.py", "workflows/watchdog.py")
 
 
@@ -116,7 +107,7 @@ def test_the_adoption_clause_is_converged_and_stays_converged():
         )
     assert "reap_orphaned_loops" not in _text("gateway.py"), (
         "gateway.py awaits a loop boot-adoption hook again — the second INVOCATION is back even "
-        "if the shared primitive is still used. See tests/test_pp16_boot_adoption.py for why "
+        "if the shared primitive is still used. See checks/runtime/test_pp16_boot_adoption.py for why "
         "that shape loses a failed sweep for the life of the process."
     )
 
@@ -125,21 +116,15 @@ def test_the_seam_probe_rejects_a_symbol_that_does_not_exist():
     """Vacuity floor for the three ratchets above: a scan that reports every symbol as present —
     or every symbol as absent — would pass them without measuring anything."""
     body = _text("workflows/attention.py")
-    assert "emit_attention_item" in body, "positive control failed — the probe sees nothing"
+    assert (
+        "emit_attention_item" in body
+    ), "positive control failed — the probe sees nothing"
     assert (
         "emit_attention_item_that_never_existed" not in body
     ), "negative control failed — the probe matches a symbol that does not exist"
 
 
-# ── the clauses that still have two implementations (counts that must SHRINK) ──────────────
-
-
-#: One row per unconverged clause: the clause name, and the two implementations by
-#: `path::symbol`. Each pair is a real pair TODAY; the slice that unifies one deletes a side and
-#: reds this rail, which is how the census stays honest instead of rotting into a stale claim.
 _UNCONVERGED: dict[str, tuple[tuple[str, str], ...]] = {
-    # loop/tasks_link.py:167 provisions imperatively; workflows/materialize.py:257 PLANS a
-    # materialization and returns bindings. Two directions over one relationship.
     "projection to tasks": (
         ("loop/tasks_link.py", "def provision"),
         ("workflows/materialize.py", "def plan_materialization"),
@@ -147,32 +132,23 @@ _UNCONVERGED: dict[str, tuple[tuple[str, str], ...]] = {
 }
 
 
-# ── clause 3, CONVERGED by PP-16 seam 3 (a ratchet from here on) ───────────────────────────
-#
-# This row used to live in `_UNCONVERGED` above, pinning `loop/kinds/__init__.py::class
-# LoopKindStrategy` against `workflows/supervisor_policy.py::class SupervisorPolicy` as two
-# implementations of one concept. Seam 3 unified the SUPERVISOR half: the convergence decision is
-# declared in `KIND_CONVERGENCE` and evaluated once in `loop/supervisor.py`, and no strategy
-# carries a done-ness member any more.
-#
-# Worth recording precisely, because the old row would NOT have caught this: it asserted the
-# CLASS still existed, and `LoopKindStrategy` deliberately survives as the intake / worker-framing
-# / projection seam. A row keyed on a class name could never have measured a per-METHOD retirement,
-# which is why the ratchet below is keyed on the retired MEMBERS and on the dispatch actually
-# reaching the policy.
-
-#: The supervisor members that were retired from the plugin seam. A kind that re-grows any of them
-#: has shipped a second convergence path beside the declared one.
-_RETIRED_SUPERVISOR_MEMBERS = ("is_done_signal", "has_done_check", "budget_stop_genuine")
+_RETIRED_SUPERVISOR_MEMBERS = (
+    "is_done_signal",
+    "has_done_check",
+    "budget_stop_genuine",
+)
 
 
 def test_the_pluggable_supervisor_clause_is_converged_and_stays_converged():
     """`PP-16`'s "the supervisor stops being pluggable Python" clause is satisfied for all five
     kinds: the declaration is data, the evaluator is one module, and no strategy answers a
     convergence question."""
-    from gideon.loop import kinds
-    from gideon.loop.loop import KINDS
-    from gideon.workflows.supervisor_policy import DONE_SIGNALS, KIND_CONVERGENCE
+    from gideon.automation.loop import kinds
+    from gideon.automation.loop.loop import KINDS
+    from gideon.automation.workflows.supervisor_policy import (
+        DONE_SIGNALS,
+        KIND_CONVERGENCE,
+    )
 
     assert "def done_signal" in _text("loop/supervisor.py"), (
         "loop/supervisor.py no longer declares done_signal — the ONE convergence evaluator is "
@@ -187,21 +163,21 @@ def test_the_pluggable_supervisor_clause_is_converged_and_stays_converged():
                 f"decision onto the declared SupervisorPolicy; a kind that answers one in Python "
                 f"is the two-path shape the clean-break tenet refuses."
             )
-    # Every declared row names a mechanism from the CLOSED vocabulary — a table row with a typo'd
-    # signal would otherwise be a loop that raises on its first finding.
     assert (
         KIND_CONVERGENCE
     ), "KIND_CONVERGENCE is empty — the declaration would be measuring nothing"
     for key, spec in KIND_CONVERGENCE.items():
-        assert spec.signal in DONE_SIGNALS, f"{key} declares unknown signal {spec.signal!r}"
+        assert (
+            spec.signal in DONE_SIGNALS
+        ), f"{key} declares unknown signal {spec.signal!r}"
 
 
 def test_every_kind_resolves_to_a_declared_convergence_row():
     """The vacuity floor for the ratchet above: a kind with no row would silently get the default
     policy, whose ORCHESTRATED signal never completes anything — a loop that runs forever rather
     than a test that fails."""
-    from gideon.loop.loop import KINDS
-    from gideon.workflows.supervisor_policy import (
+    from gideon.automation.loop.loop import KINDS
+    from gideon.automation.workflows.supervisor_policy import (
         KIND_CONVERGENCE,
         convergence_key,
         policy_for_kind,
@@ -216,15 +192,14 @@ def test_every_kind_resolves_to_a_declared_convergence_row():
             f"self-complete."
         )
         assert policy_for_kind(kind, {}).convergence is KIND_CONVERGENCE[key]
-    # Negative control: a kind that does not exist must NOT resolve to a row, else the check above
-    # would pass for anything.
     assert convergence_key("not-a-loop-kind", {}) not in KIND_CONVERGENCE
 
 
 @pytest.mark.parametrize("clause", sorted(_UNCONVERGED))
 def test_the_unconverged_clauses_still_have_exactly_two_implementations(clause: str):
     """Pins that both sides of each clause exist TODAY. When a `PP-16` slice unifies one, the
-    deleted side reds this — update the census in the same commit; do not delete the assertion."""
+    deleted side reds this — update the census in the same commit; do not delete the assertion.
+    """
     sides = _UNCONVERGED[clause]
     assert len(sides) == 2, f"{clause}: the census row should name exactly two sides"
     for rel, symbol in sides:
@@ -235,9 +210,6 @@ def test_the_unconverged_clauses_still_have_exactly_two_implementations(clause: 
         )
 
 
-#: The cockpit clause, measured differently: it is a FRONTEND duality, two stream hooks and two
-#: fold pipelines over what PP-16 says is one noun. Pinned as file existence because the unification
-#: deletes files rather than symbols.
 _COCKPIT_PAIRS = (
     ("pages/loops/useRunStream.ts", "pages/workflows/useWorkflowStream.ts"),
     ("pages/loops/runFold.ts", "pages/workflows/workflowFold.ts"),
@@ -267,9 +239,12 @@ def test_the_five_kinds_are_templates_plus_policies_and_the_plugin_keeps_only_th
     (`build_brief` / `cycle_nudge`), planning (`walkthrough`), the multi-cycle orchestration hook
     (`on_new_cycle`) and the projection keys. Those are the bundled TEMPLATE's node prompts and
     graph, not the supervisor."""
-    from gideon.loop.loop import KINDS
-    from gideon.workflows.loop_aliases import KIND_TO_TEMPLATE
-    from gideon.workflows.supervisor_policy import KIND_CONVERGENCE, convergence_key
+    from gideon.automation.loop.loop import KINDS
+    from gideon.automation.workflows.loop_aliases import KIND_TO_TEMPLATE
+    from gideon.automation.workflows.supervisor_policy import (
+        KIND_CONVERGENCE,
+        convergence_key,
+    )
 
     body = _text("loop/kinds/__init__.py")
     assert (
@@ -280,7 +255,9 @@ def test_the_five_kinds_are_templates_plus_policies_and_the_plugin_keeps_only_th
     assert KINDS, "LoopKind declares no members — import drift?"
     unaliased = sorted(KINDS - set(KIND_TO_TEMPLATE))
     assert not unaliased, f"loop kinds with no bundled-template alias: {unaliased}."
-    unpoliced = sorted(k for k in KINDS if convergence_key(k, {}) not in KIND_CONVERGENCE)
+    unpoliced = sorted(
+        k for k in KINDS if convergence_key(k, {}) not in KIND_CONVERGENCE
+    )
     assert not unpoliced, (
         f"loop kinds with no declared convergence policy: {unpoliced}. Both halves of clause 3 "
         f"must hold for every kind — a kind with a template but no policy is a half-migration."
@@ -290,9 +267,13 @@ def test_the_five_kinds_are_templates_plus_policies_and_the_plugin_keeps_only_th
         f"'five kinds become templates + policies' clause is sized against five."
     )
 
-    # The plugin seam keeps exactly the non-supervisor concerns. Asserted as a POSITIVE list so
-    # that retiring one of them later reds here and the census stays a measurement, not a memory.
-    for member in ("classify", "build_brief", "cycle_nudge", "phase_key", "default_kind_config"):
+    for member in (
+        "classify",
+        "build_brief",
+        "cycle_nudge",
+        "phase_key",
+        "default_kind_config",
+    ):
         assert f"def {member}(" in body, (
             f"LoopKindStrategy no longer declares {member!r}. If a later PP-16 seam moved it into "
             f"the bundled template, that is the intended outcome — update this list."

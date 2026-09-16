@@ -2,7 +2,7 @@
 
 The `gideon` command is the single entry point (installed by
 `pip install -e .` via the `gideon` console script; source:
-`src/gideon/cli.py`). Run `gideon <command> --help` for the live help
+`runtime/gideon/cli.py`). Run `gideon <command> --help` for the live help
 text — this page mirrors it.
 
 ## Global options
@@ -144,7 +144,7 @@ it by pid on exit.
 gideon run -p 'Reply with exactly: OK' --format json | jq -er '.result'
 ```
 
-A ready-made script and GitHub Action live at `scripts/ci_smoke_run.sh` and
+A ready-made script and GitHub Action live at `tooling/scripts/ci_smoke_run.sh` and
 `.github/workflows/headless-run-smoke.yml`.
 
 ## `gideon setup`
@@ -254,7 +254,7 @@ Scaffold a third-party app.
 |---|---|
 | `app new --list-types` | Print the provider types this build accepts, derived at runtime from the provider registry — plus the SDK contract each type's stub implements and how many providers of that type are registered. A type added upstream shows up here without a scaffold change. |
 | `app new NAME --type TYPE [--dir DIR] [--display-name] [--description] [--author] [--force]` | Generate an installable app: `app.json` (validated against core's own manifest parser, with the plan-32 `cli.*` seams and `loggerRoots`), a provider stub implementing that type's SDK ABC, a passing `test_provider.py`, `README.md`, and an MIT `LICENSE`. Declares no permissions — add only what the provider uses. |
-| `app new --from-template [--dir DIR] [--template-url URL] [--template-archive FILE] [--force]` | Fork-and-go: fetch the [`Gideon/app-template`](https://github.com/Gideon/app-template) repo into `DIR/app-template` instead of generating. Same `--type tool` output, plus CI and a clone-to-installed README. Takes no NAME — renaming is a documented four-edit step in the template's README; use `--type` to generate a named app. |
+| `app new --from-template [--dir DIR] [--template-url URL] [--template-archive FILE] [--force]` | Import a selected archive into `DIR/app-template`. Provide `--template-archive FILE`, `--template-url URL`, or the operator-configured `GIDEON_APP_TEMPLATE_URL`; there is no built-in remote template source. Takes no NAME and does not rename archive contents; use `--type` to generate a named app. |
 
 Names are kebab-case. `pytest <dir>` passes on the generated bundle as-generated, and
 installing it from that local path registers the provider.
@@ -266,6 +266,10 @@ files or directories with relative in-tree paths — a symlink, hardlink, device
 member is refused, and every write path is re-checked for containment after
 canonicalisation. An existing non-empty target is refused unless `--force`.
 `--template-archive` reads a `.tar.gz` already on disk and touches no network.
+A local archive takes precedence over environment configuration. An explicit
+`--template-url` overrides `GIDEON_APP_TEMPLATE_URL`; both remote paths use the same
+URL restrictions. Supplying both explicit source flags is refused. With no source,
+the command reports the available configuration options and writes nothing.
 
 ## `gideon config`
 

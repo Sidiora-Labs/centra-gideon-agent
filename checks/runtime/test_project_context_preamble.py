@@ -9,16 +9,13 @@ from unittest.mock import patch
 
 import pytest
 
-from gideon.dashboard.chat_utils import _project_context_preamble
-from gideon.tasks.hierarchy import HierarchyStore
+from gideon.engine.tasks.hierarchy import HierarchyStore
+from gideon.interfaces.dashboard.chat_utils import _project_context_preamble
 
 
 @pytest.fixture()
 def store(tmp_path):
-    # The preamble framing is now a bundled snippet (``project-context``) rendered
-    # from GIDEON_HOME; the global autouse ``_isolate_gideon_home``
-    # fixture (tests/conftest.py) already points it at a throwaway home.
-    with patch("gideon.tasks.hierarchy.config_dir", return_value=tmp_path):
+    with patch("gideon.engine.tasks.hierarchy.config_dir", return_value=tmp_path):
         yield HierarchyStore()
 
 
@@ -43,13 +40,12 @@ def test_preamble_lists_context_dir_files(store):
     cdir.mkdir(parents=True, exist_ok=True)
     (cdir / "decisions.md").write_text("# Decisions\nUse minimax.\n")
     (cdir / "conventions.md").write_text("kebab-case files\n")
-    (cdir / ".hidden").write_text("ignored")  # dotfiles excluded
+    (cdir / ".hidden").write_text("ignored")
 
     out = _project_context_preamble(p.id)
     assert "decisions.md" in out
     assert "conventions.md" in out
     assert ".hidden" not in out
-    # The listing is introduced so the agent knows these are readable for continuity.
     assert "Files in it" in out
 
 

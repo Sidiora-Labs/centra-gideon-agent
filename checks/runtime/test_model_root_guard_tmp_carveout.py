@@ -37,11 +37,14 @@ class TestEveryRealRootIsStillRefused:
     @pytest.mark.parametrize("sub", G.FORBIDDEN_SUBPATHS)
     def test_every_named_root_is_still_refused(self, sub):
         """Parametrized over the live tuple, so a root added later is covered automatically
-        rather than needing this test edited — the drift that makes a rail decorative."""
+        rather than needing this test edited — the drift that makes a rail decorative.
+        """
         target = G.REAL_HOME / sub / "some-model"
         assert G.offending_root(str(target)) is not None, f"{sub} must stay forbidden"
 
-    def test_a_named_root_is_refused_even_if_it_sits_under_the_temp_dir(self, monkeypatch):
+    def test_a_named_root_is_refused_even_if_it_sits_under_the_temp_dir(
+        self, monkeypatch
+    ):
         """The ordering guarantee. Named roots are checked BEFORE the carve-out, so a real
         model root would stay refused even in the pathological case where the temp directory
         contains it. Without that ordering the exemption would be a hole."""
@@ -49,7 +52,9 @@ class TestEveryRealRootIsStillRefused:
         target = G.REAL_HOME / ".ollama" / "models"
         assert G.offending_root(str(target)) is not None
 
-    def test_the_carve_out_switches_itself_off_when_the_temp_dir_is_the_home(self, monkeypatch):
+    def test_the_carve_out_switches_itself_off_when_the_temp_dir_is_the_home(
+        self, monkeypatch
+    ):
         """If ``tempfile.gettempdir()`` IS the real home, "under the temp dir" would exempt the
         whole of ``$HOME`` and the catch-all would mean nothing. The rail keeps its original
         strictness instead of silently widening."""
@@ -60,7 +65,9 @@ class TestEveryRealRootIsStillRefused:
 
 class TestATmpPathIsNotAModelRoot:
     def test_a_path_under_the_temp_dir_is_allowed(self):
-        target = Path(tempfile.gettempdir()).resolve() / "pytest-of-x" / "test_a0" / "models"
+        target = (
+            Path(tempfile.gettempdir()).resolve() / "pytest-of-x" / "test_a0" / "models"
+        )
         assert G.offending_root(str(target)) is None
 
     def test_pytests_own_tmp_path_is_allowed(self, tmp_path):
@@ -70,7 +77,9 @@ class TestATmpPathIsNotAModelRoot:
         assert G.offending_root(str(tmp_path)) is None
         assert G.offending_root(str(tmp_path / "models" / "some-model")) is None
 
-    def test_the_temp_dir_is_actually_under_the_home_on_this_machine_or_this_is_vacuous(self):
+    def test_the_temp_dir_is_actually_under_the_home_on_this_machine_or_this_is_vacuous(
+        self,
+    ):
         """The vacuity floor, and it is honest about being conditional.
 
         On a machine whose temp directory is ALREADY outside ``$HOME`` (stock macOS

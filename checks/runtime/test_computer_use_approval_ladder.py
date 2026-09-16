@@ -45,25 +45,26 @@ from pathlib import Path
 
 import pytest
 
-from gideon.computer_use import enable_state, policy, service
-from gideon.computer_use import tools as ct
-from gideon.errors import ERROR_CODES
-from gideon.guardrails import autonomy as au
-from gideon.guardrails import rungs as rg
-from gideon.sel import SecurityEventLog
+from gideon.core.errors import ERROR_CODES
+from gideon.integrations.computer_use import enable_state, policy, service
+from gideon.integrations.computer_use import tools as ct
+from gideon.security.guardrails import autonomy as au
+from gideon.security.guardrails import rungs as rg
+from gideon.security.sel import SecurityEventLog
 
-SRC = str(Path(__file__).resolve().parents[1] / "src")
+SRC = str(Path(__file__).resolve().parents[2] / "src")
 
 ARMED_APP = "TextEdit"
 
-#: A cron fire: no human, no prompt, nothing watching. ``guardrails.policy`` resolves it to the
-#: HEADLESS profile (``approval="hook_based"``) by construction.
 UNATTENDED = "cron:desktop-tidy"
 
-#: A dashboard chat session: a person is looking at it. Resolves to INTERACTIVE (``"ask"``).
 INTERACTIVE = "dashboard:sess-7"
 
-ORDINARY_FIELD = {"role": "AXTextField", "label": "Subject", "value": "Lunch on Tuesday"}
+ORDINARY_FIELD = {
+    "role": "AXTextField",
+    "label": "Subject",
+    "value": "Lunch on Tuesday",
+}
 
 
 @pytest.fixture(autouse=True)
@@ -81,9 +82,11 @@ def _isolated(tmp_path, monkeypatch):
     cfg = home / "config.json"
     cfg.write_text("{}", encoding="utf-8")
     monkeypatch.setenv("GIDEON_HOME", str(home))
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: home)
-    monkeypatch.setattr("gideon.config.loader.config_path", lambda: cfg)
-    monkeypatch.setenv(enable_state.ENABLE_PATH_ENV, str(home / "governance" / "enable.json"))
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.core.config.loader.config_path", lambda: cfg)
+    monkeypatch.setenv(
+        enable_state.ENABLE_PATH_ENV, str(home / "governance" / "enable.json")
+    )
     enable_state.reset_enable_state()
     service.reset_snapshots()
     yield home
@@ -124,7 +127,10 @@ def _fake_driver(monkeypatch, *, apps=("TextEdit",), elements=None):
         if op == "list_apps":
             return {"apps": list(apps)}
         if op == "snapshot":
-            return {"fingerprint": "fp-1", "elements": list(elements or [ORDINARY_FIELD])}
+            return {
+                "fingerprint": "fp-1",
+                "elements": list(elements or [ORDINARY_FIELD]),
+            }
         return {"ok": True, "op": op}
 
     monkeypatch.setattr(service, "_run_driver", run)
@@ -139,7 +145,9 @@ def _dispatch(tool, params=None, *, identity):
     """One real dispatch. Returns ``(error | None, result | None)``."""
     try:
         return None, _run(
-            service.computer_dispatch(tool, params or {}, source="test", caller_identity=identity)
+            service.computer_dispatch(
+                tool, params or {}, source="test", caller_identity=identity
+            )
         )
     except (
         enable_state.ComputerUseDisabled,
@@ -176,7 +184,7 @@ def _planted_snapshot():
 
 def _inbox_rows(home: Path) -> list[dict]:
     """Every persisted inbox row, read back off disk rather than from a captured call."""
-    from gideon.inbox import InboxStore
+    from gideon.integrations.inbox import InboxStore
 
     store = InboxStore()
     store.load()
@@ -190,9 +198,6 @@ def _inbox_rows(home: Path) -> list[dict]:
         }
         for item in store.items.values()
     ]
-
-
-# ── 1. the clause, through the dispatch, with its vacuity leg ─────────────────
 
 
 def test_an_unattended_drive_without_the_grant_is_refused_through_the_dispatch(
@@ -209,7 +214,9 @@ def test_an_unattended_drive_without_the_grant_is_refused_through_the_dispatch(
     assert calls == [], "the driver ran for a call the ladder withheld"
 
 
-def test_the_granted_tool_goes_through_the_same_path_and_reaches_the_driver(_isolated, monkeypatch):
+def test_the_granted_tool_goes_through_the_same_path_and_reaches_the_driver(
+    _isolated, monkeypatch
+):
     """🪤 THE VACUITY LEG. Same session key, same document, same dispatch — one list entry
     different. Without this the refusal above is indistinguishable from a dispatch that refuses
     every unattended call, or from one that refuses for some unrelated reason."""
@@ -221,7 +228,9 @@ def test_the_granted_tool_goes_through_the_same_path_and_reaches_the_driver(_iso
     assert calls == ["list_apps"], "the permitted leg never reached the driver"
 
 
-def test_an_interactive_run_is_not_refused_because_the_prompt_is_the_ask(_isolated, monkeypatch):
+def test_an_interactive_run_is_not_refused_because_the_prompt_is_the_ask(
+    _isolated, monkeypatch
+):
     """Clause half two. An interactive run gets the tool layer's approval prompt, so this screen
     has nothing to add — and it must not invent a second refusal on top of it.
 
@@ -250,24 +259,33 @@ def test_the_grant_is_per_tool_so_permission_to_look_is_not_permission_to_act(
     _arm(_isolated, unattended=("computer_snapshot",))
     calls = _fake_driver(monkeypatch)
 
-    error, result = _dispatch("computer_snapshot", {"app": ARMED_APP}, identity=UNATTENDED)
+    error, result = _dispatch(
+        "computer_snapshot", {"app": ARMED_APP}, identity=UNATTENDED
+    )
     assert error is None, f"the granted snapshot was refused: {error}"
     assert result is not None and result.get("snapshot_id")
 
     snap_id = result["snapshot_id"]
     error, _ = _dispatch(
-        "computer_click", {"snapshot_id": snap_id, "element_index": 0}, identity=UNATTENDED
+        "computer_click",
+        {"snapshot_id": snap_id, "element_index": 0},
+        identity=UNATTENDED,
     )
     assert error is not None, "a snapshot grant licensed a click"
     assert error.code == policy.ERR_UNATTENDED_NOT_GRANTED
-    assert calls == ["snapshot", "snapshot"], calls  # the walk + the click's freshness re-walk
+    assert calls == [
+        "snapshot",
+        "snapshot",
+    ], calls
 
 
 @pytest.mark.parametrize(
     "near",
     ["computer_list_app", "COMPUTER_LIST_APPS", "list_apps", "computer_list_appsx"],
 )
-def test_a_grant_that_merely_resembles_the_tool_grants_nothing(_isolated, monkeypatch, near):
+def test_a_grant_that_merely_resembles_the_tool_grants_nothing(
+    _isolated, monkeypatch, near
+):
     """The document refuses a name outside the declared surface rather than storing it, so a
     near-miss cannot become a grant by a normalisation nobody wrote. Either way the drive is
     refused — asserted as the OUTCOME, since that is the property that matters."""
@@ -282,9 +300,6 @@ def test_a_grant_that_merely_resembles_the_tool_grants_nothing(_isolated, monkey
     _fake_driver(monkeypatch)
     error, _ = _dispatch("computer_list_apps", identity=UNATTENDED)
     assert error is not None, f"{near!r} was honoured as a grant for computer_list_apps"
-
-
-# ── 2. "and notifies" — a durable row, read back off disk ────────────────────
 
 
 def test_the_refusal_raises_a_durable_agent_request_row(_isolated, monkeypatch):
@@ -313,7 +328,8 @@ def test_the_refusal_raises_a_durable_agent_request_row(_isolated, monkeypatch):
 
 def test_the_hold_row_is_deduped_per_tool_not_per_attempt(_isolated, monkeypatch):
     """A trigger that fires every thirty seconds must not stack a hundred identical rows — and a
-    DIFFERENT tool is a different question a person answers differently, so it gets its own."""
+    DIFFERENT tool is a different question a person answers differently, so it gets its own.
+    """
     _arm(_isolated)
     _fake_driver(monkeypatch)
     snap = _planted_snapshot()
@@ -347,9 +363,6 @@ def test_the_hold_row_is_a_request_from_a_cold_registry(_isolated, monkeypatch):
     assert rows[0]["refs"].get("rung") == au.RUNG_ONE_TAP, rows[0]["refs"]
 
 
-# ── 3. the SEL row for the refusal ───────────────────────────────────────────
-
-
 @pytest.fixture
 def sel_rows(tmp_path, monkeypatch):
     """A REAL :class:`SecurityEventLog` at a tmp dir, plus a reader for its rows off disk."""
@@ -363,12 +376,18 @@ def sel_rows(tmp_path, monkeypatch):
         path = log_dir / "security_events.jsonl"
         if not path.exists():
             return []
-        return [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines() if x.strip()]
+        return [
+            json.loads(x)
+            for x in path.read_text(encoding="utf-8").splitlines()
+            if x.strip()
+        ]
 
     return rows
 
 
-def test_the_ladder_refusal_writes_exactly_one_denied_sel_row(_isolated, monkeypatch, sel_rows):
+def test_the_ladder_refusal_writes_exactly_one_denied_sel_row(
+    _isolated, monkeypatch, sel_rows
+):
     """`DCU-2`'s clause is "every attempt, allowed or refused, produces a SEL record", and step
     4b is a new exit. Placed inside the audited ``try`` rather than before it, so the row names
     the app the call was aimed at."""
@@ -385,9 +404,12 @@ def test_the_ladder_refusal_writes_exactly_one_denied_sel_row(_isolated, monkeyp
     assert ARMED_APP in blob, "the refusal row does not name what the call was aimed at"
 
 
-def test_the_granted_leg_writes_an_approved_row_instead(_isolated, monkeypatch, sel_rows):
+def test_the_granted_leg_writes_an_approved_row_instead(
+    _isolated, monkeypatch, sel_rows
+):
     """The vacuity half of the row above. Asserted separately because a single "a row exists"
-    test passes when only the refusal writes one — `DCU-4`'s sharpest recorded finding."""
+    test passes when only the refusal writes one — `DCU-4`'s sharpest recorded finding.
+    """
     _arm(_isolated, unattended=("computer_snapshot",))
     _fake_driver(monkeypatch)
     error, _ = _dispatch("computer_snapshot", {"app": ARMED_APP}, identity=UNATTENDED)
@@ -397,9 +419,6 @@ def test_the_granted_leg_writes_an_approved_row_instead(_isolated, monkeypatch, 
     assert len(rows) == 1, rows
     blob = json.dumps(rows[0])
     assert "approved" in blob and policy.ERR_UNATTENDED_NOT_GRANTED not in blob, blob
-
-
-# ── 4. the declaration is what makes this an ASK ──────────────────────────────
 
 
 def test_no_new_rung_name_was_minted():
@@ -443,7 +462,9 @@ def test_the_declaration_is_what_makes_this_an_ask():
     spec = next(s for s in rg.CORE_ACTION_TYPES if s.key == rg.COMPUTER_USE_DRIVE)
     assert spec.floor == au.RUNG_ONE_TAP and spec.ceiling == au.RUNG_ONE_TAP
     assert spec.leaves_machine is True, "a click can send the mail"
-    assert spec.providers == (), "nothing dispatches this through the action-provider registry"
+    assert (
+        spec.providers == ()
+    ), "nothing dispatches this through the action-provider registry"
 
     rg.ensure_core_action_types()
     for key in (UNATTENDED, INTERACTIVE):
@@ -458,9 +479,6 @@ def test_the_governed_inventory_lists_the_drive_so_a_person_can_see_it():
     ``CORE_ACTION_TYPES``, so the declaration has to be in it."""
     assert rg.COMPUTER_USE_DRIVE in {s.key for s in rg.CORE_ACTION_TYPES}
     assert rg.rung_label(au.RUNG_ONE_TAP) == "asks first"
-
-
-# ── 5. the code is the PARENT's, and a child may not claim it ────────────────
 
 
 def test_the_code_is_registered_and_distinct():
@@ -483,15 +501,16 @@ def test_the_parent_side_verdict_is_not_a_code_a_child_may_name():
 def test_a_real_child_claiming_the_parents_verdict_is_flattened(_isolated, monkeypatch):
     """END-TO-END, across a real process boundary: the real ceilinged spawn, a real child, the
     real JSON protocol and the real ``_run_driver`` translation. A child that names the parent's
-    policy code comes back as a generic driver failure, which is the allowlist working."""
+    policy code comes back as a generic driver failure, which is the allowlist working.
+    """
     _arm(_isolated, unattended=("computer_list_apps",))
-    # 🪤 The envelope shape is load-bearing and it is NOT flat: `_run_driver` reads
-    # ``{"error": {"code": …}}`` and a top-level ``code`` is invisible to it. A child that sent the
-    # flat shape was flattened to ERR_..._DRIVER_FAILED no matter what ``_CHILD_CODES`` held, so
-    # this test passed while measuring nothing — caught by admitting the code to the allowlist and
-    # watching it stay green.
     envelope = json.dumps(
-        {"error": {"code": policy.ERR_UNATTENDED_NOT_GRANTED, "message": "I am not the parent"}}
+        {
+            "error": {
+                "code": policy.ERR_UNATTENDED_NOT_GRANTED,
+                "message": "I am not the parent",
+            }
+        }
     )
     argv = [
         sys.executable,
@@ -506,9 +525,6 @@ def test_a_real_child_claiming_the_parents_verdict_is_flattened(_isolated, monke
     assert (
         error.code == service.ERR_DRIVER_FAILED
     ), f"a child named the parent's policy verdict and it survived as {error.code}"
-
-
-# ── 6. the operator document: the third grant ─────────────────────────────────
 
 
 def test_an_absent_unattended_key_grants_nothing(_isolated):
@@ -527,15 +543,24 @@ def test_the_grant_survives_a_round_trip_and_is_order_independent(_isolated):
 @pytest.mark.parametrize(
     ("document", "needle"),
     [
-        ('{"version": 1, "enabled": true, "unattended": "computer_click"}', "not a list of"),
+        (
+            '{"version": 1, "enabled": true, "unattended": "computer_click"}',
+            "not a list of",
+        ),
         ('{"version": 1, "enabled": true, "unattended": [7]}', "not a string"),
         ('{"version": 1, "enabled": true, "unattended": [""]}', "empty name"),
-        ('{"version": 1, "enabled": true, "unattended": [" computer_click"]}', "padded"),
+        (
+            '{"version": 1, "enabled": true, "unattended": [" computer_click"]}',
+            "padded",
+        ),
         (
             '{"version": 1, "enabled": true, "unattended": ["computer_click", "computer_click"]}',
             "twice",
         ),
-        ('{"version": 1, "enabled": true, "unattended": ["nope"]}', "not one of this build"),
+        (
+            '{"version": 1, "enabled": true, "unattended": ["nope"]}',
+            "not one of this build",
+        ),
     ],
 )
 def test_a_malformed_grant_takes_the_WHOLE_document_off(_isolated, document, needle):
@@ -570,9 +595,6 @@ def test_the_unattended_field_has_exactly_one_reader(_isolated):
     assert sorted(set(readers)) == ["unattended_tools"], readers
 
 
-# ── 7. the message an operator actually reads ────────────────────────────────
-
-
 def test_the_refusal_names_the_file_the_key_and_the_way_out(_isolated, monkeypatch):
     """A FIX that does not name the exact edit is how an operator concludes the feature is
     broken. It must name the out-of-band file (never "open Settings"), the key, the tool, and
@@ -588,7 +610,9 @@ def test_the_refusal_names_the_file_the_key_and_the_way_out(_isolated, monkeypat
     assert enable_state.UNATTENDED_KEY in error.fix
     assert "computer_click" in error.fix
     assert "interactive" in error.fix.lower(), "the message never says what DOES work"
-    assert "Settings" not in error.fix, "the FIX points at a setting that does not exist"
+    assert (
+        "Settings" not in error.fix
+    ), "the FIX points at a setting that does not exist"
     assert "headless" in error.what, "the WHAT does not say which posture refused"
 
 
@@ -613,17 +637,17 @@ def test_every_declared_tool_is_refusable_and_grantable(_isolated, monkeypatch):
     assert granted == [s.name for s in ct.TOOL_SURFACE], granted
 
 
-# ── 8. the HTTP seam: a headerless caller is not a human ─────────────────────
-
-
 def test_a_request_with_no_session_header_resolves_to_an_unattended_identity():
     """🔴 Measured fail-open, closed here. ``caller_identity=""`` resolved to the INTERACTIVE
     profile, so any authenticated client that simply did not send ``X-Session-Key`` — a script,
     an ACP CLI — read as "a human is watching". Minted into a sessionless unattended identity by
     the same helper the trigger and hook seams use, at the one seam that knows the header was
     absent."""
-    from gideon.dashboard.handlers.computer_use import _caller_identity
-    from gideon.guardrails.policy import UNATTENDED_DISPATCH_PREFIX, profile_for_session
+    from gideon.interfaces.dashboard.handlers.computer_use import _caller_identity
+    from gideon.security.guardrails.policy import (
+        UNATTENDED_DISPATCH_PREFIX,
+        profile_for_session,
+    )
 
     class _Req:
         def __init__(self, headers):
@@ -632,6 +656,5 @@ def test_a_request_with_no_session_header_resolves_to_an_unattended_identity():
     minted = _caller_identity(_Req({}))
     assert minted.startswith(UNATTENDED_DISPATCH_PREFIX), minted
     assert profile_for_session(minted).approval == "hook_based"
-    # And a real session key is passed through untouched — the vacuity half.
     assert _caller_identity(_Req({"X-Session-Key": INTERACTIVE})) == INTERACTIVE
     assert profile_for_session(INTERACTIVE).approval == "ask"

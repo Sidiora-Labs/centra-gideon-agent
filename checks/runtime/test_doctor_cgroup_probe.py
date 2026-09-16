@@ -26,9 +26,9 @@ import sys
 
 import pytest
 
-from gideon import sandbox as sandbox_mod
-from gideon.resilience import doctor
-from gideon.resilience.doctor import DoctorContext, ProbeResult, Tier
+from gideon.operations.resilience import doctor
+from gideon.operations.resilience.doctor import DoctorContext, ProbeResult, Tier
+from gideon.security import sandbox as sandbox_mod
 
 PROBE_ID = "sandbox.cgroup_scopes"
 
@@ -42,7 +42,7 @@ def _fake_availability(monkeypatch, value):
     """Stand in for the sibling's ``sandbox.probe_cgroup_scopes``.
 
     ``value`` is either the ``(available, reason)`` tuple it returns or an exception
-    instance to raise. Patched on ``gideon.sandbox`` (not on the doctor) because the
+    instance to raise. Patched on ``gideon.security.sandbox`` (not on the doctor) because the
     probe imports it lazily at call time — that is what keeps the doctor and the spawn path
     reading the SAME detection.
     """
@@ -81,18 +81,15 @@ def _fake_ceilings(monkeypatch, *, nofile=4096, max_pids=0, max_rss_mb=0):
     )
 
 
-# ── registration (+ a vacuity check on the lookup itself) ────────────────────
-
-
 def test_the_cgroup_probe_is_registered_at_the_CAPABILITY_tier():
     """Registered, not merely defined. ``CAPABILITY`` because a host without the cgroup
     tier is not a broken gateway: tiers 0-2 short-circuit everything above them, so a lower
     tier would make every Mac look down over an enforcement layer that never existed."""
     ids = {p.id: p for p in doctor.all_probes()}
 
-    # Vacuity: the registry is populated and the lookup discriminates, so "found" means
-    # something. A bogus id must NOT resolve.
-    assert doctor.all_probes(), "the probe registry is empty — the lookup proves nothing"
+    assert (
+        doctor.all_probes()
+    ), "the probe registry is empty — the lookup proves nothing"
     assert "sandbox.cgroup_scopes_that_does_not_exist" not in ids
 
     assert PROBE_ID in ids, "the probe must be registered, not just defined"
@@ -102,12 +99,11 @@ def test_the_cgroup_probe_is_registered_at_the_CAPABILITY_tier():
     assert probe.title
 
 
-# ── available: honest in the positive direction too ──────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_available_tier_reports_pids_and_RSS_as_enforced(monkeypatch):
-    _fake_availability(monkeypatch, (True, "cgroup2 unified hierarchy + systemd user session"))
+    _fake_availability(
+        monkeypatch, (True, "cgroup2 unified hierarchy + systemd user session")
+    )
     _fake_ceilings(monkeypatch, max_pids=200, max_rss_mb=2048)
 
     res = await _probe().run(DoctorContext())
@@ -121,15 +117,16 @@ async def test_available_tier_reports_pids_and_RSS_as_enforced(monkeypatch):
     assert res.evidence["configured_ceilings"]["max_pids"] == 200
 
 
-# ── unavailable: the sentence an operator has to be able to act on ───────────
-
-
 @pytest.mark.asyncio
-async def test_unavailable_tier_names_pids_RSS_unenforced_and_NOFILE_still_applying(monkeypatch):
+async def test_unavailable_tier_names_pids_RSS_unenforced_and_NOFILE_still_applying(
+    monkeypatch,
+):
     """The user-facing clause of the atom. Asserted by MEANING (pids + RSS + not enforced +
     NOFILE still applies), never by an exact string, so the prose stays editable."""
-    _fake_availability(monkeypatch, (False, "darwin: no cgroup v2 hierarchy, no systemd"))
-    _fake_ceilings(monkeypatch)  # nothing configured → nothing silently dropped
+    _fake_availability(
+        monkeypatch, (False, "darwin: no cgroup v2 hierarchy, no systemd")
+    )
+    _fake_ceilings(monkeypatch)
 
     res = await _probe().run(DoctorContext())
 
@@ -139,7 +136,9 @@ async def test_unavailable_tier_names_pids_RSS_unenforced_and_NOFILE_still_apply
     assert "rss" in claim, "the claim must name RSS"
     low = res.detail.lower()
     assert "nofile" in low and "still applies" in low
-    assert res.ok is True, "a permanent red on every Mac trains operators to ignore the doctor"
+    assert (
+        res.ok is True
+    ), "a permanent red on every Mac trains operators to ignore the doctor"
     assert res.evidence["unenforced"] == ["pids", "RSS"]
     assert res.evidence["enforced"] == ["NOFILE"]
     assert res.evidence["cgroup_scope_tier_available"] is False
@@ -151,7 +150,9 @@ async def test_unavailable_tier_names_pids_RSS_unenforced_and_NOFILE_still_apply
     [("max_pids", 200), ("max_rss_mb", 2048)],
 )
 @pytest.mark.asyncio
-async def test_a_configured_ceiling_that_cannot_be_enforced_is_a_RED_row(monkeypatch, knob, value):
+async def test_a_configured_ceiling_that_cannot_be_enforced_is_a_RED_row(
+    monkeypatch, knob, value
+):
     """Honest in the other direction: a bare green would hide a configured ceiling that does
     nothing. Still tier 3, so this reds only the sandbox row."""
     _fake_availability(monkeypatch, (False, "linux: no systemd user session"))
@@ -168,9 +169,6 @@ async def test_a_configured_ceiling_that_cannot_be_enforced_is_a_RED_row(monkeyp
     assert res.evidence["configured_ceilings"][knob] == value
 
 
-# ── the never-raises clause, driven hard ────────────────────────────────────
-
-
 @pytest.mark.parametrize(
     "exc",
     [
@@ -182,7 +180,9 @@ async def test_a_configured_ceiling_that_cannot_be_enforced_is_a_RED_row(monkeyp
     ids=["oserror", "permissionerror", "filenotfound", "bare-exception"],
 )
 @pytest.mark.asyncio
-async def test_the_probe_never_raises_whatever_the_availability_check_does(monkeypatch, exc):
+async def test_the_probe_never_raises_whatever_the_availability_check_does(
+    monkeypatch, exc
+):
     """An explicit clause of the atom, not a nicety. Every failure degrades toward
     "not enforced": a probe that cannot PROVE enforcement must never claim it."""
     _fake_availability(monkeypatch, exc)
@@ -192,7 +192,6 @@ async def test_the_probe_never_raises_whatever_the_availability_check_does(monke
 
     assert isinstance(res, ProbeResult)
     assert res.evidence["cgroup_scope_tier_available"] is False
-    # the cause is diagnosable from the row without re-running anything
     assert type(exc).__name__ in res.evidence["availability_detail"]
     assert str(exc) in res.evidence["availability_error"]
     claim = _unenforced_clause(res.detail)
@@ -213,9 +212,6 @@ async def test_an_unreadable_sandbox_config_still_produces_a_row(monkeypatch):
 
     assert isinstance(res, ProbeResult)
     assert "unreadable" in res.evidence["ceilings_detail"]
-
-
-# ── live on this host, nothing patched ──────────────────────────────────────
 
 
 @pytest.mark.asyncio

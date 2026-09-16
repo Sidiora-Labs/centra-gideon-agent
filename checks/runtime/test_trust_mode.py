@@ -2,7 +2,7 @@
 
 from unittest.mock import patch
 
-import gideon.trust_mode as tm
+import gideon.security.trust_mode as tm
 
 
 class TestTrustModeCore:
@@ -20,7 +20,7 @@ class TestTrustModeCore:
 
     def test_ttl_expiry_on_read(self) -> None:
         tm.enable_yolo(ttl_secs=1800)
-        tm._TRUST._expires_at = 1.0  # positive but far in the past
+        tm._TRUST._expires_at = 1.0
         assert tm.is_yolo_active() is False
 
     def test_config_permanent_never_expires(self) -> None:
@@ -32,7 +32,7 @@ class TestTrustModeCore:
 
     def test_surface_cannot_downgrade_config(self) -> None:
         tm.enable_yolo(from_config=True)
-        tm.enable_yolo(ttl_secs=60)  # no-op
+        tm.enable_yolo(ttl_secs=60)
         assert tm.yolo_from_config() is True
         assert tm.yolo_remaining_secs() is None
 
@@ -56,7 +56,7 @@ class TestOnDisableCallbacks:
         tm.register_on_disable(lambda reason: seen.append(reason))
         tm.enable_yolo(ttl_secs=60)
         tm._TRUST._expires_at = 1.0
-        tm.is_yolo_active()  # triggers expiry
+        tm.is_yolo_active()
         assert "expired" in seen
 
     def test_callback_exception_is_swallowed(self) -> None:
@@ -65,6 +65,5 @@ class TestOnDisableCallbacks:
 
         tm.register_on_disable(boom)
         tm.enable_yolo(ttl_secs=60)
-        # must not raise despite the failing callback
         tm.disable_yolo()
         assert tm.is_yolo_active() is False

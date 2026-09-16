@@ -7,8 +7,8 @@ broadcast — which drives the topbar token tickers — fires for ACP
 agents just as it does for the OpenAI / Anthropic / Ollama providers.
 """
 
-from gideon.acp.types import EVENT_COMPLETE, AcpEvent
-from gideon.llm.acp_agent import AcpAgentProvider
+from gideon.integrations.acp.types import EVENT_COMPLETE, AcpEvent
+from gideon.integrations.llm.acp_agent import AcpAgentProvider
 
 
 def test_to_llm_event_preserves_usage_fields() -> None:
@@ -61,6 +61,5 @@ def test_to_llm_event_preserves_text_and_tool_fields() -> None:
     assert mapped.tool_kind == "read"
     assert mapped.tool_input == '{"path": "x"}'
     assert mapped.tool_output == "contents"
-    # Usage fields default to zero when the source event carries none.
     assert mapped.input_tokens == 0
     assert mapped.output_tokens == 0

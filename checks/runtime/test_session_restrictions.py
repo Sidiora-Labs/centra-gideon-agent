@@ -1,6 +1,6 @@
 """Tests for the channel-agnostic per-session memory-restriction registry."""
 
-import gideon.session_restrictions as sr
+import gideon.engine.session_restrictions as sr
 
 
 class TestSessionRestrictions:
@@ -36,7 +36,7 @@ class TestSessionRestrictions:
         try:
             for key in ("a", "b", "c", "d"):
                 sr.mark_temporary(key)
-            assert sr.is_temporary("a") is False  # evicted
+            assert sr.is_temporary("a") is False
             assert sr.is_temporary("d") is True
         finally:
             sr._MAX = original

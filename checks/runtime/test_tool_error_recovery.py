@@ -6,15 +6,15 @@ recovery hint. format_tool_result surfaces the #7 result contract (recovery_hint
 on failure, truncation notice on success) instead of dropping it.
 """
 
-from gideon import security
-from gideon.agents.native.tools import format_tool_result
-from gideon.tool_providers.base import ToolResult
-
-# ── classify_denial taxonomy ──
+from gideon.engine.agents.native.tools import format_tool_result
+from gideon.integrations.tool_providers.base import ToolResult
+from gideon.security import security
 
 
 def test_policy_denial_is_hard_and_terminal():
-    rec, obs = security.classify_denial(security.DENY_KIND_POLICY, "deny:rm -rf", "bash")
+    rec, obs = security.classify_denial(
+        security.DENY_KIND_POLICY, "deny:rm -rf", "bash"
+    )
     assert rec is False
     assert "security policy" in obs
     assert "non-negotiable" in obs
@@ -30,7 +30,9 @@ def test_sensitive_path_denial_is_hard():
 
 
 def test_hook_denial_is_recoverable_adapt_dont_repeat():
-    rec, obs = security.classify_denial(security.DENY_KIND_HOOK, "no prod writes", "edit_file")
+    rec, obs = security.classify_denial(
+        security.DENY_KIND_HOOK, "no prod writes", "edit_file"
+    )
     assert rec is True
     assert "Do NOT retry" in obs
     assert "different approach" in obs
@@ -45,7 +47,9 @@ def test_readonly_denial_is_recoverable():
 
 
 def test_user_denial_is_recoverable():
-    rec, obs = security.classify_denial(security.DENY_KIND_USER, "user declined", "bash")
+    rec, obs = security.classify_denial(
+        security.DENY_KIND_USER, "user declined", "bash"
+    )
     assert rec is True
     assert "Do NOT retry" in obs
 
@@ -56,18 +60,16 @@ def test_unknown_kind_defaults_recoverable():
 
 
 def test_tool_name_appears_in_observation():
-    _, obs = security.classify_denial(security.DENY_KIND_USER, "declined", "subagent_run")
+    _, obs = security.classify_denial(
+        security.DENY_KIND_USER, "declined", "subagent_run"
+    )
     assert "subagent_run" in obs
 
 
 def test_hard_denial_has_no_recovery_hint():
-    # Hard denials must NOT coach the model on alternatives (would invite bypass).
     _, obs = security.classify_denial(security.DENY_KIND_POLICY, "deny", "bash")
     assert "Hint:" not in obs
     assert "alternative" not in obs.lower()
-
-
-# ── format_tool_result surfaces the result contract ──
 
 
 def test_format_success_passthrough():
@@ -75,7 +77,9 @@ def test_format_success_passthrough():
 
 
 def test_format_failure_includes_recovery_hints():
-    r = ToolResult(success=False, error="file not found", recovery_hints=["Use glob to locate it."])
+    r = ToolResult(
+        success=False, error="file not found", recovery_hints=["Use glob to locate it."]
+    )
     out = format_tool_result(r)
     assert "Error: file not found" in out
     assert "Hint: Use glob to locate it." in out

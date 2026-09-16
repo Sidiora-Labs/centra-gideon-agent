@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from harness import cli
-from harness.specs import load_specs, validate_all
-from harness.validate_refs import (
+from checks.harness import cli
+from checks.harness.specs import load_specs, validate_all
+from checks.harness.validate_refs import (
     _file_defines,
     _node_id_matches,
     _split_node_id,
@@ -27,7 +27,7 @@ def test_the_interpreter_is_absolute_and_launchable_from_any_cwd() -> None:
     reported "could not collect the test suite", and the three tests below failed in
     every worktree — indistinguishable from a genuinely dangling spec reference.
     """
-    from harness.profiles import HARNESS_PY
+    from checks.harness.profiles import HARNESS_PY
 
     assert Path(HARNESS_PY).is_absolute()
     assert Path(HARNESS_PY).is_file()
@@ -39,9 +39,8 @@ def test_the_interpreter_prefers_this_trees_venv_then_the_running_process(
     """Both branches of the resolution, so neither can rot unnoticed."""
     import sys
 
-    from harness.profiles import resolve_python
+    from checks.harness.profiles import resolve_python
 
-    # No .venv in the root (the worktree case) → the interpreter already running.
     assert resolve_python(tmp_path) == sys.executable
 
     venv_py = tmp_path / ".venv" / "bin" / "python"
@@ -51,7 +50,7 @@ def test_the_interpreter_prefers_this_trees_venv_then_the_running_process(
 
 
 def test_shipped_specs_validate_shape() -> None:
-    """Every seed spec that ships in harness/specs/ is shape-valid."""
+    """Every seed spec that ships in checks/harness/specs/ is shape-valid."""
     specs = load_specs()
     assert specs, "no seed specs found — the harness ships a starter set"
     errors = [i for i in validate_all(specs) if i.level == "error"]
@@ -74,29 +73,37 @@ def test_shipped_specs_test_references_resolve() -> None:
 
 
 def test_split_node_id_strips_class_and_params() -> None:
-    assert _split_node_id("tests/x.py::Klass::test_fn[a-b]") == ("tests/x.py", "test_fn")
-    assert _split_node_id("tests/x.py::test_fn") == ("tests/x.py", "test_fn")
-    assert _split_node_id("tests/x.py") == ("tests/x.py", "")
+    assert _split_node_id("checks/runtime/x.py::Klass::test_fn[a-b]") == (
+        "checks/runtime/x.py",
+        "test_fn",
+    )
+    assert _split_node_id("checks/runtime/x.py::test_fn") == (
+        "checks/runtime/x.py",
+        "test_fn",
+    )
+    assert _split_node_id("checks/runtime/x.py") == ("checks/runtime/x.py", "")
 
 
 def test_file_defines_finds_real_function() -> None:
-    # A real, environment-SKIPPED test still resolves via the AST fallback (the module
-    # skips at collection time on this workspace but the function is genuinely defined).
-    assert _file_defines("tests/test_apps_import_boundary.py", "test_apps_only_import_sdk")
-    assert not _file_defines("tests/test_apps_import_boundary.py", "test_not_a_real_name")
+    assert _file_defines(
+        "checks/runtime/test_apps_import_boundary.py", "test_apps_only_import_sdk"
+    )
+    assert not _file_defines(
+        "checks/runtime/test_apps_import_boundary.py", "test_not_a_real_name"
+    )
 
 
 def test_node_id_matches_ast_fallback_for_skipped_module() -> None:
-    # With an empty collected set, a skipped-module node still matches via AST.
-    node = "tests/test_apps_import_boundary.py::test_apps_only_import_sdk"
+    node = "checks/runtime/test_apps_import_boundary.py::test_apps_only_import_sdk"
     assert _node_id_matches(node, collected=set())
-    # A genuinely missing name does not match even with the fallback.
-    assert not _node_id_matches("tests/test_apps_import_boundary.py::test_ghost", collected=set())
+    assert not _node_id_matches(
+        "checks/runtime/test_apps_import_boundary.py::test_ghost", collected=set()
+    )
 
 
 def test_dangling_node_id_is_flagged(tmp_path: Path) -> None:
     """A spec pointing at a non-existent test node-id fails reference resolution."""
-    from harness.specs import KIND_RULE, Spec
+    from checks.harness.specs import KIND_RULE, Spec
 
     spec = Spec(
         path=tmp_path / "r.md",
@@ -107,7 +114,9 @@ def test_dangling_node_id_is_flagged(tmp_path: Path) -> None:
             "statement": "s",
             "appliesTo": ["src/x.py"],
             "source": "x",
-            "requiredTests": ["tests/test_config_roundtrip.py::test_THIS_DOES_NOT_EXIST"],
+            "requiredTests": [
+                "checks/runtime/test_config_roundtrip.py::test_THIS_DOES_NOT_EXIST"
+            ],
         },
         body="why",
     )
@@ -116,7 +125,6 @@ def test_dangling_node_id_is_flagged(tmp_path: Path) -> None:
 
 
 def test_cli_validate_returns_zero_on_shipped_specs() -> None:
-    # The shipped set validates clean (warnings are allowed; errors are not).
     assert cli.main(["validate"]) == 0
 
 
@@ -129,13 +137,10 @@ def test_cli_explain_unknown_task_errors() -> None:
 
 
 def test_cli_scan_whole_tree_returns_zero() -> None:
-    # No ERROR findings on the real tree → scan exits 0 (WARNINGs don't fail).
     assert cli.main(["scan"]) == 0
 
 
 def test_cli_validate_has_no_scanner_warnings_now() -> None:
-    # Session 2 made the scanner check-ids resolvable, so validate should have zero
-    # warnings on the shipped set (every rule's scanner: ref resolves).
     import io
     from contextlib import redirect_stdout
 

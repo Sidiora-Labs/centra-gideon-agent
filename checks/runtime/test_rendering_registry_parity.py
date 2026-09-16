@@ -1,6 +1,6 @@
 """Rendering-engine registry guards (R6 of rendering-engine-architecture.md).
 
-The frontend ContentTypeRegistry (web/src/ui/content/) is the ONE source of
+The frontend ContentTypeRegistry (apps/console/src/ui/content/) is the ONE source of
 truth for how a content type renders/edits/sanitizes. Two cross-tier invariants
 keep it from forking again:
 
@@ -23,13 +23,12 @@ from pathlib import Path
 
 import pytest
 
-from gideon.artifacts.models import ALLOWED_KINDS
+from gideon.workspace.artifacts.models import ALLOWED_KINDS
 
-_REPO = Path(__file__).resolve().parent.parent
-_WEB = _REPO / "web" / "src"
+_REPO = Path(__file__).resolve().parent.parent.parent
+_WEB = _REPO / "apps/console" / "src"
 _REGISTER = _WEB / "ui" / "content" / "registerBuiltins.ts"
 
-# web is optional in some checkouts (backend-only installs); skip cleanly then.
 pytestmark = pytest.mark.skipif(not _WEB.exists(), reason="web sources not present")
 
 
@@ -63,7 +62,7 @@ def test_registry_kinds_match_backend_allowed_kinds():
     )
     assert not missing_in_registry, (
         f"backend ALLOWED_KINDS has kinds the FE registry doesn't render: {sorted(missing_in_registry)}. "  # noqa: E501
-        "Register them in web/src/ui/content/registerBuiltins.ts (or remove from ALLOWED_KINDS)."
+        "Register them in apps/console/src/ui/content/registerBuiltins.ts (or remove from ALLOWED_KINDS)."
     )
 
 
@@ -87,12 +86,10 @@ def test_no_kind_is_claimed_by_two_content_types():
         f"these artifact kinds are claimed by more than one content type: {duplicates}. "
         "resolveContentType returns the FIRST registered match, so the later type never "
         "renders and the shadowing is silent — give the kind to exactly one type in "
-        "web/src/ui/content/registerBuiltins.ts."
+        "apps/console/src/ui/content/registerBuiltins.ts."
     )
 
 
-# Files allowed to contain content-type dispatch / raw HTML injection: the registry
-# itself + its renderers (where the sanitizer + sandbox live).
 _DISPATCH_ALLOWED = {
     "ui/content/registerBuiltins.ts",
     "ui/content/contentTypes.ts",
@@ -104,7 +101,6 @@ _DISPATCH_ALLOWED = {
     "ui/content/exporters.ts",
 }
 
-# The dead capability Sets the engine deleted — must never be re-declared anywhere.
 _FORBIDDEN_DECL = re.compile(r"\b(IFRAME_KINDS|EDITABLE_KINDS)\b\s*=")
 
 
@@ -128,7 +124,6 @@ def test_no_raw_html_injection_outside_registry():
     """`dangerouslySetInnerHTML` is allowed only in the registry's renderers (where
     content is sanitized) + the markdown/code highlighters (hljs-escaped output).
     A new one elsewhere is a sanitizer-bypass risk — route it through the registry."""
-    # hljs syntax-highlight output is a trusted transform (escapes its input).
     hljs_ok = {"ui/Markdown.tsx", "pages/skills/SkillInspector.tsx"}
     allowed = _DISPATCH_ALLOWED | hljs_ok
     offenders = []

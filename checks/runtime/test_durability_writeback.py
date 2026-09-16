@@ -12,9 +12,9 @@ import json
 
 import pytest
 
-from gideon.durability import inventory as inv
-from gideon.durability import writeback
-from gideon.durability.shards import (
+from gideon.operations.durability import inventory as inv
+from gideon.operations.durability import writeback
+from gideon.operations.durability.shards import (
     _json_rows_from_entity_dir,
     _jsonl_rows_by_year,
 )
@@ -23,27 +23,30 @@ from gideon.durability.shards import (
 class TestEntityDir:
     def test_writes_one_file_per_row(self, tmp_path):
         dest = tmp_path / "tasks"
-        rows = [{"id": "t1", "data": {"title": "a"}}, {"id": "t2", "data": {"title": "b"}}]
+        rows = [
+            {"id": "t1", "data": {"title": "a"}},
+            {"id": "t2", "data": {"title": "b"}},
+        ]
         r = writeback.apply_rows(inv.KIND_JSON_ENTITY_DIR, dest, rows)
         assert r.written == 2
         assert json.loads((dest / "t1.json").read_text())["title"] == "a"
         assert json.loads((dest / "t2.json").read_text())["title"] == "b"
 
     def test_round_trips_the_extractor(self, tmp_path):
-        # Build a live entity dir, extract rows the way export does, wipe, re-apply:
-        # the reconstructed dir must contain the same entities.
         src = tmp_path / "live"
         src.mkdir()
         (src / "a.json").write_text(json.dumps({"n": 1}), encoding="utf-8")
         (src / "b.json").write_text(json.dumps({"n": 2}), encoding="utf-8")
-        rows = _json_rows_from_entity_dir(src)  # [{"id":"a","data":{"n":1}}, ...]
+        rows = _json_rows_from_entity_dir(src)
         dest = tmp_path / "restored"
         writeback.apply_rows(inv.KIND_JSON_ENTITY_DIR, dest, rows)
-        assert _json_rows_from_entity_dir(dest) == rows  # same rows back out
+        assert _json_rows_from_entity_dir(dest) == rows
 
     def test_tombstone_removes_the_file(self, tmp_path):
         dest = tmp_path / "tasks"
-        writeback.apply_rows(inv.KIND_JSON_ENTITY_DIR, dest, [{"id": "t1", "data": {"x": 1}}])
+        writeback.apply_rows(
+            inv.KIND_JSON_ENTITY_DIR, dest, [{"id": "t1", "data": {"x": 1}}]
+        )
         assert (dest / "t1.json").exists()
         r = writeback.apply_rows(
             inv.KIND_JSON_ENTITY_DIR, dest, [{"id": "t1", "deleted_at": "2026"}]
@@ -52,13 +55,17 @@ class TestEntityDir:
 
     def test_tombstone_for_absent_file_is_a_noop(self, tmp_path):
         r = writeback.apply_rows(
-            inv.KIND_JSON_ENTITY_DIR, tmp_path / "d", [{"id": "gone", "deleted_at": "x"}]
+            inv.KIND_JSON_ENTITY_DIR,
+            tmp_path / "d",
+            [{"id": "gone", "deleted_at": "x"}],
         )
         assert r.removed == 0 and r.written == 0
 
     def test_row_without_id_is_skipped_not_fatal(self, tmp_path):
         r = writeback.apply_rows(
-            inv.KIND_JSON_ENTITY_DIR, tmp_path / "d", [{"data": {}}, {"id": "ok", "data": {}}]
+            inv.KIND_JSON_ENTITY_DIR,
+            tmp_path / "d",
+            [{"data": {}}, {"id": "ok", "data": {}}],
         )
         assert r.written == 1 and r.skipped == 1
 
@@ -77,8 +84,12 @@ class TestJsonFile:
 
     def test_tombstone_removes_the_file(self, tmp_path):
         dest = tmp_path / "v.json"
-        writeback.apply_rows(inv.KIND_JSON_FILE, dest, [{"id": "v.json", "data": {"k": 1}}])
-        writeback.apply_rows(inv.KIND_JSON_FILE, dest, [{"id": "v.json", "deleted_at": "x"}])
+        writeback.apply_rows(
+            inv.KIND_JSON_FILE, dest, [{"id": "v.json", "data": {"k": 1}}]
+        )
+        writeback.apply_rows(
+            inv.KIND_JSON_FILE, dest, [{"id": "v.json", "deleted_at": "x"}]
+        )
         assert not dest.exists()
 
     def test_last_row_wins_for_a_single_doc(self, tmp_path):
@@ -98,10 +109,10 @@ class TestJsonl:
         r = writeback.apply_rows(inv.KIND_JSONL_APPEND, dest, rows)
         assert r.written == 2
         lines = [json.loads(x) for x in dest.read_text().splitlines()]
-        assert [x["m"] for x in lines] == ["a", "b"]  # order preserved
+        assert [x["m"] for x in lines] == ["a", "b"]
 
     def test_directory_stream_is_year_sharded(self, tmp_path):
-        dest = tmp_path / "sessions"  # no suffix, does not exist → directory-shaped
+        dest = tmp_path / "sessions"
         rows = [{"ts": "2025-06-01", "id": "x"}, {"ts": "2026-06-01", "id": "y"}]
         r = writeback.apply_rows(inv.KIND_JSONL_APPEND, dest, rows)
         assert r.written == 2
@@ -111,7 +122,6 @@ class TestJsonl:
         dest = tmp_path / "sessions"
         rows = [{"ts": "2026-01-01", "id": "a"}, {"ts": "2026-02-01", "id": "b"}]
         writeback.apply_rows(inv.KIND_JSONL_APPEND, dest, rows)
-        # Re-extract the written shard and confirm the same rows come back.
         back = _jsonl_rows_by_year(dest / "2026.jsonl")["2026"]
         assert back == rows
 

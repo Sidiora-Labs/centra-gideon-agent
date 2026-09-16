@@ -3,10 +3,10 @@
 Covers:
 - ``validate_cwd`` helper: absolute, exists, realpath, allowlist matching,
   symlink traversal, disabled feature.
-- ``SubagentManager.spawn`` cwd rejection path: invalid cwd returns a done
+- ``DelegationSupervisor.spawn`` cwd rejection path: invalid cwd returns a done
   ``SubagentInfo`` with an ``error`` and emits a ``rejected_invalid_cwd`` SEL
   event without incrementing the running count.
-- ``SubagentManager.spawn`` cwd success path: valid cwd is resolved and
+- ``DelegationSupervisor.spawn`` cwd success path: valid cwd is resolved and
   stored on ``SubagentInfo`` so downstream factories can pick it up.
 """
 
@@ -16,11 +16,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from gideon.subagent import SubagentManager, validate_cwd
-
-# ---------------------------------------------------------------------------
-# validate_cwd helper
-# ---------------------------------------------------------------------------
+from gideon.engine.subagent import DelegationSupervisor, validate_cwd
 
 
 class TestValidateCwd:
@@ -110,7 +106,9 @@ class TestValidateCwd:
         assert err == ""
         assert resolved == os.path.realpath(str(project))
 
-    def test_tilde_expanded_in_cwd(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_tilde_expanded_in_cwd(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """``~`` in cwd argument expands via ``expanduser``."""
         monkeypatch.setenv("HOME", str(tmp_path))
         project = tmp_path / "proj"
@@ -140,7 +138,7 @@ class TestValidateCwd:
 
 
 # ---------------------------------------------------------------------------
-# SubagentManager.spawn integration — cwd is threaded onto SubagentInfo
+# DelegationSupervisor.spawn integration — cwd is threaded onto SubagentInfo
 # ---------------------------------------------------------------------------
 
 
@@ -166,16 +164,16 @@ def _mock_ctx_builder_auto_spawn() -> MagicMock:
 
 
 class TestSpawnCwd:
-    """``SubagentManager.spawn`` correctly validates and stores cwd."""
+    """``DelegationSupervisor.spawn`` correctly validates and stores cwd."""
 
     @pytest.mark.asyncio
     async def test_spawn_without_cwd_leaves_field_empty(self) -> None:
         """Omitting cwd stores an empty string (subagent runs in the default sandbox)."""
-        manager = SubagentManager(
+        manager = DelegationSupervisor(
             sessions=_mock_sessions(),
             ctx_builder=_mock_ctx_builder_auto_spawn(),
         )
-        with patch("gideon.subagent.Stats"), patch("gideon.subagent.sel"):
+        with patch("gideon.engine.subagent.Stats"), patch("gideon.engine.subagent.sel"):
             info = manager.spawn("t")
         assert info is not None
         assert info.cwd == ""
@@ -189,7 +187,7 @@ class TestSpawnCwd:
         project = tmp_path / "project"
         project.mkdir()
 
-        manager = SubagentManager(
+        manager = DelegationSupervisor(
             sessions=_mock_sessions(),
             ctx_builder=_mock_ctx_builder_auto_spawn(),
         )
@@ -197,9 +195,9 @@ class TestSpawnCwd:
         mock_cfg.agent.spawn_min_memory_gb = 0
         mock_cfg.agent.subagent_cwd_allowed_roots = [str(tmp_path)]
         with (
-            patch("gideon.subagent.Stats"),
-            patch("gideon.subagent.sel"),
-            patch("gideon.subagent.AppConfig.load", return_value=mock_cfg),
+            patch("gideon.engine.subagent.Stats"),
+            patch("gideon.engine.subagent.sel"),
+            patch("gideon.engine.subagent.AppConfig.load", return_value=mock_cfg),
         ):
             info = manager.spawn("t", cwd=str(project))
 
@@ -217,7 +215,7 @@ class TestSpawnCwd:
         The rejection happens before the running count is incremented, so
         running_count is unchanged.
         """
-        manager = SubagentManager(
+        manager = DelegationSupervisor(
             sessions=_mock_sessions(),
             ctx_builder=_mock_ctx_builder_auto_spawn(),
         )
@@ -229,9 +227,9 @@ class TestSpawnCwd:
 
         sel_mock = MagicMock()
         with (
-            patch("gideon.subagent.Stats"),
-            patch("gideon.subagent.sel", return_value=sel_mock),
-            patch("gideon.subagent.AppConfig.load", return_value=mock_cfg),
+            patch("gideon.engine.subagent.Stats"),
+            patch("gideon.engine.subagent.sel", return_value=sel_mock),
+            patch("gideon.engine.subagent.AppConfig.load", return_value=mock_cfg),
         ):
             info = manager.spawn("t", cwd="/etc")
 
@@ -239,7 +237,6 @@ class TestSpawnCwd:
         assert info.done is True
         assert "spawn refused" in info.error
         assert manager._running_count == running_before
-        # SEL audit trail fired with the right outcome
         calls = [
             c
             for c in sel_mock.log_tool_invocation.call_args_list
@@ -256,7 +253,7 @@ class TestSpawnCwd:
         """Config with empty allowed_roots rejects any cwd (fails-closed)."""
         project = tmp_path / "project"
         project.mkdir()
-        manager = SubagentManager(
+        manager = DelegationSupervisor(
             sessions=_mock_sessions(),
             ctx_builder=_mock_ctx_builder_auto_spawn(),
         )
@@ -264,9 +261,9 @@ class TestSpawnCwd:
         mock_cfg.agent.spawn_min_memory_gb = 0
         mock_cfg.agent.subagent_cwd_allowed_roots = []
         with (
-            patch("gideon.subagent.Stats"),
-            patch("gideon.subagent.sel"),
-            patch("gideon.subagent.AppConfig.load", return_value=mock_cfg),
+            patch("gideon.engine.subagent.Stats"),
+            patch("gideon.engine.subagent.sel"),
+            patch("gideon.engine.subagent.AppConfig.load", return_value=mock_cfg),
         ):
             info = manager.spawn("t", cwd=str(project))
         assert info is not None
@@ -286,26 +283,26 @@ class TestSpawnCwd:
         """
         project = tmp_path / "project"
         project.mkdir()
-        manager = SubagentManager(
+        manager = DelegationSupervisor(
             sessions=_mock_sessions(),
             ctx_builder=_mock_ctx_builder_auto_spawn(),
         )
-        # Force capacity: running_count already at max
         manager._running_count = manager._max_concurrent
         mock_cfg = MagicMock()
         mock_cfg.agent.spawn_min_memory_gb = 0
         mock_cfg.agent.subagent_cwd_allowed_roots = [str(tmp_path)]
         with (
-            patch("gideon.subagent.Stats"),
-            patch("gideon.subagent.sel"),
-            patch("gideon.subagent.AppConfig.load", return_value=mock_cfg),
+            patch("gideon.engine.subagent.Stats"),
+            patch("gideon.engine.subagent.sel"),
+            patch("gideon.engine.subagent.AppConfig.load", return_value=mock_cfg),
         ):
             info = manager.spawn("t", cwd=str(project))
 
         assert info is not None
         assert info.queued is True, "spawn at capacity should have been queued"
-        assert not info.id.startswith("q"), "C1.2: queued spawn gets a real, not placeholder, id"
-        # Queue must carry the resolved cwd so dequeue can re-spawn correctly.
+        assert not info.id.startswith(
+            "q"
+        ), "C1.2: queued spawn gets a real, not placeholder, id"
         assert len(manager._queue) == 1
         queued = manager._queue[0]
         assert queued is info
@@ -324,15 +321,19 @@ class TestSpawnCwd:
         """
         project = tmp_path / "project"
         project.mkdir()
-        manager = SubagentManager(
+        manager = DelegationSupervisor(
             sessions=_mock_sessions(),
             ctx_builder=_mock_ctx_builder_auto_spawn(),
         )
         load_mock = patch(
-            "gideon.subagent.AppConfig.load",
+            "gideon.engine.subagent.AppConfig.load",
             side_effect=OSError("config unreadable"),
         )
-        with patch("gideon.subagent.Stats"), patch("gideon.subagent.sel"), load_mock:
+        with (
+            patch("gideon.engine.subagent.Stats"),
+            patch("gideon.engine.subagent.sel"),
+            load_mock,
+        ):
             info = manager.spawn("t", cwd=str(project))
 
         assert info is not None

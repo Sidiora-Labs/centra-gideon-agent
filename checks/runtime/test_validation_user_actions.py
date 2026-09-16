@@ -7,27 +7,23 @@ that input validation must accept.
 
 from unittest.mock import patch
 
-# ── MCP Core: simulate ACP agent calling tools via JSON-RPC ──
-
 
 class TestMcpCoreUserActions:
     """Simulate the exact JSON-RPC calls ACP agent sends to gideon-core."""
 
     def _simulate_tool_call(self, tool_name: str, arguments: dict) -> str:
-        """Simulate what ACP agent does: JSON-RPC tools/call → the gideon-core
+        """Simulate what ACP agent does: JSON-RPC tooling/call → the gideon-core
         MCP server's aggregating dispatch (routes each tool to its category module)."""
-        from gideon.mcp_core import _aggregated_call_tool
+        from gideon.integrations.mcp_core import _aggregated_call_tool
 
         return _aggregated_call_tool(tool_name, arguments)
 
-    # -- subagent_run: user says "search docs for X in parallel" --
-
     def test_spawn_fire_and_forget(self):
-        with patch("gideon.mcp_subagents._post") as mock_post:
+        with patch("gideon.integrations.mcp_subagents._post") as mock_post:
             mock_post.return_value = {"id": "abc12345"}
             result = self._simulate_tool_call(
                 "subagent_run",
-                {"task": "search the codebase for uses of SessionManager"},
+                {"task": "search the codebase for uses of ConversationDirectory"},
             )
         assert "abc12345" in result
         assert "Spawned" in result
@@ -41,15 +37,14 @@ class TestMcpCoreUserActions:
         the compiler refuses them and SAYS which declaration is missing — the refusal is the
         user-visible contract now, and it has to be actionable.
         """
-        with patch("gideon.mcp_subagents._post") as mock_post:
+        with patch("gideon.integrations.mcp_subagents._post") as mock_post:
             mock_post.return_value = {}
             result = self._simulate_tool_call(
                 "subagent_run",
-                {"tasks": ["search for SessionManager", "count test files"]},
+                {"tasks": ["search for ConversationDirectory", "count test files"]},
             )
         assert "leaf_contract_missing" in result
         assert "objective" in result
-        # Nothing was spawned or persisted from an uncompiled batch.
         assert mock_post.call_count == 0
 
     def test_spawn_batch_with_contracts_compiles_one_run(self):
@@ -59,7 +54,7 @@ class TestMcpCoreUserActions:
             "output_format": "a markdown list of findings",
             "boundary": "do not modify any source file",
         }
-        with patch("gideon.mcp_subagents._post") as mock_post:
+        with patch("gideon.integrations.mcp_subagents._post") as mock_post:
             mock_post.side_effect = [{"ok": True}, {"ok": True, "run_id": "run-9"}]
             result = self._simulate_tool_call(
                 "subagent_run",
@@ -76,16 +71,14 @@ class TestMcpCoreUserActions:
 
     def test_spawn_default_returns_immediately(self):
         """subagent_run always returns immediately — fire-and-forget."""
-        with patch("gideon.mcp_subagents._post") as mock_post:
+        with patch("gideon.integrations.mcp_subagents._post") as mock_post:
             mock_post.return_value = {"id": "ghi789"}
             result = self._simulate_tool_call("subagent_run", {"task": "quick check"})
         assert "Spawned" in result
         assert "completion event" in result.lower()
 
-    # -- memory_remember: user says "remember to always use dark mode" --
-
     def test_learn_preference(self):
-        with patch("gideon.mcp_memory._post") as mock_post:
+        with patch("gideon.integrations.mcp_memory._post") as mock_post:
             mock_post.return_value = {"status": "ok"}
             result = self._simulate_tool_call(
                 "memory_remember",
@@ -105,7 +98,7 @@ class TestMcpCoreUserActions:
         )
 
     def test_learn_with_negative(self):
-        with patch("gideon.mcp_memory._post") as mock_post:
+        with patch("gideon.integrations.mcp_memory._post") as mock_post:
             mock_post.return_value = {"status": "ok"}
             result = self._simulate_tool_call(
                 "memory_remember",
@@ -119,7 +112,7 @@ class TestMcpCoreUserActions:
 
     def test_learn_category_defaults_to_knowledge(self):
         """LLM might omit category — should default to 'knowledge'."""
-        with patch("gideon.mcp_memory._post") as mock_post:
+        with patch("gideon.integrations.mcp_memory._post") as mock_post:
             mock_post.return_value = {"status": "ok"}
             result = self._simulate_tool_call(
                 "memory_remember",
@@ -131,10 +124,8 @@ class TestMcpCoreUserActions:
         call_body = mock_post.call_args[0][1]
         assert call_body["category"] == "knowledge"
 
-    # -- memory_list: user says "what have I taught you?" --
-
     def test_learn_list(self):
-        with patch("gideon.mcp_memory._get") as mock_get:
+        with patch("gideon.integrations.mcp_memory._get") as mock_get:
             mock_get.return_value = {
                 "lessons": [
                     {"rule": "use dark mode", "category": "preference"},
@@ -146,15 +137,13 @@ class TestMcpCoreUserActions:
         assert "pytest" in result
 
     def test_learn_list_empty(self):
-        with patch("gideon.mcp_memory._get") as mock_get:
+        with patch("gideon.integrations.mcp_memory._get") as mock_get:
             mock_get.return_value = {"lessons": []}
             result = self._simulate_tool_call("memory_list", {})
         assert "No lessons" in result
 
-    # -- memory_forget: user says "forget the dark mode rule" --
-
     def test_learn_remove(self):
-        with patch("gideon.mcp_memory._delete") as mock_del:
+        with patch("gideon.integrations.mcp_memory._delete") as mock_del:
             mock_del.return_value = {"removed": 1}
             result = self._simulate_tool_call(
                 "memory_forget",
@@ -164,25 +153,21 @@ class TestMcpCoreUserActions:
             )
         assert "Removed" in result
 
-    # -- subagent_list: user says "what's running in the background?" --
-
     def test_spawn_list_empty(self):
-        with patch("gideon.mcp_subagents._get") as mock_get:
+        with patch("gideon.integrations.mcp_subagents._get") as mock_get:
             mock_get.return_value = {"agents": []}
             result = self._simulate_tool_call("subagent_list", {})
         assert "No subagents" in result
 
-    # -- subagent_status: user says "get the full output from that subagent" --
-
     def test_spawn_status_returns_full_result(self):
-        with patch("gideon.mcp_subagents._get") as mock_get:
+        with patch("gideon.integrations.mcp_subagents._get") as mock_get:
             mock_get.return_value = {"result": "A" * 5000}
             result = self._simulate_tool_call("subagent_status", {"agent_id": "abc123"})
         assert len(result) == 5000
         mock_get.assert_called_with("/api/spawn/abc123")
 
     def test_spawn_status_not_found(self):
-        with patch("gideon.mcp_subagents._get") as mock_get:
+        with patch("gideon.integrations.mcp_subagents._get") as mock_get:
             mock_get.return_value = {"error": "not found"}
             result = self._simulate_tool_call("subagent_status", {"agent_id": "bad"})
         assert "Error" in result
@@ -200,20 +185,17 @@ class TestMcpCoreUserActions:
         assert "invalid" in result.lower()
 
     def test_spawn_status_redacts_credentials(self):
-        with patch("gideon.mcp_subagents._get") as mock_get:
-            mock_get.return_value = {"result": "Found key AKIAIOSFODNN7EXAMPLE in output"}
+        with patch("gideon.integrations.mcp_subagents._get") as mock_get:
+            mock_get.return_value = {
+                "result": "Found key AKIAIOSFODNN7EXAMPLE in output"
+            }
             result = self._simulate_tool_call("subagent_status", {"agent_id": "abc123"})
         assert "AKIAIOSFODNN7EXAMPLE" not in result
         assert "[REDACTED" in result
 
-    # -- unknown tool: should return clean error --
-
     def test_unknown_tool(self):
         result = self._simulate_tool_call("nonexistent_tool", {"x": 1})
         assert "Unknown tool" in result
-
-
-# ── MCP Schedule: simulate ACP agent calling schedule tools ──
 
 
 class TestJsonRpcProtocol:
@@ -221,7 +203,7 @@ class TestJsonRpcProtocol:
 
     def test_initialize_handshake(self):
         """ACP agent sends initialize as the first message."""
-        from gideon.validation import validate_jsonrpc_request
+        from gideon.assurance.validation import validate_jsonrpc_request
 
         method, rid, params = validate_jsonrpc_request(
             {
@@ -238,25 +220,25 @@ class TestJsonRpcProtocol:
         assert rid == 1
 
     def test_tools_call(self):
-        """ACP agent sends tools/call with name and arguments."""
-        from gideon.validation import validate_jsonrpc_request
+        """ACP agent sends tooling/call with name and arguments."""
+        from gideon.assurance.validation import validate_jsonrpc_request
 
         method, rid, params = validate_jsonrpc_request(
             {
                 "jsonrpc": "2.0",
                 "id": 5,
-                "method": "tools/call",
+                "method": "tooling/call",
                 "params": {
                     "name": "schedule_add",
                     "arguments": {"name": "test", "message": "hi", "every": 60},
                 },
             }
         )
-        assert method == "tools/call"
+        assert method == "tooling/call"
 
     def test_notification_no_id(self):
         """ACP agent sends notifications/initialized with no id."""
-        from gideon.validation import validate_jsonrpc_request
+        from gideon.assurance.validation import validate_jsonrpc_request
 
         method, rid, params = validate_jsonrpc_request(
             {
@@ -268,14 +250,11 @@ class TestJsonRpcProtocol:
         assert rid is None
 
 
-# ── Validation: verify bad inputs are caught without affecting good ones ──
-
-
 class TestBadInputsCaught:
     """Verify that malicious/malformed inputs are rejected cleanly."""
 
     def _core_call(self, name: str, args: dict) -> str:
-        from gideon.mcp_core import _aggregated_call_tool
+        from gideon.integrations.mcp_core import _aggregated_call_tool
 
         return _aggregated_call_tool(name, args)
 
@@ -285,14 +264,13 @@ class TestBadInputsCaught:
 
     def test_spawn_task_with_hidden_unicode(self):
         """Zero-width chars should be stripped, not cause errors."""
-        with patch("gideon.mcp_subagents._post") as mock_post:
+        with patch("gideon.integrations.mcp_subagents._post") as mock_post:
             mock_post.return_value = {"id": "clean1"}
             result = self._core_call(
                 "subagent_run",
                 {"task": "search\u200b for\u200d files"},
             )
         assert "clean1" in result
-        # Verify the API received cleaned text
         call_body = mock_post.call_args[0][1]
         assert "\u200b" not in call_body["task"]
         assert "\u200d" not in call_body["task"]
@@ -305,9 +283,6 @@ class TestBadInputsCaught:
                 "category": "evil_category",
             },
         )
-        # PLATFORM-LEGIBILITY §2: the MCP string boundary now surfaces the
-        # WHAT/WHY/FIX envelope — the bad value is named and a FIX line points at
-        # the allowed values (did-you-mean), instead of a bare "must be one of".
         assert "Error" in result
         assert "evil_category" in result
         assert "WHAT:" in result and "FIX:" in result
@@ -323,7 +298,10 @@ class TestBadInputsCaught:
         A WARNING rather than an error, because R1 makes the floor overridable — the trigger still
         runs, which is why the old `min_val=60` hard rejection was not the right shape to port.
         """
-        from gideon.triggers.models import MIN_CLOCK_INTERVAL_SECS, validate_spec
+        from gideon.automation.triggers.models import (
+            MIN_CLOCK_INTERVAL_SECS,
+            validate_spec,
+        )
 
         issues = validate_spec("clock", {"kind": "interval", "interval_secs": 5})
         flagged = [i for i in issues if i.path == "spec.interval_secs"]
@@ -353,7 +331,7 @@ class TestBadInputsCaught:
         result = self._core_call(
             "subagent_run",
             {
-                "task": 12345,  # should be string
+                "task": 12345,
             },
         )
         assert "Error" in result
@@ -361,14 +339,11 @@ class TestBadInputsCaught:
     def test_oversized_response_truncated(self):
         """Responses > 100K are truncated at the MCP protocol layer."""
         large_text = "x" * 200_000
-        from gideon.validation import build_tool_response
+        from gideon.assurance.validation import build_tool_response
 
         response = build_tool_response(large_text)
         assert len(response["content"][0]["text"]) < 150_000
         assert "truncated" in response["content"][0]["text"]
-
-
-# ── Dashboard API body validation helpers ──
 
 
 class TestDashboardApiPatterns:
@@ -376,7 +351,7 @@ class TestDashboardApiPatterns:
 
     def test_lesson_create_body(self):
         """POST /api/lessons body validation."""
-        from gideon.validation import (
+        from gideon.assurance.validation import (
             ALLOWED_LESSON_CATEGORIES,
             validate_api_body,
             validate_string_field,
@@ -390,7 +365,7 @@ class TestDashboardApiPatterns:
 
     def test_cron_create_body(self):
         """POST /api/crons body validation."""
-        from gideon.validation import validate_api_body, validate_string_field
+        from gideon.assurance.validation import validate_api_body, validate_string_field
 
         body = validate_api_body(
             {
@@ -406,7 +381,7 @@ class TestDashboardApiPatterns:
 
     def test_chat_message_body(self):
         """POST /api/chat body validation."""
-        from gideon.validation import validate_api_body, validate_string_field
+        from gideon.assurance.validation import validate_api_body, validate_string_field
 
         body = validate_api_body({"message": "what's the status of my pipeline?"})
         msg = validate_string_field(body, "message", required=True, max_len=50_000)
@@ -414,7 +389,7 @@ class TestDashboardApiPatterns:
 
     def test_skill_create_body(self):
         """POST /api/skills body validation."""
-        from gideon.validation import validate_api_body, validate_string_field
+        from gideon.assurance.validation import validate_api_body, validate_string_field
 
         body = validate_api_body(
             {

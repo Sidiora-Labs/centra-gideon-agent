@@ -14,7 +14,7 @@ import json
 
 from aiohttp.test_utils import make_mocked_request
 
-from gideon.dashboard.handlers import model_registry as mr
+from gideon.interfaces.dashboard.handlers import model_registry as mr
 
 
 def _call() -> list:
@@ -32,11 +32,9 @@ def test_active_models_carry_superset_shape(monkeypatch):
     rows = _call()
     assert len(rows) == 2
     qualified = next(r for r in rows if r["provider"] == "Bedrock")
-    # qualified ref → name keeps the full ref; model_name/model_id are the bare id
     assert qualified["name"] == "Bedrock:global.anthropic.claude-opus-4-8"
     assert qualified["model_name"] == "global.anthropic.claude-opus-4-8"
     assert qualified["model_id"] == "global.anthropic.claude-opus-4-8"
-    # every entry has the full superset of keys
     for r in rows:
         assert {"name", "model_name", "model_id", "provider", "description"} <= set(r)
     bare = next(r for r in rows if r["provider"] == "")
@@ -51,7 +49,7 @@ def test_fallback_discovers_across_provider_families(monkeypatch):
     the handler resolves that via ``_catalog_for_config_provider``. Inject fake
     catalogs keyed by provider name so the test is provider-agnostic (proving the
     generic seam, not any specific type)."""
-    from gideon.llm.catalog import ModelCatalog, ModelInfo
+    from gideon.integrations.llm.catalog import ModelCatalog, ModelInfo
 
     monkeypatch.setattr(mr, "load_active_models", lambda: {})
     monkeypatch.setattr(
@@ -74,21 +72,27 @@ def test_fallback_discovers_across_provider_families(monkeypatch):
         "ollama": _FakeCatalog(
             [
                 ModelInfo(id="llama3", name="llama3", capabilities=["chat"]),
-                ModelInfo(id="nomic-embed", name="nomic-embed", capabilities=["embedding"]),
+                ModelInfo(
+                    id="nomic-embed", name="nomic-embed", capabilities=["embedding"]
+                ),
             ]
         ),
         "Bedrock": _FakeCatalog(
             [
-                ModelInfo(id="anthropic.claude-x", name="Claude X", capabilities=["chat"]),
+                ModelInfo(
+                    id="anthropic.claude-x", name="Claude X", capabilities=["chat"]
+                ),
             ]
         ),
     }
-    monkeypatch.setattr(mr, "_catalog_for_config_provider", lambda p: catalogs.get(p.get("name")))
+    monkeypatch.setattr(
+        mr, "_catalog_for_config_provider", lambda p: catalogs.get(p.get("name"))
+    )
 
     rows = _call()
     ids = {r["model_id"] for r in rows}
-    assert "llama3" in ids  # ollama chat model
-    assert "anthropic.claude-x" in ids  # bedrock chat model
-    assert "nomic-embed" not in ids  # embedding model excluded (chat-only)
+    assert "llama3" in ids
+    assert "anthropic.claude-x" in ids
+    assert "nomic-embed" not in ids
     for r in rows:
         assert {"name", "model_name", "model_id", "provider", "description"} <= set(r)

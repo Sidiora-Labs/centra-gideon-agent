@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from gideon.hooks import (
+from gideon.engine.hooks import (
     HOOK_EVENT_AGENT_SPAWN,
     HOOK_EVENT_PRE_TOOL_USE,
     HOOK_EVENT_USER_PROMPT_SUBMIT,
@@ -129,7 +129,8 @@ class TestScriptHookStore:
             }
         )
         updated = hook_store.update(
-            hook.id, {"name": "updated-name", "provider_config": {"command": "echo updated"}}
+            hook.id,
+            {"name": "updated-name", "provider_config": {"command": "echo updated"}},
         )
         assert updated is not None
         assert updated.name == "updated-name"
@@ -182,7 +183,6 @@ class TestScriptHookStore:
             }
         )
 
-        # Load from same file
         store2 = ScriptHookStore(tmp_path)
         retrieved = store2.get(hook.id)
         assert retrieved is not None
@@ -223,7 +223,7 @@ class TestRunScriptHook:
         )
         result = await run_script_hook(hook, "test-context")
         assert result.exit_code == 1
-        assert result.error == ""  # exit code is not an error, just non-zero
+        assert result.error == ""
 
     @pytest.mark.asyncio
     async def test_timeout(self):
@@ -238,7 +238,7 @@ class TestRunScriptHook:
         )
         result = await run_script_hook(hook, "test-context")
         assert "Timed out" in result.error
-        assert result.duration_ms >= 1000  # at least 1 second
+        assert result.duration_ms >= 1000
 
     @pytest.mark.asyncio
     async def test_exit_code_2_blocks(self):
@@ -370,13 +370,15 @@ class TestScriptHookStoreFire:
                 "matcher": "fs_*",
             }
         )
-        # Should match
-        results = await hook_store.fire(HOOK_EVENT_PRE_TOOL_USE, "test", tool_name="fs_write")
+        results = await hook_store.fire(
+            HOOK_EVENT_PRE_TOOL_USE, "test", tool_name="fs_write"
+        )
         assert len(results) == 1
         assert "matched" in results[0].stdout
 
-        # Should not match
-        results = await hook_store.fire(HOOK_EVENT_PRE_TOOL_USE, "test", tool_name="git_commit")
+        results = await hook_store.fire(
+            HOOK_EVENT_PRE_TOOL_USE, "test", tool_name="git_commit"
+        )
         assert len(results) == 0
 
     @pytest.mark.asyncio
@@ -415,7 +417,6 @@ class TestScriptHookStoreFire:
         )
         results = await hook_store.fire(HOOK_EVENT_USER_PROMPT_SUBMIT, "test")
         assert len(results) == 2
-        # Results maintain insertion order
         assert "first" in results[0].stdout
         assert "second" in results[1].stdout
 

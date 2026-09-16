@@ -16,10 +16,6 @@ BASE = "http://127.0.0.1:10000"
 
 
 def _get(path):
-    # Retry with backoff: right after a gateway restart the asyncio loop can be
-    # briefly saturated by background warm/probe tasks, so a single 10s GET may
-    # time out on a gateway that is in fact healthy. Retry before declaring a
-    # consistency violation (this harness checks invariants, not latency).
     last = None
     for attempt in range(6):
         try:
@@ -54,16 +50,13 @@ def main() -> int:
     providers = _get("/api/providers")["providers"]
     apps = _get("/api/apps")["apps"]
 
-    # 1. every tool appears EXACTLY once
     names = [t["name"] for t in tools]
     dupes = sorted({n for n in names if names.count(n) > 1})
     check(not dupes, f"duplicate tools in /api/tools: {dupes}", fails)
 
-    # 2. no monolithic 'builtin' provider remains
     check(not any(t["provider"] == "builtin" for t in tools),
           "a tool is still under the monolithic 'builtin' provider", fails)
 
-    # 3. the split entity providers each own their slice
     by_prov: dict[str, set] = {}
     for t in tools:
         by_prov.setdefault(t["provider"], set()).add(t["name"])
@@ -74,23 +67,19 @@ def main() -> int:
           all(n.startswith("knowledge_") for n in by_prov["gideon-knowledge-tools"]),
           "knowledge provider slice wrong", fails)
 
-    # 4. the removed shell-wrapper tools are gone
     for gone in ("git", "run_tests", "diagnostics"):
         check(gone not in names, f"removed tool {gone!r} reappeared", fails)
 
-    # 5. every tool-type provider on Settings>Providers also appears in Store/Library
     tool_provs = {p["name"] for p in providers if (p.get("provider") or {}).get("type") == "tool"}
     app_names = {a["name"] for a in apps}
     missing = sorted(tool_provs - app_names)
     check(not missing, f"tool providers on Providers but missing from Library: {missing}", fails)
 
-    # 6. the platform provider is present + flagged on BOTH surfaces, non-removable
     fs_prov = next((p for p in providers if p["name"] == "gideon-filesystem"), None)
     fs_app = next((a for a in apps if a["name"] == "gideon-filesystem"), None)
     check(fs_prov and fs_prov.get("platform"), "platform provider missing/unflagged on /api/providers", fails)
     check(fs_app and fs_app.get("platform"), "platform provider missing/unflagged on /api/apps", fails)
 
-    # 7. locked tools never report disabled; platform provider can't be disabled
     for t in tools:
         if t.get("locked"):
             check(not t.get("disabled"), f"locked tool {t['name']} reports disabled", fails)
@@ -99,14 +88,12 @@ def main() -> int:
     check(status == 409 and not body.get("ok"),
           f"platform provider disable not refused (status={status})", fails)
 
-    # 8. per-tool + per-provider disable round-trips through /api/tools (one source)
     status, _ = _post("/api/tools/provider-toggle",
                       {"provider": "gideon-knowledge-tools", "enabled": False})
     after = _get("/api/tools")["tools"]
     kn = [t for t in after if t["provider"] == "gideon-knowledge-tools"]
     check(kn and all(t.get("disabled") and t.get("providerDisabled") for t in kn),
           "provider-disable not reflected in /api/tools", fails)
-    # restore
     _post("/api/tools/provider-toggle", {"provider": "gideon-knowledge-tools", "enabled": True})
     after2 = _get("/api/tools")["tools"]
     kn2 = [t for t in after2 if t["provider"] == "gideon-knowledge-tools"]

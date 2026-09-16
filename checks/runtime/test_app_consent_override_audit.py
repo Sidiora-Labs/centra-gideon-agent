@@ -18,17 +18,16 @@ from pathlib import Path
 
 import pytest
 
-from gideon.apps import app_manager, manager
-from gideon.sel import SecurityEventLog
-from gideon.supply_chain import Finding, ScanReport, Verdict
+from gideon.extensions.apps import app_manager, manager
+from gideon.security.sel import SecurityEventLog
+from gideon.security.supply_chain import Finding, ScanReport, Verdict
 
-# A plain `curl` in a script is a WARNING at community/local tier — the overridable band.
-_WARNING_FILES = {"scripts/fetch.sh": "curl https://api.example.com/data\n"}
+_WARNING_FILES = {"tooling/scripts/fetch.sh": "curl https://api.example.com/data\n"}
 
 
 @pytest.fixture(autouse=True)
 def _isolate_apps(tmp_path, monkeypatch):
-    import gideon.config.loader as loader
+    import gideon.core.config.loader as loader
 
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(manager, "config_dir", lambda: tmp_path)
@@ -114,7 +113,9 @@ class TestInstallConsentIsAudited:
         assert "consent" not in resources
         assert "rules=" not in resources
 
-    def test_an_overridden_warning_install_records_verdict_and_consent(self, tmp_path, sel_rows):
+    def test_an_overridden_warning_install_records_verdict_and_consent(
+        self, tmp_path, sel_rows
+    ):
         """The positive half — the defect. An install that only landed because the user
         confirmed a scanner warning says so on its success event."""
         src = _make_app_source(tmp_path, files=_WARNING_FILES)
@@ -132,22 +133,25 @@ class TestInstallConsentIsAudited:
         assert "app=demo-app" in resources
         assert "verdict=warning" in resources
         assert "consent=true" in resources
-        # The rule id that produced the verdict, so the log says WHICH gate was set aside.
         assert "rules=curl_network" in resources
-        # The rule id, never the matched snippet — SEL is durable and exportable.
         assert "api.example.com" not in resources
         assert "https://" not in resources
 
     def test_the_refusals_still_carry_the_verdict(self, tmp_path, sel_rows):
         """The two audited paths keep their record and gain the verdict — and neither
-        claims consent, `confirm=True` notwithstanding. A dangerous verdict is terminal."""
+        claims consent, `confirm=True` notwithstanding. A dangerous verdict is terminal.
+        """
         danger = _make_app_source(
             tmp_path,
             name="danger-app",
-            files={"scripts/evil.sh": "rm -rf / --no-preserve-root\n"},
+            files={"tooling/scripts/evil.sh": "rm -rf / --no-preserve-root\n"},
         )
         res = app_manager.install(danger, origin="local", confirm=True)
-        assert not res.ok and res.scan is not None and res.scan.verdict is Verdict.DANGEROUS
+        assert (
+            not res.ok
+            and res.scan is not None
+            and res.scan.verdict is Verdict.DANGEROUS
+        )
         assert not manager.app_dir("danger-app").exists()
         refused = sel_rows("app.install", "refused")
         assert len(refused) == 1
@@ -188,7 +192,9 @@ class TestUpdateConsentIsAudited:
         assert "verdict=clean" in ok[0]["resources"]
         assert "consent" not in ok[0]["resources"]
 
-    def test_an_overridden_warning_update_records_verdict_and_consent(self, tmp_path, sel_rows):
+    def test_an_overridden_warning_update_records_verdict_and_consent(
+        self, tmp_path, sel_rows
+    ):
         self._install_clean(tmp_path)
         newer = _make_app_source(tmp_path, version="1.1.0", files=_WARNING_FILES)
 
@@ -217,7 +223,10 @@ class TestScanDetailRendering:
         return ScanReport(
             verdict=verdict,
             findings=[
-                Finding("script", verdict, rule, "scripts/x.sh", "SECRET_SNIPPET") for rule in rules
+                Finding(
+                    "script", verdict, rule, "tooling/scripts/x.sh", "SECRET_SNIPPET"
+                )
+                for rule in rules
             ],
         )
 
@@ -225,7 +234,9 @@ class TestScanDetailRendering:
         """SEL truncates `resources` at write time. An app tripping a dozen rules must not
         push `consent=true` off the end — the field an incident greps for."""
         rules = [f"rule_{i:02d}" for i in range(12)]
-        detail = app_manager._scan_detail(self._report(Verdict.WARNING, rules), consent=True)
+        detail = app_manager._scan_detail(
+            self._report(Verdict.WARNING, rules), consent=True
+        )
         assert detail.endswith("consent=true")
         assert "rules_total=12" in detail
         assert detail.count(",") == app_manager._AUDIT_MAX_RULES - 1
@@ -235,12 +246,14 @@ class TestScanDetailRendering:
             self._report(Verdict.WARNING, ["python_exec"]), consent=True
         )
         assert "SECRET_SNIPPET" not in detail
-        assert "scripts/x.sh" not in detail
+        assert "tooling/scripts/x.sh" not in detail
 
     def test_a_low_verdict_never_claims_consent(self):
         """Trust-tier modulation drops a builtin/official bundle's warnings to `low`, which
         does not gate. Nothing was overridden there, so nothing is claimed."""
-        detail = app_manager._scan_detail(self._report(Verdict.LOW, ["curl_network"]), consent=True)
+        detail = app_manager._scan_detail(
+            self._report(Verdict.LOW, ["curl_network"]), consent=True
+        )
         assert "verdict=low" in detail and "consent" not in detail
 
     def test_no_report_renders_nothing(self):

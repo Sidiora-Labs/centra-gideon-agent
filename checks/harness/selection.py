@@ -16,47 +16,61 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class ForceRule:
     """If any changed file matches ``glob``, force ``profile``. ``reason`` is shown to the
-    executor so the forcing is legible ("forced replay because you touched chat stream")."""
+    executor so the forcing is legible ("forced replay because you touched chat stream").
+    """
 
     glob: str
     profile: str
     reason: str
 
 
-# Ordered; a file can match several rules and force several profiles. Globs are matched
-# against repo-relative POSIX paths. These encode the plan's named couplings plus the
-# obvious "touching web/ forces the web gate" and "touching Python forces fast tests".
 _FORCE_RULES: tuple[ForceRule, ...] = (
     ForceRule(
-        "web/src/pages/chat/*",
+        "apps/console/src/pages/chat/*",
         "replay",
         "chat stream touched — replay guards the K42/K44/K45 coalescer bug class",
     ),
     ForceRule(
-        "web/src/pages/loops/*",
+        "apps/console/src/pages/loops/*",
         "replay",
         "run stream touched — replay guards the run-fold state machine",
     ),
     ForceRule(
-        "src/gideon/dashboard/sse.py",
+        "runtime/gideon/interfaces/dashboard/sse.py",
         "replay",
         "SSE registry touched — replay guards journal→widget-stream fidelity",
     ),
-    ForceRule("web/*", "web", "frontend touched — the web gate (typecheck + vitest) applies"),
-    ForceRule("web/**/*", "web", "frontend touched — the web gate (typecheck + vitest) applies"),
     ForceRule(
-        "src/gideon/config/loader.py",
+        "apps/console/*",
+        "web",
+        "frontend touched — the web gate (typecheck + vitest) applies",
+    ),
+    ForceRule(
+        "apps/console/**/*",
+        "web",
+        "frontend touched — the web gate (typecheck + vitest) applies",
+    ),
+    ForceRule(
+        "runtime/gideon/core/config/loader.py",
         "scan",
         "config dataclass touched — the config-four-points scanner check applies",
     ),
     ForceRule(
-        "src/gideon/action_providers/*",
+        "runtime/gideon/integrations/action_providers/*",
         "scan",
         "action provider touched — the hook-provider-parity scanner check applies",
     ),
-    ForceRule("src/gideon/*", "scan", "core Python touched — run the boundary scanner"),
-    ForceRule("src/gideon/**/*", "scan", "core Python touched — run the boundary scanner"),
-    ForceRule("apps/**/*", "scan", "app code touched — the app-sdk-boundary scanner check applies"),
+    ForceRule(
+        "runtime/gideon/*", "scan", "core Python touched — run the boundary scanner"
+    ),
+    ForceRule(
+        "runtime/gideon/**/*", "scan", "core Python touched — run the boundary scanner"
+    ),
+    ForceRule(
+        "apps/**/*",
+        "scan",
+        "app code touched — the app-sdk-boundary scanner check applies",
+    ),
 )
 
 

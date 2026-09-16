@@ -29,7 +29,8 @@ from pathlib import Path
 
 import pytest
 
-from gideon.decisions import (
+from gideon.automation.triggers.store import TriggerStore
+from gideon.cognition.decisions import (
     CALIBRATED_GRADES,
     DECISION_DOMAINS,
     DECISION_TYPE,
@@ -48,8 +49,7 @@ from gideon.decisions import (
     resolve_decision,
     review_trigger_id,
 )
-from gideon.knowledge.store import KnowledgeStore
-from gideon.triggers.store import TriggerStore
+from gideon.cognition.knowledge.store import KnowledgeStore
 
 
 @pytest.fixture
@@ -64,10 +64,10 @@ def triggers(tmp_path: Path) -> TriggerStore:
 
 @pytest.fixture
 def memory(tmp_path: Path):
-    from gideon.memory_service import MemoryService
-    from gideon.vector_memory import VectorMemoryStore
+    from gideon.cognition.memory_service import MemoryService
+    from gideon.cognition.vector_memory import SemanticArchive
 
-    vs = VectorMemoryStore(db_path=tmp_path / "memory.db")
+    vs = SemanticArchive(db_path=tmp_path / "memory.db")
     vs.init()
     return MemoryService.over_vector_store(vs)
 
@@ -85,31 +85,36 @@ def _log(store, triggers, **kw) -> dict:
     return log_decision(store=store, trigger_store=triggers, **args)
 
 
-# ── the native type, registered end to end ───────────────────────────────────
-
-
 class TestNativeTypeRegistration:
     def test_decision_is_the_thirteenth_native_type(self) -> None:
         """The provider's typed-create allowlist is the gate `create_typed` checks; a type
         absent from it raises before any storage happens."""
-        from gideon.knowledge_providers.native import NATIVE_TYPES
+        from gideon.integrations.knowledge_providers.native import NATIVE_TYPES
 
         assert DECISION_TYPE in NATIVE_TYPES
         assert len(NATIVE_TYPES) == 13
 
     def test_the_provider_accepts_a_decision_through_create_typed(self, store) -> None:
         """The ONE true create path. Asserting the provider rather than the store, because the
-        store would happily persist any item_type string — the allowlist is the contract."""
-        from gideon.knowledge_providers.native import NativeKnowledgeProvider
+        store would happily persist any item_type string — the allowlist is the contract.
+        """
+        from gideon.integrations.knowledge_providers.native import (
+            NativeKnowledgeProvider,
+        )
 
         provider = NativeKnowledgeProvider(store)
-        item_id = provider.create_typed(item_type=DECISION_TYPE, title="A call", content="why")
+        item_id = provider.create_typed(
+            item_type=DECISION_TYPE, title="A call", content="why"
+        )
         assert store.get_item(item_id)["item_type"] == DECISION_TYPE
 
     def test_the_provider_still_refuses_an_unknown_type(self, store) -> None:
         """The vacuity floor for the test above: if the allowlist stopped being consulted,
-        `create_typed` would accept anything and the acceptance test would prove nothing."""
-        from gideon.knowledge_providers.native import NativeKnowledgeProvider
+        `create_typed` would accept anything and the acceptance test would prove nothing.
+        """
+        from gideon.integrations.knowledge_providers.native import (
+            NativeKnowledgeProvider,
+        )
 
         with pytest.raises(ValueError, match="unknown knowledge type"):
             NativeKnowledgeProvider(store).create_typed(item_type="verdict", title="x")
@@ -118,22 +123,29 @@ class TestNativeTypeRegistration:
         """The atom's contract. `graph_for` falls back to `DocumentGraph` for anything it does
         not know, so an UNLISTED decision would route through the document reader and merely
         look similar — which is why the type is mapped explicitly."""
-        from gideon.knowledge.pipeline.graphs import PassthroughGraph, graph_for
+        from gideon.cognition.knowledge.pipeline.graphs import (
+            PassthroughGraph,
+            graph_for,
+        )
 
         assert isinstance(graph_for(DECISION_TYPE), PassthroughGraph)
 
     def test_the_passthrough_assertion_can_fail(self) -> None:
         """Vacuity floor: `PassthroughGraph` is not what every type gets, so the assertion
         above is a real discriminator rather than a tautology about the fallback."""
-        from gideon.knowledge.pipeline.graphs import PassthroughGraph, graph_for
+        from gideon.cognition.knowledge.pipeline.graphs import (
+            PassthroughGraph,
+            graph_for,
+        )
 
         assert not isinstance(graph_for("pdf"), PassthroughGraph)
 
     def test_the_http_handler_knows_the_type_but_will_not_author_it(self) -> None:
         """`_KNOWLEDGE_TYPES` is what makes a decision a recognized library type (listing,
         filtering, watched-source validation). `_AUTHORABLE_TYPES` deliberately excludes it:
-        an item authored through the generic create would be a decision with no review."""
-        from gideon.dashboard.handlers.knowledge import (
+        an item authored through the generic create would be a decision with no review.
+        """
+        from gideon.interfaces.dashboard.handlers.knowledge import (
             _AUTHORABLE_TYPES,
             _KNOWLEDGE_TYPES,
         )
@@ -144,7 +156,7 @@ class TestNativeTypeRegistration:
     def test_the_refusal_names_log_decision_not_the_upload_endpoint(self) -> None:
         """A refusal that sent the caller to /ingest would send them somewhere that cannot
         make a decision — the message is the only guidance they get."""
-        from gideon.dashboard.handlers.knowledge import (
+        from gideon.interfaces.dashboard.handlers.knowledge import (
             _CREATION_PATH,
             _DEFAULT_CREATION_PATH,
         )
@@ -152,23 +164,23 @@ class TestNativeTypeRegistration:
         via = _CREATION_PATH.get(DECISION_TYPE, _DEFAULT_CREATION_PATH)
         assert "log_decision" in via
         assert "/ingest" not in via
-        # Vacuity floor: the default path is still the upload one, so the mapping above is a
-        # real override rather than a rename of the only branch.
         assert "/ingest" in _DEFAULT_CREATION_PATH
 
 
-# ── log_decision ─────────────────────────────────────────────────────────────
-
-
 class TestLogDecision:
-    def test_it_creates_a_keyword_searchable_knowledge_item(self, store, triggers) -> None:
+    def test_it_creates_a_keyword_searchable_knowledge_item(
+        self, store, triggers
+    ) -> None:
         """Searchable is asserted through the FTS index rather than by reading the row back:
-        an item that exists but was never indexed is invisible to the search the user runs."""
+        an item that exists but was never indexed is invisible to the search the user runs.
+        """
         row = _log(store, triggers, summary="Move the database to Postgres")
         hits = store.search_items_fts("Postgres")
         assert row["id"] in [h["id"] for h in hits]
 
-    def test_the_structured_fields_ride_the_metadata_json(self, store, triggers) -> None:
+    def test_the_structured_fields_ride_the_metadata_json(
+        self, store, triggers
+    ) -> None:
         """No new column, so `_migrate` stays untouched — the plan's §2.1 constraint."""
         row = _log(store, triggers)
         item = store.get_item(row["id"])
@@ -177,8 +189,6 @@ class TestLogDecision:
         assert meta["domain"] == "career"
         assert meta["confidence"] == 0.7
         assert meta["expectation"].startswith("I will earn more")
-        # The decision block is NESTED under the item's metadata column, not spread across it,
-        # so a future writer of `also_seen_in` cannot collide with a decision field.
         raw = json.loads(json.dumps(item["file_metadata"]))
         assert set(raw) == {"decision"}
 
@@ -186,14 +196,21 @@ class TestLogDecision:
         self, store, triggers
     ) -> None:
         """Criterion 3's "exactly one". Counted over the WHOLE store rather than looked up by
-        id, because a generated slug would also satisfy a by-id lookup of the row it created."""
+        id, because a generated slug would also satisfy a by-id lookup of the row it created.
+        """
         row = _log(store, triggers)
-        rows = [r for r in triggers.load() if r.trigger.id.startswith("system:decision-journal")]
+        rows = [
+            r
+            for r in triggers.load()
+            if r.trigger.id.startswith("system:decision-journal")
+        ]
         assert len(rows) == 1
         assert rows[0].trigger.id == review_trigger_id(row["id"])
         assert row["reminder_trigger_id"] == review_trigger_id(row["id"])
 
-    def test_the_review_trigger_is_a_one_shot_that_retires_itself(self, store, triggers) -> None:
+    def test_the_review_trigger_is_a_one_shot_that_retires_itself(
+        self, store, triggers
+    ) -> None:
         """`delete_after_run` is what makes an unanswered decision leave no dormant reminder,
         and it is the substrate's commitment-conversion shape."""
         row = _log(store, triggers)
@@ -202,15 +219,18 @@ class TestLogDecision:
         assert trigger.spec["kind"] == "at"
         assert trigger.spec["delete_after_run"] is True
         assert trigger.enabled is True
-        # Armed at creation: a clock trigger with no `next_fire_at` is never surfaced by
-        # `service.due_ids`, so an unarmed row is a reminder that never fires.
         assert trigger.next_fire_at
 
-    def test_the_trigger_names_a_workflow_that_actually_ships(self, store, triggers) -> None:
+    def test_the_trigger_names_a_workflow_that_actually_ships(
+        self, store, triggers
+    ) -> None:
         """The trigger→template link. Renaming the bundled directory, or pointing
         `REVIEW_WORKFLOW` at a template that does not exist, fails HERE rather than at the
         one fire the reminder gets."""
-        from gideon.workflows.bundled_defs import read_template, template_names
+        from gideon.automation.workflows.bundled_defs import (
+            read_template,
+            template_names,
+        )
 
         row = _log(store, triggers)
         trigger = triggers.get(review_trigger_id(row["id"])).trigger
@@ -220,13 +240,15 @@ class TestLogDecision:
         assert REVIEW_WORKFLOW in template_names()
         assert read_template(REVIEW_WORKFLOW) is not None
 
-    def test_the_card_carries_the_prediction_the_user_stated(self, store, triggers) -> None:
+    def test_the_card_carries_the_prediction_the_user_stated(
+        self, store, triggers
+    ) -> None:
         """The review has to quote the expectation as it was WHEN IT WAS MADE. Carried as
         workflow inputs, because nothing at fire time loads the item to look them up."""
         row = _log(store, triggers)
-        inputs = triggers.get(review_trigger_id(row["id"])).trigger.workflow["inline"]["config"][
-            "inputs"
-        ]
+        inputs = triggers.get(review_trigger_id(row["id"])).trigger.workflow["inline"][
+            "config"
+        ]["inputs"]
         assert inputs["decision_id"] == row["id"]
         assert inputs["expectation"] == row["expectation"]
         assert inputs["confidence"] == "0.70"
@@ -245,7 +267,11 @@ class TestLogDecision:
         row = _log(store, triggers)
         later = horizon_from_days(200)
         reschedule_review(row["id"], later, store=store, trigger_store=triggers)
-        rows = [r for r in triggers.load() if r.trigger.id.startswith("system:decision-journal")]
+        rows = [
+            r
+            for r in triggers.load()
+            if r.trigger.id.startswith("system:decision-journal")
+        ]
         assert len(rows) == 1
         assert rows[0].trigger.spec["at"] == pytest.approx(
             datetime.fromisoformat(later).timestamp()
@@ -275,7 +301,9 @@ class TestLogDecision:
             ({"review_horizon": "next tuesday"}, "not a date"),
         ],
     )
-    def test_it_refuses_input_it_cannot_honour(self, store, triggers, kw, match) -> None:
+    def test_it_refuses_input_it_cannot_honour(
+        self, store, triggers, kw, match
+    ) -> None:
         """A past horizon is refused rather than accepted, because `triggers.arm` returns ""
         for an elapsed one-shot — the decision would persist with a reminder that can never
         fire, which is an inert control dressed as a feature."""
@@ -289,10 +317,12 @@ class TestLogDecision:
         assert list(triggers.load()) == []
         assert list_decisions(store=store) == []
 
-    def test_the_default_horizon_comes_from_config(self, store, triggers, monkeypatch) -> None:
+    def test_the_default_horizon_comes_from_config(
+        self, store, triggers, monkeypatch
+    ) -> None:
         """`proactive.decision_default_horizon_days`. Patched at the accessor rather than
         through a config file so the test states which knob it is reading."""
-        import gideon.decisions as dj
+        import gideon.cognition.decisions as dj
 
         monkeypatch.setattr(dj, "default_horizon_days", lambda: 7)
         row = _log(store, triggers, review_horizon="")
@@ -300,15 +330,13 @@ class TestLogDecision:
         assert row["review_horizon"] == expected
 
 
-# ── resolution + the R18 lesson ──────────────────────────────────────────────
-
-
 class TestResolution:
     def test_resolving_writes_a_lesson_citing_expectation_versus_outcome(
         self, store, triggers, memory
     ) -> None:
         """Criterion 5's memory half. The lesson must CITE both sides: a lesson that records
-        only the outcome cannot teach calibration, which is the entire point of the journal."""
+        only the outcome cannot teach calibration, which is the entire point of the journal.
+        """
         row = _log(store, triggers)
         resolved = resolve_decision(
             row["id"],
@@ -320,7 +348,6 @@ class TestResolution:
         )
         lessons = memory.get_lessons()
         assert len(lessons) == 1
-        # A lesson's `value_json` is the rule text encoded directly.
         rule = json.loads(lessons[0]["value_json"])
         assert isinstance(rule, str)
         assert row["expectation"] in rule
@@ -329,7 +356,9 @@ class TestResolution:
         assert resolved["status"] == "resolved"
         assert resolved["outcome_grade"] == "better"
 
-    def test_the_soft_reference_points_at_a_row_that_exists(self, store, triggers, memory) -> None:
+    def test_the_soft_reference_points_at_a_row_that_exists(
+        self, store, triggers, memory
+    ) -> None:
         """`lesson_memory_key` is a soft string reference, deliberately not a foreign key — so
         the only thing that makes it trustworthy is that it was read back OUT of the memory
         store rather than re-derived from the rule text."""
@@ -362,7 +391,9 @@ class TestResolution:
         assert row["id"] not in json.dumps(lesson)
         assert isinstance(resolved["lesson_memory_key"], str)
 
-    def test_a_refused_lesson_write_leaves_the_reference_null(self, store, triggers) -> None:
+    def test_a_refused_lesson_write_leaves_the_reference_null(
+        self, store, triggers
+    ) -> None:
         """The falsification floor for the two tests above. If the stamp were unconditional,
         `lesson_memory_key` would point at a row that does not exist and every assertion about
         the soft reference would pass while the reference was a lie."""
@@ -386,7 +417,9 @@ class TestResolution:
         assert resolved["status"] == "resolved"
         assert resolved["lesson_memory_key"] is None
 
-    def test_a_broken_memory_store_still_records_the_users_answer(self, store, triggers) -> None:
+    def test_a_broken_memory_store_still_records_the_users_answer(
+        self, store, triggers
+    ) -> None:
         """The user typed the outcome. Losing it because the lesson step raised would be the
         worse of the two failures, so the lesson is written LAST."""
 
@@ -419,7 +452,9 @@ class TestResolution:
         )
         assert triggers.get(review_trigger_id(row["id"])) is None
 
-    def test_a_resolved_decision_cannot_be_resolved_twice(self, store, triggers, memory) -> None:
+    def test_a_resolved_decision_cannot_be_resolved_twice(
+        self, store, triggers, memory
+    ) -> None:
         """A second resolution would write a second lesson about the same decision."""
         row = _log(store, triggers)
         kw = {"store": store, "trigger_store": triggers, "memory": memory}
@@ -427,7 +462,9 @@ class TestResolution:
         with pytest.raises(DecisionError, match="already resolved"):
             resolve_decision(row["id"], outcome="again", grade="worse", **kw)
 
-    def test_it_refuses_a_grade_outside_the_vocabulary(self, store, triggers, memory) -> None:
+    def test_it_refuses_a_grade_outside_the_vocabulary(
+        self, store, triggers, memory
+    ) -> None:
         row = _log(store, triggers)
         with pytest.raises(DecisionError, match="unknown grade"):
             resolve_decision(
@@ -453,7 +490,8 @@ class TestResolution:
 
     def test_the_lesson_body_never_paraphrases_the_expectation(self) -> None:
         """Composed deterministically, so the citation half cannot be summarized away — and
-        resolving a decision costs no tokens on a path the user reaches by answering a card."""
+        resolving a decision costs no tokens on a path the user reaches by answering a card.
+        """
         rule = lesson_text(
             summary="S",
             expectation="E happens by June",
@@ -467,7 +505,9 @@ class TestResolution:
 
 
 class TestDeferral:
-    def test_too_early_re_arms_rather_than_resolving(self, store, triggers, memory) -> None:
+    def test_too_early_re_arms_rather_than_resolving(
+        self, store, triggers, memory
+    ) -> None:
         row = _log(store, triggers)
         deferred = resolve_decision(
             row["id"],
@@ -481,23 +521,28 @@ class TestDeferral:
         assert deferred["deferrals"] == 1
         assert deferred["review_horizon"] > row["review_horizon"]
         assert triggers.get(review_trigger_id(row["id"])) is not None
-        # No lesson: there is no outcome yet to compare against the expectation.
         assert memory.get_lessons() == []
 
-    def test_it_defers_at_most_twice_then_goes_stale_pending(self, store, triggers, memory) -> None:
+    def test_it_defers_at_most_twice_then_goes_stale_pending(
+        self, store, triggers, memory
+    ) -> None:
         """Criterion 6. Past the cap the item stays pending with NO trigger — the journal view
         surfaces it, and nothing nags again."""
         row = _log(store, triggers)
         kw = {"store": store, "trigger_store": triggers, "memory": memory}
         for _ in range(MAX_DEFERRALS):
             resolve_decision(row["id"], outcome="still open", grade="too_early", **kw)
-        final = resolve_decision(row["id"], outcome="still open", grade="too_early", **kw)
+        final = resolve_decision(
+            row["id"], outcome="still open", grade="too_early", **kw
+        )
         assert final["status"] == "pending"
         assert final["stale_pending"] is True
         assert final["reminder_trigger_id"] is None
         assert triggers.get(review_trigger_id(row["id"])) is None
 
-    def test_a_deferral_never_stacks_a_second_reminder(self, store, triggers, memory) -> None:
+    def test_a_deferral_never_stacks_a_second_reminder(
+        self, store, triggers, memory
+    ) -> None:
         """Each deferral re-points the one deterministic row. A generated id here would leave
         the elapsed reminder behind and add a new one on every defer."""
         row = _log(store, triggers)
@@ -509,11 +554,12 @@ class TestDeferral:
             trigger_store=triggers,
             memory=memory,
         )
-        rows = [r for r in triggers.load() if r.trigger.id.startswith("system:decision-journal")]
+        rows = [
+            r
+            for r in triggers.load()
+            if r.trigger.id.startswith("system:decision-journal")
+        ]
         assert len(rows) == 1
-
-
-# ── reads ────────────────────────────────────────────────────────────────────
 
 
 class TestListAndCalibration:
@@ -530,19 +576,22 @@ class TestListAndCalibration:
         )
         pending = [r["id"] for r in list_decisions(store=store, status="pending")]
         assert pending == [a["id"]]
-        assert [r["id"] for r in list_decisions(store=store, status="resolved")] == [b["id"]]
-        assert [r["id"] for r in list_decisions(store=store, domain="financial")] == [b["id"]]
+        assert [r["id"] for r in list_decisions(store=store, status="resolved")] == [
+            b["id"]
+        ]
+        assert [r["id"] for r in list_decisions(store=store, domain="financial")] == [
+            b["id"]
+        ]
 
     def test_overdue_is_derived_not_stored(self, store, triggers) -> None:
         """A pending decision past its horizon. Derived at read time, so a reminder that fired
-        and deleted itself does not have to leave a status behind for the view to work."""
+        and deleted itself does not have to leave a status behind for the view to work.
+        """
         row = _log(store, triggers, review_horizon=horizon_from_days(2))
         future = datetime.now() + timedelta(days=5)
-        assert [r["id"] for r in list_decisions(store=store, status="overdue", now=future)] == [
-            row["id"]
-        ]
-        # Vacuity floor: the same decision is NOT overdue today, so the filter is reading the
-        # horizon rather than matching every pending row.
+        assert [
+            r["id"] for r in list_decisions(store=store, status="overdue", now=future)
+        ] == [row["id"]]
         assert list_decisions(store=store, status="overdue") == []
 
     def test_it_refuses_an_unknown_status_or_domain(self, store) -> None:
@@ -551,7 +600,9 @@ class TestListAndCalibration:
         with pytest.raises(DecisionError, match="unknown domain"):
             list_decisions(store=store, domain="vibes")
 
-    def test_calibration_is_count_honest_under_ten(self, store, triggers, memory) -> None:
+    def test_calibration_is_count_honest_under_ten(
+        self, store, triggers, memory
+    ) -> None:
         """Criterion 7: computed from knowledge.db alone, no new store and no LLM, and honest
         about a sample too small to mean anything."""
         for i in range(3):
@@ -569,8 +620,6 @@ class TestListAndCalibration:
         assert strip["technical"]["as_expected_rate"] == 1.0
         assert strip["technical"]["mean_confidence"] == 0.7
         assert strip["technical"]["count_honest"] is False
-        # Vacuity floor: the flag flips when the sample is large enough, so `count_honest` is
-        # reading the count rather than being hard-coded False.
         assert calibration(store=store, min_n=3)["technical"]["count_honest"] is True
 
     def test_a_mixed_outcome_is_not_scored_as_a_hit_or_a_miss(
@@ -591,11 +640,8 @@ class TestListAndCalibration:
         assert "mixed" in RESOLUTION_GRADES
 
 
-# ── the chat tools ───────────────────────────────────────────────────────────
-
-
 def _invoke(name: str, args: dict):
-    from gideon.agents.native.builtin_tools import NativeBuiltinToolProvider
+    from gideon.engine.agents.native.builtin_tools import NativeBuiltinToolProvider
 
     return asyncio.run(NativeBuiltinToolProvider().invoke(name, args))
 
@@ -605,36 +651,44 @@ class TestChatTools:
         """The plan registers them beside the knowledge tools, in the same category — a
         decision IS a knowledge item, so the journal cannot be removed independently of the
         library its entries live in."""
-        from gideon.agents.native.builtin_tools import (
+        from gideon.engine.agents.native.builtin_tools import (
             APP_CATEGORY_PROVIDERS,
             NativeBuiltinToolProvider,
         )
 
         provider = NativeBuiltinToolProvider(
-            categories={"knowledge"}, provider_name=APP_CATEGORY_PROVIDERS["knowledge"][0]
+            categories={"knowledge"},
+            provider_name=APP_CATEGORY_PROVIDERS["knowledge"][0],
         )
         names = {t.name for t in asyncio.run(provider.list_tools())}
         assert {"log_decision", "decision_list", "decision_resolve"} <= names
 
-    def test_the_tool_schemas_read_their_vocabulary_from_the_owning_module(self) -> None:
+    def test_the_tool_schemas_read_their_vocabulary_from_the_owning_module(
+        self,
+    ) -> None:
         """A hand-copied enum would let a tool advertise a domain or grade
-        `gideon.decisions` rejects, and the model would keep sending it."""
-        from gideon.agents.native.builtin_tools import NativeBuiltinToolProvider
+        `gideon.cognition.decisions` rejects, and the model would keep sending it."""
+        from gideon.engine.agents.native.builtin_tools import NativeBuiltinToolProvider
 
-        defs = {t.name: t for t in asyncio.run(NativeBuiltinToolProvider().list_tools())}
+        defs = {
+            t.name: t for t in asyncio.run(NativeBuiltinToolProvider().list_tools())
+        }
         assert defs["log_decision"].parameters["properties"]["domain"]["enum"] == list(
             DECISION_DOMAINS
         )
-        assert defs["decision_resolve"].parameters["properties"]["grade"]["enum"] == list(
-            RESOLUTION_GRADES
-        )
+        assert defs["decision_resolve"].parameters["properties"]["grade"][
+            "enum"
+        ] == list(RESOLUTION_GRADES)
 
-    def test_log_decision_reaches_the_journal_with_ingestion_wired(self, monkeypatch) -> None:
+    def test_log_decision_reaches_the_journal_with_ingestion_wired(
+        self, monkeypatch
+    ) -> None:
         """The CALL SITE. Driven through `invoke()` by name, so deleting `_t_log_decision`
         yields "unknown builtin tool" instead of an unexercised function — and `enqueue` is
-        asserted because omitting it would leave every logged decision keyword-only forever."""
-        import gideon.decisions as dj
-        from gideon.agents.native.builtin_tools import _enrich_in_background
+        asserted because omitting it would leave every logged decision keyword-only forever.
+        """
+        import gideon.cognition.decisions as dj
+        from gideon.engine.agents.native.builtin_tools import _enrich_in_background
 
         seen: dict = {}
 
@@ -666,20 +720,24 @@ class TestChatTools:
         assert seen["enqueue"] is _enrich_in_background
         assert "system:decision-journal:itm-1" in result.output
 
-    def test_log_decision_surfaces_a_refusal_instead_of_raising(self, monkeypatch) -> None:
+    def test_log_decision_surfaces_a_refusal_instead_of_raising(
+        self, monkeypatch
+    ) -> None:
         """A bad confidence is the model's mistake to fix, so the message has to reach it."""
-        import gideon.decisions as dj
+        import gideon.cognition.decisions as dj
 
         def _boom(**kw):
             raise dj.DecisionError("confidence 4.0 is out of range")
 
         monkeypatch.setattr(dj, "log_decision", _boom)
-        result = _invoke("log_decision", {"summary": "S", "expectation": "E", "confidence": 4.0})
+        result = _invoke(
+            "log_decision", {"summary": "S", "expectation": "E", "confidence": 4.0}
+        )
         assert result.success is False
         assert "out of range" in result.error
 
     def test_decision_list_reaches_the_journal(self, monkeypatch) -> None:
-        import gideon.decisions as dj
+        import gideon.cognition.decisions as dj
 
         seen: dict = {}
 
@@ -705,9 +763,11 @@ class TestChatTools:
         assert "OVERDUE" in result.output
         assert "itm-1" in result.output
 
-    def test_decision_resolve_reaches_the_journal_and_reports_the_lesson(self, monkeypatch) -> None:
-        import gideon.decisions as dj
-        from gideon.agents.native.builtin_tools import _enrich_in_background
+    def test_decision_resolve_reaches_the_journal_and_reports_the_lesson(
+        self, monkeypatch
+    ) -> None:
+        import gideon.cognition.decisions as dj
+        from gideon.engine.agents.native.builtin_tools import _enrich_in_background
 
         seen: dict = {}
 
@@ -725,7 +785,8 @@ class TestChatTools:
 
         monkeypatch.setattr(dj, "resolve_decision", _fake)
         result = _invoke(
-            "decision_resolve", {"id": "itm-1", "outcome": "six weeks", "grade": "worse"}
+            "decision_resolve",
+            {"id": "itm-1", "outcome": "six weeks", "grade": "worse"},
         )
         assert result.success, result.error
         assert seen["id"] == "itm-1"
@@ -734,10 +795,12 @@ class TestChatTools:
         assert seen["enqueue"] is _enrich_in_background
         assert "lesson.abc123" in result.output
 
-    def test_decision_resolve_reports_a_deferral_as_a_deferral(self, monkeypatch) -> None:
+    def test_decision_resolve_reports_a_deferral_as_a_deferral(
+        self, monkeypatch
+    ) -> None:
         """A `too_early` did not resolve anything; saying it did would be a wrong report of a
         write that never happened."""
-        import gideon.decisions as dj
+        import gideon.cognition.decisions as dj
 
         monkeypatch.setattr(
             dj,
@@ -752,7 +815,8 @@ class TestChatTools:
             },
         )
         result = _invoke(
-            "decision_resolve", {"id": "itm-1", "outcome": "still open", "grade": "too_early"}
+            "decision_resolve",
+            {"id": "itm-1", "outcome": "still open", "grade": "too_early"},
         )
         assert result.success
         assert "rescheduled" in result.output

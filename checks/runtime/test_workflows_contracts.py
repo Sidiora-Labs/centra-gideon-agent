@@ -16,8 +16,8 @@ import json
 
 import pytest
 
-from gideon.workflows import bundled_defs
-from gideon.workflows.contracts import (
+from gideon.automation.workflows import bundled_defs
+from gideon.automation.workflows.contracts import (
     MACHINE_VERIFIED_GATES,
     ParamSpec,
     apply_extraction,
@@ -29,8 +29,8 @@ from gideon.workflows.contracts import (
     template_types,
     type_decisions,
 )
-from gideon.workflows.models import Node
-from gideon.workflows.validator import validate_node_tree
+from gideon.automation.workflows.models import Node
+from gideon.automation.workflows.validator import validate_node_tree
 
 TEMPLATES = sorted(bundled_defs.template_names())
 
@@ -52,9 +52,6 @@ def stage(node_id: str, **cfg) -> dict:
     return {"kind": "stage", "id": node_id, "config": {"prompt": "x", **cfg}}
 
 
-# ── derived parameters (UP-R8) ──
-
-
 def test_the_derived_schema_is_what_the_tree_references():
     spec = {
         "inputs": {"topic": {"required": True}},
@@ -67,7 +64,10 @@ def test_the_derived_schema_is_what_the_tree_references():
 def test_a_declared_input_the_tree_never_reads_is_not_a_parameter():
     """Returning it would put a control on the launch form that changes nothing — worse than
     omitting it, because the user believes they configured something."""
-    spec = {"inputs": {"ghost": {"required": True}}, "root": stage("s", prompt="no bindings")}
+    spec = {
+        "inputs": {"ghost": {"required": True}},
+        "root": stage("s", prompt="no bindings"),
+    }
     assert resolve_unfilled_inputs(spec) == []
     assert declared_but_unused(spec) == ["ghost"]
 
@@ -128,15 +128,14 @@ def test_an_optional_parameter_is_marked_in_the_type_string():
 
 
 def test_a_parameterless_template_says_so():
-    assert "no parameters" in template_types({"root": stage("s", prompt="nothing bound")})
+    assert "no parameters" in template_types(
+        {"root": stage("s", prompt="nothing bound")}
+    )
 
 
 def test_an_unparseable_spec_yields_no_parameters_rather_than_raising():
     assert resolve_unfilled_inputs({"root": "not a dict"}) == []
     assert resolve_unfilled_inputs({}) == []
-
-
-# ── the extraction contract ──
 
 
 def params(*names, **required):
@@ -157,7 +156,9 @@ def test_extraction_recomputes_all_filled_rather_than_trusting_it():
 def test_a_field_the_schema_does_not_have_is_ignored():
     """Whatever it looks like, it is not a parameter — and accepting it would put an unvalidated
     value into the run's inputs."""
-    result = apply_extraction(params("topic"), {"extracted": {"topic": "x", "invented": "y"}})
+    result = apply_extraction(
+        params("topic"), {"extracted": {"topic": "x", "invented": "y"}}
+    )
     assert result.extracted == {"topic": "x"}
 
 
@@ -173,7 +174,9 @@ def test_a_default_counts_as_filled():
 def test_a_declined_optional_is_never_re_asked():
     """Asking twice reads as not listening, and the user already answered."""
     result = apply_extraction(
-        params("topic", "audience"), {"extracted": {"topic": "x"}}, declined={"audience"}
+        params("topic", "audience"),
+        {"extracted": {"topic": "x"}},
+        declined={"audience"},
     )
     assert result.missing == []
     assert result.all_filled
@@ -214,9 +217,6 @@ def test_the_extraction_serializes_with_both_flags():
     assert payload["extraction_failed"] is False
 
 
-# ── stage contracts (UP-R3) ──
-
-
 def test_a_gate_after_a_stage_verifies_it():
     spec = {
         "root": {
@@ -224,7 +224,11 @@ def test_a_gate_after_a_stage_verifies_it():
             "id": "r",
             "children": [
                 stage("work"),
-                {"kind": "gate", "id": "g", "config": {"kind": "judge", "prompt": "good?"}},
+                {
+                    "kind": "gate",
+                    "id": "g",
+                    "config": {"kind": "judge", "prompt": "good?"},
+                },
             ],
         }
     }
@@ -249,7 +253,9 @@ def test_an_approval_gate_is_not_a_MACHINE_check():
     }
     contract = next(c for c in derive_contracts(spec) if c.node_id == "work")
     assert contract.verification == "approval"
-    assert any("not a machine check" in i for i in contract_issues(derive_contracts(spec)))
+    assert any(
+        "not a machine check" in i for i in contract_issues(derive_contracts(spec))
+    )
 
 
 def test_a_bounded_enclosing_loop_verifies_its_body():
@@ -259,7 +265,11 @@ def test_a_bounded_enclosing_loop_verifies_its_body():
             "kind": "loop",
             "id": "l",
             "config": {"mode": "until_dry", "streak": 2},
-            "body": {"kind": "sequence", "id": "b", "children": [stage("a"), stage("b")]},
+            "body": {
+                "kind": "sequence",
+                "id": "b",
+                "children": [stage("a"), stage("b")],
+            },
         }
     }
     assert all(c.verification == "loop-condition" for c in derive_contracts(spec))
@@ -280,7 +290,11 @@ def test_a_stage_feeding_a_verified_stage_is_not_flagged():
             "children": [
                 stage("review"),
                 stage("revise", prompt="fix {{nodes.review.output}}"),
-                {"kind": "gate", "id": "g", "config": {"kind": "judge", "prompt": "ok?"}},
+                {
+                    "kind": "gate",
+                    "id": "g",
+                    "config": {"kind": "judge", "prompt": "ok?"},
+                },
             ],
         }
     }
@@ -299,8 +313,16 @@ def test_a_zero_token_node_is_not_required_to_have_a_judge():
             "id": "r",
             "children": [
                 stage("w"),
-                {"kind": "gate", "id": "g", "config": {"kind": "judge", "prompt": "ok?"}},
-                {"kind": "action", "id": "save", "config": {"provider": "knowledge-persist"}},
+                {
+                    "kind": "gate",
+                    "id": "g",
+                    "config": {"kind": "judge", "prompt": "ok?"},
+                },
+                {
+                    "kind": "action",
+                    "id": "save",
+                    "config": {"provider": "knowledge-persist"},
+                },
             ],
         }
     }
@@ -309,25 +331,40 @@ def test_a_zero_token_node_is_not_required_to_have_a_judge():
 
 def test_a_plan_with_no_machine_check_is_rejected():
     """The minimal triple: goal, verification, stopping condition."""
-    spec = {"root": {"kind": "sequence", "id": "r", "children": [stage("a"), stage("b")]}}
-    assert any(i.startswith("no stage") for i in contract_issues(derive_contracts(spec)))
+    spec = {
+        "root": {"kind": "sequence", "id": "r", "children": [stage("a"), stage("b")]}
+    }
+    assert any(
+        i.startswith("no stage") for i in contract_issues(derive_contracts(spec))
+    )
 
 
 def test_an_all_deterministic_plan_is_exempt():
     """Measured on `knowledge-health`: every node is a zero-token action, so its output already IS
     the check. Demanding a model judge over a deterministic scan spends a call to form an opinion
-    about arithmetic — and a rule that fires on correct structure gets suppressed wholesale."""
+    about arithmetic — and a rule that fires on correct structure gets suppressed wholesale.
+    """
     spec = {
         "root": {
             "kind": "sequence",
             "id": "r",
             "children": [
-                {"kind": "action", "id": "scan", "config": {"provider": "knowledge-health"}},
-                {"kind": "transform", "id": "out", "config": {"expr": "{{nodes.scan.output}}"}},
+                {
+                    "kind": "action",
+                    "id": "scan",
+                    "config": {"provider": "knowledge-health"},
+                },
+                {
+                    "kind": "transform",
+                    "id": "out",
+                    "config": {"expr": "{{nodes.scan.output}}"},
+                },
             ],
         }
     }
-    assert not any(i.startswith("no stage") for i in contract_issues(derive_contracts(spec)))
+    assert not any(
+        i.startswith("no stage") for i in contract_issues(derive_contracts(spec))
+    )
 
 
 def test_done_means_is_derived_when_the_author_left_it_blank():
@@ -338,7 +375,11 @@ def test_done_means_is_derived_when_the_author_left_it_blank():
             "id": "r",
             "children": [
                 stage("w"),
-                {"kind": "gate", "id": "g", "config": {"kind": "judge", "prompt": "ok?"}},
+                {
+                    "kind": "gate",
+                    "id": "g",
+                    "config": {"kind": "judge", "prompt": "ok?"},
+                },
             ],
         }
     }
@@ -347,7 +388,9 @@ def test_done_means_is_derived_when_the_author_left_it_blank():
 
 
 def test_an_unverifiable_contract_carries_its_review_note():
-    spec = {"root": {"kind": "sequence", "id": "r", "children": [stage("a"), stage("b")]}}
+    spec = {
+        "root": {"kind": "sequence", "id": "r", "children": [stage("a"), stage("b")]}
+    }
     payload = derive_contracts(spec)[0].to_dict()
     assert payload["verifiable"] is False
     assert "unverifiable" in payload["review_note"]
@@ -357,7 +400,11 @@ def test_an_unverifiable_contract_carries_its_review_note():
 def test_every_shipped_template_still_validates(name):
     """The gates added by this session must not break any template."""
     root = spec_of(name)["root"]
-    errors = [i for i in validate_node_tree(Node.from_dict(root)).issues if i.severity == "error"]
+    errors = [
+        i
+        for i in validate_node_tree(Node.from_dict(root)).issues
+        if i.severity == "error"
+    ]
     assert errors == [], f"{name}: {[i.code for i in errors]}"
 
 
@@ -378,9 +425,6 @@ def test_the_templates_this_program_authored_have_a_machine_check(name):
     the accuracy findings before it was stored as reference."""
     issues = contract_issues(derive_contracts(spec_of(name)))
     assert not any(i.startswith("no stage") for i in issues), name
-
-
-# ── decision typing (UP-R16) ──
 
 
 def test_a_gate_whose_output_is_consumed_is_blocking():
@@ -412,7 +456,11 @@ def test_a_gate_nothing_binds_to_is_an_open_decision():
             "id": "r",
             "children": [
                 stage("work"),
-                {"kind": "gate", "id": "note", "config": {"kind": "judge", "prompt": "worth it?"}},
+                {
+                    "kind": "gate",
+                    "id": "note",
+                    "config": {"kind": "judge", "prompt": "worth it?"},
+                },
             ],
         }
     }
@@ -454,9 +502,6 @@ def test_a_spec_with_no_gates_has_no_decisions():
 def test_decision_typing_survives_a_malformed_spec():
     assert type_decisions({"root": "junk"}) == []
     assert type_decisions({}) == []
-
-
-# ── the real library, end to end ──
 
 
 @pytest.mark.parametrize("name", TEMPLATES)

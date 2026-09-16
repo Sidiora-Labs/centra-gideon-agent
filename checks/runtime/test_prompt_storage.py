@@ -6,8 +6,12 @@ from pathlib import Path
 import pytest
 import yaml
 
-from gideon.prompt_providers.base import PromptSnippet, PromptTemplate, PromptVariable
-from gideon.prompt_providers.native_provider import (
+from gideon.integrations.prompt_providers.base import (
+    PromptSnippet,
+    PromptTemplate,
+    PromptVariable,
+)
+from gideon.integrations.prompt_providers.native_provider import (
     NativePromptProvider,
     _prompt_path,
     _snippet_path,
@@ -24,9 +28,6 @@ def _isolate_home(tmp_path, monkeypatch):
 @pytest.fixture()
 def provider():
     return NativePromptProvider()
-
-
-# ── snippet CRUD ─────────────────────────────────────────────────────────────
 
 
 def test_snippet_create_get_list_delete(provider):
@@ -65,16 +66,11 @@ def test_snippet_update_missing_raises(provider):
 def test_prompts_and_snippets_are_separate_stores(provider):
     provider.create_prompt(PromptTemplate(name="dup", kind="user", content="prompt"))
     provider.create_snippet(PromptSnippet(name="dup", content="snippet"))
-    # Same name, different stores → no collision.
     assert provider.get_prompt("dup").content == "prompt"
     assert provider.get_snippet("dup").content == "snippet"
 
 
-# ── migration on read ────────────────────────────────────────────────────────
-
-
 def test_legacy_prompt_migrated_on_read(provider, tmp_path):
-    # Write a pre-`kind` record with legacy variable types directly to disk.
     path = _prompt_path("legacy")
     path.write_text(
         yaml.safe_dump(
@@ -93,12 +89,11 @@ def test_legacy_prompt_migrated_on_read(provider, tmp_path):
 
     tpl = provider.get_prompt("legacy")
     assert tpl is not None
-    assert tpl.kind == "user"  # no system- prefix → user
-    assert tpl.title == "Legacy"  # humanized
-    assert tpl.variables[0].type == "text"  # string → text
-    assert tpl.variables[1].type == "text"  # file_path → text
+    assert tpl.kind == "user"
+    assert tpl.title == "Legacy"
+    assert tpl.variables[0].type == "text"
+    assert tpl.variables[1].type == "text"
 
-    # And the on-disk file was rewritten in the new shape (no dual support).
     rewritten = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert rewritten["kind"] == "user"
     assert rewritten["title"] == "Legacy"
@@ -109,21 +104,21 @@ def test_legacy_prompt_migrated_on_read(provider, tmp_path):
 def test_legacy_system_prompt_kind_inferred(provider):
     path = _prompt_path("system-chat")
     path.write_text(
-        yaml.safe_dump({"name": "system-chat", "content": "You are X."}), encoding="utf-8"
+        yaml.safe_dump({"name": "system-chat", "content": "You are X."}),
+        encoding="utf-8",
     )
     tpl = provider.get_prompt("system-chat")
-    assert tpl.kind == "system"  # system- prefix
+    assert tpl.kind == "system"
     rewritten = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert rewritten["kind"] == "system"
 
 
 def test_current_shape_not_rewritten(provider):
-    # A record already in canonical shape must NOT be rewritten (no churn).
     provider.create_prompt(PromptTemplate(name="fresh", kind="user", content="hello"))
     path = _prompt_path("fresh")
     before = path.read_text(encoding="utf-8")
     mtime_before = path.stat().st_mtime_ns
-    provider.get_prompt("fresh")  # read → would migrate if shape differed
+    provider.get_prompt("fresh")
     assert path.read_text(encoding="utf-8") == before
     assert path.stat().st_mtime_ns == mtime_before
 
@@ -152,21 +147,20 @@ def test_bundled_sha_stamp_survives_read_no_migrate_pingpong(provider):
         ),
         encoding="utf-8",
     )
-    # First read may normalize shape once; the SECOND read must not rewrite at all.
     provider.get_snippet("stamped")
     after_first = path.read_text(encoding="utf-8")
     mtime_first = path.stat().st_mtime_ns
-    provider.get_snippet("stamped")  # would rewrite if the stamp weren't preserved
+    provider.get_snippet("stamped")
     assert path.read_text(encoding="utf-8") == after_first
     assert path.stat().st_mtime_ns == mtime_first
-    # And the pristine-stamp is still on disk (so the next seed's pristine-check works).
     assert yaml.safe_load(after_first).get("bundled_sha") == sha
 
 
 def test_seed_writes_system_kind(provider, monkeypatch, tmp_path):
-    # Allow seeding for this test, then confirm seeded prompts are kind=system.
     monkeypatch.delenv("GIDEON_SKIP_PROMPT_SEED", raising=False)
-    from gideon.prompt_providers.native_provider import seed_bundled_system_prompts
+    from gideon.integrations.prompt_providers.native_provider import (
+        seed_bundled_system_prompts,
+    )
 
     seed_bundled_system_prompts()
     chat = provider.get_prompt("system-chat")
@@ -178,13 +172,13 @@ def test_seed_writes_shared_snippets_and_prompts_include_them(provider, monkeypa
     """The bundled system prompts include shared snippets via {{> name}}, which seed
     alongside them and resolve through the compose-aware engine."""
     monkeypatch.delenv("GIDEON_SKIP_PROMPT_SEED", raising=False)
-    from gideon.prompt_providers.engine import render_template
-    from gideon.prompt_providers.native_provider import seed_bundled_system_prompts
+    from gideon.integrations.prompt_providers.engine import render_template
+    from gideon.integrations.prompt_providers.native_provider import (
+        seed_bundled_system_prompts,
+    )
 
     seed_bundled_system_prompts()
 
-    # All bundled snippets seeded (the 2 from S7 + the 5 atomic ones from the
-    # full breakdown).
     for sname in (
         "safety-rules",
         "diff-output",
@@ -197,25 +191,30 @@ def test_seed_writes_shared_snippets_and_prompts_include_them(provider, monkeypa
         assert provider.get_snippet(sname) is not None, f"snippet {sname} did not seed"
     assert "git push" in provider.get_snippet("safety-rules").content
 
-    # EVERY bundled system prompt is composed from snippets and renders with every
-    # {{> include}} resolved (no leftover marker, no [missing snippet:]).
     def resolver(n):
         return provider.get_snippet(n)
 
-    for pname in ("system-chat", "system-background", "system-code", "system-goal-loop"):
+    for pname in (
+        "system-chat",
+        "system-background",
+        "system-code",
+        "system-goal-loop",
+    ):
         p = provider.get_prompt(pname)
         assert p is not None and "{{>" in p.content, f"{pname} should include snippets"
-        rendered = render_template(p, {"bot_name": "X", "widget_block": ""}, resolver=resolver)
+        rendered = render_template(
+            p, {"bot_name": "X", "widget_block": ""}, resolver=resolver
+        )
         assert "{{>" not in rendered, f"{pname} left an unresolved include"
-        assert "[missing snippet:" not in rendered, f"{pname} references a missing snippet"
-    # The chat prompt inlines representative snippet prose end-to-end.
+        assert (
+            "[missing snippet:" not in rendered
+        ), f"{pname} references a missing snippet"
     chat_rendered = render_template(
-        provider.get_prompt("system-chat"), {"bot_name": "X", "widget_block": ""}, resolver=resolver
+        provider.get_prompt("system-chat"),
+        {"bot_name": "X", "widget_block": ""},
+        resolver=resolver,
     )
     assert "git push" in chat_rendered and "subagent_run" in chat_rendered
-
-
-# ── bundled-snippet re-seed: propagate bundled updates, never clobber user edits ──
 
 
 def test_reseed_updates_pristine_bundled_snippet(provider, monkeypatch):
@@ -225,7 +224,7 @@ def test_reseed_updates_pristine_bundled_snippet(provider, monkeypatch):
     import hashlib
 
     monkeypatch.delenv("GIDEON_SKIP_PROMPT_SEED", raising=False)
-    from gideon.prompt_providers import native_provider as N
+    from gideon.integrations.prompt_providers import native_provider as N
 
     p = _snippet_path("safety-rules")
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -240,7 +239,6 @@ def test_reseed_updates_pristine_bundled_snippet(provider, monkeypatch):
         )
     )
     N.seed_bundled_snippets()
-    # now matches the current bundled safety-rules (which includes the fence rule)
     assert "untrusted_content" in provider.get_snippet("safety-rules").content
 
 
@@ -248,7 +246,7 @@ def test_reseed_preserves_user_edited_snippet(provider, monkeypatch):
     """A user-edited snippet (content ≠ bundled, no matching stamp) is NEVER clobbered,
     across repeated seeds — the non-clobber guarantee."""
     monkeypatch.delenv("GIDEON_SKIP_PROMPT_SEED", raising=False)
-    from gideon.prompt_providers import native_provider as N
+    from gideon.integrations.prompt_providers import native_provider as N
 
     p = _snippet_path("safety-rules")
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -256,5 +254,5 @@ def test_reseed_preserves_user_edited_snippet(provider, monkeypatch):
     p.write_text(yaml.safe_dump({"name": "safety-rules", "content": mine}))
     N.seed_bundled_snippets()
     assert provider.get_snippet("safety-rules").content.rstrip("\n") == mine
-    N.seed_bundled_snippets()  # 2nd seed still preserves
+    N.seed_bundled_snippets()
     assert provider.get_snippet("safety-rules").content.rstrip("\n") == mine

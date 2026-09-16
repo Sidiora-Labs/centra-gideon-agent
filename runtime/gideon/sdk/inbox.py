@@ -1,10 +1,10 @@
 """SDK: the message-source (inbox) provider ABC + data types.
 
-Stable re-export of ``gideon.inbox_providers.base`` — an app imports these, not the
+Stable re-export of ``gideon.integrations.inbox_providers.base`` — an app imports these, not the
 core module directly, so the core path can move without breaking installed apps.
 """
 
-from gideon.inbox_providers.base import (  # noqa: F401
+from gideon.integrations.inbox_providers.base import (
     IncomingMessage,
     MessageSourceProvider,
 )

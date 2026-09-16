@@ -13,7 +13,7 @@ import json
 import pytest
 from aiohttp.test_utils import make_mocked_request
 
-from gideon.dashboard.handlers import updates as upd
+from gideon.interfaces.dashboard.handlers import updates as upd
 
 
 class _StateStub:
@@ -53,14 +53,15 @@ async def test_container_returns_instructions(monkeypatch) -> None:
             "instructions": ["docker compose pull", "docker compose up -d"],
         }
 
-    monkeypatch.setattr("gideon.self_update.build_update_status", _fake_status)
+    monkeypatch.setattr(
+        "gideon.operations.self_update.build_update_status", _fake_status
+    )
     resp = await upd.api_update_apply(_req())
     body = json.loads(resp.body.decode())
     assert resp.status == 200
     assert body["status"] == "instructions"
     assert body["kind"] == "container"
     assert body["instructions"] == ["docker compose pull", "docker compose up -d"]
-    # No apply ran, so the in-flight guard was never claimed.
     assert upd._apply_in_flight is False
 
 
@@ -69,16 +70,20 @@ async def test_desktop_returns_instructions(monkeypatch) -> None:
     monkeypatch.setenv("GIDEON_INSTALL_KIND", "desktop")
 
     async def _fake_status(_cur):
-        return {"kind": "desktop", "apply_method": "desktop_delegate", "instructions": []}
+        return {
+            "kind": "desktop",
+            "apply_method": "desktop_delegate",
+            "instructions": [],
+        }
 
-    monkeypatch.setattr("gideon.self_update.build_update_status", _fake_status)
+    monkeypatch.setattr(
+        "gideon.operations.self_update.build_update_status", _fake_status
+    )
     resp = await upd.api_update_apply(_req())
     body = json.loads(resp.body.decode())
     assert resp.status == 200
     assert body["kind"] == "desktop"
     assert body["status"] == "instructions"
-    # The detail must name where the new version comes from. It shipped saying "the app
-    # updates itself", which is the unbuilt electron-updater half of DC-1 (#2673).
     assert "releases page" in body["detail"]
     assert "updates itself" not in body["detail"]
 
@@ -103,9 +108,6 @@ async def test_pip_kind_routes_to_pip_update(monkeypatch) -> None:
     assert body["kind"] == "pip"
 
 
-# ── T4.5: dashboard.update_dev_mode endpoint (config round-trip) ─────────────
-
-
 def _post_devmode(body: object):
     req = make_mocked_request("POST", "/api/update/dev-mode")
 
@@ -125,9 +127,8 @@ async def test_dev_mode_persists_nested(monkeypatch, tmp_path) -> None:
     assert body == {"ok": True, "update_dev_mode": True}
     saved = json.loads(cfg.read_text())
     assert saved["dashboard"]["update_dev_mode"] is True
-    # And it survives a real config load (round-trip).
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.config.loader import AppConfig
+    from gideon.core.config.loader import AppConfig
 
     assert AppConfig.load().dashboard.update_dev_mode is True
 
@@ -147,5 +148,5 @@ async def test_dev_mode_preserves_other_dashboard_keys(monkeypatch, tmp_path) ->
     monkeypatch.setattr(upd, "config_path", lambda: cfg, raising=False)
     await upd.api_update_dev_mode(_post_devmode({"enabled": True}))
     saved = json.loads(cfg.read_text())
-    assert saved["dashboard"]["user_name"] == "Keyur"  # not clobbered
+    assert saved["dashboard"]["user_name"] == "Keyur"
     assert saved["dashboard"]["update_dev_mode"] is True

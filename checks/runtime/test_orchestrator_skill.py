@@ -1,4 +1,4 @@
-"""Tests for gideon.orchestrator_skill — orchestrator SKILL.md generation."""
+"""Tests for gideon.cognition.orchestrator_skill — orchestrator SKILL.md generation."""
 
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -41,52 +41,54 @@ def _config_with(agents):
     return cfg
 
 
-@patch("gideon.config.loader.AppConfig.load")
-@patch("gideon.orchestrator_skill.load_all")
-@patch("gideon.orchestrator_skill.load")
-@patch("gideon.orchestrator_skill.save")
+@patch("gideon.core.config.loader.AppConfig.load")
+@patch("gideon.cognition.orchestrator_skill.load_all")
+@patch("gideon.cognition.orchestrator_skill.load")
+@patch("gideon.cognition.orchestrator_skill.save")
 def test_includes_agents_from_metadata(
     mock_save, mock_load, mock_load_all, mock_config_load, skills_loader
 ):
-    from gideon.orchestrator_skill import generate_orchestrator_skill
+    from gideon.cognition.orchestrator_skill import generate_orchestrator_skill
 
     mock_config_load.return_value = _config_with(
         [_FakeAgent(name="code-reviewer", description="Reviews code")]
     )
     mock_load.return_value = "Use for CR reviews and security audits."
-    mock_load_all.return_value = {"code-reviewer": "Use for CR reviews and security audits."}
+    mock_load_all.return_value = {
+        "code-reviewer": "Use for CR reviews and security audits."
+    }
     generate_orchestrator_skill(skills_loader)
     content = _read_skill(skills_loader._dir)
     assert "code-reviewer" in content
     assert "Use for CR reviews and security audits." in content
 
 
-@patch("gideon.config.loader.AppConfig.load")
-@patch("gideon.orchestrator_skill.load_all")
-@patch("gideon.orchestrator_skill.load")
-@patch("gideon.orchestrator_skill.save")
+@patch("gideon.core.config.loader.AppConfig.load")
+@patch("gideon.cognition.orchestrator_skill.load_all")
+@patch("gideon.cognition.orchestrator_skill.load")
+@patch("gideon.cognition.orchestrator_skill.save")
 def test_auto_seeds_metadata_from_description(
     mock_save, mock_load, mock_load_all, mock_config_load, skills_loader
 ):
-    from gideon.orchestrator_skill import generate_orchestrator_skill
+    from gideon.cognition.orchestrator_skill import generate_orchestrator_skill
 
     mock_config_load.return_value = _config_with(
         [_FakeAgent(name="code-reviewer", description="Reviews code quality")]
     )
-    mock_load.return_value = ""  # no metadata file
+    mock_load.return_value = ""
     mock_load_all.return_value = {}
     generate_orchestrator_skill(skills_loader)
     mock_save.assert_called_once_with("code-reviewer", "Reviews code quality")
 
 
-@patch("gideon.config.loader.AppConfig.load")
-@patch("gideon.orchestrator_skill.load_all")
-@patch("gideon.orchestrator_skill.load")
-@patch("gideon.orchestrator_skill.save")
+@patch("gideon.core.config.loader.AppConfig.load")
+@patch("gideon.cognition.orchestrator_skill.load_all")
+@patch("gideon.cognition.orchestrator_skill.load")
+@patch("gideon.cognition.orchestrator_skill.save")
 def test_excludes_gideon_and_orchestrator(
     mock_save, mock_load, mock_load_all, mock_config_load, skills_loader
 ):
-    from gideon.orchestrator_skill import generate_orchestrator_skill
+    from gideon.cognition.orchestrator_skill import generate_orchestrator_skill
 
     mock_config_load.return_value = _config_with(
         [
@@ -100,25 +102,24 @@ def test_excludes_gideon_and_orchestrator(
     generate_orchestrator_skill(skills_loader)
     content = _read_skill(skills_loader._dir)
     assert "gideon-orchestrator" not in content
-    # gideon should not appear as a heading in roster
     assert "### gideon" not in content
     assert "### code-reviewer" in content
 
 
-@patch("gideon.config.loader.AppConfig.load")
-@patch("gideon.orchestrator_skill.load_all")
-@patch("gideon.orchestrator_skill.load")
-@patch("gideon.orchestrator_skill.save")
+@patch("gideon.core.config.loader.AppConfig.load")
+@patch("gideon.cognition.orchestrator_skill.load_all")
+@patch("gideon.cognition.orchestrator_skill.load")
+@patch("gideon.cognition.orchestrator_skill.save")
 def test_excludes_mixed_case_default_agent_key(
     mock_save, mock_load, mock_load_all, mock_config_load, skills_loader
 ):
     """The default agent's canonical config key is mixed-case ("Gideon"),
     but the self-exclusion set is lowercase. The filter must case-fold so the
     default agent is never listed as a delegation target to itself (#419)."""
-    from gideon.agents.defaults import DEFAULT_NATIVE_AGENT_NAME
-    from gideon.orchestrator_skill import generate_orchestrator_skill
+    from gideon.cognition.orchestrator_skill import generate_orchestrator_skill
+    from gideon.engine.agents.defaults import DEFAULT_NATIVE_AGENT_NAME
 
-    assert DEFAULT_NATIVE_AGENT_NAME == "Gideon"  # mixed-case, guards the fixture
+    assert DEFAULT_NATIVE_AGENT_NAME == "Gideon"
 
     mock_config_load.return_value = _config_with(
         [
@@ -131,21 +132,19 @@ def test_excludes_mixed_case_default_agent_key(
     mock_load_all.return_value = {}
     generate_orchestrator_skill(skills_loader)
     content = _read_skill(skills_loader._dir)
-    # The mixed-case default agent must NOT appear as a roster/delegate entry.
     assert f"### {DEFAULT_NATIVE_AGENT_NAME}" not in content
-    # Real specialists must still be listed.
     assert "### code-reviewer" in content
     assert "### researcher" in content
 
 
-@patch("gideon.config.loader.AppConfig.load")
-@patch("gideon.orchestrator_skill.load_all")
-@patch("gideon.orchestrator_skill.load")
-@patch("gideon.orchestrator_skill.save")
+@patch("gideon.core.config.loader.AppConfig.load")
+@patch("gideon.cognition.orchestrator_skill.load_all")
+@patch("gideon.cognition.orchestrator_skill.load")
+@patch("gideon.cognition.orchestrator_skill.save")
 def test_skill_has_always_true_and_delegation_guidelines(
     mock_save, mock_load, mock_load_all, mock_config_load, skills_loader
 ):
-    from gideon.orchestrator_skill import generate_orchestrator_skill
+    from gideon.cognition.orchestrator_skill import generate_orchestrator_skill
 
     mock_config_load.return_value = _config_with(
         [_FakeAgent(name="code-reviewer", description="Reviews code")]
@@ -161,19 +160,18 @@ def test_skill_has_always_true_and_delegation_guidelines(
     assert "subagent_run" in content
 
 
-@patch("gideon.config.loader.AppConfig.load")
-@patch("gideon.orchestrator_skill.load_all")
-@patch("gideon.orchestrator_skill.load")
-@patch("gideon.orchestrator_skill.save")
+@patch("gideon.core.config.loader.AppConfig.load")
+@patch("gideon.cognition.orchestrator_skill.load_all")
+@patch("gideon.cognition.orchestrator_skill.load")
+@patch("gideon.cognition.orchestrator_skill.save")
 def test_removes_legacy_conductor_skill_dir(
     mock_save, mock_load, mock_load_all, mock_config_load, skills_loader
 ):
     """The feature was renamed conductor → orchestrator. Generating the
     orchestrator skill must delete any pre-rename ``conductor/`` dir so the stale
     always-loaded SKILL.md doesn't double-inject the routing table."""
-    from gideon.orchestrator_skill import generate_orchestrator_skill
+    from gideon.cognition.orchestrator_skill import generate_orchestrator_skill
 
-    # Seed a legacy conductor/ skill dir on disk.
     legacy = skills_loader._dir / "conductor"
     legacy.mkdir()
     (legacy / "SKILL.md").write_text("stale", encoding="utf-8")

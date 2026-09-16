@@ -6,16 +6,16 @@ shrink/byte-compare ratchet test; ``PHF-14`` added three more (the STRUCTURAL ra
 registered here rather than beside here so that one structural red never hides the other
 five — six gates, one table, every failure visible in a single run:
 
-  * ``config-baseline`` (PHF-5) — ``scripts/generate_config_baseline.py`` renders the
+  * ``config-baseline`` (PHF-5) — ``tooling/scripts/generate_config_baseline.py`` renders the
     ``AppConfig`` schema; drift is a BYTE mismatch between the committed
-    ``config-baseline.json`` and a fresh render.
-  * ``inert-surface`` (PHF-6) — ``scripts/generate_inert_surface_baseline.py`` censuses
+    ``checks/catalogs/configuration.json`` and a fresh render.
+  * ``inert-surface`` (PHF-6) — ``tooling/scripts/generate_inert_surface_baseline.py`` censuses
     declared-but-inert surfaces; drift is any per-file inert counter that ROSE
     (``regressions(committed_per_file, current_per_file)`` non-empty).
-  * ``docs-lint`` (PHF-10) — ``scripts/generate_docs_lint_baseline.py`` censuses docs drift;
+  * ``docs-lint`` (PHF-10) — ``tooling/scripts/generate_docs_lint_baseline.py`` censuses docs drift;
     drift is any per-file finding counter that ROSE (``regressions(...)`` non-empty).
   * ``structural-size`` / ``structural-import-direction`` / ``structural-duplication``
-    (PHF-14) — ``scripts/generate_structural_baseline.py`` censuses the SHAPE of the tree
+    (PHF-14) — ``tooling/scripts/generate_structural_baseline.py`` censuses the SHAPE of the tree
     (per-file size ceiling, declared layer order, re-derived implementation families). Each
     is a separate gate here, and each reports its own VACUITY failure (a rail that inspected
     fewer files than the census counted) alongside its backslides.
@@ -23,7 +23,7 @@ five — six gates, one table, every failure visible in a single run:
 Each is its own pytest test that fails independently. A dev running them one at a time — or a
 fail-fast runner — fixes one, re-runs, hits the next, fixes, re-runs… This aggregate runs ALL
 SIX, collects EVERY failure, and prints ONE table so all failures are visible in a single
-run. That is the §6 "aggregate, don't short-circuit" ergonomic: unlike ``harness/cli.py``'s
+run. That is the §6 "aggregate, don't short-circuit" ergonomic: unlike ``checks/harness/cli.py``'s
 task runner (which stops at the first failing command), this NEVER short-circuits — a gate
 that drifts, or even one that raises, is captured as a structured failure while every other
 gate still runs.
@@ -35,7 +35,7 @@ gate passes, else ``1``.
 
 Run it::
 
-    python scripts/gate_report.py     # or: make gates
+    python tooling/scripts/gate_report.py     # or: make gates
 """
 
 from __future__ import annotations
@@ -45,21 +45,15 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# Make the repo root and ``src`` importable so ``scripts.generate_*`` and the
-# ``gideon`` package (which ``generate_config_baseline`` imports at module load)
-# both resolve whether this file is run as a script (``python scripts/gate_report.py``,
-# where ``sys.path[0]`` is ``scripts/``, not the repo root) or imported under pytest
-# (whose ``pythonpath = ["src", "."]`` already covers both). Mirrors the bootstrap in
-# ``generate_inert_surface_baseline.py``.
-_REPO_ROOT = Path(__file__).resolve().parents[1]
-for _p in (_REPO_ROOT, _REPO_ROOT / "src"):
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+for _p in (_REPO_ROOT, _REPO_ROOT / "runtime"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-from scripts import generate_config_baseline as config_gen  # noqa: E402
-from scripts import generate_docs_lint_baseline as docs_gen  # noqa: E402
-from scripts import generate_inert_surface_baseline as inert_gen  # noqa: E402
-from scripts import generate_structural_baseline as structural_gen  # noqa: E402
+from tooling.scripts import generate_config_baseline as config_gen  # noqa: E402
+from tooling.scripts import generate_docs_lint_baseline as docs_gen  # noqa: E402
+from tooling.scripts import generate_inert_surface_baseline as inert_gen  # noqa: E402
+from tooling.scripts import generate_structural_baseline as structural_gen  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -77,7 +71,7 @@ class GateResult:
 
 
 def _config_baseline_gate() -> GateResult:
-    """config-baseline (PHF-5): ok iff the committed ``config-baseline.json`` byte-matches a
+    """config-baseline (PHF-5): ok iff the committed ``checks/catalogs/configuration.json`` byte-matches a
     fresh render of the ``AppConfig`` schema. A mismatch means a field was renamed, added, or
     dropped without regenerating. The failure line is fixed (deterministic — no diff dump)."""
     name = "config-baseline"
@@ -87,7 +81,7 @@ def _config_baseline_gate() -> GateResult:
     return GateResult(
         name,
         False,
-        ["config-baseline.json is stale — run scripts/generate_config_baseline.py"],
+        ["checks/catalogs/configuration.json is stale — run tooling/scripts/generate_config_baseline.py"],
     )
 
 
@@ -96,7 +90,9 @@ def _regressions_gate(name: str, gen: object) -> GateResult:
     baseline. ``regressions()`` (owned by each generator) is the shrink-only comparison the
     ratchet test uses; its returned lines already name file + surface/finding and are sorted,
     so the report inherits determinism for free."""
-    committed = json.loads(gen.baseline_path().read_text(encoding="utf-8"))["per_file"]
+    document = json.loads(gen.baseline_path().read_text(encoding="utf-8"))
+    inventory = gen.decode_catalog(document) if hasattr(gen, "decode_catalog") else document
+    committed = inventory["per_file"]
     current = gen.build_inventory()["per_file"]
     failures = list(gen.regressions(committed, current))
     return GateResult(name, not failures, failures)
@@ -111,7 +107,9 @@ def _structural_gate(ratchet: str) -> GateResult:
     silent pass. ``ratchet_failures()`` (owned by the generator) returns the vacuity lines
     followed by the shrink-only backslides, already sorted, so the report inherits determinism
     for free and each of the three ratchets fails INDEPENDENTLY of the other two."""
-    committed = json.loads(structural_gen.baseline_path().read_text(encoding="utf-8"))
+    committed = structural_gen.decode_catalog(
+        json.loads(structural_gen.baseline_path().read_text(encoding="utf-8"))
+    )
     current = structural_gen.build_inventory()
     failures = structural_gen.ratchet_failures(ratchet, committed, current)
     return GateResult(ratchet, not failures, failures)

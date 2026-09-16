@@ -12,7 +12,7 @@ un-clearable.
         ``kind="new"`` by default and its only duplicate guard is ``find_similar(description)`` — a
         check on the DESCRIPTION, not on whether the slug exists — so a differently-worded synthesis
         for an installed skill sailed through and then could never be applied.
-#302    ``GET /api/skills`` walked ONE level with ``iterdir()`` while ``SkillsLoader._iter`` uses
+#302    ``GET /api/skills`` walked ONE level with ``iterdir()`` while ``ProcedureLibrary._iter`` uses
         ``rglob("SKILL.md")``. ``auto/`` is a directory with no ``SKILL.md`` of its own, so every
         accepted proposal's skill was invisible: loaded into every agent's context, and
         un-inspectable and un-deletable from the UI.
@@ -40,8 +40,12 @@ from unittest.mock import patch
 
 import pytest
 
-from gideon.skills import proposals as P
-from gideon.skills.loader import AUTO_SKILL_NAMESPACE, AutoSkillProvenance, SkillsLoader
+from gideon.extensions.skills import proposals as P
+from gideon.extensions.skills.loader import (
+    AUTO_SKILL_NAMESPACE,
+    AutoSkillProvenance,
+    ProcedureLibrary,
+)
 
 _CREATED = "2026-01-01T00:00:00Z"
 
@@ -49,16 +53,16 @@ _CREATED = "2026-01-01T00:00:00Z"
 @pytest.fixture()
 def home(tmp_path, monkeypatch):
     """An isolated home for the loader, the proposal store and the inbox."""
-    import gideon.config.loader as cfg
-    import gideon.skills.loader as sl
+    import gideon.core.config.loader as cfg
+    import gideon.extensions.skills.loader as sl
 
     monkeypatch.setattr(sl, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(cfg, "config_dir", lambda: tmp_path)
     return tmp_path
 
 
-def _loader() -> SkillsLoader:
-    return SkillsLoader(install_builtins=False)
+def _loader() -> ProcedureLibrary:
+    return ProcedureLibrary(install_builtins=False)
 
 
 def _install(slug: str, *, body: str = "original body") -> str:
@@ -88,9 +92,6 @@ def _propose(slug: str, *, kind: str = "new", refine_target: str = "", n: int = 
     return prop
 
 
-# ── #323: accept must not 409 on an existing slug ─────────────────────────────
-
-
 class TestAcceptNeverPermanently409s:
     def test_a_new_proposal_for_an_existing_slug_overlays_it(self, home):
         """🔴 THE cycle's engine. This answered `409 could not write skill … (exists)` forever."""
@@ -101,9 +102,12 @@ class TestAcceptNeverPermanently409s:
 
     def test_the_TWENTIETH_proposal_for_one_slug_still_accepts(self, home):
         """The measured shape: 20 pending proposals for `loop-worker`, none acceptable. Accepting
-        them in sequence must keep working rather than working once and then blocking."""
+        them in sequence must keep working rather than working once and then blocking.
+        """
         _install("loop-worker")
-        versions = [P.accept(_propose("loop-worker", n=i).id).version for i in range(1, 6)]
+        versions = [
+            P.accept(_propose("loop-worker", n=i).id).version for i in range(1, 6)
+        ]
         assert versions == sorted(versions), f"versions did not advance: {versions}"
         assert len(set(versions)) == len(versions), "two accepts wrote the same version"
 
@@ -119,14 +123,18 @@ class TestAcceptNeverPermanently409s:
     def test_a_refine_proposal_still_overlays_its_named_target(self, home):
         """The path #303 added, unchanged — asserted so the #323 restructure cannot regress it."""
         name = _install("loop-worker")
-        result = P.accept(_propose("loop-worker", kind="refine", refine_target=name, n=1).id)
+        result = P.accept(
+            _propose("loop-worker", kind="refine", refine_target=name, n=1).id
+        )
         assert result.name == name
         assert result.version >= 1
 
     def test_a_refine_whose_target_VANISHED_falls_back_to_create(self, home):
         """Deleted since the proposal was filed. Must create rather than 500, so Accept still
         resolves the row."""
-        prop = _propose("gone-skill", kind="refine", refine_target="auto/gone-skill", n=1)
+        prop = _propose(
+            "gone-skill", kind="refine", refine_target="auto/gone-skill", n=1
+        )
         result = P.accept(prop.id)
         assert result.name == f"{AUTO_SKILL_NAMESPACE}/gone-skill"
         assert result.version == 0, "a create, not an overlay"
@@ -149,9 +157,6 @@ class TestAcceptNeverPermanently409s:
         assert base.read_text(encoding="utf-8") == before
 
 
-# ── the generator labels it correctly, so the queue stops filling ─────────────
-
-
 class TestGeneratorLabelsARefine:
     def test_a_proposal_for_an_existing_slug_is_filed_as_a_refine(self, home):
         """`find_similar` compares DESCRIPTIONS, so it cannot answer "does this slug exist" — which
@@ -162,7 +167,7 @@ class TestGeneratorLabelsARefine:
         """
         import inspect
 
-        from gideon import history
+        from gideon.cognition import history
 
         src = inspect.getsource(history)
         assert 'kind="refine" if _is_refine else "new"' in src
@@ -177,16 +182,15 @@ class TestGeneratorLabelsARefine:
         assert "Refine a skill" in src and 'prop.kind == "refine"' in src
 
 
-# ── #302: the accepted skill must be visible ──────────────────────────────────
-
-
 class TestNamespacedSkillsAreListed:
     def test_an_auto_namespaced_skill_is_discovered(self, tmp_path):
         """🔴 Three `auto/*` skills were loaded into every agent's context while `GET /api/skills`
         reported none of them — un-inspectable and un-deletable from the UI."""
         base = tmp_path / "skills"
         (base / "auto" / "loop-worker").mkdir(parents=True)
-        (base / "auto" / "loop-worker" / "SKILL.md").write_text("---\nname: x\n---\nb\n")
+        (base / "auto" / "loop-worker" / "SKILL.md").write_text(
+            "---\nname: x\n---\nb\n"
+        )
         (base / "top-level").mkdir()
         (base / "top-level" / "SKILL.md").write_text("---\nname: y\n---\nb\n")
 
@@ -202,14 +206,14 @@ class TestNamespacedSkillsAreListed:
         "what is a skill", and only one of them decided what the user could see."""
         import inspect
 
-        from gideon.dashboard.handlers import skills as H
-        from gideon.skills import loader as L
+        from gideon.extensions.skills import loader as L
+        from gideon.interfaces.dashboard.handlers import skills as H
 
         assert "rglob(_SKILL_FILENAME)" in inspect.getsource(H.api_skills_list)
         assert 'rglob("SKILL.md")' in inspect.getsource(L)
 
     def test_a_namespaced_name_keeps_its_namespace(self, tmp_path):
-        """`auto/loop-worker`, not `loop-worker`. The namespace is what `SkillsLoader` calls it,
+        """`auto/loop-worker`, not `loop-worker`. The namespace is what `ProcedureLibrary` calls it,
         what
         the delete route takes, and what dedups it against a top-level skill of the same name — a
         bare basename would collide the two and drop one."""
@@ -224,9 +228,6 @@ class TestNamespacedSkillsAreListed:
             if md.parent != base
         }
         assert names == {"auto/shared-name", "shared-name"}, "the two must not collide"
-
-
-# ── #336: the inbox row must clear ────────────────────────────────────────────
 
 
 class TestInboxRowsResolveAgainstTheLiveStore:
@@ -253,9 +254,11 @@ class TestInboxRowsResolveAgainstTheLiveStore:
 
     def test_headless_still_gets_a_usable_store(self, home):
         """Vacuity floor: with no gateway up there is no live store, and the file IS the truth. A
-        helper that returned None there would make a CLI accept silently skip the resolve."""
+        helper that returned None there would make a CLI accept silently skip the resolve.
+        """
         with patch(
-            "gideon.inbox_providers.native_source.get_dashboard_state", return_value=None
+            "gideon.integrations.inbox_providers.native_source.get_dashboard_state",
+            return_value=None,
         ):
             store = P._inbox_store_for_write()
         assert store is not None
@@ -264,7 +267,7 @@ class TestInboxRowsResolveAgainstTheLiveStore:
     def test_a_resolve_marks_the_row_terminal(self, home):
         """End to end through the real (headless) store: accepting a proposal must leave no open
         row referencing it."""
-        from gideon.inbox import InboxStore
+        from gideon.integrations.inbox import InboxStore
 
         _install("loop-worker")
         prop = _propose("loop-worker", n=1)
@@ -273,14 +276,13 @@ class TestInboxRowsResolveAgainstTheLiveStore:
 
         store = InboxStore()
         store.load()
-        rows = [i for i in store.items.values() if i.refs.get("skill_proposal") == prop.id]
+        rows = [
+            i for i in store.items.values() if i.refs.get("skill_proposal") == prop.id
+        ]
         assert rows, "the fixture's own precondition: a row was surfaced"
         assert all(
             i.status in ("handled", "dismissed") for i in rows
         ), f"an accepted proposal left an OPEN row: {[i.status for i in rows]}"
-
-
-# ── the bulk control has to be able to reach the queue ────────────────────────
 
 
 class TestDismissAllMeansAll:
@@ -290,13 +292,18 @@ class TestDismissAllMeansAll:
     """
 
     def _store(self, tmp_path, monkeypatch):
-        import gideon.inbox as inbox_mod
-        from gideon.inbox import InboxItem, InboxStore, ItemStatus
+        import gideon.integrations.inbox as inbox_mod
+        from gideon.integrations.inbox import InboxItem, InboxStore, ItemStatus
 
         monkeypatch.setattr(inbox_mod, "config_dir", lambda: tmp_path, raising=False)
         store = InboxStore()
         for i, status in enumerate(
-            [ItemStatus.PENDING, ItemStatus.SEEN, ItemStatus.DISMISSED, ItemStatus.HANDLED]
+            [
+                ItemStatus.PENDING,
+                ItemStatus.SEEN,
+                ItemStatus.DISMISSED,
+                ItemStatus.HANDLED,
+            ]
         ):
             item = InboxItem(
                 id=f"i{i}",
@@ -331,49 +338,44 @@ class TestDismissAllMeansAll:
     def test_the_handler_uses_the_open_set(self):
         import inspect
 
-        from gideon.dashboard import handlers_inbox as H
+        from gideon.interfaces.dashboard import handlers_inbox as H
 
         src = inspect.getsource(H.api_inbox_dismiss_all)
         assert "inbox.open_items()" in src
         assert "inbox.pending()" not in src
 
 
-# ── the cycle, end to end ─────────────────────────────────────────────────────
-
-
 def test_the_whole_cycle_is_broken(home):
     """One assertion per link, on one sequence, because #409's point is that the links are mutually
     causal: each successful accept used to block its slug, hide its result, and orphan its row.
     """
-    from gideon.inbox import InboxStore
+    from gideon.integrations.inbox import InboxStore
 
-    # A first proposal installs the skill.
     first = _propose("loop-worker", n=1)
     P._surface_in_inbox(first)
     created = P.accept(first.id)
     assert created.name == f"{AUTO_SKILL_NAMESPACE}/loop-worker"
 
-    # #323 — a SECOND proposal for that slug is still acceptable.
     second = _propose("loop-worker", n=2)
     P._surface_in_inbox(second)
     assert P.accept(second.id).version >= 1
 
-    # #302 — both are visible where a user would look for them.
     base = home / "skills"
     listed = {
-        md.parent.relative_to(base).as_posix() for md in base.rglob("SKILL.md") if md.parent != base
+        md.parent.relative_to(base).as_posix()
+        for md in base.rglob("SKILL.md")
+        if md.parent != base
     }
     assert f"{AUTO_SKILL_NAMESPACE}/loop-worker" in listed
 
-    # #336 — neither accept left an open row behind.
     store = InboxStore()
     store.load()
     open_rows = [
         i
         for i in store.items.values()
-        if i.refs.get("skill_proposal") in {first.id, second.id} and i.status in ("pending", "seen")
+        if i.refs.get("skill_proposal") in {first.id, second.id}
+        and i.status in ("pending", "seen")
     ]
     assert open_rows == [], f"{len(open_rows)} orphan row(s) left open"
 
-    # And the queue is actually empty, not merely answered.
     assert [p.id for p in P.list_pending()] == []

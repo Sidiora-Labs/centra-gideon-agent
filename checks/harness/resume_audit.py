@@ -8,7 +8,7 @@ import the harness) — the exact audit that would have caught the historical de
 bugs. Two entities, two halves:
 
 - **Loops** (:func:`audit_loop`) — read a loop's SQLite row + file dir through
-  ``gideon.loop.store`` and report per-question answerability. Findings COUNT is the
+  ``gideon.automation.loop.store`` and report per-question answerability. Findings COUNT is the
   cycle clock (in-memory watchdog counters are documented as non-resumed):
 
   - **done?**    — ``loop.status`` (a terminal/attention status is a definitive answer).
@@ -33,12 +33,10 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from gideon.loop import files as loop_files
-from gideon.loop import store
-from gideon.loop.loop import LoopStatus
+from gideon.automation.loop import files as loop_files
+from gideon.automation.loop import store
+from gideon.automation.loop.loop import LoopStatus
 
-# Statuses that are a definitive "done / awaiting-deliberate-action" answer — a resumed
-# loop in one of these needs no live session to say what state it's in.
 _TERMINAL_OR_ATTENTION = {
     LoopStatus.COMPLETE.value,
     LoopStatus.FAILED.value,
@@ -80,7 +78,9 @@ class ResumeReport:
         if not self.done_answerable:
             out.append("'what's done?' not answerable (no resolvable status)")
         if not self.verified_answerable:
-            out.append("'what's verified?' not answerable (no verdicts/findings on disk)")
+            out.append(
+                "'what's verified?' not answerable (no verdicts/findings on disk)"
+            )
         if not self.next_answerable:
             out.append("'what's next?' not answerable (no plan/next-cycle signal)")
         if not self.how_to_verify_answerable:
@@ -100,50 +100,39 @@ def audit_loop(loop_id: str) -> ResumeReport:
         return report
     report.exists = True
 
-    # what's done? — a resolvable status. RUNNING/PLANNING are "in-flight" answers too
-    # (reap re-arms them), so ANY non-empty status answers the question; the terminal /
-    # attention set is the strongest form.
     status = loop.status or ""
     report.done_answerable = bool(status)
     report.detail["status"] = status
     report.detail["terminal_or_attention"] = status in _TERMINAL_OR_ATTENTION
 
-    # what's verified? — judge verdicts (open-ended) and/or cycle findings on disk.
     verdicts = loop_files.get_verdicts(loop_id)
     findings = loop_files.get_findings(loop_id)
     report.detail["verdict_count"] = len(verdicts)
     report.detail["finding_count"] = len(findings)
-    # A run that has produced ANY finding/verdict has a verifiable record; a run that
-    # hasn't started producing yet is verified-answerable by its (empty) count = 0 being a
-    # definitive "nothing verified yet" — so this is answerable as long as the dir exists.
     report.verified_answerable = loop_files.safe_loop_dir(loop_id) is not None
 
-    # what's next? — phased kinds: plan + phase_status; else the next cycle / status.
     plan = loop.plan or []
     phase_status = getattr(loop, "phase_status", None) or {}
     report.detail["phased"] = bool(plan)
     if plan:
-        # A phased loop can name its next stage from plan vs phase_status on disk.
         next_stage = next(
-            (p.get("stage") for p in plan if phase_status.get(p.get("stage")) != "done"),
+            (
+                p.get("stage")
+                for p in plan
+                if phase_status.get(p.get("stage")) != "done"
+            ),
             None,
         )
         report.detail["next_stage"] = next_stage
-        report.next_answerable = True  # plan present → next stage derivable
+        report.next_answerable = True
     else:
-        # Non-phased: the next cycle number = finding count + 1 (findings are the clock),
-        # and the status says whether another cycle is even due.
         report.detail["next_cycle"] = len(findings) + 1
         report.next_answerable = bool(status)
 
-    # how to verify? — the persisted task/spec text is what the resumed worker re-reads.
     report.how_to_verify_answerable = bool((loop.task or "").strip())
     report.detail["has_task_text"] = bool((loop.task or "").strip())
 
     return report
-
-
-# ── workflow-run half (§2.4, WF2 event-fold byte-equal frontier reconstruction) ──
 
 
 @dataclass
@@ -159,16 +148,9 @@ class WorkflowResumeReport:
 
     run_id: str
     exists: bool = False
-    #: The canonical pre-kill frontier snapshot (a stable JSON string — see
-    #: :func:`_frontier_snapshot`). Empty when the run does not exist.
     pre_kill_frontier: str = ""
-    #: The frontier snapshot the fresh, disk-only ``RunController`` reconstructs.
     resumed_frontier: str = ""
-    #: The two agree byte-for-byte — the audit's primary assertion.
     frontier_byte_equal: bool = False
-    #: The journal event-fold's node-state map equals the persisted node states — the WF2
-    #: event-fold law, cross-checked so a divergent replay (a corrupted or truncated
-    #: journal) fails the audit rather than passing on the state file alone.
     fold_matches_state: bool = False
     detail: dict = field(default_factory=dict)
 
@@ -193,15 +175,6 @@ class WorkflowResumeReport:
         return out
 
 
-#: The journal record kind → SSE projection event mapping. A resumed run's scheduling reads
-#: ``state.json``; the ledger's ``journal.jsonl`` is the append-only law that must be able to
-#: REBUILD those states. This projects each node-state-bearing journal record to the same SSE
-#: event shape the live gateway publishes (``workflow_node_started`` / ``workflow_node_done`` /
-#: ``workflow_run_update``), so SV-5's :func:`fold_workflow` reconstructs node states from the
-#: journal exactly as it does from a recorded live stream. Kinds that do not move a node's
-#: persisted state (``confirmation_pending``, ``step_escalated``, ledger-only records) are not
-#: projected — they leave the frontier's WAITING/derived states to the reconstructed controller,
-#: which is the authority for them.
 _JOURNAL_TO_SSE: dict[str, tuple[str, str]] = {
     "run_started": ("workflow_run_update", "running"),
     "run_finished": ("workflow_run_update", "@status"),
@@ -218,8 +191,8 @@ def _project_journal_to_events(run_id: str) -> list[Any]:
     fold consumes. Deterministic and pure — ordered by the journal's own monotonic ``seq``,
     no wall-clock — so the folded terminal state is a stable value.
     """
-    from harness.replay import TraceEvent
-    from gideon.workflows import store as wf_store
+    from checks.harness.replay import TraceEvent
+    from gideon.automation.workflows import store as wf_store
 
     events: list[Any] = []
     for rec in wf_store.read_jsonl(run_id, "journal.jsonl"):
@@ -234,8 +207,6 @@ def _project_journal_to_events(run_id: str) -> list[Any]:
             payload["status"] = rec.get("status")
         elif status_rule:
             payload["status"] = status_rule
-        # The fold's node-seq floor keys off a per-node ``seq``; the journal's is per-RUN, so
-        # a node's started/done both carry it and the floor still holds monotonically.
         payload.setdefault("node_epoch", rec.get("epoch", 0))
         events.append(
             TraceEvent(
@@ -297,9 +268,9 @@ def audit_workflow_run(
     Reads only persisted state; constructs the controller with no gateway services, so it
     never launches a node or touches the network.
     """
-    from harness.replay import fold_workflow
-    from gideon.workflows import store as wf_store
-    from gideon.workflows.controller import EngineServices, RunController
+    from checks.harness.replay import fold_workflow
+    from gideon.automation.workflows import store as wf_store
+    from gideon.automation.workflows.controller import EngineServices, RunController
 
     report = WorkflowResumeReport(run_id=run_id)
     run = wf_store.get(run_id)
@@ -308,14 +279,9 @@ def audit_workflow_run(
         return report
     report.exists = True
 
-    # Resume from DISK ALONE: a fresh controller reads state.json + spec.json + the journal,
-    # with no services (it must not launch work or reach a gateway).
     resumed = RunController(run, spec, services=EngineServices())
     report.resumed_frontier = _frontier_snapshot(resumed)
 
-    # The pre-kill truth. When the caller captured a live snapshot before the kill, compare
-    # against it; otherwise the persisted files ARE the truth, and a second independent
-    # reconstruction must reproduce the same snapshot (idempotent resume).
     if pre_kill_frontier is None:
         report.pre_kill_frontier = _frontier_snapshot(
             RunController(run, spec, services=EngineServices())
@@ -324,11 +290,11 @@ def audit_workflow_run(
         report.pre_kill_frontier = pre_kill_frontier
     report.frontier_byte_equal = report.resumed_frontier == report.pre_kill_frontier
 
-    # The event-fold law: the journal must reconstruct the persisted node states. A run whose
-    # nodes all carry a node-state event in the journal folds to exactly the state map on disk.
     fold = fold_workflow(_project_journal_to_events(run_id))
     persisted_nodes = {p: inst.state.value for p, inst in resumed.instances.items()}
-    folded_nodes = {p: st for p, st in fold.get("nodes", {}).items() if p in persisted_nodes}
+    folded_nodes = {
+        p: st for p, st in fold.get("nodes", {}).items() if p in persisted_nodes
+    }
     report.fold_matches_state = json.dumps(folded_nodes, sort_keys=True) == json.dumps(
         persisted_nodes, sort_keys=True
     )

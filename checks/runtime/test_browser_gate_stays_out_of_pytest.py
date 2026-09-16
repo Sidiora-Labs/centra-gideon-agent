@@ -4,7 +4,7 @@
 **and a bare pytest does not run it**". Nothing asserted the second half. It was true only by
 construction — the gate is Playwright, so its specs are `.ts` and pytest collects `.py` — and
 "true by construction" is exactly the state that ends with someone adding
-`tests/test_e2e_smoke.py` that shells `npx playwright test`, because no rail said not to.
+`checks/runtime/test_e2e_smoke.py` that shells `npx playwright test`, because no rail said not to.
 
 The cost is not abstract. `PLATFORM-HARDENING-FLOORS.md` §4 lists it first among the harness's
 load-bearing wiring details: the browser leg is "minutes per interpreter", which "is far too slow
@@ -18,7 +18,7 @@ So this file asserts the separation from both ends:
   browser leg, and
 * no pytest-collected module shells the browser gate.
 
-The second check is AST-based on purpose. `tests/test_e2e_specs_are_executed.py` contains the
+The second check is AST-based on purpose. `checks/runtime/test_e2e_specs_are_executed.py` contains the
 literal string ``"npx playwright test e2e/ghost.spec.ts"`` — twice — inside its own vacuity
 assertion. A text scan would call that file a violation and the only available fix would be to
 weaken the scan. Asking the syntax tree "is this string an argument to a subprocess call" tells
@@ -32,19 +32,15 @@ import pathlib
 
 import pytest
 
-_ROOT = pathlib.Path(__file__).resolve().parents[1]
-_TESTS = _ROOT / "tests"
+_ROOT = pathlib.Path(__file__).resolve().parents[2]
+_TESTS = _ROOT / "checks/runtime"
 _MAKEFILE = _ROOT / "Makefile"
 
-#: The target a developer and CI both run for the unit suite.
 UNIT_TARGET = "test"
-#: The target that owns the browser leg.
 BROWSER_TARGET = "test-e2e"
 
-#: Tokens that mean "this call launches the browser gate".
 _BROWSER_TOKENS = ("playwright", "npx")
 
-#: Callables that hand a command line to the OS.
 _SPAWNERS = {
     "run",
     "Popen",
@@ -89,7 +85,9 @@ def _target_prerequisites(target: str) -> list[str]:
         head, sep, tail = raw.partition(":")
         if sep and head.strip() == target and not head.startswith("."):
             return tail.split()
-    raise AssertionError(f"the Makefile has no `{target}` target — this rail is pinned to it")
+    raise AssertionError(
+        f"the Makefile has no `{target}` target — this rail is pinned to it"
+    )
 
 
 def spawns_the_browser_gate(source: str) -> list[str]:
@@ -128,12 +126,16 @@ def _collectible_modules() -> list[pathlib.Path]:
 class TestTheUnitTargetDoesNotDoTheBrowserLeg:
     def test_the_unit_target_is_a_plain_pytest_invocation(self):
         recipe = _make_recipe(UNIT_TARGET)
-        assert recipe, f"`make {UNIT_TARGET}` has an empty recipe — this rail would be vacuous"
+        assert (
+            recipe
+        ), f"`make {UNIT_TARGET}` has an empty recipe — this rail would be vacuous"
         assert any("pytest" in line for line in recipe), (
             f"`make {UNIT_TARGET}` no longer invokes pytest: {recipe}. Re-derive this rail "
             f"against whatever runs the unit suite now."
         )
-        offenders = [ln for ln in recipe if any(t in ln.lower() for t in _BROWSER_TOKENS)]
+        offenders = [
+            ln for ln in recipe if any(t in ln.lower() for t in _BROWSER_TOKENS)
+        ]
         assert not offenders, (
             f"`make {UNIT_TARGET}` launches the browser gate: {offenders}\n\n"
             f"That is minutes per interpreter on the per-commit gate, it needs a built SPA (so "
@@ -152,7 +154,9 @@ class TestTheUnitTargetDoesNotDoTheBrowserLeg:
         """The other side of the split. Absence proves nothing on its own: a repo that DELETED
         the browser gate would satisfy every assertion above."""
         recipe = _make_recipe(BROWSER_TARGET)
-        assert recipe, f"`make {BROWSER_TARGET}` is gone — the browser gate now runs nowhere"
+        assert (
+            recipe
+        ), f"`make {BROWSER_TARGET}` is gone — the browser gate now runs nowhere"
         assert any(
             "playwright" in line for line in recipe
         ), f"`make {BROWSER_TARGET}` no longer runs playwright: {recipe}"
@@ -172,15 +176,20 @@ class TestNoPytestModuleShellsTheBrowserGate:
                 offenders[path.name] = hits
         assert not offenders, (
             "these pytest modules shell the browser gate, so a bare `pytest` now runs it:\n"
-            + "\n".join(f"  {name}: {', '.join(hits)}" for name, hits in offenders.items())
+            + "\n".join(
+                f"  {name}: {', '.join(hits)}" for name, hits in offenders.items()
+            )
             + f"\n\nMove the browser leg to `make {BROWSER_TARGET}` (a Playwright spec under "
-            f"web/e2e/, wired into a CI job — see tests/test_e2e_specs_are_executed.py)."
+            f"apps/console/e2e/, wired into a CI job — see checks/runtime/test_e2e_specs_are_executed.py)."
         )
 
     def test_no_python_test_module_hides_in_the_spec_directory(self):
-        """`web/e2e/` is the browser gate's own directory. A `test_*.py` there is collected by a
-        bare root-level `pytest` while looking like it belongs to the Playwright suite."""
-        stowaways = sorted(p.name for p in (_ROOT / "web" / "e2e").rglob("test_*.py"))
+        """`apps/console/e2e/` is the browser gate's own directory. A `test_*.py` there is collected by a
+        bare root-level `pytest` while looking like it belongs to the Playwright suite.
+        """
+        stowaways = sorted(
+            p.name for p in (_ROOT / "apps/console" / "e2e").rglob("test_*.py")
+        )
         assert not stowaways, (
             f"python test modules inside the Playwright spec directory: {stowaways} — a bare "
             f"pytest from the repo root collects these."
@@ -206,16 +215,17 @@ class TestTheDetectorItself:
         ],
     )
     def test_a_real_launch_is_caught(self, source: str):
-        assert spawns_the_browser_gate(source), f"the detector missed a real launch:\n{source}"
+        assert spawns_the_browser_gate(
+            source
+        ), f"the detector missed a real launch:\n{source}"
 
     @pytest.mark.parametrize(
         "source",
         [
-            # The shape that actually exists in this repo, and must NOT be flagged.
             'live = "      - run: npx playwright test e2e/ghost.spec.ts\\n"\n'
             'assert names_spec(live, "ghost.spec.ts")\n',
             '"""A docstring mentioning npx playwright test."""\n',
-            'PATH = "web/e2e/a11y.spec.ts"\nassert "playwright" in open("Makefile").read()\n',
+            'PATH = "apps/console/e2e/a11y.spec.ts"\nassert "playwright" in open("Makefile").read()\n',
             'import subprocess\nsubprocess.run(["pytest", "-q"])\n',
         ],
     )
@@ -227,7 +237,9 @@ class TestTheDetectorItself:
     def test_the_real_repo_shape_is_not_flagged(self):
         """The concrete file this precision exists for, by name rather than in principle."""
         target = _TESTS / "test_e2e_specs_are_executed.py"
-        assert target.exists(), "the file whose shape motivates the AST approach is gone"
+        assert (
+            target.exists()
+        ), "the file whose shape motivates the AST approach is gone"
         assert "playwright test" in target.read_text(encoding="utf-8"), (
             "that file no longer contains the literal this test exists to distinguish — the "
             "precision claim below would be vacuous"

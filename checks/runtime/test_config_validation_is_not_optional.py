@@ -21,11 +21,12 @@ from __future__ import annotations
 
 import json
 import re
+import tomllib
 from pathlib import Path
 
 import pytest
 
-_PYPROJECT = Path(__file__).resolve().parent.parent / "pyproject.toml"
+_PYPROJECT = Path(__file__).resolve().parent.parent.parent / "pyproject.toml"
 
 
 def test_jsonschema_is_a_declared_core_dependency():
@@ -34,10 +35,11 @@ def test_jsonschema_is_a_declared_core_dependency():
     Importability proves nothing here: the dev venv has `jsonschema` either way, which is exactly
     why the defect survived. What matters is that a bare `pip install gideon` gets it.
     """
-    text = _PYPROJECT.read_text(encoding="utf-8")
-    core = re.search(r"^dependencies = \[(.*?)^\]", text, re.S | re.M)
-    assert core, "pyproject has no [project] dependencies array"
-    assert "jsonschema" in core.group(1), (
+    from packaging.requirements import Requirement
+
+    project = tomllib.loads(_PYPROJECT.read_text(encoding="utf-8"))["project"]
+    core = {Requirement(value).name for value in project["dependencies"]}
+    assert "jsonschema" in core, (
         "jsonschema is not a hard dependency — config validation silently no-ops on a normal "
         "install, and only the optional [mcp] extra would drag it in"
     )
@@ -53,12 +55,12 @@ def test_the_validator_imports_jsonschema_unconditionally():
     not use — which is the shim this codebase forbids.
     """
     src = (
-        Path(__file__).resolve().parent.parent / "src/gideon/config/validation.py"
+        Path(__file__).resolve().parent.parent.parent
+        / "runtime/gideon/core/config/validation.py"
     ).read_text(encoding="utf-8")
-    # CODE only. The name legitimately survives in the comment that explains what was removed,
-    # and a rail that counts comment text fails on its own documentation — which it did on the
-    # first run of this test.
-    code = "\n".join(line for line in src.splitlines() if not line.lstrip().startswith("#"))
+    code = "\n".join(
+        line for line in src.splitlines() if not line.lstrip().startswith("#")
+    )
     assert "_HAS_JSONSCHEMA" not in code, "the optional-dependency flag is back in code"
     assert re.search(
         r"^import jsonschema$", code, re.M
@@ -74,7 +76,7 @@ def home(tmp_path, monkeypatch):
 
 def _load(home: Path, data: dict):
     (home / "config.json").write_text(json.dumps(data), encoding="utf-8")
-    from gideon.config.loader import AppConfig
+    from gideon.core.config.loader import AppConfig
 
     return AppConfig.load()
 
@@ -93,22 +95,26 @@ def test_a_retired_field_is_pruned_rather_than_carried(home):
     `agent.streaming` was removed from `AgentConfig` with zero consumers; a pre-removal config
     should load cleanly and be rewritten without it, not warn on every load forever.
     """
-    from gideon.config.validation import _validate_config_data
+    from gideon.core.config.validation import _validate_config_data
 
     data = {"agent": {"streaming": True, "model": "gpt-9"}, "default_memory_store": "x"}
     _validate_config_data(data)
-    assert "streaming" not in data["agent"], "retired agent.streaming survived validation"
+    assert (
+        "streaming" not in data["agent"]
+    ), "retired agent.streaming survived validation"
     assert "model" not in data["agent"], "retired agent.model survived validation"
-    assert "default_memory_store" not in data, "retired default_memory_store survived validation"
+    assert (
+        "default_memory_store" not in data
+    ), "retired default_memory_store survived validation"
 
 
 def test_an_unrecognized_top_level_key_is_reported(home, caplog):
     """The third skipped pass. Silence here is how a typo'd section looks like it applied."""
     import logging
 
-    from gideon.config.validation import _validate_config_data
+    from gideon.core.config.validation import _validate_config_data
 
-    with caplog.at_level(logging.WARNING, logger="gideon.config.loader"):
+    with caplog.at_level(logging.WARNING, logger="gideon.core.config.loader"):
         _validate_config_data({"definitely_not_a_section": {"x": 1}})
     assert any(
         "unrecognized top-level keys" in r.message for r in caplog.records
@@ -121,7 +127,7 @@ def test_the_validation_pass_can_still_fail(home):
     Without this, every test above could pass against a validator that accepts everything — which
     is precisely the state this change repairs.
     """
-    from gideon.config.validation import _validate_config_data
+    from gideon.core.config.validation import _validate_config_data
 
     data = {"agent": {"max_subagents": "not-a-number"}}
     _validate_config_data(data)

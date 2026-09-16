@@ -26,8 +26,8 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 from yarl import URL
 
-from gideon.artifacts import registry
-from gideon.artifacts.deploy import (
+from gideon.workspace.artifacts import registry
+from gideon.workspace.artifacts.deploy import (
     ARTIFACT_SERVE_CSP,
     DEFAULT_ENTRY,
     MAX_DEPLOYMENTS,
@@ -36,8 +36,8 @@ from gideon.artifacts.deploy import (
     rejects_path,
     resolve_served_file,
 )
-from gideon.artifacts.handlers import register_artifact_routes
-from gideon.artifacts.native import NativeArtifactProvider
+from gideon.workspace.artifacts.handlers import register_artifact_routes
+from gideon.workspace.artifacts.native import NativeArtifactProvider
 
 SECRET_BODY = "TOP-SECRET-OUTSIDE-THE-ROOT"
 
@@ -80,9 +80,6 @@ def _parse_csp(header: str) -> dict[str, list[str]]:
     return out
 
 
-# ── the path spine ───────────────────────────────────────────────────────────
-
-
 class TestRejectsPath:
     @pytest.mark.parametrize(
         "bad",
@@ -104,7 +101,9 @@ class TestRejectsPath:
     def test_refuses_every_escape_shape(self, bad: str) -> None:
         assert rejects_path(bad) is True
 
-    @pytest.mark.parametrize("ok", ["index.html", "assets/app.js", "a/b/c.css", "x.y.z.json"])
+    @pytest.mark.parametrize(
+        "ok", ["index.html", "assets/app.js", "a/b/c.css", "x.y.z.json"]
+    )
     def test_allows_ordinary_relative_paths(self, ok: str) -> None:
         assert rejects_path(ok) is False
 
@@ -152,9 +151,6 @@ class TestResolveServedFile:
         assert resolve_served_file(root, "nope.html") is None
 
 
-# ── the deploy registry ──────────────────────────────────────────────────────
-
-
 class TestDeployStore:
     def test_deploy_then_read_back_and_teardown(self, store) -> None:
         dep = store.deploy("my-app")
@@ -164,7 +160,7 @@ class TestDeployStore:
         assert store.is_deployed("my-app") is True
         assert store.teardown("my-app") is True
         assert store.is_deployed("my-app") is False
-        assert store.teardown("my-app") is False  # second teardown is a no-op
+        assert store.teardown("my-app") is False
 
     def test_deploy_is_idempotent_and_refreshes_entry(self, store) -> None:
         store.deploy("my-app")
@@ -202,14 +198,13 @@ class TestDeployStore:
         assert store.list() == []
 
 
-# ── the serve route ──────────────────────────────────────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_deployed_widget_renders_and_serves_its_own_files(patched_native) -> None:
     """The render + interact clause: the entry document AND the script beside it."""
     prov = patched_native
-    art = prov.create(name="My App", content="<h1>hi</h1><script src='app.js'></script>")
+    art = prov.create(
+        name="My App", content="<h1>hi</h1><script src='app.js'></script>"
+    )
     files = ArtifactDeployStore(prov.root).files_root(art.slug)
     files.mkdir(parents=True)
     (files / "app.js").write_text("document.title='clicked'")
@@ -266,14 +261,10 @@ async def test_undeployed_and_unknown_slugs_are_not_served(patched_native) -> No
     art = prov.create(name="My App", content="<h1>hi</h1>")
     client = await _client(prov)
     try:
-        # The route exists, but nothing is published for this slug yet.
         assert (await client.get(f"{SERVE_URL_PREFIX}/{art.slug}/")).status == 404
         assert (await client.get(f"{SERVE_URL_PREFIX}/nope/")).status == 404
     finally:
         await client.close()
-
-
-# ── traversal ────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -292,13 +283,14 @@ async def test_traversal_is_refused_and_leaks_nothing(patched_native, raw: str) 
     store = ArtifactDeployStore(prov.root)
     files = store.files_root(art.slug)
     files.mkdir(parents=True)
-    # The file a traversal would reach: one level above the artifact's files root.
     (files.parent / "secret.txt").write_text(SECRET_BODY)
     (prov.root / "secret.txt").write_text(SECRET_BODY)
     client = await _client(prov)
     try:
         await client.post(f"/api/artifacts/{art.slug}/deploy")
-        resp = await client.get(URL(f"{SERVE_URL_PREFIX}/{art.slug}/{raw}", encoded=True))
+        resp = await client.get(
+            URL(f"{SERVE_URL_PREFIX}/{art.slug}/{raw}", encoded=True)
+        )
         assert resp.status in (403, 404)
         assert SECRET_BODY not in await resp.text()
     finally:
@@ -306,7 +298,9 @@ async def test_traversal_is_refused_and_leaks_nothing(patched_native, raw: str) 
 
 
 @pytest.mark.asyncio
-async def test_symlink_out_of_the_root_is_refused_over_http(patched_native, tmp_path) -> None:
+async def test_symlink_out_of_the_root_is_refused_over_http(
+    patched_native, tmp_path
+) -> None:
     prov = patched_native
     art = prov.create(name="My App", content="<h1>hi</h1>")
     files = ArtifactDeployStore(prov.root).files_root(art.slug)
@@ -324,27 +318,24 @@ async def test_symlink_out_of_the_root_is_refused_over_http(patched_native, tmp_
         await client.close()
 
 
-# ── the CSP fence ────────────────────────────────────────────────────────────
-
-
 class TestCspFenceValue:
     """Directive VALUES, not header presence: weakening one must red here."""
 
     def test_the_page_cannot_reach_the_gateway_api(self) -> None:
         directives = _parse_csp(ARTIFACT_SERVE_CSP)
-        # connect-src is THE fence: fetch/XHR/WebSocket/EventSource/sendBeacon all
-        # fall under it, so 'none' is what makes /api unreachable from the document.
         assert directives["connect-src"] == ["'none'"]
-        # Nothing may re-open it by inheritance or by navigation.
         assert directives["default-src"] == ["'none'"]
         assert directives["form-action"] == ["'none'"]
         assert directives["base-uri"] == ["'none'"]
         assert directives["object-src"] == ["'none'"]
-        # Embeddable in the dashboard's own pane (the in-app open), nowhere else.
         assert directives["frame-ancestors"] == ["'self'"]
-        # No directive that could carry a request to /api may name this origin or a
-        # wildcard. (script/style/img/font are same-origin FILE loads, not API calls.)
-        for name in ("connect-src", "form-action", "base-uri", "object-src", "default-src"):
+        for name in (
+            "connect-src",
+            "form-action",
+            "base-uri",
+            "object-src",
+            "default-src",
+        ):
             assert "'self'" not in directives[name]
             assert "*" not in directives[name]
 
@@ -373,13 +364,12 @@ async def test_every_served_response_carries_the_fence(patched_native) -> None:
 
 def test_serve_prefix_is_not_auth_bypassed() -> None:
     """ "Behind session auth": the serve prefix must be in no auth-bypass allowlist."""
-    from gideon.dashboard import token_auth
+    from gideon.interfaces.dashboard import token_auth
 
-    assert not any(f"{SERVE_URL_PREFIX}/x".startswith(p) for p in token_auth._BYPASS_PREFIXES)
+    assert not any(
+        f"{SERVE_URL_PREFIX}/x".startswith(p) for p in token_auth._BYPASS_PREFIXES
+    )
     assert f"{SERVE_URL_PREFIX}/x" not in token_auth._BYPASS_EXACT
-
-
-# ── teardown ─────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -398,10 +388,8 @@ async def test_teardown_removes_the_route(patched_native) -> None:
         assert torn.status == 200
         assert (await torn.json())["removed"] is True
 
-        # The page AND its files are gone — no stale handler keeps serving either.
         assert (await client.get(f"{SERVE_URL_PREFIX}/{art.slug}/")).status == 404
         assert (await client.get(f"{SERVE_URL_PREFIX}/{art.slug}/app.js")).status == 404
-        # Un-publishing is not deleting: the artifact itself survives.
         assert (await client.get(f"/api/artifacts/{art.slug}")).status == 200
     finally:
         await client.close()
@@ -422,9 +410,6 @@ async def test_deleting_the_artifact_tears_the_deployment_down(patched_native) -
         await client.close()
 
 
-# ── the deploy API ───────────────────────────────────────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_deployed_listing_carries_the_url(patched_native) -> None:
     prov = patched_native
@@ -432,7 +417,9 @@ async def test_deployed_listing_carries_the_url(patched_native) -> None:
     client = await _client(prov)
     try:
         await client.post(f"/api/artifacts/{art.slug}/deploy")
-        rows = (await (await client.get("/api/artifacts/deployed")).json())["deployments"]
+        rows = (await (await client.get("/api/artifacts/deployed")).json())[
+            "deployments"
+        ]
         assert [r["slug"] for r in rows] == [art.slug]
         assert rows[0]["url"] == f"{SERVE_URL_PREFIX}/{art.slug}/"
     finally:
@@ -440,7 +427,9 @@ async def test_deployed_listing_carries_the_url(patched_native) -> None:
 
 
 @pytest.mark.asyncio
-async def test_deploy_refuses_a_non_deployable_kind_and_a_missing_artifact(patched_native) -> None:
+async def test_deploy_refuses_a_non_deployable_kind_and_a_missing_artifact(
+    patched_native,
+) -> None:
     prov = patched_native
     doc = prov.create(name="Notes", content="# hi", kind="markdown")
     client = await _client(prov)
@@ -463,8 +452,15 @@ async def test_restricted_session_may_not_deploy_or_tear_down(patched_native) ->
     client = TestClient(TestServer(app))
     await client.start_server()
     try:
-        with patch("gideon.artifacts.handlers._is_restricted_session", return_value=True):
-            assert (await client.post(f"/api/artifacts/{art.slug}/deploy")).status == 403
-            assert (await client.delete(f"/api/artifacts/{art.slug}/deploy")).status == 403
+        with patch(
+            "gideon.workspace.artifacts.handlers._is_restricted_session",
+            return_value=True,
+        ):
+            assert (
+                await client.post(f"/api/artifacts/{art.slug}/deploy")
+            ).status == 403
+            assert (
+                await client.delete(f"/api/artifacts/{art.slug}/deploy")
+            ).status == 403
     finally:
         await client.close()

@@ -23,7 +23,6 @@ from pathlib import Path
 
 import pytest
 
-# Endpoints that must respond identically on both runtimes
 _REQUIRED_ENDPOINTS = [
     "/api/system",
     "/api/auth-status",
@@ -34,9 +33,9 @@ _REQUIRED_ENDPOINTS = [
     "/api/agents",
 ]
 
-_PORT = 17777  # test port (avoid colliding with production 10000)
+_PORT = 17777
 _BASE_URL = f"http://127.0.0.1:{_PORT}"
-_STARTUP_TIMEOUT = 30  # seconds
+_STARTUP_TIMEOUT = 30
 
 
 def _wait_for_gateway(base_url: str, timeout: float = _STARTUP_TIMEOUT) -> bool:
@@ -49,7 +48,7 @@ def _wait_for_gateway(base_url: str, timeout: float = _STARTUP_TIMEOUT) -> bool:
                 return True
         except urllib.error.HTTPError as e:
             if e.code in (401, 403):
-                return True  # Gateway is up, just requires auth
+                return True
         except Exception:
             pass
         time.sleep(0.5)
@@ -68,9 +67,6 @@ def _fetch(url: str) -> dict:
         return {"_error": f"HTTP {e.code}"}
     except Exception as exc:
         return {"_error": str(exc)}
-
-
-# ── Service path fixture ──────────────────────────────────────────────────────
 
 
 @pytest.fixture(scope="module")
@@ -102,9 +98,6 @@ def service_gateway():
                 proc.kill()
 
 
-# ── Compose path fixture ──────────────────────────────────────────────────────
-
-
 def _container_runtime() -> str | None:
     for rt in ("docker", "finch"):
         if shutil.which(rt):
@@ -119,16 +112,13 @@ def compose_gateway():
     if not runtime:
         pytest.skip("Neither docker nor finch on PATH — Compose path not available")
 
-    repo_root = Path(__file__).resolve().parent.parent
-    compose_dir = repo_root / "deploy" / "compose"
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    compose_dir = repo_root / "infrastructure" / "compose"
     compose_file = compose_dir / "compose.yaml"
     build_overlay = compose_dir / "compose.build.yaml"
     if not compose_file.exists():
-        pytest.skip("deploy/compose/compose.yaml not found")
+        pytest.skip("infrastructure/compose/compose.yaml not found")
 
-    # The stack reads repo-root ../../.env via each service's env_file. Seed it
-    # from .env.example only when absent, so a developer's real .env is never
-    # clobbered by the test run.
     root_env = repo_root / ".env"
     env_example = repo_root / ".env.example"
     seeded_env = False
@@ -136,17 +126,16 @@ def compose_gateway():
         root_env.write_text(env_example.read_text())
         seeded_env = True
 
-    # The stack binds the gateway on a fixed 127.0.0.1:10000.
     base_url = "http://127.0.0.1:10000"
-    compose_args = [runtime, "compose", "-f", str(compose_file), "-f", str(build_overlay)]
+    compose_args = [
+        runtime,
+        "compose",
+        "-f",
+        str(compose_file),
+        "-f",
+        str(build_overlay),
+    ]
 
-    # Build timeout is deliberately below the global pytest-timeout (--timeout=120):
-    # a from-scratch image build (npm+vite, pip with heavy extras) can legitimately
-    # exceed the budget on a loaded runner. If it does, this is an environment
-    # constraint, not a product failure — skip cleanly (the fixture's contract),
-    # the same as a build error. Landing UNDER pytest-timeout guarantees OUR
-    # timeout fires first and tears the compose process down, rather than
-    # pytest-timeout killing setup and reporting 7 ERRORs.
     build_timeout = 90
     try:
         subprocess.run(
@@ -161,11 +150,12 @@ def compose_gateway():
             root_env.unlink(missing_ok=True)
         pytest.skip(f"compose up failed: {exc.stderr.decode()[:200]}")
     except subprocess.TimeoutExpired:
-        # Best-effort teardown of anything the interrupted build/up left behind.
         subprocess.run(compose_args + ["down"], capture_output=True, timeout=60)
         if seeded_env:
             root_env.unlink(missing_ok=True)
-        pytest.skip(f"compose up exceeded {build_timeout}s to build — skipping Compose path")
+        pytest.skip(
+            f"compose up exceeded {build_timeout}s to build — skipping Compose path"
+        )
 
     try:
         if not _wait_for_gateway(base_url, timeout=60):
@@ -175,9 +165,6 @@ def compose_gateway():
         subprocess.run(compose_args + ["down"], capture_output=True, timeout=60)
         if seeded_env:
             root_env.unlink(missing_ok=True)
-
-
-# ── Tests ─────────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize("endpoint", _REQUIRED_ENDPOINTS)

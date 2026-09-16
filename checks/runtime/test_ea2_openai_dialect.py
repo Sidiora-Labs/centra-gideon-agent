@@ -37,17 +37,11 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.inbound import auth
-from gideon.inbound import openai_dialect as dialect
+from gideon.integrations.inbound import auth
+from gideon.integrations.inbound import openai_dialect as dialect
 
 _SURFACES = ("OPENAI", "MCP", "A2A", "CAPTURE", "BRIDGE")
 
-#: Names of BINDABLE providers/vendors — the ones a dialect is tempted to write when a
-#: cosmetic alias needs mapping. Deliberately NOT including this surface's own name
-#: (``openai``): `/v1` is a protocol many vendors implement, and
-#: `docs/architecture/provider-boundary.md` blesses `/v1/audio` shapes in core by name.
-#: The tenet is "no vendor-specific LOGIC", so the rail bans the names that could only
-#: appear as routing decisions, not the wire format's identity.
 BANNED_PROVIDER_NAMES = (
     "piper",
     "kokoro",
@@ -94,20 +88,23 @@ def test_isolated_home_binds(tmp_path):
     Without this, a suite that silently kept pointing at the real ``~/.gideon``
     would still pass everything below — and would be writing to it.
     """
-    from gideon.config.loader import config_dir
+    from gideon.core.config.loader import config_dir
 
     assert Path(config_dir()) == tmp_path
-    assert str(Path.home()) not in str(config_dir()) or str(tmp_path).startswith(str(Path.home()))
-
-
-# ── Fixtures for a configured surface ─────────────────────────────────────────
+    assert str(Path.home()) not in str(config_dir()) or str(tmp_path).startswith(
+        str(Path.home())
+    )
 
 
 def _enable(monkeypatch, *, agents=("researcher", "writer"), enabled=True, master=True):
     """Point ``AppConfig.load()`` at an external-access config without writing files."""
-    from gideon.config.external_access import ExternalAccessConfig
-    from gideon.config.external_access import ExternalAccessSurfaceConfig as Surface
-    from gideon.config.loader import AgentConfig, AppConfig
+    from gideon.core.config.external_access import (
+        ExternalAccessConfig,
+    )
+    from gideon.core.config.external_access import (
+        ExternalAccessSurfaceConfig as Surface,
+    )
+    from gideon.core.config.loader import AgentConfig, AppConfig
 
     cfg = AppConfig()
     cfg.external_access = ExternalAccessConfig(
@@ -135,7 +132,9 @@ class _FakeSession:
         self.task = None
         self.event = asyncio.Event()
 
-    def append(self, role: str, content: str, cls: str = "", ts: str = "", **kw) -> None:
+    def append(
+        self, role: str, content: str, cls: str = "", ts: str = "", **kw
+    ) -> None:
         msg = {"role": role, "content": content, "cls": cls, "ts": ts}
         self.messages.append(msg)
         self._pending.append(msg)
@@ -166,7 +165,11 @@ async def _client(monkeypatch, *, script=None) -> tuple[TestClient, _FakeState]:
     are the ones ``chat_runner`` really appends (``("chunk", text, "chunk")`` and the
     terminal ``("done", "", "done")``).
     """
-    rows = script if script is not None else [("chunk", "hello ", "chunk"), ("done", "", "done")]
+    rows = (
+        script
+        if script is not None
+        else [("chunk", "hello ", "chunk"), ("done", "", "done")]
+    )
 
     async def _fake_run(state, session, message):
         for role, content, cls in rows:
@@ -176,8 +179,6 @@ async def _client(monkeypatch, *, script=None) -> tuple[TestClient, _FakeState]:
     state = _FakeState()
     app = web.Application()
     app["state"] = state
-    # Injected, exactly as `dashboard/server.py` does it — so these tests exercise the
-    # real wiring contract rather than a patched-out import.
     dialect.register_routes(app, turn_runner=_fake_run)
     client = TestClient(TestServer(app))
     await client.start_server()
@@ -194,9 +195,6 @@ def _body(model="researcher", **extra) -> str:
     return json.dumps(payload)
 
 
-# ── 1. The doorway answers, in both model spellings ───────────────────────────
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize("model", ["researcher", "gideon/researcher"])
 async def test_both_model_spellings_reach_the_agent(monkeypatch, model):
@@ -206,7 +204,9 @@ async def test_both_model_spellings_reach_the_agent(monkeypatch, model):
     token = _token()
     client, state = await _client(monkeypatch)
     try:
-        resp = await client.post(dialect.ROUTE_CHAT, data=_body(model), headers=_auth(token))
+        resp = await client.post(
+            dialect.ROUTE_CHAT, data=_body(model), headers=_auth(token)
+        )
         assert resp.status == 200, await resp.text()
         payload = await resp.json()
     finally:
@@ -215,7 +215,6 @@ async def test_both_model_spellings_reach_the_agent(monkeypatch, model):
     assert payload["choices"][0]["message"]["content"] == "hello"
     assert payload["choices"][0]["finish_reason"] == "stop"
     assert "usage" in payload
-    # The agent actually reached the session, rather than the default being assumed.
     assert next(iter(state._sessions.values())).agent == "researcher"
 
 
@@ -242,9 +241,6 @@ async def test_non_stream_returns_exactly_one_completion(monkeypatch):
     assert payload["choices"][0]["message"]["content"] == "one two"
 
 
-# ── 2. The unknown-agent 404, in the dialect's error shape ────────────────────
-
-
 @pytest.mark.asyncio
 async def test_unknown_agent_is_404_in_the_wire_error_shape(monkeypatch):
     """The clause a silent fallback would break.
@@ -267,10 +263,11 @@ async def test_unknown_agent_is_404_in_the_wire_error_shape(monkeypatch):
         await client.close()
     assert resp.status == 404
     error = payload["error"]
-    # The wire shape: an object with these three keys, NOT a bare string.
     assert isinstance(error, dict)
     assert set(("message", "type", "code")) <= set(error)
-    assert error["code"] == "unknown_agent", "the stable code must survive the wire envelope"
+    assert (
+        error["code"] == "unknown_agent"
+    ), "the stable code must survive the wire envelope"
     assert error["type"] == "invalid_request_error"
     assert "no-such-agent" in error["message"]
 
@@ -278,7 +275,7 @@ async def test_unknown_agent_is_404_in_the_wire_error_shape(monkeypatch):
 @pytest.mark.asyncio
 async def test_binding_pin_beats_the_model_field(monkeypatch):
     """§1.2: a request argument can never override a binding — 403, not a swap."""
-    from gideon.inbound.clients import InboundClient
+    from gideon.integrations.inbound.clients import InboundClient
 
     cfg = _enable(monkeypatch, agents=("researcher", "writer"))
     pinned = InboundClient(client_id="c1", agent="researcher", surfaces=["openai"])
@@ -286,12 +283,8 @@ async def test_binding_pin_beats_the_model_field(monkeypatch):
     agent, refusal = dialect.resolve_agent("writer", pinned, cfg)
     assert agent == ""
     assert refusal is not None and refusal.status == 403
-    # And the pin is honoured when the client names nothing at all.
     agent, refusal = dialect.resolve_agent("", pinned, cfg)
     assert (agent, refusal) == ("researcher", None)
-
-
-# ── 3. SSE translation ────────────────────────────────────────────────────────
 
 
 def _sse_frames(raw: str) -> tuple[list[dict], bool]:
@@ -323,7 +316,9 @@ async def test_sse_chunks_then_usage_then_done(monkeypatch):
         script=[("chunk", "a", "chunk"), ("chunk", "b", "chunk"), ("done", "", "done")],
     )
     try:
-        resp = await client.post(dialect.ROUTE_CHAT, data=_body(stream=True), headers=_auth(token))
+        resp = await client.post(
+            dialect.ROUTE_CHAT, data=_body(stream=True), headers=_auth(token)
+        )
         assert resp.status == 200
         assert resp.content_type == "text/event-stream"
         raw = await resp.text()
@@ -364,11 +359,15 @@ async def test_tool_activity_never_becomes_tool_calls_deltas(monkeypatch):
         ],
     )
     try:
-        resp = await client.post(dialect.ROUTE_CHAT, data=_body(stream=True), headers=_auth(token))
+        resp = await client.post(
+            dialect.ROUTE_CHAT, data=_body(stream=True), headers=_auth(token)
+        )
         raw = await resp.text()
     finally:
         await client.close()
-    assert "tool_calls" not in raw, "tool calls execute server-side and never reach the wire"
+    assert (
+        "tool_calls" not in raw
+    ), "tool calls execute server-side and never reach the wire"
     frames, _ = _sse_frames(raw)
     assert all("tool_calls" not in f["choices"][0]["delta"] for f in frames)
     text = "".join(f["choices"][0]["delta"].get("content", "") for f in frames)
@@ -400,9 +399,6 @@ async def test_needs_approval_returns_the_dashboard_pointer_and_stops(monkeypatc
     assert payload["choices"][0]["finish_reason"] == "stop"
 
 
-# ── 4. Session mapping ────────────────────────────────────────────────────────
-
-
 def test_session_key_shape_and_hashing():
     """``inbound:<client_id>:<sha8>`` — and the caller's tag is HASHED.
 
@@ -414,7 +410,9 @@ def test_session_key_shape_and_hashing():
     assert key.startswith("inbound:c1:")
     assert len(key.split(":")[2]) == 8
     assert dialect.session_key_for("c1", "alice") == key, "same tag, same session"
-    assert dialect.session_key_for("c1", "bob") != key, "different tag, different session"
+    assert (
+        dialect.session_key_for("c1", "bob") != key
+    ), "different tag, different session"
     nasty = dialect.session_key_for("c1", "../../etc/passwd")
     assert "/" not in nasty and ".." not in nasty
 
@@ -438,21 +436,23 @@ def test_unattended_classification_covers_this_key():
     ``profile_for_session`` that returned the headless profile for EVERYTHING would
     satisfy the first assertion alone.
     """
-    from gideon.constants import dashboard_session_key
-    from gideon.guardrails.policy import is_unattended_session, profile_for_session
+    from gideon.core.constants import dashboard_session_key
+    from gideon.security.guardrails.policy import (
+        is_unattended_session,
+        profile_for_session,
+    )
 
     key = dialect.session_key_for("c1", "alice")
     assert is_unattended_session(key)
     assert profile_for_session(key).name == "headless"
     assert profile_for_session("mychat").name == "interactive", "vacuity floor"
-    # The wrapped provider form too — the posture must not depend on who is asking.
     assert is_unattended_session(dashboard_session_key(key))
     assert profile_for_session(dashboard_session_key(key)).name == "headless"
 
 
 def test_session_tag_ignored_unless_the_client_opted_in(monkeypatch):
     """T2-A2: `user` and the header are honoured only behind ``persistent_sessions``."""
-    from gideon.inbound.clients import InboundClient
+    from gideon.integrations.inbound.clients import InboundClient
 
     class _Req:
         headers = {dialect.SESSION_HEADER: "from-header"}
@@ -478,7 +478,7 @@ def test_persistent_sessions_parses_only_a_real_true(tmp_path):
     """
     import json as _json
 
-    from gideon.inbound.clients import clients_path, load_clients
+    from gideon.integrations.inbound.clients import clients_path, load_clients
 
     path = clients_path()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -493,7 +493,9 @@ def test_persistent_sessions_parses_only_a_real_true(tmp_path):
     )
     loaded = load_clients()
     assert loaded["yes"].persistent_sessions is True
-    assert loaded["stringy"].persistent_sessions is False, "a string must not grant continuity"
+    assert (
+        loaded["stringy"].persistent_sessions is False
+    ), "a string must not grant continuity"
     assert loaded["absent"].persistent_sessions is False
 
 
@@ -507,16 +509,11 @@ async def test_stateless_turn_clears_both_axes(monkeypatch, tmp_path):
     and the persistent case is asserted beside it so the test is not just proving that
     everything is always wiped.
     """
-    from gideon.session_map import SessionMap
+    from gideon.engine.session_map import SessionMap
 
     _enable(monkeypatch)
     key = dialect.session_key_for("c1", "default")
 
-    # The LIVE map, handed over the way the gateway does (`state.sessions._session_map`).
-    # Passing the live instance is the point: `SessionMap` answers reads from the
-    # in-memory dict it loaded at construction, so a purge performed on a FRESH
-    # instance removes the row from disk while this one still returns the sid — and the
-    # next write from this instance would restore it.
     live = SessionMap()
     state = _FakeState()
     state.sessions = type("_M", (), {"_session_map": live})()
@@ -529,7 +526,6 @@ async def test_stateless_turn_clears_both_axes(monkeypatch, tmp_path):
     assert session.messages == [], "the transcript the model sees must not carry over"
     assert live.get(key) is None, "the provider resume id must not carry over either"
 
-    # The persistent path leaves both alone — the flag has to mean something.
     live.set(key, "resume-sid-2")
     keeper = _FakeSession(key)
     keeper.append("assistant", "kept", "msg")
@@ -545,7 +541,7 @@ async def test_reset_reaches_the_live_map_not_a_fresh_copy(monkeypatch, tmp_path
     id. Asserted by proving the purge landed on the instance the gateway holds — not
     merely that some copy somewhere lost the row.
     """
-    from gideon.session_map import SessionMap
+    from gideon.engine.session_map import SessionMap
 
     _enable(monkeypatch)
     key = dialect.session_key_for("c1", "default")
@@ -556,12 +552,8 @@ async def test_reset_reaches_the_live_map_not_a_fresh_copy(monkeypatch, tmp_path
 
     dialect._reset_session(_FakeSession(key), key, state)
     assert live.get(key) is None, "the purge must land on the live in-memory map"
-    # And a save from the live instance must not resurrect it.
     live.set("other", "sid-other")
     assert SessionMap().get(key) is None, "a later save must not restore the purged id"
-
-
-# ── 5. GET /v1/models ─────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -584,14 +576,16 @@ async def test_models_lists_agents_and_never_provider_models(monkeypatch):
 
 def test_models_shows_a_pinned_client_only_its_own_agent(monkeypatch):
     """A client cannot discover an agent it would only be 403'd for selecting."""
-    from gideon.inbound.clients import InboundClient
+    from gideon.integrations.inbound.clients import InboundClient
 
     cfg = _enable(monkeypatch, agents=("researcher", "writer"))
-    assert dialect.visible_agents(InboundClient(client_id="c1", agent="writer"), cfg) == ["writer"]
-    assert dialect.visible_agents(InboundClient(client_id="c1"), cfg) == ["researcher", "writer"]
-
-
-# ── 6. Admission ──────────────────────────────────────────────────────────────
+    assert dialect.visible_agents(
+        InboundClient(client_id="c1", agent="writer"), cfg
+    ) == ["writer"]
+    assert dialect.visible_agents(InboundClient(client_id="c1"), cfg) == [
+        "researcher",
+        "writer",
+    ]
 
 
 @pytest.mark.asyncio
@@ -639,11 +633,6 @@ async def test_bad_bearer_is_401_in_the_wire_error_shape(monkeypatch):
     finally:
         await client.close()
     assert resp.status == 401
-    # The GENERIC row, not a surface-specific one: the inbound-MCP section of
-    # `HTTP_ERROR_CODES` records the ruling that admission codes must not name this
-    # surface or say which kill switch fired, because that hands a prober what the
-    # status is chosen to withhold. The SDK classifies on the 401 status, so the
-    # generic code costs a caller nothing.
     assert payload["error"]["code"] == "unauthorized"
     assert isinstance(payload["error"]["message"], str)
 
@@ -653,7 +642,9 @@ async def test_incident_mode_is_503_not_404(monkeypatch):
     """§1.1 layer 4: an incident is temporary, so it must not tell a client "gone"."""
     _enable(monkeypatch)
     token = _token()
-    monkeypatch.setattr("gideon.guardrails.incident.incident_active", lambda: True)
+    monkeypatch.setattr(
+        "gideon.security.guardrails.incident.incident_active", lambda: True
+    )
     client, _ = await _client(monkeypatch)
     try:
         resp = await client.post(dialect.ROUTE_CHAT, data=_body(), headers=_auth(token))
@@ -664,19 +655,16 @@ async def test_incident_mode_is_503_not_404(monkeypatch):
     assert payload["error"]["type"] == "server_error"
 
 
-# ── 6b. The injected turn runner ──────────────────────────────────────────────
-
-
 def test_the_dialect_does_not_import_the_http_surface():
     """The ``core-must-not-import-the-http-surface`` inversion, pinned at the source.
 
-    ``scripts/gate_report.py`` caught this on the first draft: the dialect imported
+    ``tooling/scripts/gate_report.py`` caught this on the first draft: the dialect imported
     ``chat_handlers._run_chat_scoped`` directly, an ``inbound/`` -> ``dashboard/`` edge.
     The gate is shrink-only and would grandfather the edge once a baseline was
     regenerated, so this assertion is the one that stays specific to THIS module.
     """
     source = _dialect_source()
-    assert "gideon.dashboard" not in source, (
+    assert "gideon.interfaces.dashboard" not in source, (
         "the dialect must not import the HTTP surface — the composition root injects "
         "the turn runner (see register_routes)"
     )
@@ -690,7 +678,7 @@ def test_the_composition_root_actually_injects_the_runner():
     every `/v1` chat turn would 503 in production while the whole suite above stayed
     green on its own injected fake.
     """
-    from gideon.dashboard import server as server_module
+    from gideon.interfaces.dashboard import server as server_module
 
     source = Path(server_module.__file__).read_text(encoding="utf-8")
     assert (
@@ -716,9 +704,6 @@ async def test_a_missing_runner_is_an_honest_503(monkeypatch):
         await client.close()
     assert resp.status == 503
     assert payload["error"]["code"] == "service_unavailable"
-
-
-# ── 6c. Wire codes stay statically checkable through the wrapper ──────────────
 
 
 def test_every_dialect_error_code_is_a_registered_literal():
@@ -760,16 +745,12 @@ def test_every_dialect_error_code_is_a_registered_literal():
         "openai_error was called with a computed code at line(s) "
         f"{computed} — pass a literal so the registry check can see it"
     )
-    # Vacuity floor: a matcher that found nothing would satisfy the assertion above.
     assert len(literals) >= 10, f"the matcher found only {len(literals)} call sites"
     unregistered = sorted({c for c in literals if c not in HTTP_ERROR_CODES})
     assert not unregistered, (
         "these dialect wire codes are not in the append-only registry — add them with "
         f"their one-line meaning in this change: {unregistered}"
     )
-
-
-# ── 7. The no-provider-names rail ─────────────────────────────────────────────
 
 
 def _dialect_source() -> str:
@@ -821,19 +802,16 @@ def test_cosmetic_aliases_are_accepted_and_discarded():
     source = _dialect_source()
     for alias in ("tts-1", "whisper-1"):
         for pattern in (f'== "{alias}"', f"== '{alias}'", f'"{alias}":', f"'{alias}':"):
-            assert pattern not in source, f"the dialect branches on the cosmetic alias {alias!r}"
+            assert (
+                pattern not in source
+            ), f"the dialect branches on the cosmetic alias {alias!r}"
 
 
 def test_resolve_voice_is_the_only_voice_seam():
     """§2.2's NEW-9 seam: ONE function for profiles to be re-implemented against."""
     assert callable(dialect.resolve_voice)
     source = _dialect_source()
-    # Every voice resolution in this module goes through the seam, so the count of
-    # direct `active_voice_params` calls is exactly one — the seam's own body.
     assert source.count("active_voice_params(") == 1
-
-
-# ── 8. Audio aliases ──────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -862,12 +840,16 @@ async def test_speech_returns_bound_provider_audio(monkeypatch):
             "speech_voice": "",
         },
     )
-    monkeypatch.setattr("gideon.voice_reply.streaming_voice_reply", _fake_stream)
+    monkeypatch.setattr(
+        "gideon.integrations.voice_reply.streaming_voice_reply", _fake_stream
+    )
     client, _ = await _client(monkeypatch)
     try:
         resp = await client.post(
             dialect.ROUTE_SPEECH,
-            data=json.dumps({"model": "tts-1", "input": "hello there", "voice": "ignored"}),
+            data=json.dumps(
+                {"model": "tts-1", "input": "hello there", "voice": "ignored"}
+            ),
             headers=_auth(token),
         )
         audio = await resp.read()
@@ -876,7 +858,6 @@ async def test_speech_returns_bound_provider_audio(monkeypatch):
     assert resp.status == 200
     assert resp.content_type == "audio/wav"
     assert audio == b"RIFF-fake-wav"
-    # The cosmetic `model` never reached provider selection.
     assert seen["provider"] == "BOUND-PROVIDER-OBJECT"
     assert seen["voice"] == "bound-voice"
 
@@ -912,12 +893,16 @@ async def test_transcriptions_uses_the_bound_stt_and_ignores_the_model(monkeypat
         seen["path"] = path
         return "the transcript"
 
-    monkeypatch.setattr("gideon.transcribe.is_available", lambda: _true())
-    monkeypatch.setattr("gideon.transcribe.transcribe_audio", _fake_transcribe)
+    monkeypatch.setattr("gideon.integrations.transcribe.is_available", lambda: _true())
+    monkeypatch.setattr(
+        "gideon.integrations.transcribe.transcribe_audio", _fake_transcribe
+    )
     client, _ = await _client(monkeypatch)
     try:
         form = {"model": "whisper-1", "file": _upload()}
-        resp = await client.post(dialect.ROUTE_TRANSCRIPTIONS, data=form, headers=_auth(token))
+        resp = await client.post(
+            dialect.ROUTE_TRANSCRIPTIONS, data=form, headers=_auth(token)
+        )
         payload = await resp.json()
     finally:
         await client.close()
@@ -946,7 +931,7 @@ async def test_transcriptions_503_when_no_stt_is_installed(monkeypatch):
     async def _false() -> bool:
         return False
 
-    monkeypatch.setattr("gideon.transcribe.is_available", lambda: _false())
+    monkeypatch.setattr("gideon.integrations.transcribe.is_available", lambda: _false())
     client, _ = await _client(monkeypatch)
     try:
         resp = await client.post(

@@ -1,18 +1,19 @@
 """Tests for AcpSessionProvider — the concurrent-path provider wrapping an AcpSession.
 Driven against fakes (no real process); asserts it exposes the AgentProvider surface and
-translates AcpEvents → neutral events via the shared adapter, identical to the client path."""
+translates AcpEvents → neutral events via the shared adapter, identical to the client path.
+"""
 
 from __future__ import annotations
 
 import pytest
 
-from gideon.acp.types import (
+from gideon.integrations.acp.types import (
     EVENT_COMPLETE,
     EVENT_TEXT_CHUNK,
     AcpEvent,
     AcpPromptStats,
 )
-from gideon.llm.acp_session_provider import AcpSessionProvider
+from gideon.integrations.llm.acp_session_provider import AcpSessionProvider
 
 
 class _FakeSession:
@@ -57,10 +58,10 @@ class _FakeConn:
     def __init__(self, alive=True):
         self._alive = alive
         self._transport = type("T", (), {"pid": 4242})()
-        self.agent_capabilities = {"loadSession": True, "promptCapabilities": {"image": True}}
-        # This fake stands in for an agent that DID advertise the command extension —
-        # ``stream_command`` is now gated on it (`G4`), so a fake that stayed silent would
-        # be testing the refusal path, not the translation path.
+        self.agent_capabilities = {
+            "loadSession": True,
+            "promptCapabilities": {"image": True},
+        }
         self.supports_native_commands = True
         self.closed_sessions: list = []
 
@@ -74,7 +75,9 @@ class _FakeConn:
 def _mk():
     conn = _FakeConn()
     sess = _FakeSession()
-    p = AcpSessionProvider(conn, sess, runtime_id="acp:demo-cli", model="opus", agent_name="Helper")
+    p = AcpSessionProvider(
+        conn, sess, runtime_id="acp:demo-cli", model="opus", agent_name="Helper"
+    )
     return p, conn, sess
 
 
@@ -84,7 +87,6 @@ async def test_stream_translates_events_and_stamps_telemetry():
     events = [e async for e in p.stream("hi")]
     assert [e.kind for e in events] == [EVENT_TEXT_CHUNK, EVENT_COMPLETE]
     assert events[0].text == "hello"
-    # telemetry stamped on the terminal event from the session's stats
     assert events[-1].event_count == 3
     assert events[-1].tool_call_count == 2
 
@@ -104,7 +106,6 @@ def test_identity_surface():
     assert p.agent_model == "opus"
     assert p.agent_name == "Helper"
     assert p.pid == 4242
-    # declared_capabilities surfaces the connection's handshake caps by name
     assert "loadSession" in p.declared_capabilities
     assert "promptCapabilities" in p.declared_capabilities
 
@@ -129,7 +130,7 @@ def test_context_usage_and_liveness():
 async def test_shutdown_closes_only_this_session():
     p, conn, sess = _mk()
     await p.shutdown()
-    assert conn.closed_sessions == ["S1"]  # closes THIS session, not the shared connection
+    assert conn.closed_sessions == ["S1"]
 
 
 @pytest.mark.asyncio
@@ -143,19 +144,13 @@ async def test_cancel_no_active_turn():
 async def test_cancel_acked_fire_and_forget():
     p, _conn, sess = _mk()
     sess._active = True
-    assert await p.cancel() == "acked"  # wait_ack_timeout=0 → optimistic acked
+    assert await p.cancel() == "acked"
     assert sess.cancelled is True
 
 
-# ── double-gate + opener ─────────────────────────────────────────────────────
-
-
 def test_gate_off_when_flag_off_even_for_concurrent_dialect(monkeypatch):
-    # the default dialect IS concurrent-capable, but with the runtime flag OFF the gate
-    # is OFF (the one-session client path stays authoritative). Monkeypatch the flag off
-    # so this doesn't depend on the machine's real config.json.
-    import gideon.config as config_mod
-    from gideon.llm.acp_session_provider import concurrent_sessions_enabled
+    import gideon.core.config as config_mod
+    from gideon.integrations.llm.acp_session_provider import concurrent_sessions_enabled
 
     class _Cfg:
         agent = type("A", (), {"acp_concurrent_sessions": False})()
@@ -165,10 +160,9 @@ def test_gate_off_when_flag_off_even_for_concurrent_dialect(monkeypatch):
 
 
 def test_gate_off_for_non_concurrent_dialect(monkeypatch):
-    import gideon.config as config_mod
-    from gideon.llm.acp_session_provider import concurrent_sessions_enabled
+    import gideon.core.config as config_mod
+    from gideon.integrations.llm.acp_session_provider import concurrent_sessions_enabled
 
-    # claude-code/codex adapters aren't proven-concurrent → OFF even with the flag ON.
     class _Cfg:
         agent = type("A", (), {"acp_concurrent_sessions": True})()
 
@@ -177,24 +171,20 @@ def test_gate_off_for_non_concurrent_dialect(monkeypatch):
 
 
 def test_gate_on_only_when_both_true(monkeypatch):
-    import gideon.config as config_mod
-    from gideon.llm.acp_session_provider import concurrent_sessions_enabled
+    import gideon.core.config as config_mod
+    from gideon.integrations.llm.acp_session_provider import concurrent_sessions_enabled
 
     class _Cfg:
         agent = type("A", (), {"acp_concurrent_sessions": True})()
 
-    # The gate reads config via `from gideon.config import AppConfig` at call time,
-    # so patch the class's load on the source module.
     monkeypatch.setattr(config_mod.AppConfig, "load", staticmethod(lambda: _Cfg()))
-    assert concurrent_sessions_enabled("default") is True  # capable dialect + flag on
-    assert concurrent_sessions_enabled("claude-code") is False  # flag on but dialect not capable
+    assert concurrent_sessions_enabled("default") is True
+    assert concurrent_sessions_enabled("claude-code") is False
 
 
 @pytest.mark.asyncio
 async def test_set_model_is_session_scoped():
-    # Live set_* must build a SESSION-SCOPED dialect request (carries this session's id)
-    # and send it via the connection — so it affects only THIS co-tenant session.
-    from gideon.acp.dialect import DefaultDialect
+    from gideon.integrations.acp.dialect import DefaultDialect
 
     sent: list = []
 
@@ -234,15 +224,19 @@ async def test_open_session_provider_opens_and_wraps():
         def is_process_alive(self):
             return True
 
-    from gideon.llm.acp_session_provider import open_acp_session_provider
+    from gideon.integrations.llm.acp_session_provider import open_acp_session_provider
 
     p = await open_acp_session_provider(
-        _Conn(), runtime_id="acp:demo-cli", cwd="/tmp/ws", model="opus", agent_name="Helper"
+        _Conn(),
+        runtime_id="acp:demo-cli",
+        cwd="/tmp/ws",
+        model="opus",
+        agent_name="Helper",
     )
     assert p.session_id == "NEW"
     assert opened["params"]["cwd"] == "/tmp/ws"
     # AAP-4: the concurrent path carries ``gideon-core`` by default. This
     # assertion used to demand ``mcpServers == []`` — it was encoding gap 1, the
     # unwritten ``mcp_servers`` key that left the pooled path as tool-less as the
-    # one-session path. Full coverage: tests/test_acp_mcp_reachability.py.
+    # one-session path. Full coverage: checks/runtime/test_acp_mcp_reachability.py.
     assert [s["name"] for s in opened["params"]["mcpServers"]] == ["gideon-core"]

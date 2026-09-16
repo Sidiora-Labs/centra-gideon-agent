@@ -1,9 +1,9 @@
-# Posts validate-listings.yml's verdict onto the pull request.
+                                                              
 #
-# `workflow_run` runs from the BASE repository, so it has a writable token even when
-# the PR came from a fork. It never checks out the PR's code and never runs anything
-# from it — it only downloads the artifact the validation job produced. (Same shape as
-# Gideon core's pr-feedback.yml.)
+                                                                                    
+                                                                                    
+                                                                                      
+                                 
 name: comment-listing-verdict
 
 on:

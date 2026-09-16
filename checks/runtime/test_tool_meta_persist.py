@@ -9,8 +9,8 @@ round-trip (_redact_meta) with secrets stripped.
 
 from __future__ import annotations
 
-from gideon.dashboard.chat_persistence import _redact_meta
-from gideon.dashboard.chat_utils import tool_input_to_str
+from gideon.interfaces.dashboard.chat_persistence import _redact_meta
+from gideon.interfaces.dashboard.chat_utils import tool_input_to_str
 
 
 def test_tool_input_coerced_for_meta_dict_and_str():
@@ -29,14 +29,20 @@ def test_tool_result_loop_sets_output_on_matching_message():
         {
             "role": "tool",
             "content": "🔧 read",
-            "meta": {"tool_call_id": "tc_1", "purpose": "read a file", "input": "/etc/hosts"},
+            "meta": {
+                "tool_call_id": "tc_1",
+                "purpose": "read a file",
+                "input": "/etc/hosts",
+            },
         },
     ]
     tool_call_id = "tc_1"
     _out = "file contents here"
-    # The exact loop body from chat_runner.py:
     for m in reversed(messages):
-        if m.get("role") == "tool" and m.get("meta", {}).get("tool_call_id") == tool_call_id:
+        if (
+            m.get("role") == "tool"
+            and m.get("meta", {}).get("tool_call_id") == tool_call_id
+        ):
             _meta = m.setdefault("meta", {})
             _meta["done"] = True
             _meta["output"] = _out
@@ -45,7 +51,7 @@ def test_tool_result_loop_sets_output_on_matching_message():
     meta = messages[-1]["meta"]
     assert meta["done"] is True
     assert meta["output"] == "file contents here"
-    assert meta["input"] == "/etc/hosts"  # input from the tool_call append survives
+    assert meta["input"] == "/etc/hosts"
 
 
 def test_meta_input_output_survive_redaction_roundtrip():
@@ -59,10 +65,9 @@ def test_meta_input_output_survive_redaction_roundtrip():
         "done": True,
     }
     red = _redact_meta(meta)
-    assert set(red.keys()) == set(meta.keys())  # no keys dropped
+    assert set(red.keys()) == set(meta.keys())
     assert red["done"] is True
     assert red["tool_call_id"] == "tc_1"
-    # String values pass through redaction (identity for safe strings here).
     assert red["input"] == "curl https://api.example.com"
     assert red["output"] == "ok"
 
@@ -75,5 +80,4 @@ def test_secret_in_tool_output_is_redacted_on_persist():
         "output": "export AWS_SECRET_ACCESS_KEY=AKIAIOSFODNN7EXAMPLE0000000000000000000X",
     }
     red = _redact_meta(meta)
-    # The raw secret value must not survive verbatim.
     assert "AKIAIOSFODNN7EXAMPLE0000000000000000000X" not in red["output"]

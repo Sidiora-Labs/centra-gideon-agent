@@ -1,60 +1,18 @@
-# Build context is the repo root:
-#   docker build -f deploy/docker/Dockerfile.web .
-
-# ── Stage 1: build SPA ───────────────────────────────────────────────────────
 FROM mirror.gcr.io/library/node:20-alpine AS builder
-
 WORKDIR /app
-
-# npm-workspaces install: the ONLY lockfile lives at the repo root (web/ and
-# desktop/ carry none — npm/cli#4828), so `npm ci` must run from the root with
-# the target workspace's package.json present. The `desktop` workspace is NOT
-# copied — it's excluded by .dockerignore and `--workspace=web` doesn't need it
-# (verified: npm ci resolves web's tree from the root lock alone). Manifests
-# first for layer caching.
 COPY package.json package-lock.json ./
-COPY web/package.json web/
-
-RUN npm ci --workspace=web --prefer-offline
-
-# Copy full web source and build
-COPY web/ web/
-
-# tsc + vite on this SPA need more than node's default (~2 GiB) old-space heap;
-# without this the in-container build dies with "JavaScript heap out of memory"
-# even when the container itself has plenty of RAM.
-RUN NODE_OPTIONS=--max-old-space-size=4096 npm run build --workspace=web
-
-# ── Stage 2: runtime ─────────────────────────────────────────────────────────
+COPY apps/console/package.json apps/console/
+RUN npm ci --workspace=apps/console --prefer-offline
+COPY apps/console/ apps/console/
+RUN NODE_OPTIONS=--max-old-space-size=4096 npm run build --workspace=apps/console
 FROM mirror.gcr.io/library/nginx:1.27-alpine AS runtime
-
-# Copy built SPA (vite outputs to web/dist under the workspace root)
-COPY --from=builder /app/web/dist /usr/share/nginx/html
-
-# Mark this as a container install (plan 34 T3.1). The gateway's
-# detect_install_kind() reads GIDEON_INSTALL_KIND and only the BACKEND
-# container runs that Python process — but set it here too so every container in
-# the deployment self-identifies consistently (e.g. `docker exec … env`).
+COPY --from=builder /app/apps/console/dist /usr/share/nginx/html
 ENV GIDEON_INSTALL_KIND=container
-
-# Install our proxy-aware config as a TEMPLATE. The official nginx image's
-# entrypoint (20-envsubst-on-templates.sh) renders /etc/nginx/templates/*.template
-# into /etc/nginx/conf.d/ at container start, substituting ${NGINX_LOCAL_RESOLVERS}
-# (auto-detected from the container's /etc/resolv.conf by 15-local-resolvers.envsh).
-# This lets nginx re-resolve the gateway hostname at runtime so a recreated
-# gateway container's new IP is picked up without a proxy restart.
-# Remove the stock default.conf so only our rendered config is served.
-COPY deploy/docker/nginx.conf.template /etc/nginx/templates/default.conf.template
+COPY infrastructure/docker/nginx.conf.template /etc/nginx/templates/default.conf.template
 RUN rm -f /etc/nginx/conf.d/default.conf /etc/nginx/conf.d/default.conf.bak
-
-# openssl for the self-signed cert; cert-generation hook runs before envsubst.
 RUN apk add --no-cache openssl
-COPY deploy/docker/10-self-signed-cert.sh /docker-entrypoint.d/10-self-signed-cert.sh
+COPY infrastructure/docker/10-self-signed-cert.sh /docker-entrypoint.d/10-self-signed-cert.sh
 RUN chmod +x /docker-entrypoint.d/10-self-signed-cert.sh
-
 EXPOSE 80 443
-
-# Health check hits the plain-HTTP /healthz so it never has to trust the
-# self-signed cert.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD wget -qO- http://127.0.0.1:80/healthz > /dev/null || exit 1

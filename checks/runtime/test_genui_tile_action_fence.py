@@ -22,9 +22,9 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.artifacts import registry as artifact_registry
-from gideon.artifacts.native import NativeArtifactProvider
-from gideon.dashboard import tile_actions, tile_refresh, views_store
+from gideon.interfaces.dashboard import tile_actions, tile_refresh, views_store
+from gideon.workspace.artifacts import registry as artifact_registry
+from gideon.workspace.artifacts.native import NativeArtifactProvider
 
 SKELETON = "<div>items: {{nodes.health.output.item_count}}</div>"
 HEALTH_NODE = {"id": "health", "provider": "knowledge-health", "config": {}}
@@ -41,10 +41,14 @@ def anyio_backend() -> str:
 def home(tmp_path, monkeypatch):
     """An isolated home AND an artifact provider rooted in it (the AS-2 fixture's reasoning:
     the registry caches a provider whose root was frozen at construction)."""
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
-    monkeypatch.setattr("gideon.dashboard.views_store.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "gideon.interfaces.dashboard.views_store.config_dir", lambda: tmp_path
+    )
     previous = artifact_registry.get_provider()
-    artifact_registry.register_provider(NativeArtifactProvider(root=tmp_path / "artifacts"))
+    artifact_registry.register_provider(
+        NativeArtifactProvider(root=tmp_path / "artifacts")
+    )
     yield tmp_path
     if previous is not None:
         artifact_registry.register_provider(previous)
@@ -54,7 +58,9 @@ def _live_tile(data=None) -> str:
     """Pin a ttl tile whose bound workflow is one allowlisted read-only data node."""
     store = artifact_registry.get_provider()
     store.create(name="Skeleton", content=SKELETON, kind="widget", slug="tile-skeleton")
-    store.create(name="Sales", content="<div>first paint</div>", kind="widget", slug="sales")
+    store.create(
+        name="Sales", content="<div>first paint</div>", kind="widget", slug="sales"
+    )
     views_store.add_tile("overview", "artifact:sales")
     views_store.set_tile_refresh(
         "overview",
@@ -73,13 +79,12 @@ def _tile():
     return views_store.find_tile("overview", "artifact:sales")
 
 
-# ── the frozen set is the SAVED binding ──────────────────────────────────────
-
-
 class TestTheFrozenSet:
     def test_it_is_derived_from_the_tiles_own_bound_nodes(self, home) -> None:
         _live_tile()
-        assert tile_actions.frozen_capabilities(_tile()) == {"providers": ["knowledge-health"]}
+        assert tile_actions.frozen_capabilities(_tile()) == {
+            "providers": ["knowledge-health"]
+        }
 
     def test_an_unbound_tile_freezes_nothing(self, home) -> None:
         """`EMPTY_MEANS = "deny"`: a tile with no bound workflow permits no action at all,
@@ -109,7 +114,6 @@ class TestTheNegativeAndItsControl:
         verdict = tile_actions.check(_tile(), "bash")
         assert verdict["ok"] is False
         assert verdict["code"] == tile_actions.CODE_REFUSED
-        # The row must say WHICH action was outside the set, not merely that one was.
         assert any(v[1] == "bash" for v in verdict["violations"])
         assert "bash" in verdict["message"]
 
@@ -125,18 +129,31 @@ class TestTheNegativeAndItsControl:
         assert tile_actions.check(_tile(), "refresh")["ok"] is True
 
     @pytest.mark.parametrize(
-        "action", ["bash", "run-prompt", "invoke-agent", "run-workflow", "send-message", "notify"]
+        "action",
+        [
+            "bash",
+            "run-prompt",
+            "invoke-agent",
+            "run-workflow",
+            "send-message",
+            "notify",
+        ],
     )
-    def test_every_write_or_model_capable_provider_is_refused(self, home, action) -> None:
+    def test_every_write_or_model_capable_provider_is_refused(
+        self, home, action
+    ) -> None:
         """Enumerated rather than sampled: `notify`/`send-message` are READ-ONLY to the
         trigger fence (they are in `READ_ONLY_PROVIDERS`), so they would pass a fence that
         reused the trigger path's read-only default. A tile that never declared them must
-        still be refused — which is why that default is deliberately not applied here."""
+        still be refused — which is why that default is deliberately not applied here.
+        """
         _live_tile()
         verdict = tile_actions.check(_tile(), action)
         assert verdict["ok"] is False, f"{action} is outside this tile's binding"
 
-    def test_an_allowlisted_provider_the_tile_never_DECLARED_is_still_refused(self, home) -> None:
+    def test_an_allowlisted_provider_the_tile_never_DECLARED_is_still_refused(
+        self, home
+    ) -> None:
         """🔴 The case ONLY the frozen set catches, and it was MISSING until a falsification run
         found it. With `unfenced_actions` deleted from `check`, all sixteen other tests in this
         file still passed: every action they name (`bash`, `run-prompt`, `notify`, …) is refused
@@ -155,7 +172,6 @@ class TestTheNegativeAndItsControl:
             "if this provider ever leaves the allowlist this test stops measuring the frozen "
             "set and starts measuring the allowlist again"
         )
-        # The CONTROL, on the same tile: the provider it DID declare is permitted.
         assert tile_actions.check(_tile(), "knowledge-health")["ok"] is True
 
     def test_a_provider_outside_the_tile_allowlist_is_refused_even_when_declared(
@@ -172,15 +188,21 @@ class TestTheNegativeAndItsControl:
 
 
 class TestTheRefire:
-    async def test_a_permitted_action_really_re_fires_the_bound_workflow(self, home) -> None:
+    async def test_a_permitted_action_really_re_fires_the_bound_workflow(
+        self, home
+    ) -> None:
         """The feature half: the fence passing is worth nothing if nothing runs. Asserted on
         the tile's BODY changing — the re-fire re-renders the skeleton — not on the return
         value alone."""
         ref = _live_tile()
-        result = await tile_actions.refire("overview", ref, action="health", payload={"a": 1})
+        result = await tile_actions.refire(
+            "overview", ref, action="health", payload={"a": 1}
+        )
         assert result["ok"] is True and result["outcome"] == "tile-refired"
         body = artifact_registry.get_provider().get("sales").content
-        assert "first paint" not in body, "the bound workflow must have re-rendered the tile"
+        assert (
+            "first paint" not in body
+        ), "the bound workflow must have re-rendered the tile"
         assert "items:" in body and "{{" not in body
 
     async def test_a_refused_action_dispatches_NOTHING(self, home) -> None:
@@ -194,5 +216,7 @@ class TestTheRefire:
         assert artifact_registry.get_provider().get("sales").content == before
 
     async def test_a_missing_tile_is_reported_not_guessed(self, home) -> None:
-        result = await tile_actions.refire("overview", "artifact:ghost", action="refresh")
+        result = await tile_actions.refire(
+            "overview", "artifact:ghost", action="refresh"
+        )
         assert result["ok"] is False and result["code"] == tile_actions.CODE_NOT_FOUND

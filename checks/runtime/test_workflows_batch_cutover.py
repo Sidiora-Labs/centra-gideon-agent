@@ -21,10 +21,8 @@ import json
 
 import pytest
 
-from gideon.workflows import batch_compile, leases, roster
-from gideon.workflows.batch_compile import Capability, LeafTask
-
-# ── helpers ──────────────────────────────────────────────────────────────────
+from gideon.automation.workflows import batch_compile, leases, roster
+from gideon.automation.workflows.batch_compile import Capability, LeafTask
 
 
 def leaf(name: str, **kw) -> LeafTask:
@@ -39,9 +37,6 @@ def leaf(name: str, **kw) -> LeafTask:
     return LeafTask(**base)  # type: ignore[arg-type]
 
 
-# ── clause 1: the cutover ────────────────────────────────────────────────────
-
-
 def test_two_tasks_ROUTE_THROUGH_the_compiler_rather_than_two_spawns(monkeypatch):
     """The whole point of the atom: N>=2 becomes ONE compiled run, not N spawns.
 
@@ -49,7 +44,7 @@ def test_two_tasks_ROUTE_THROUGH_the_compiler_rather_than_two_spawns(monkeypatch
     `/api/spawn` calls and one compiled run are indistinguishable in the tool's return string but
     completely different in what exists afterwards, so the calls are what the test reads.
     """
-    from gideon import mcp_subagents
+    from gideon.integrations import mcp_subagents
 
     posts: list[tuple[str, dict]] = []
 
@@ -92,7 +87,7 @@ def test_two_tasks_ROUTE_THROUGH_the_compiler_rather_than_two_spawns(monkeypatch
 def test_a_SINGLE_task_stays_a_raw_spawn(monkeypatch):
     """N=1 keeps today's behaviour. A run record plus project resolution on "go check X" is
     ceremony the personal feel does not survive — `COMPILE_THRESHOLD` owns that line."""
-    from gideon import mcp_subagents
+    from gideon.integrations import mcp_subagents
 
     posts: list[str] = []
 
@@ -110,7 +105,7 @@ def test_a_SINGLE_task_stays_a_raw_spawn(monkeypatch):
 def test_the_agents_LENGTH_CHECK_survives_the_cutover(monkeypatch):
     """A pre-existing guarantee the cutover must not drop: mismatched `agents` is still refused,
     and refused BEFORE anything is persisted."""
-    from gideon import mcp_subagents
+    from gideon.integrations import mcp_subagents
 
     posts: list[str] = []
     monkeypatch.setattr(mcp_subagents, "_post", lambda p, b: posts.append(p) or {})
@@ -127,13 +122,15 @@ def test_an_UNDER_SPECIFIED_batch_is_refused_with_the_findings(monkeypatch):
     """Plain-string tasks carry no contract, so `contract_lint` refuses them — and the refusal
     must SAY what to supply. A batch that failed with "did not compile" and no findings would send
     the caller back to read the compiler."""
-    from gideon import mcp_subagents
+    from gideon.integrations import mcp_subagents
 
     posts: list[str] = []
     monkeypatch.setattr(mcp_subagents, "_post", lambda p, b: posts.append(p) or {})
     monkeypatch.setattr(mcp_subagents, "_resolve_session_key", lambda: "chat:1")
 
-    out = mcp_subagents._call_tool_inner("subagent_run", {"tasks": ["do a thing", "do another"]})
+    out = mcp_subagents._call_tool_inner(
+        "subagent_run", {"tasks": ["do a thing", "do another"]}
+    )
     assert "leaf_contract_missing" in out
     assert "objective" in out and "boundary" in out
     assert posts == [], "an uncompiled batch must not persist anything"
@@ -143,8 +140,8 @@ def test_a_NESTED_batch_is_refused_at_the_seam(monkeypatch):
     """`depth_lint` refuses a batch inside a batch. The DEPTH must come from the env the engine
     wrote, not from a tool argument — a depth the caller supplies is a depth a leaf can
     understate, which would make the refusal advisory."""
-    from gideon import mcp_subagents
-    from gideon.workflows.engine import WF_DEPTH_KEY
+    from gideon.automation.workflows.engine import WF_DEPTH_KEY
+    from gideon.integrations import mcp_subagents
 
     monkeypatch.setenv(WF_DEPTH_KEY, "1")
     posts: list[str] = []
@@ -178,7 +175,7 @@ def test_the_tool_SCHEMA_accepts_a_contract_object():
     """The contract has to be expressible through the tool that needs it. Before the cutover
     `tasks` accepted strings only, so an N>=2 batch could never satisfy `contract_lint` — the
     compiler would have refused every call it was finally wired to."""
-    from gideon.validation import SPAWN_RUN_SCHEMA, validate_tool_args
+    from gideon.assurance.validation import SPAWN_RUN_SCHEMA, validate_tool_args
 
     cleaned = validate_tool_args(
         {"tasks": [{"task": "a", "objective": "b"}, "a plain string"]}, SPAWN_RUN_SCHEMA
@@ -189,13 +186,14 @@ def test_the_tool_SCHEMA_accepts_a_contract_object():
 
 def test_a_LIST_ITEM_of_the_wrong_type_is_still_rejected():
     """Widening `tasks` to accept objects must not widen it to accept anything."""
-    from gideon.validation import SPAWN_RUN_SCHEMA, ValidationError, validate_tool_args
+    from gideon.assurance.validation import (
+        SPAWN_RUN_SCHEMA,
+        ValidationError,
+        validate_tool_args,
+    )
 
     with pytest.raises(ValidationError):
         validate_tool_args({"tasks": [123]}, SPAWN_RUN_SCHEMA)
-
-
-# ── clause 1: restart survival, proven FROM DISK ─────────────────────────────
 
 
 def test_the_widget_rebuilds_FROM_DISK_after_a_restart(tmp_path, monkeypatch):
@@ -215,21 +213,28 @@ def test_the_widget_rebuilds_FROM_DISK_after_a_restart(tmp_path, monkeypatch):
     per-branch retry provable ACROSS a restart rather than only within the process.
     """
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
 
     import asyncio
     import importlib
 
-    from gideon.workflows import defs as defs_mod
-    from gideon.workflows import native_defs
-    from gideon.workflows import store as store_mod
+    from gideon.automation.workflows import defs as defs_mod
+    from gideon.automation.workflows import native_defs
+    from gideon.automation.workflows import store as store_mod
 
     store_mod = importlib.reload(store_mod)
     monkeypatch.setattr(store_mod, "config_dir", lambda: tmp_path, raising=False)
 
-    from gideon.workflows.models import OriginKind, RunOrigin, RunStatus, WorkflowRun
+    from gideon.automation.workflows.models import (
+        OriginKind,
+        RunOrigin,
+        RunStatus,
+        WorkflowRun,
+    )
 
-    result = batch_compile.compile_batch([leaf("cache"), leaf("queue")], run_name="batch-restart")
+    result = batch_compile.compile_batch(
+        [leaf("cache"), leaf("queue")], run_name="batch-restart"
+    )
     assert result.compiled and result.ok
     compiled_ids = [c["id"] for c in result.spec["root"]["children"]]
 
@@ -248,7 +253,6 @@ def test_the_widget_rebuilds_FROM_DISK_after_a_restart(tmp_path, monkeypatch):
     run_id = created.id
     assert run_id
 
-    # The restart: drop every in-process handle to the run AND to the compiled spec.
     del created
     store_mod = importlib.reload(store_mod)
     monkeypatch.setattr(store_mod, "config_dir", lambda: tmp_path, raising=False)
@@ -257,12 +261,15 @@ def test_the_widget_rebuilds_FROM_DISK_after_a_restart(tmp_path, monkeypatch):
     assert reloaded is not None, "the run did not survive the restart"
     assert reloaded.workflow_name == "batch-restart"
 
-    # The SPEC half: fetch the def back by the name the surviving run row points at.
-    recovered = asyncio.run(native_defs.NativeWorkflowDefProvider().get_def(reloaded.workflow_name))
+    recovered = asyncio.run(
+        native_defs.NativeWorkflowDefProvider().get_def(reloaded.workflow_name)
+    )
     assert recovered is not None, "the run row points at a def that is not on disk"
     persisted = recovered.to_dict()
     persisted_ids = [c["id"] for c in persisted["root"]["children"]]
-    assert persisted_ids == compiled_ids, "the persisted branch ids drifted from the compiled ones"
+    assert (
+        persisted_ids == compiled_ids
+    ), "the persisted branch ids drifted from the compiled ones"
     assert len(set(persisted_ids)) == 2
 
 
@@ -274,7 +281,7 @@ def test_a_FAILED_save_never_starts_a_run(monkeypatch):
     error before it POSTs the start. The second is `service.start_run`, which resolves the def via
     `_raw_def` and answers `WF_DEF_NOT_FOUND` — so even a start that somehow raced a missing def is
     refused rather than minting an orphan row."""
-    from gideon import mcp_subagents
+    from gideon.integrations import mcp_subagents
 
     posts: list[str] = []
 
@@ -308,13 +315,11 @@ def test_a_FAILED_save_never_starts_a_run(monkeypatch):
 def test_every_branch_is_INDIVIDUALLY_ADDRESSABLE_for_retry():
     """Per-branch retry rides the EXISTING `run-from` route over the compiled node ids rather than
     a new retry mechanism. The ids must therefore be stable and unique — two leaves sharing an id
-    would make "retry this branch" ambiguous, and the engine would re-run whichever it found."""
+    would make "retry this branch" ambiguous, and the engine would re-run whichever it found.
+    """
     result = batch_compile.compile_batch([leaf("cache"), leaf("cache")])
     ids = [c["id"] for c in result.spec["root"]["children"]]
     assert len(set(ids)) == 2, f"two same-named leaves collided: {ids}"
-
-
-# ── clause 3: the isolated workspace is actually PROVISIONED ─────────────────
 
 
 def test_the_compiled_spec_declares_the_workspace_the_APPLIER_READS():
@@ -326,13 +331,15 @@ def test_the_compiled_spec_declares_the_workspace_the_APPLIER_READS():
     render surface no applier reads — so provisioning silently no-opped for every compiled batch.
     Asserted through `declares_workspace` (the real reader) rather than by eyeballing the key,
     because "the key is present" is the decoration this replaces."""
-    from gideon.workflows import provisioning
+    from gideon.automation.workflows import provisioning
 
     result = batch_compile.compile_batch([leaf("cache"), leaf("queue")])
     assert provisioning.declares_workspace(result.spec) is True
 
     spec, issues = provisioning.resolve_spec(result.spec)
-    assert spec.isolated is True, "a non-isolated mode would leave the branches on the real tree"
+    assert (
+        spec.isolated is True
+    ), "a non-isolated mode would leave the branches on the real tree"
     assert [i.code for i in issues if i.fatal] == [], "a fatal issue REFUSES the run"
 
 
@@ -347,14 +354,16 @@ def test_the_workspace_block_SURVIVES_persistence(tmp_path, monkeypatch):
     import asyncio
 
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
 
-    from gideon.workflows import defs as defs_mod
-    from gideon.workflows import native_defs, provisioning, service
+    from gideon.automation.workflows import defs as defs_mod
+    from gideon.automation.workflows import native_defs, provisioning, service
 
     defs_mod.register_provider(native_defs.NativeWorkflowDefProvider())
 
-    result = batch_compile.compile_batch([leaf("cache"), leaf("queue")], run_name="batch-ws")
+    result = batch_compile.compile_batch(
+        [leaf("cache"), leaf("queue")], run_name="batch-ws"
+    )
     authored = asyncio.run(
         service.author_def(
             name="batch-ws",
@@ -373,7 +382,9 @@ def test_the_workspace_block_SURVIVES_persistence(tmp_path, monkeypatch):
     ), "the workspace block was dropped by the save allowlist — the applier will find nothing"
 
 
-def test_a_crash_surviving_batch_takes_the_SUSPENDED_path_not_adoption(tmp_path, monkeypatch):
+def test_a_crash_surviving_batch_takes_the_SUSPENDED_path_not_adoption(
+    tmp_path, monkeypatch
+):
     """Which restart path a compiled batch takes, MEASURED rather than assumed.
 
     Declaring a workspace changes the answer, so the atom has to state it. `stamp_run` records
@@ -388,12 +399,12 @@ def test_a_crash_surviving_batch_takes_the_SUSPENDED_path_not_adoption(tmp_path,
     a paused batch."""
     import pathlib
 
-    from gideon.workflows import containers, provisioning, worktrees
-    from gideon.workflows.models import RunStatus, WorkflowRun
-    from gideon.workflows.workspace import Mode, WorkspaceSpec
+    from gideon.automation.workflows import containers, provisioning, worktrees
+    from gideon.automation.workflows.models import RunStatus, WorkflowRun
+    from gideon.automation.workflows.workspace import Mode, WorkspaceSpec
 
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
 
     workspace = pathlib.Path(tmp_path / "ws" / "batch")
     workspace.mkdir(parents=True, exist_ok=True)
@@ -403,7 +414,9 @@ def test_a_crash_surviving_batch_takes_the_SUSPENDED_path_not_adoption(tmp_path,
         provisioning.Provisioned(path=str(workspace), isolated=True),
         WorkspaceSpec(mode=Mode(batch_compile.BATCH_WORKSPACE_MODE)),
     )
-    assert run.extra.get("worktree_path"), "stamp_run recorded no recoverable substrate path"
+    assert run.extra.get(
+        "worktree_path"
+    ), "stamp_run recorded no recoverable substrate path"
 
     substrate = worktrees.substrate_for(provisioning.inspect_run(run))
     assert substrate.isolated is True and substrate.alive is True
@@ -416,12 +429,9 @@ def test_scratch_is_an_ISOLATED_mode_so_the_substrate_is_recoverable():
     """`stamp_run` records `worktree_path` for every isolated mode, not just worktree — which is
     what lets §5.2's boot sweep recognise a crash-survivor's substrate. `scratch` must therefore be
     in `ISOLATED_MODES`, or a restarted batch would look substrate-less."""
-    from gideon.workflows.workspace import ISOLATED_MODES, Mode
+    from gideon.automation.workflows.workspace import ISOLATED_MODES, Mode
 
     assert Mode(batch_compile.BATCH_WORKSPACE_MODE) in ISOLATED_MODES
-
-
-# ── clause 3: the lease REFUSES a second execution ───────────────────────────
 
 
 def test_a_SECOND_worker_is_REFUSED_the_same_node(tmp_path, monkeypatch):
@@ -432,7 +442,9 @@ def test_a_SECOND_worker_is_REFUSED_the_same_node(tmp_path, monkeypatch):
     look protected. So this takes a claim as one holder and asserts the second holder is turned
     away with a reason.
     """
-    monkeypatch.setattr("gideon.workflows.leases.config_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "gideon.automation.workflows.leases.config_dir", lambda: tmp_path
+    )
 
     granted, _ = leases.acquire_claim("run1:cache_0", "worker-a")
     assert granted is not None and granted.holder == "worker-a"
@@ -446,7 +458,9 @@ def test_the_claim_is_PER_NODE_so_the_fanout_still_fans_out(tmp_path, monkeypatc
     """A run-scoped claim would serialize the very fan-out the lease protects. Two branches of ONE
     run must both be claimable — the lease prevents double-execution of a branch, not concurrency
     between branches."""
-    monkeypatch.setattr("gideon.workflows.leases.config_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "gideon.automation.workflows.leases.config_dir", lambda: tmp_path
+    )
 
     first, _ = leases.acquire_claim("run1:cache_0", "worker-a")
     second, _ = leases.acquire_claim("run1:queue_1", "worker-b")
@@ -460,11 +474,13 @@ def test_dispatch_stage_takes_the_claim_BEFORE_it_spawns(tmp_path, monkeypatch):
     """
     import asyncio
 
-    monkeypatch.setattr("gideon.workflows.leases.config_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "gideon.automation.workflows.leases.config_dir", lambda: tmp_path
+    )
 
-    from gideon.workflows.bindings import BindingContext
-    from gideon.workflows.engine import dispatch_stage
-    from gideon.workflows.models import InstanceState, Node, NodeKind
+    from gideon.automation.workflows.bindings import BindingContext
+    from gideon.automation.workflows.engine import dispatch_stage
+    from gideon.automation.workflows.models import InstanceState, Node, NodeKind
 
     spawns: list[str] = []
 
@@ -477,28 +493,31 @@ def test_dispatch_stage_takes_the_claim_BEFORE_it_spawns(tmp_path, monkeypatch):
     ctx = BindingContext()
 
     first = asyncio.run(
-        dispatch_stage(node, ctx, subagents=FakeSubagents(), run_id="run-lease", depth=0)
+        dispatch_stage(
+            node, ctx, subagents=FakeSubagents(), run_id="run-lease", depth=0
+        )
     )
     assert first.state is InstanceState.RUNNING
     assert len(spawns) == 1
 
     second = asyncio.run(
-        dispatch_stage(node, ctx, subagents=FakeSubagents(), run_id="run-lease", depth=0)
+        dispatch_stage(
+            node, ctx, subagents=FakeSubagents(), run_id="run-lease", depth=0
+        )
     )
-    assert len(spawns) == 1, "the second dispatch SPAWNED — the lease did not prevent it"
+    assert (
+        len(spawns) == 1
+    ), "the second dispatch SPAWNED — the lease did not prevent it"
     assert second.state is InstanceState.DEGRADED
     assert "not executing twice" in (second.degraded_reason or "")
-
-
-# ── clause 2: the tool-handler seam ──────────────────────────────────────────
 
 
 def test_an_ORCHESTRATION_tool_is_denied_to_a_leaf_at_every_depth(monkeypatch):
     """A leaf that can spawn fans out without a budget, and the depth counter alone would let it
     happen once per level. Denied at the HANDLER because that is the only place a tool call can
     actually be refused — a filtered list computed at compile time is documentation."""
-    from gideon import mcp_shared
-    from gideon.workflows.engine import WF_DEPTH_KEY
+    from gideon.automation.workflows.engine import WF_DEPTH_KEY
+    from gideon.integrations import mcp_shared
 
     monkeypatch.setenv(WF_DEPTH_KEY, "2")
     for tool in sorted(batch_compile.ORCHESTRATION_TOOLS):
@@ -508,8 +527,8 @@ def test_an_ORCHESTRATION_tool_is_denied_to_a_leaf_at_every_depth(monkeypatch):
 def test_the_PARENT_is_not_restricted(monkeypatch):
     """Depth 0 is the parent, not a leaf. If the seam restricted it, `subagent_run` itself would be
     denied and the batch could never be launched at all."""
-    from gideon import mcp_shared
-    from gideon.workflows.engine import WF_DEPTH_KEY
+    from gideon.automation.workflows.engine import WF_DEPTH_KEY
+    from gideon.integrations import mcp_shared
 
     monkeypatch.setenv(WF_DEPTH_KEY, "0")
     assert mcp_shared.leaf_tool_denial("subagent_run") == ""
@@ -517,22 +536,22 @@ def test_the_PARENT_is_not_restricted(monkeypatch):
 
 def test_a_RESEARCH_leaf_is_denied_write_tools(monkeypatch):
     """The capability class, enforced. `is_write_tool` owns the classification — restating it here
-    would create a second policy that drifts from the one the compiler linted against."""
-    from gideon import mcp_shared
-    from gideon.workflows.engine import WF_DEPTH_KEY
+    would create a second policy that drifts from the one the compiler linted against.
+    """
+    from gideon.automation.workflows.engine import WF_DEPTH_KEY
+    from gideon.integrations import mcp_shared
 
     monkeypatch.setenv(WF_DEPTH_KEY, "1")
     monkeypatch.setenv(mcp_shared.LEAF_READ_ONLY_KEY, "1")
     assert mcp_shared.leaf_tool_denial("artifact_update")
-    # A read tool stays available: a research leaf that cannot read cannot research.
     assert mcp_shared.leaf_tool_denial("memory_recall") == ""
 
 
 def test_a_MUTATING_leaf_may_write_but_still_may_not_orchestrate(monkeypatch):
     """The two rules are independent. Collapsing them would either give a mutating leaf the ability
     to fan out or deny a declared writer its writes."""
-    from gideon import mcp_shared
-    from gideon.workflows.engine import WF_DEPTH_KEY
+    from gideon.automation.workflows.engine import WF_DEPTH_KEY
+    from gideon.integrations import mcp_shared
 
     monkeypatch.setenv(WF_DEPTH_KEY, "1")
     monkeypatch.delenv(mcp_shared.LEAF_READ_ONLY_KEY, raising=False)
@@ -542,9 +561,10 @@ def test_a_MUTATING_leaf_may_write_but_still_may_not_orchestrate(monkeypatch):
 
 def test_the_denial_is_enforced_through_call_tool_with_logging(monkeypatch):
     """The seam is the chokepoint every in-process MCP tool call crosses. Asserted by driving the
-    real handler wrapper: a denial the wrapper does not apply is a denial that does not exist."""
-    from gideon import mcp_shared
-    from gideon.workflows.engine import WF_DEPTH_KEY
+    real handler wrapper: a denial the wrapper does not apply is a denial that does not exist.
+    """
+    from gideon.automation.workflows.engine import WF_DEPTH_KEY
+    from gideon.integrations import mcp_shared
 
     monkeypatch.setenv(WF_DEPTH_KEY, "1")
     called: list[str] = []
@@ -566,7 +586,7 @@ def test_the_leaf_ENV_is_secret_filtered():
     credentials are exactly what must not travel with it. The secret TEST is reused from
     `workspace.looks_secret`; a second list of credential-ish fragments would drift, and the copy
     that drifted would be the one letting a token through."""
-    from gideon import mcp_shared
+    from gideon.integrations import mcp_shared
 
     env = mcp_shared.leaf_env(
         {
@@ -597,7 +617,7 @@ def test_a_leaf_keeps_its_native_library_search_path_and_loses_a_PAT():
     survived, and testing it is what let this ship. The `_PATH`-SUFFIXED names are the ones
     that broke.
     """
-    from gideon import mcp_shared
+    from gideon.integrations import mcp_shared
 
     env = mcp_shared.leaf_env(
         {
@@ -620,7 +640,9 @@ def test_a_leaf_keeps_its_native_library_search_path_and_loses_a_PAT():
         "RE_PATTERN",
         "COMPAT_MODE",
     ):
-        assert needed in env, f"{needed} was stripped from the leaf env as if it were a credential"
+        assert (
+            needed in env
+        ), f"{needed} was stripped from the leaf env as if it were a credential"
     assert env["DYLD_LIBRARY_PATH"] == "/opt/homebrew/lib"
     for leaked in ("GITHUB_PAT", "GH_PAT"):
         assert leaked not in env, f"{leaked} reached the leaf env"
@@ -630,13 +652,15 @@ def test_the_spawn_path_WRITES_the_flags_the_seam_reads(monkeypatch):
     """The inert-control check. A gate on a value nobody writes is not a gate, so this asserts the
     WRITER: `leaf_spawn_env` must emit the depth and the read-only flag the handler reads, with the
     child's depth one deeper than the parent's."""
-    from gideon import mcp_shared
-    from gideon.workflows.engine import WF_DEPTH_KEY, leaf_spawn_env
-    from gideon.workflows.models import Node, NodeKind
+    from gideon.automation.workflows.engine import WF_DEPTH_KEY, leaf_spawn_env
+    from gideon.automation.workflows.models import Node, NodeKind
+    from gideon.integrations import mcp_shared
 
     node = Node(kind=NodeKind.STAGE, id="cache_0", config={})
     env = leaf_spawn_env(node, {"capability": "research"}, run_id="r1", depth=0)
-    assert env[WF_DEPTH_KEY] == "1", "the child did not get a deeper depth than its parent"
+    assert (
+        env[WF_DEPTH_KEY] == "1"
+    ), "the child did not get a deeper depth than its parent"
     assert env[mcp_shared.LEAF_READ_ONLY_KEY] == "1"
     assert env["__wf_node_id"] == "cache_0"
 
@@ -649,7 +673,10 @@ def test_the_compiler_EMITS_the_capability_the_engine_reads():
     withheld from node config while nothing read it; it is emitted now that `leaf_spawn_env` reads
     it. A batch compiled without it would run every leaf unrestricted."""
     result = batch_compile.compile_batch(
-        [leaf("cache"), leaf("queue", capability=Capability.MUTATING, writes=["out/queue.md"])]
+        [
+            leaf("cache"),
+            leaf("queue", capability=Capability.MUTATING, writes=["out/queue.md"]),
+        ]
     )
     configs = {c["id"]: c["config"] for c in result.spec["root"]["children"]}
     values = sorted(c["capability"] for c in configs.values())
@@ -663,9 +690,6 @@ def test_compile_result_no_longer_claims_tool_denials_are_UNENFORCED():
     result = batch_compile.compile_batch([leaf("cache"), leaf("queue")])
     pending = " ".join(result.unenforced())
     assert "tool denials" not in pending
-    # `workspace_mode` also LEFT the pending list once the top-level `workspace:` block made the
-    # run-start applier actually provision. `timeout_secs` stays: there is genuinely no per-node
-    # timeout override to bind to, so claiming it would be the mirror error.
     assert "workspace_mode" not in pending
     assert "timeout_secs" in pending
     enforced = " ".join(result.enforced())
@@ -675,11 +699,9 @@ def test_compile_result_no_longer_claims_tool_denials_are_UNENFORCED():
 
 def test_forbidden_declarations_stays_EMPTY():
     """The standing persona prohibition (amendment (a)). Checked here too because this module is
-    where a future author wiring a "role" through the batch seam would most plausibly add one."""
+    where a future author wiring a "role" through the batch seam would most plausibly add one.
+    """
     assert batch_compile.forbidden_declarations() == []
-
-
-# ── clause 4: the agent roster + drift check ─────────────────────────────────
 
 
 class _Profile:
@@ -697,10 +719,13 @@ def test_a_batch_naming_an_UNKNOWN_agent_is_refused_at_compile(monkeypatch):
 
     An unknown agent is an ERROR because `subagent._validate_agent` would fail the spawn anyway
     (C1.3 made it a typed error, never a silent downgrade). Catching it at compile costs nothing;
-    catching it at spawn has already minted a run whose branches all fail on one typo."""
+    catching it at spawn has already minted a run whose branches all fail on one typo.
+    """
     monkeypatch.setattr(roster, "catalog", lambda agents=None: [])
 
-    result = batch_compile.compile_batch([leaf("cache", agent="no-such-agent"), leaf("queue")])
+    result = batch_compile.compile_batch(
+        [leaf("cache", agent="no-such-agent"), leaf("queue")]
+    )
     assert result.ok is False
     codes = [f.code for f in result.findings]
     assert "unknown_agent" in codes
@@ -719,7 +744,9 @@ def test_a_DISPLAY_NAME_reference_lands_in_the_spec_as_the_CONFIG_KEY(monkeypatc
     entry = roster.RosterEntry(slug="my-researcher", name="My Researcher")
     monkeypatch.setattr(roster, "catalog", lambda agents=None: [entry])
 
-    result = batch_compile.compile_batch([leaf("cache", agent="my researcher"), leaf("queue")])
+    result = batch_compile.compile_batch(
+        [leaf("cache", agent="my researcher"), leaf("queue")]
+    )
     assert result.ok is True, [f.message for f in result.findings]
     configs = {c["id"]: c["config"] for c in result.spec["root"]["children"]}
     bound = [c["agent"] for c in configs.values() if "agent" in c]
@@ -739,11 +766,12 @@ def test_an_UNPINNED_leaf_emits_no_agent_key(monkeypatch):
 def test_the_roster_projects_over_the_SAME_source_validate_agent_consults():
     """One source for "which agents exist". `roster.catalog` reads `AppConfig.load().agents` and
     `subagent._validate_agent` checks `AppConfig.load().agents` — the same dict. Asserted by AST so
-    a future edit that introduced a second enumeration trips here rather than drifting silently."""
+    a future edit that introduced a second enumeration trips here rather than drifting silently.
+    """
     import ast
     import inspect
 
-    from gideon import subagent as subagent_mod
+    from gideon.engine import subagent as subagent_mod
 
     def _reads_appconfig_agents(fn) -> bool:
         tree = ast.parse(inspect.getsource(fn).lstrip())
@@ -760,7 +788,9 @@ def test_the_roster_is_a_PROJECTION_over_config_agents():
     would be a second source of truth that drifts the moment a user renames one."""
     entries = roster.catalog({"My Researcher": _Profile(description="reads things")})
     assert [e.slug for e in entries] == ["my-researcher"]
-    assert entries[0].name == "My Researcher", "the config key must survive as the spawn name"
+    assert (
+        entries[0].name == "My Researcher"
+    ), "the config key must survive as the spawn name"
     assert entries[0].description == "reads things"
 
 
@@ -775,7 +805,7 @@ def test_slugs_are_RENAME_PROOF_and_display_names_are_presentation_only():
 def test_reserved_system_agents_are_ALWAYS_active():
     """A reserved system agent is part of the platform; a user's own agent is offered only when
     something names it, which is what keeps a simple run's roster small."""
-    from gideon.agents.defaults import LOOP_WORKER_AGENT_NAME
+    from gideon.engine.agents.defaults import LOOP_WORKER_AGENT_NAME
 
     entries = roster.catalog({LOOP_WORKER_AGENT_NAME: _Profile(), "mine": _Profile()})
     by_slug = {e.slug: e for e in entries}
@@ -790,7 +820,9 @@ def test_the_DRIFT_CHECK_names_the_slug_that_broke():
     sends a reader back to grep for it."""
     agents = {"researcher": _Profile()}
     assert roster.unresolved_slugs(["researcher"], agents) == []
-    assert roster.unresolved_slugs(["researcher", "deleted-one"], agents) == ["deleted-one"]
+    assert roster.unresolved_slugs(["researcher", "deleted-one"], agents) == [
+        "deleted-one"
+    ]
 
 
 def test_the_drift_check_walks_EVERY_node_depth():
@@ -810,7 +842,11 @@ def test_the_drift_check_walks_EVERY_node_depth():
                     "kind": "sequence",
                     "id": "nested",
                     "children": [
-                        {"kind": "stage", "id": "deep", "config": {"agent": "Deep Auditor"}}
+                        {
+                            "kind": "stage",
+                            "id": "deep",
+                            "config": {"agent": "Deep Auditor"},
+                        }
                     ],
                 },
             ],
@@ -818,14 +854,16 @@ def test_the_drift_check_walks_EVERY_node_depth():
     }
     found = roster.referenced_slugs(spec)
     assert found == ["deep-auditor", "researcher"], "a nested leaf's agent was missed"
-    assert roster.unresolved_slugs(found, {"researcher": _Profile()}) == ["deep-auditor"]
+    assert roster.unresolved_slugs(found, {"researcher": _Profile()}) == [
+        "deep-auditor"
+    ]
 
 
 def test_every_BUNDLED_TEMPLATE_references_a_resolvable_agent():
     """The drift check pointed at the real corpus — this is the gate that fails when a template
     names an agent that no longer exists. Bundled templates are the set we control, so a
     reference here is a defect rather than a user's own choice."""
-    from gideon.workflows import defs as defs_mod
+    from gideon.automation.workflows import defs as defs_mod
 
     unresolved: dict[str, list[str]] = {}
     for provider_name in defs_mod.list_providers():
@@ -842,7 +880,8 @@ def test_every_BUNDLED_TEMPLATE_references_a_resolvable_agent():
 
 def _bundled_specs(provider) -> list[dict]:
     """The provider's specs, tolerantly — a provider that cannot enumerate is skipped rather than
-    failing the gate, because this test's subject is slug drift and not provider health."""
+    failing the gate, because this test's subject is slug drift and not provider health.
+    """
     import asyncio
     import inspect
 
@@ -862,7 +901,9 @@ def _bundled_specs(provider) -> list[dict]:
 
 def test_the_roster_ROUND_TRIPS_through_its_dict():
     """A projection nobody can serialize is a projection no surface can render."""
-    entry = roster.catalog({"mine": _Profile(description="d", model="fast", tools=["read"])})[0]
+    entry = roster.catalog(
+        {"mine": _Profile(description="d", model="fast", tools=["read"])}
+    )[0]
     raw = json.loads(json.dumps(entry.to_dict()))
     assert raw["slug"] == "mine"
     assert raw["capabilities"] == ["read"]

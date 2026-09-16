@@ -11,12 +11,16 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
-from gideon.action_providers.base import ActionContext
-from gideon.action_providers.run_prompt_provider import RunPromptActionProvider
+from gideon.integrations.action_providers.base import ActionContext
+from gideon.integrations.action_providers.run_prompt_provider import (
+    RunPromptActionProvider,
+)
 
 
 def _ctx() -> ActionContext:
-    return ActionContext(event="Schedule", context="", payload={"session_key": "cron:x"})
+    return ActionContext(
+        event="Schedule", context="", payload={"session_key": "cron:x"}
+    )
 
 
 def _services(spawn_sink, scheduled):
@@ -30,21 +34,22 @@ def _services(spawn_sink, scheduled):
 
 
 def test_no_prompt_id_and_no_loop_md_is_error(monkeypatch):
-    import gideon.action_providers.run_prompt_provider as mod
+    import gideon.integrations.action_providers.run_prompt_provider as mod
 
-    # No loop.md anywhere → a bare run-prompt has nothing to run.
     monkeypatch.setattr(mod, "resolve_loop_md", lambda cwd: None)
     res = asyncio.run(RunPromptActionProvider().execute({}, _ctx()))
     assert res.success is False and "loop.md" in res.error
 
 
 def test_bad_vars_type_is_error():
-    res = asyncio.run(RunPromptActionProvider().execute({"prompt_id": "p", "vars": "nope"}, _ctx()))
+    res = asyncio.run(
+        RunPromptActionProvider().execute({"prompt_id": "p", "vars": "nope"}, _ctx())
+    )
     assert res.success is False and "vars" in res.error
 
 
 def test_unknown_prompt_is_error(monkeypatch):
-    import gideon.action_providers.run_prompt_provider as mod
+    import gideon.integrations.action_providers.run_prompt_provider as mod
 
     def _raise(prompt_id, values):
         raise LookupError(f"no saved prompt named {prompt_id!r}")
@@ -55,7 +60,7 @@ def test_unknown_prompt_is_error(monkeypatch):
 
 
 def test_empty_render_is_error(monkeypatch):
-    import gideon.action_providers.run_prompt_provider as mod
+    import gideon.integrations.action_providers.run_prompt_provider as mod
 
     monkeypatch.setattr(mod, "render_saved_prompt", lambda pid, v: "   ")
     res = asyncio.run(RunPromptActionProvider().execute({"prompt_id": "blank"}, _ctx()))
@@ -66,13 +71,15 @@ def test_render_error_is_value_error_and_caught(monkeypatch):
     """A PromptRenderError (e.g. unfilled required variable) must surface as a
     ValueError from render_saved_prompt AND be caught by execute() as an honest
     error result — not escape uncaught and break the action dispatch."""
-    import gideon.action_providers.run_prompt_provider as mod
+    import gideon.integrations.action_providers.run_prompt_provider as mod
 
     def _raise(pid, v):
         raise ValueError("missing required variable: project")
 
     monkeypatch.setattr(mod, "render_saved_prompt", _raise)
-    res = asyncio.run(RunPromptActionProvider().execute({"prompt_id": "p", "vars": {}}, _ctx()))
+    res = asyncio.run(
+        RunPromptActionProvider().execute({"prompt_id": "p", "vars": {}}, _ctx())
+    )
     assert res.success is False and "missing required variable" in res.error
 
 
@@ -80,12 +87,14 @@ def test_render_saved_prompt_normalizes_prompt_render_error():
     """The real render_saved_prompt maps a PromptRenderError -> ValueError so the
     caller's `except ValueError` contract holds (PromptRenderError is a bare
     Exception, not a ValueError subclass)."""
-    import gideon.action_providers.run_prompt_provider as mod
-    from gideon.prompt_providers.base import PromptTemplate, PromptVariable
-    from gideon.prompt_providers.registry import _ensure_default_providers_registered
+    import gideon.integrations.action_providers.run_prompt_provider as mod
+    from gideon.integrations.prompt_providers.base import PromptTemplate, PromptVariable
+    from gideon.integrations.prompt_providers.registry import (
+        _ensure_default_providers_registered,
+    )
 
     _ensure_default_providers_registered()
-    from gideon.prompt_providers import get_default_provider
+    from gideon.integrations.prompt_providers import get_default_provider
 
     prov = get_default_provider()
     tmpl = PromptTemplate(
@@ -99,7 +108,7 @@ def test_render_saved_prompt_normalizes_prompt_render_error():
         import pytest as _pytest
 
         with _pytest.raises(ValueError):
-            mod.render_saved_prompt("_t_reqvar", {})  # required var unset
+            mod.render_saved_prompt("_t_reqvar", {})
     finally:
         prov.delete_prompt("_t_reqvar")
 
@@ -109,42 +118,51 @@ def test_bundled_digest_prompt_resolves_and_renders():
     ``run-prompt`` can fire — resolve it and render its three vars (sources/window/
     target) through the SAME render_saved_prompt path the action uses. Proves the
     digest primitive is composition (a Prompt fired by a trigger), no new service."""
-    import gideon.action_providers.run_prompt_provider as mod
-    from gideon.prompt_providers.registry import _ensure_default_providers_registered
+    import gideon.integrations.action_providers.run_prompt_provider as mod
+    from gideon.integrations.prompt_providers.registry import (
+        _ensure_default_providers_registered,
+    )
 
     _ensure_default_providers_registered()
     out = mod.render_saved_prompt(
         "task-digest",
         {"sources": "#eng, inbox", "window": "the last 24 hours", "target": "inbox"},
     )
-    assert out and "{{" not in out, "digest prompt must fully render with no leftover vars"
-    # The rendered directive carries the caller's chosen sources/window/target.
+    assert (
+        out and "{{" not in out
+    ), "digest prompt must fully render with no leftover vars"
     assert "#eng, inbox" in out and "the last 24 hours" in out and "inbox" in out
-    # It is an AGENT directive (gather → deliver), not a paste-in summarizer.
     assert "Gather" in out and "Deliver" in out
 
 
 def test_bundled_digest_prompt_is_in_use_case_vocabulary():
     """P10: the digest use_case auto-registers in PROMPT_USE_CASES (derived from the
-    catalog) so binding/resolution work — without polluting the model-capability vocab."""
-    from gideon.providers.prompt_use_cases import PROMPT_USE_CASES, active_prompt_ref
-    from gideon.providers.use_cases import USE_CASES
+    catalog) so binding/resolution work — without polluting the model-capability vocab.
+    """
+    from gideon.extensions.providers.prompt_use_cases import (
+        PROMPT_USE_CASES,
+        active_prompt_ref,
+    )
+    from gideon.extensions.providers.use_cases import USE_CASES
 
     assert "digest" in PROMPT_USE_CASES
     assert active_prompt_ref("digest") == "native:task-digest"
-    # It's a PROMPT use_case, not a model capability — the two vocabularies stay separate.
     assert "digest" not in USE_CASES
 
 
 def test_success_spawns_auto_approved_with_framing(monkeypatch):
-    import gideon.action_providers.run_prompt_provider as mod
+    import gideon.integrations.action_providers.run_prompt_provider as mod
 
     monkeypatch.setattr(
-        mod, "render_saved_prompt", lambda pid, v: f"BODY for {pid} team={(v or {}).get('team')}"
+        mod,
+        "render_saved_prompt",
+        lambda pid, v: f"BODY for {pid} team={(v or {}).get('team')}",
     )
     spawn_sink: dict = {}
     scheduled: list = []
-    monkeypatch.setattr(mod, "get_action_services", lambda: _services(spawn_sink, scheduled))
+    monkeypatch.setattr(
+        mod, "get_action_services", lambda: _services(spawn_sink, scheduled)
+    )
 
     async def go():
         res = await RunPromptActionProvider().execute(
@@ -157,21 +175,21 @@ def test_success_spawns_auto_approved_with_framing(monkeypatch):
     res = asyncio.run(go())
     assert res.success is True and "standup" in res.stdout
     assert scheduled, "the prompt turn must run as a fire-and-forget background spawn"
-    # The rendered prompt reaches the spawn, wrapped in autonomous framing.
     assert "BODY for standup team=infra" in spawn_sink.get("task", "")
     assert "AUTONOMOUS RUN" in spawn_sink.get("task", "")
     assert spawn_sink.get("agent") == "Gideon"
-    # Auto-approve so a scheduled run never stalls on a tool-approval prompt.
     assert spawn_sink.get("approval_mode") == "auto"
 
 
 def test_session_opt_in_pins_parent_session(monkeypatch):
-    import gideon.action_providers.run_prompt_provider as mod
+    import gideon.integrations.action_providers.run_prompt_provider as mod
 
     monkeypatch.setattr(mod, "render_saved_prompt", lambda pid, v: "body")
     spawn_sink: dict = {}
     scheduled: list = []
-    monkeypatch.setattr(mod, "get_action_services", lambda: _services(spawn_sink, scheduled))
+    monkeypatch.setattr(
+        mod, "get_action_services", lambda: _services(spawn_sink, scheduled)
+    )
 
     async def go():
         await RunPromptActionProvider().execute(
@@ -180,17 +198,18 @@ def test_session_opt_in_pins_parent_session(monkeypatch):
         await asyncio.sleep(0.05)
 
     asyncio.run(go())
-    # Explicit session opt-in wins over the trigger payload's session_key.
     assert spawn_sink.get("parent_session_key") == "cron:pinned"
 
 
 def test_default_session_is_trigger_payload(monkeypatch):
-    import gideon.action_providers.run_prompt_provider as mod
+    import gideon.integrations.action_providers.run_prompt_provider as mod
 
     monkeypatch.setattr(mod, "render_saved_prompt", lambda pid, v: "body")
     spawn_sink: dict = {}
     scheduled: list = []
-    monkeypatch.setattr(mod, "get_action_services", lambda: _services(spawn_sink, scheduled))
+    monkeypatch.setattr(
+        mod, "get_action_services", lambda: _services(spawn_sink, scheduled)
+    )
 
     async def go():
         await RunPromptActionProvider().execute({"prompt_id": "p"}, _ctx())
@@ -201,7 +220,7 @@ def test_default_session_is_trigger_payload(monkeypatch):
 
 
 def test_services_unavailable_is_error(monkeypatch):
-    import gideon.action_providers.run_prompt_provider as mod
+    import gideon.integrations.action_providers.run_prompt_provider as mod
 
     monkeypatch.setattr(mod, "render_saved_prompt", lambda pid, v: "body")
     monkeypatch.setattr(
@@ -216,26 +235,29 @@ def test_services_unavailable_is_error(monkeypatch):
 def test_invalid_cwd_is_honest_error(monkeypatch):
     """A cwd the subagent would refuse returns an error NOW, not a false
     'launched' (the spawn validates cwd asynchronously)."""
-    import gideon.action_providers.run_prompt_provider as mod
+    import gideon.integrations.action_providers.run_prompt_provider as mod
 
     monkeypatch.setattr(mod, "render_saved_prompt", lambda pid, v: "body")
     monkeypatch.setattr(
-        mod, "validate_spawn_cwd", lambda cwd: "cwd is not under any allowed root: ['~/ok']"
+        mod,
+        "validate_spawn_cwd",
+        lambda cwd: "cwd is not under any allowed root: ['~/ok']",
     )
     spawn_sink: dict = {}
     scheduled: list = []
-    monkeypatch.setattr(mod, "get_action_services", lambda: _services(spawn_sink, scheduled))
-    res = asyncio.run(RunPromptActionProvider().execute({"prompt_id": "p", "cwd": "/bad"}, _ctx()))
+    monkeypatch.setattr(
+        mod, "get_action_services", lambda: _services(spawn_sink, scheduled)
+    )
+    res = asyncio.run(
+        RunPromptActionProvider().execute({"prompt_id": "p", "cwd": "/bad"}, _ctx())
+    )
     assert res.success is False and "allowed root" in res.error
-    assert not scheduled  # never spawned
-
-
-# ── loop.md default-recurring-prompt (T3) ──
+    assert not scheduled
 
 
 def test_resolve_loop_md_project_beats_user(tmp_path, monkeypatch):
-    import gideon.action_providers.run_prompt_provider as mod
-    from gideon.config import loader
+    import gideon.integrations.action_providers.run_prompt_provider as mod
+    from gideon.core.config import loader
 
     proj = tmp_path / "proj"
     proj.mkdir()
@@ -250,11 +272,11 @@ def test_resolve_loop_md_project_beats_user(tmp_path, monkeypatch):
 
 
 def test_resolve_loop_md_falls_back_to_user(tmp_path, monkeypatch):
-    import gideon.action_providers.run_prompt_provider as mod
-    from gideon.config import loader
+    import gideon.integrations.action_providers.run_prompt_provider as mod
+    from gideon.core.config import loader
 
     proj = tmp_path / "proj"
-    proj.mkdir()  # no project loop.md
+    proj.mkdir()
     user = tmp_path / "home"
     user.mkdir()
     (user / "loop.md").write_text("USER loop", encoding="utf-8")
@@ -265,35 +287,37 @@ def test_resolve_loop_md_falls_back_to_user(tmp_path, monkeypatch):
 
 
 def test_resolve_loop_md_hot_reload(tmp_path, monkeypatch):
-    import gideon.action_providers.run_prompt_provider as mod
-    from gideon.config import loader
+    import gideon.integrations.action_providers.run_prompt_provider as mod
+    from gideon.core.config import loader
 
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path / "nope")
     f = tmp_path / "loop.md"
     f.write_text("v1", encoding="utf-8")
     assert mod.resolve_loop_md(str(tmp_path))[0] == "v1"
-    f.write_text("v2", encoding="utf-8")  # edit takes effect next read
+    f.write_text("v2", encoding="utf-8")
     assert mod.resolve_loop_md(str(tmp_path))[0] == "v2"
 
 
 def test_resolve_loop_md_none_when_absent(tmp_path, monkeypatch):
-    import gideon.action_providers.run_prompt_provider as mod
-    from gideon.config import loader
+    import gideon.integrations.action_providers.run_prompt_provider as mod
+    from gideon.core.config import loader
 
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path / "nope")
     assert mod.resolve_loop_md(str(tmp_path)) is None
 
 
 def test_loop_md_fallback_spawns(tmp_path, monkeypatch):
-    import gideon.action_providers.run_prompt_provider as mod
-    from gideon.config import loader
+    import gideon.integrations.action_providers.run_prompt_provider as mod
+    from gideon.core.config import loader
 
     (tmp_path / "loop.md").write_text("do the recurring thing", encoding="utf-8")
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path / "nope")
-    monkeypatch.setattr(mod, "validate_spawn_cwd", lambda cwd: "")  # cwd allowed
+    monkeypatch.setattr(mod, "validate_spawn_cwd", lambda cwd: "")
     spawn_sink: dict = {}
     scheduled: list = []
-    monkeypatch.setattr(mod, "get_action_services", lambda: _services(spawn_sink, scheduled))
+    monkeypatch.setattr(
+        mod, "get_action_services", lambda: _services(spawn_sink, scheduled)
+    )
 
     async def go():
         res = await RunPromptActionProvider().execute({"cwd": str(tmp_path)}, _ctx())

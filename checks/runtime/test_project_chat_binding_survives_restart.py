@@ -2,7 +2,7 @@
 
 `_ChatSession.project_id` was in-memory only. `save_session_to_history` rebuilds the whole metadata
 line from the live session on every turn and never wrote it, and neither restore path read it —
-measured mechanically: `grep project_id src/gideon/dashboard/chat_persistence.py` returned
+measured mechanically: `grep project_id runtime/gideon/interfaces/dashboard/chat_persistence.py` returned
 NOTHING before this change.
 
 The user-visible consequence is not "a field is missing". `/api/projects/<id>/linked` does not
@@ -34,36 +34,38 @@ import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
-from gideon.dashboard.chat_persistence import (
+from gideon.cognition.history import ConversationLog
+from gideon.interfaces.dashboard.chat_persistence import (
     _rehydrate_session_from_history,
     restore_recent_sessions,
     save_session_to_history,
 )
-from gideon.dashboard.state import DashboardState, _ChatSession
-from gideon.history import ConversationLog
+from gideon.interfaces.dashboard.state import ConsoleState, _ChatSession
 
 SESSION = "chat-7-proj"
 HISTORY_KEY = "dashboard:" + SESSION
 PROJECT = "proj-abc123"
 
 
-def _state(tmp_path: Path) -> DashboardState:
+def _state(tmp_path: Path) -> ConsoleState:
     sessions = MagicMock(count=0)
     sessions.get_pid = MagicMock(return_value=None)
     sessions.remove = AsyncMock()
     sessions.set_task_mode = MagicMock()
-    return DashboardState(
+    return ConsoleState(
         sessions=sessions,
         start_time=0.0,
         conversation_log=ConversationLog(base_dir=tmp_path),
     )
 
 
-def _project_chat(state: DashboardState, project_id: str = PROJECT) -> _ChatSession:
+def _project_chat(state: ConsoleState, project_id: str = PROJECT) -> _ChatSession:
     """A live chat opened from a project — the posture the issue reproduces from the UI."""
     s = state.get_or_create_session(SESSION)
     s.messages.append({"role": "user", "content": "hello", "ts": "2026-09-05T10:00:00"})
-    s.messages.append({"role": "assistant", "content": "hi", "ts": "2026-09-05T10:00:01"})
+    s.messages.append(
+        {"role": "assistant", "content": "hi", "ts": "2026-09-05T10:00:01"}
+    )
     s.project_id = project_id
     s.workspace_dir = "/tmp/proj-ws"
     return s
@@ -74,9 +76,6 @@ def _meta(tmp_path: Path) -> dict:
     files = list(tmp_path.rglob("*.jsonl"))
     assert files, "nothing was persisted — the harness stopped exercising the save path"
     return json.loads(files[0].read_text().splitlines()[0])
-
-
-# ── the write ────────────────────────────────────────────────────────────────────────────────
 
 
 def test_the_binding_is_written_to_the_meta_line(tmp_path):
@@ -91,11 +90,14 @@ def test_the_binding_is_written_to_the_meta_line(tmp_path):
 def test_a_second_turn_does_not_clobber_it(tmp_path):
     """🪤 The specific hazard this function's own comment records: it REBUILDS the whole meta line
     from the in-memory session every turn, so a field missing from the list is not merely unsaved —
-    it erases any out-of-band write at the end of the next turn. Two saves, still there."""
+    it erases any out-of-band write at the end of the next turn. Two saves, still there.
+    """
     state = _state(tmp_path)
     session = _project_chat(state)
     save_session_to_history(state, session)
-    session.messages.append({"role": "user", "content": "again", "ts": "2026-09-05T10:01:00"})
+    session.messages.append(
+        {"role": "user", "content": "again", "ts": "2026-09-05T10:01:00"}
+    )
     save_session_to_history(state, session)
     assert _meta(tmp_path).get("project_id") == PROJECT
 
@@ -109,12 +111,10 @@ def test_a_chat_with_no_project_writes_no_key(tmp_path):
     assert "project_id" not in _meta(tmp_path)
 
 
-# ── the read: BOTH paths, because they have drifted before ───────────────────────────────────
-
-
 def test_the_BULK_restore_brings_the_binding_back(tmp_path):
     """🔑 The path a gateway restart actually takes — and the one that skipped the runtime binding
-    entirely last time this file had this bug (`acp_provider`, per `test_acp_restart_binding`)."""
+    entirely last time this file had this bug (`acp_provider`, per `test_acp_restart_binding`).
+    """
     state = _state(tmp_path)
     save_session_to_history(state, _project_chat(state))
 
@@ -127,7 +127,8 @@ def test_the_BULK_restore_brings_the_binding_back(tmp_path):
 
 def test_the_TARGETED_rehydrate_brings_the_binding_back(tmp_path):
     """The other reader. Both go through `_restore_runtime_binding`, which exists precisely so they
-    cannot drift again — this asserts the property rather than trusting the arrangement."""
+    cannot drift again — this asserts the property rather than trusting the arrangement.
+    """
     state = _state(tmp_path)
     save_session_to_history(state, _project_chat(state))
 
@@ -155,9 +156,6 @@ def test_a_hand_edited_non_string_does_not_become_the_binding(tmp_path):
     assert restored.project_id == "", "a non-string was accepted as the binding"
 
 
-# ── the round trip, as the user experiences it ───────────────────────────────────────────────
-
-
 def test_the_projects_linked_scan_finds_the_chat_after_a_restart(tmp_path):
     """The user-visible claim: the project's Chats list is not empty after a restart.
 
@@ -170,11 +168,10 @@ def test_the_projects_linked_scan_finds_the_chat_after_a_restart(tmp_path):
 
     fresh = _state(tmp_path)
     restore_recent_sessions(fresh)
-    linked = [s for s in fresh._sessions.values() if getattr(s, "project_id", "") == PROJECT]
+    linked = [
+        s for s in fresh._sessions.values() if getattr(s, "project_id", "") == PROJECT
+    ]
     assert len(linked) == 1, "the project's Chats list would be empty after a restart"
-
-
-# ── the rail: the write list and the read list must agree ────────────────────────────────────
 
 
 def test_every_field_the_restore_reads_is_a_field_the_save_writes():
@@ -195,15 +192,18 @@ def test_every_field_the_restore_reads_is_a_field_the_save_writes():
     import re
 
     src = (
-        Path(__file__).resolve().parents[1]
-        / "src"
+        Path(__file__).resolve().parents[2]
+        / "runtime"
         / "gideon"
+        / "interfaces"
         / "dashboard"
         / "chat_persistence.py"
     ).read_text()
 
     helper = src[
-        src.index("def _restore_runtime_binding") : src.index("def _rehydrate_session_from_history")
+        src.index("def _restore_runtime_binding") : src.index(
+            "def _rehydrate_session_from_history"
+        )
     ]
     read_keys = set(re.findall(r'meta\.get\("(\w+)"\)', helper))
     assert "project_id" in read_keys, "the helper stopped reading the binding"

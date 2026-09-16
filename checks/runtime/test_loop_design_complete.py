@@ -9,8 +9,8 @@ import asyncio
 
 import pytest
 
-from gideon.loop import kinds, store
-from gideon.loop.loop import Loop
+from gideon.automation.loop import kinds, store
+from gideon.automation.loop.loop import Loop
 
 
 def _run(coro):
@@ -19,9 +19,8 @@ def _run(coro):
 
 @pytest.fixture(autouse=True)
 def _tmp_config(monkeypatch, tmp_path):
-    monkeypatch.setattr("gideon.loop.files.config_dir", lambda: tmp_path)
-    # Artifact provider writes under config_dir too — keep it isolated.
-    import gideon.artifacts.native as nat
+    monkeypatch.setattr("gideon.automation.loop.files.config_dir", lambda: tmp_path)
+    import gideon.workspace.artifacts.native as nat
 
     monkeypatch.setattr(nat, "config_dir", lambda: tmp_path, raising=False)
     kinds.ensure_loaded()
@@ -40,7 +39,6 @@ class _Ctx:
 
 
 def _design_loop():
-    # A single-phase plan so the very first finding is "on the last phase".
     return store.create(
         Loop(
             id="",
@@ -59,14 +57,15 @@ class TestDesignCompletionGate:
         ctx = _Ctx()
         done = _run(
             s.on_new_cycle(
-                store.get(c.id), [{"cycle": 1, "step": "build_plan", "summary": "drafted"}], ctx
+                store.get(c.id),
+                [{"cycle": 1, "step": "build_plan", "summary": "drafted"}],
+                ctx,
             )
         )
-        assert done is False and ctx.completed is None  # no DESIGN.md file or artifact yet
+        assert done is False and ctx.completed is None
 
     def test_completes_on_design_artifact_even_without_loop_dir_file(self):
-        # The worker saved DESIGN.md as an ARTIFACT (tagged loop:<id>), never a file.
-        from gideon.artifacts import registry as artifact_registry
+        from gideon.workspace.artifacts import registry as artifact_registry
 
         prov = artifact_registry.get_provider()
         c = _design_loop()
@@ -77,7 +76,6 @@ class TestDesignCompletionGate:
             tags=[f"loop:{c.id}"],
             actor="agent",
         )
-        # Sanity: the loop-dir file does NOT exist — only the artifact carries it.
         assert not store.read_deliverable(c.id).strip()
         ctx = _Ctx()
         done = _run(s_on_cycle(c, ctx))
@@ -87,7 +85,9 @@ class TestDesignCompletionGate:
 def s_on_cycle(c, ctx):
     s = kinds.get("design")
     return s.on_new_cycle(
-        store.get(c.id), [{"cycle": 1, "step": "build_plan", "summary": "delivered"}], ctx
+        store.get(c.id),
+        [{"cycle": 1, "step": "build_plan", "summary": "delivered"}],
+        ctx,
     )
 
 
@@ -95,7 +95,8 @@ class TestPhaseMatchTolerantOfOrdinalPrefix:
     """A worker reports its step with an ordinal prefix ("1. Emit Primitive Token Layer")
     while the plan phase title is bare ("Emit Primitive Token Layer"). The matcher must
     strip the ordinal, else the phase trail freezes on phase 0 and completion is deferred
-    to the slow per-cycle fallback (observed live: stuck on `foundations` for cycles)."""
+    to the slow per-cycle fallback (observed live: stuck on `foundations` for cycles).
+    """
 
     def _multi_phase(self):
         return store.create(
@@ -106,7 +107,10 @@ class TestPhaseMatchTolerantOfOrdinalPrefix:
                 task="a design system",
                 plan=[
                     {"step": "foundations", "title": "Emit Primitive Token Layer"},
-                    {"step": "palette", "title": "Expand & Verify Semantic Color Roles"},
+                    {
+                        "step": "palette",
+                        "title": "Expand & Verify Semantic Color Roles",
+                    },
                     {"step": "build_plan", "title": "Assemble DESIGN.md & Export"},
                 ],
             )
@@ -118,14 +122,12 @@ class TestPhaseMatchTolerantOfOrdinalPrefix:
         assert strip("1. Emit Primitive Token Layer") == "emit primitive token layer"
         assert strip("2 — Palette") == "palette"
         assert strip("step 3: Components") == "components"
-        assert strip("Foundations") == "foundations"  # no ordinal → unchanged (lowercased)
+        assert strip("Foundations") == "foundations"
 
     def test_ordinal_prefixed_step_advances_trail(self):
         s = kinds.get("design")
         c = self._multi_phase()
         ctx = _Ctx()
-        # Worker reports "2. Expand…" — must resolve to phase index 1 (palette), marking
-        # foundations done + palette active (not freezing on foundations).
         _run(
             s.on_new_cycle(
                 store.get(c.id),
@@ -141,14 +143,9 @@ class TestPhaseMatchTolerantOfOrdinalPrefix:
         )
         ps = store.get(c.id).phase_status
         assert ps.get("foundations") == "done" and ps.get("palette") == "active"
-        assert ctx.completed is None  # not the last phase
+        assert ctx.completed is None
 
     def test_drifted_title_with_ordinal_prefix_resolves_by_index(self):
-        # The worker's step TITLE drifts from the plan's phase title, but it prefixes the
-        # ordinal: "Step 4 — Per-state component specs & keyboard/ARIA model" vs plan
-        # phase-3 title "Per-state specs & keyboard model". Substring match misses; the
-        # leading index (4 → phase idx 3) must still resolve it (observed: this drift made
-        # the time-fallback flip an earlier phase back to active).
         kinds.ensure_loaded()
         s = kinds.get("design")
         loop = store.create(
@@ -164,25 +161,31 @@ class TestPhaseMatchTolerantOfOrdinalPrefix:
                     {"step": "components", "title": "Per-state specs & keyboard model"},
                     {"step": "export", "title": "Document, export tokens & verify"},
                 ],
-                phase_status={"foundations": "done", "palette": "done", "typography": "done"},
+                phase_status={
+                    "foundations": "done",
+                    "palette": "done",
+                    "typography": "done",
+                },
             )
         )
         ctx = _Ctx()
         _run(
             s.on_new_cycle(
                 store.get(loop.id),
-                [{"cycle": 4, "step": "Step 4 — Per-state component specs & keyboard/ARIA model"}],
+                [
+                    {
+                        "cycle": 4,
+                        "step": "Step 4 — Per-state component specs & keyboard/ARIA model",
+                    }
+                ],
                 ctx,
             )
         )
         ps = store.get(loop.id).phase_status
         assert ps.get("components") == "active"
-        # The earlier done phases stay done — no backwards regression.
         assert ps.get("foundations") == "done" and ps.get("typography") == "done"
 
     def test_stepless_finding_never_regresses_the_trail(self):
-        # A finding with no parseable step must not walk the trail backwards (the
-        # time-fallback could pick an earlier index early in the run).
         kinds.ensure_loaded()
         s = kinds.get("design")
         loop = store.create(
@@ -197,25 +200,33 @@ class TestPhaseMatchTolerantOfOrdinalPrefix:
                     {"step": "components", "title": "C"},
                     {"step": "export", "title": "E"},
                 ],
-                phase_status={"foundations": "done", "palette": "done", "components": "active"},
+                phase_status={
+                    "foundations": "done",
+                    "palette": "done",
+                    "components": "active",
+                },
                 max_cycles=30,
             )
         )
         ctx = _Ctx()
-        _run(s.on_new_cycle(store.get(loop.id), [{"cycle": 3, "summary": "no step field"}], ctx))
+        _run(
+            s.on_new_cycle(
+                store.get(loop.id), [{"cycle": 3, "summary": "no step field"}], ctx
+            )
+        )
         ps = store.get(loop.id).phase_status
-        # components stays active (or advances) — foundations/palette stay done, not reset.
         assert ps.get("foundations") == "done" and ps.get("palette") == "done"
         assert ps.get("components") in ("active", "done")
 
     def test_bare_integer_step_is_a_one_based_phase_index(self):
-        # Workers also report the step as a bare integer ("step": 2 / "2") — no slug, no
-        # title. That must resolve to the 1-based phase (index 1 = palette), not freeze on
-        # phase 0 (observed live: design worker reported step 1,2 → stuck on foundations).
         s = kinds.get("design")
         c = self._multi_phase()
         ctx = _Ctx()
-        _run(s.on_new_cycle(store.get(c.id), [{"cycle": 2, "step": 2, "summary": "palette"}], ctx))
+        _run(
+            s.on_new_cycle(
+                store.get(c.id), [{"cycle": 2, "step": 2, "summary": "palette"}], ctx
+            )
+        )
         ps = store.get(c.id).phase_status
         assert ps.get("foundations") == "done" and ps.get("palette") == "active"
         assert ctx.completed is None

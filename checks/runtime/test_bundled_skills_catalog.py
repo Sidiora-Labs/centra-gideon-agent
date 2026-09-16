@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import re
 
-from gideon.skills.marketplace import _parse_description
-from gideon.skills.native import NativeSkillsMarketplace, _bundled_root
+from gideon.extensions.skills.marketplace import _parse_description
+from gideon.extensions.skills.native import NativeSkillsMarketplace, _bundled_root
 
 
 class TestVisualOutputSkill:
@@ -24,16 +24,18 @@ class TestVisualOutputSkill:
         assert "SKILL.md" in paths
 
     def test_frontmatter_single_line_description(self):
-        md = (_bundled_root() / "visual-output" / "SKILL.md").read_text(encoding="utf-8")
+        md = (_bundled_root() / "visual-output" / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
         desc = _parse_description(_bundled_root() / "visual-output" / "SKILL.md")
-        assert desc and "\n" not in desc  # single-line → both parsers agree
+        assert desc and "\n" not in desc
         assert "triggers:" in md and "<widget" in md
 
     def test_triggered_on_widget_request(self, tmp_path, monkeypatch):
-        from gideon.skills.loader import SkillsLoader
+        from gideon.extensions.skills.loader import ProcedureLibrary
 
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-        loader = SkillsLoader(skills_path=tmp_path / "skills")
+        loader = ProcedureLibrary(skills_path=tmp_path / "skills")
         names = {s["key"] for s in loader.list_skills()}
         assert "visual-output" in names
         hit = loader.get_triggered_skills("can you render a widget chart")
@@ -42,10 +44,6 @@ class TestVisualOutputSkill:
         assert "visual-output" not in miss
 
     def test_no_internal_nouns(self):
-        # The denylist is stored as irreversible SHA-256 digests so the published
-        # repo never contains the guarded nouns in any recoverable form (a base64
-        # denylist still ships them). The guard stays live: hash each token in the
-        # skill text and compare against the digest set.
         import hashlib
         import re
 
@@ -59,9 +57,17 @@ class TestVisualOutputSkill:
             "87ec940abd81dcaa2ef5deb4b3bf9e354f161dc5eb51ba0e26f88ea797080b8c",
             "87cb60d3f9cbfa1e55661503e2ca017f5a11c2aa3d78e44982e370866aa8f71b",
         }
-        md = (_bundled_root() / "visual-output" / "SKILL.md").read_text(encoding="utf-8").lower()
+        md = (
+            (_bundled_root() / "visual-output" / "SKILL.md")
+            .read_text(encoding="utf-8")
+            .lower()
+        )
         tokens = set(re.findall(r"[a-z0-9][a-z0-9.]*", md))
-        leaked = {t for t in tokens if hashlib.sha256(t.encode()).hexdigest() in banned_digests}
+        leaked = {
+            t
+            for t in tokens
+            if hashlib.sha256(t.encode()).hexdigest() in banned_digests
+        }
         assert not leaked, f"visual-output skill leaked internal noun(s): {leaked}"
 
 
@@ -72,12 +78,14 @@ class TestArtifactsSkill:
         assert "SKILL.md" in paths
 
     def test_triggered_on_save_widget(self, tmp_path, monkeypatch):
-        from gideon.skills.loader import SkillsLoader
+        from gideon.extensions.skills.loader import ProcedureLibrary
 
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-        loader = SkillsLoader(skills_path=tmp_path / "skills")
+        loader = ProcedureLibrary(skills_path=tmp_path / "skills")
         assert "artifacts" in {s["key"] for s in loader.list_skills()}
-        assert "artifacts" in loader.get_triggered_skills("save this widget to the library")
+        assert "artifacts" in loader.get_triggered_skills(
+            "save this widget to the library"
+        )
 
     def test_tool_existence_cross_check(self):
         """D2: every artifact_* tool the skill names must exist on the gideon-core
@@ -88,7 +96,7 @@ class TestArtifactsSkill:
         live in the mcp_artifacts category module now, aggregated into the core MCP
         server surface, so cross-check against that aggregate.
         """
-        from gideon.mcp_core import _aggregated_list_tools
+        from gideon.integrations.mcp_core import _aggregated_list_tools
 
         live = {t["name"] for t in _aggregated_list_tools()}
         md = (_bundled_root() / "artifacts" / "SKILL.md").read_text(encoding="utf-8")
@@ -100,9 +108,6 @@ class TestArtifactsSkill:
     def test_gideon_namespace(self):
         md = (_bundled_root() / "artifacts" / "SKILL.md").read_text(encoding="utf-8")
         assert "@gideon-core" in md
-        # The skill must reference only the canonical core MCP namespace — no
-        # pre-rename or vendor namespace may resurface. Assert every "@…-core"
-        # token the skill names is exactly "@gideon-core".
         core_namespaces = set(re.findall(r"@[a-z][a-z0-9-]*-core\b", md))
         assert core_namespaces == {"@gideon-core"}, (
             f"skill references unexpected core namespace(s): "

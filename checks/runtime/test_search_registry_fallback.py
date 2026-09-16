@@ -18,9 +18,9 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.search_providers import registry as reg
-from gideon.search_providers import use_cases as uc
-from gideon.search_providers.base import (
+from gideon.integrations.search_providers import registry as reg
+from gideon.integrations.search_providers import use_cases as uc
+from gideon.integrations.search_providers.base import (
     SearchCapabilities,
     SearchHit,
     SearchProvider,
@@ -71,7 +71,9 @@ class _FakeDDG(SearchProvider):
         return True
 
     def capabilities(self):
-        return SearchCapabilities(supports_recency=True, depths=("balanced",), keyless=True)
+        return SearchCapabilities(
+            supports_recency=True, depths=("balanced",), keyless=True
+        )
 
     async def search(self, q, **k):
         return SearchResult(
@@ -100,13 +102,8 @@ class _Keyed(SearchProvider):
         return SearchResult(provider="tavily", query=q)
 
 
-# ── keyless-floor resolution ────────────────────────────────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_no_binding_resolves_to_keyless_floor(monkeypatch, tmp_path):
-    # A user who configured NOTHING: only the keyless default is registered → it
-    # resolves, so web_search works out-of-box (and seeds web_fetch provenance).
     monkeypatch.setattr(reg, "_providers", {})
     monkeypatch.setattr(uc, "_active_path", lambda: tmp_path / "a.json")
     reg.register_provider(_FakeDDG())
@@ -116,17 +113,12 @@ async def test_no_binding_resolves_to_keyless_floor(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_keyed_provider_wins_over_keyless_default(monkeypatch, tmp_path):
-    # When an available keyed provider is also registered (unbound), it should win
-    # the implicit fallback over the keyless default (the floor sorts last).
     monkeypatch.setattr(reg, "_providers", {})
     monkeypatch.setattr(uc, "_active_path", lambda: tmp_path / "a.json")
     reg.register_provider(_FakeDDG())
     reg.register_provider(_Keyed())
     p = await reg.resolve_search_provider_for_use_case("search-general")
-    assert p.name == "tavily"  # keyed provider preferred; the floor is last
-
-
-# ── failure fallback (search_with_fallback) ─────────────────────────────────────
+    assert p.name == "tavily"
 
 
 @pytest.fixture
@@ -152,7 +144,7 @@ async def test_search_falls_back_to_floor_on_failure(_bound_failing):
 async def test_search_no_fallback_when_bound_provider_succeeds(monkeypatch, tmp_path):
     monkeypatch.setattr(reg, "_providers", {})
     monkeypatch.setattr(uc, "_active_path", lambda: tmp_path / "a.json")
-    reg.register_provider(_FakeDDG())  # floor bound + working — no fallback needed
+    reg.register_provider(_FakeDDG())
     uc.set_active_search_provider("search-general", "duckduckgo")
     result, fell_back = await reg.search_with_fallback("search-general", "q")
     assert fell_back is False
@@ -161,7 +153,6 @@ async def test_search_no_fallback_when_bound_provider_succeeds(monkeypatch, tmp_
 
 @pytest.mark.asyncio
 async def test_search_reraises_when_no_keyless_fallback(monkeypatch, tmp_path):
-    # Bound provider fails AND no floor registered → the original error propagates.
     monkeypatch.setattr(reg, "_providers", {})
     monkeypatch.setattr(uc, "_active_path", lambda: tmp_path / "a.json")
     reg.register_provider(_Boom("tavily"))
@@ -170,23 +161,25 @@ async def test_search_reraises_when_no_keyless_fallback(monkeypatch, tmp_path):
         await reg.search_with_fallback("search-general", "q")
 
 
-# ── fetch_with_fallback → native pipeline ──────────────────────────────────────
-
-
 @pytest.mark.asyncio
-async def test_fetch_falls_back_to_native_pipeline_on_provider_failure(monkeypatch, tmp_path):
-    # A fetch-capable provider bound to fetch-article, but its fetch() raises → the
-    # native web_fetch pipeline takes over (no key needed).
+async def test_fetch_falls_back_to_native_pipeline_on_provider_failure(
+    monkeypatch, tmp_path
+):
     monkeypatch.setattr(reg, "_providers", {})
     monkeypatch.setattr(uc, "_active_path", lambda: tmp_path / "a.json")
     reg.register_provider(_Boom("tavily", fetch=True))
     uc.set_active_search_provider("fetch-article", "tavily")
 
-    from gideon.web import fetch as wf
+    from gideon.integrations.web import fetch as wf
 
     async def _fake_native(url, **k):
         return wf.FetchOutcome(
-            ok=True, url=url, title="Native", content="body", char_count=4, total_chars=4
+            ok=True,
+            url=url,
+            title="Native",
+            content="body",
+            char_count=4,
+            total_chars=4,
         )
 
     monkeypatch.setattr(wf, "web_fetch", _fake_native)

@@ -1,7 +1,7 @@
 # Getting started
 
 Gideon is a self-hosted personal AI agent: a local gateway process that
-serves a web dashboard, runs agents with tools/memory/skills, and connects to
+serves a web dashboard, runs agents with tooling/memory/skills, and connects to
 channels. This guide takes you from **nothing installed** to your first chat.
 
 > **Pre-1.0:** Gideon is pre-1.0 and moves fast; releases may make
@@ -14,77 +14,48 @@ channels. This guide takes you from **nothing installed** to your first chat.
   OpenAI-compatible endpoint, AWS Bedrock credentials, or a local Ollama —
   anything from the Store's model-provider apps)
 
-You do **not** need to install Python or Node yourself for the recommended
-paths: `uv` provides its own Python 3.12, and the release wheel ships the
-prebuilt dashboard. (Contributors who build from source need Python 3.12+ and
-Node 18+ — see [CONTRIBUTING](../../CONTRIBUTING.md#development-setup).)
+For a source checkout, install Python 3.12+ and Node 20+, then build the
+console before packaging the runtime. A wheel built from this tree includes the
+console assets and can run without Node on the destination machine.
 
 ## 1. Install
 
-Pick one path. All of them install the **same release artifact** — there are no
-per-channel special builds.
-
-| Path | Command | Best for |
-|---|---|---|
-| **uv tool** *(recommended)* | `uv tool install gideon` | anyone — `uv` brings its own Python 3.12 |
-| **Bootstrap one-liner** | `curl -fsSL https://gideon.dev/install \| sh` | fastest start; installs `uv` if absent, then the above |
-| pipx | `pipx install gideon` | Python users who like isolated tools |
-| pip | `pip install gideon` | inside an existing Python 3.12+ venv |
-| **Docker Compose** | see [§ Docker](#docker-compose) | self-hosters; Windows |
-| Git checkout | see [CONTRIBUTING](../../CONTRIBUTING.md#development-setup) | contributors / development |
-
-After a uv/pipx/pip install the `gideon` command is on your PATH:
+From the repository root:
 
 ```bash
-uv tool install gideon
-gideon setup      # interactive: workspace directory + timezone
+npm ci
+npm run build
+python3 -m pip install .
+gideon setup
 ```
 
-`setup` does **not** ask for a model provider credential — on a fresh install
-there is no provider app to hold one yet. Providers arrive in
-[§3](#3-configure-a-model-provider), after the gateway is up. Run `setup` on a
-real terminal: it prompts, so piping or redirecting stdin makes it fall back to
-the printed defaults.
-
-### Verify the one-liner
-
-`curl … | sh` executes whatever the server sends, unread. If you would rather
-check the bytes before running them, the digest of the current `install.sh` is
-committed in this repository — a **different origin** from the site that serves
-the script:
+The bootstrap path uses `uv` and accepts the current checkout by default:
 
 ```bash
-curl -fsSL -o install.sh https://gideon.dev/install
-curl -fsSL -o install.sh.sha256 \
-  https://raw.githubusercontent.com/Gideon/Gideon/main/deploy/website/install.sh.sha256
-shasum -a 256 -c install.sh.sha256   # or: sha256sum -c install.sh.sha256
+sh infrastructure/website/install.sh
+```
+
+For a separately supplied wheel or release source, set `GIDEON_PACKAGE_SOURCE`
+to its explicit path, URL, or versioned distribution specification before running
+the installer. This project does not assume that a Gideon package, image, or hosted
+installer has already been published.
+
+`setup` configures the workspace directory and timezone. Provider credentials
+are configured after starting the gateway, as described below. Run setup on an
+interactive terminal so its prompts can collect your choices.
+
+### Verify the installer
+
+```bash
+cd infrastructure/website
+sha256sum -c install.sh.sha256
 sh install.sh
 ```
 
-**What this proves, exactly** — stated narrowly on purpose, because a digest is
-easy to oversell:
-
-- **It does defeat** a poisoned CDN cache, a truncated or corrupted transfer, and
-  a tampered response from `gideon.dev`. None of those can also change the
-  copy on `raw.githubusercontent.com`.
-- **Fetching the digest from a second origin is the entire security value here.**
-  A digest served by the same host as the script would prove almost nothing: a
-  host that can hand you a modified script can hand you a matching digest. Do not
-  "simplify" the recipe to a `gideon.dev` digest.
-- **It does not defeat** a compromise of this GitHub repository or of a maintainer
-  account — an attacker with that access updates the script and the digest
-  together. It also covers only this file, not what the file goes on to download:
-  uv's installer from `astral.sh` is fetched over TLS and **not** verified (see the
-  comment in `deploy/website/install.sh`), and the `gideon` wheel comes from
-  PyPI over TLS with a version floor. The wheel does carry
-  [PEP 740](https://peps.python.org/pep-0740/) provenance, signed by GitHub for
-  `Gideon/Gideon` `release.yml` — but no released `uv` or `pip` checks
-  it at install time, so nothing in this path verifies it for you yet.
-- **A mismatch is not by itself proof of an attack.** The website's copy is applied
-  by hand from this repository, so the served bytes can legitimately lag it by a
-  commit. On a mismatch, diff what you downloaded against
-  `deploy/website/install.sh` on `main` before assuming the worst: a reworded
-  message is drift, an added download is not.
+The digest checks these installer bytes. A published installer should have its
+digest distributed through an independent trusted release channel. The installer
+may fetch Astral's `uv` installer over TLS if uv is unavailable; that dependency
+fetch is not covered by this file's digest.
 
 ### Optional extras
 
@@ -94,14 +65,14 @@ dependency; extras are the plain-pip path):
 
 | Extra | Install | Unlocks | Weight |
 |---|---|---|---|
-| `openai` | `pip install 'gideon[openai]'` | the OpenAI SDK (chat/embeddings/STT/TTS) | small |
-| `anthropic` | `pip install 'gideon[anthropic]'` | the Anthropic SDK | small |
-| `bedrock` | `pip install 'gideon[bedrock]'` | AWS Bedrock (`boto3`) | medium |
-| `mcp` | `pip install 'gideon[mcp]'` | Model Context Protocol servers/tools | small |
-| `js-render` | `pip install 'gideon[js-render]'` | JS-rendered web fetch (Playwright) | large (browser) |
-| `models` | `pip install 'gideon[models]'` | local inference: embeddings + STT + TTS | large (ML) |
+| `openai` | `pip install '.[openai]'` | the OpenAI SDK (chat/embeddings/STT/TTS) | small |
+| `anthropic` | `pip install '.[anthropic]'` | the Anthropic SDK | small |
+| `bedrock` | `pip install '.[bedrock]'` | AWS Bedrock (`boto3`) | medium |
+| `mcp` | `pip install '.[mcp]'` | Model Context Protocol servers/tools | small |
+| `js-render` | `pip install '.[js-render]'` | JS-rendered web fetch (Playwright) | large (browser) |
+| `models` | `pip install '.[models]'` | local inference: embeddings + STT + TTS | large (ML) |
 
-> With `uv tool`, add an extra with `uv tool install 'gideon[bedrock]'`.
+> With `uv tool`, add an extra with `uv tool install '.[bedrock]'`.
 > `gideon doctor` reports which optional dependencies are missing and
 > prints the exact command to add them.
 
@@ -157,11 +128,11 @@ sandboxing, and security policy).
 ## Docker Compose
 
 Run a published release without installing anything but Docker. From a checkout
-(or after downloading `deploy/compose/compose.yaml`):
+(or after downloading `infrastructure/compose/compose.yaml`):
 
 ```bash
 cp .env.example .env         # set provider keys / options
-docker compose -f deploy/compose/compose.yaml up -d
+docker compose -f infrastructure/compose/compose.yaml up -d
 ```
 
 The gateway comes up on `http://127.0.0.1:10000` with a persistent

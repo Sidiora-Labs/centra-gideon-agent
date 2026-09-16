@@ -1028,7 +1028,7 @@ Load a skill's full instructions by name. Your context carries only a compact IN
 
 ```json
 {
-  "name": "pclaw-api"
+  "name": "gideon-api"
 }
 ```
 
@@ -1097,7 +1097,7 @@ Load ONE file a skill declared as a resource (a reference doc, a data file, a he
 ```json
 {
   "path": "reference/api-notes.md",
-  "skill": "pclaw-api"
+  "skill": "gideon-api"
 }
 ```
 

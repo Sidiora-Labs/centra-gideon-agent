@@ -6,21 +6,29 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from gideon.skills.curator import STATE_STALE, CuratorReport, is_archived, restore, run_aging
-from gideon.skills.loader import SkillsLoader
+from gideon.extensions.skills.curator import (
+    STATE_STALE,
+    CuratorReport,
+    is_archived,
+    restore,
+    run_aging,
+)
+from gideon.extensions.skills.loader import ProcedureLibrary
 
 NOW = datetime(2026, 6, 15, tzinfo=timezone.utc)
 
 
 @pytest.fixture
-def loader(tmp_path, monkeypatch) -> SkillsLoader:
+def loader(tmp_path, monkeypatch) -> ProcedureLibrary:
     skills = tmp_path / "skills"
     skills.mkdir()
-    monkeypatch.setattr("gideon.skills.loader.skills_dir", lambda: skills)
-    return SkillsLoader(skills_path=skills, install_builtins=False)
+    monkeypatch.setattr("gideon.extensions.skills.loader.skills_dir", lambda: skills)
+    return ProcedureLibrary(skills_path=skills, install_builtins=False)
 
 
-def _write_auto(loader: SkillsLoader, slug: str, *, created_at: str, pinned=False, status=""):
+def _write_auto(
+    loader: ProcedureLibrary, slug: str, *, created_at: str, pinned=False, status=""
+):
     name = f"auto/{slug}"
     fm = [
         "---",
@@ -51,10 +59,9 @@ def _stub_usage(monkeypatch, mapping: dict[str, str]):
         def all_usage(self):
             return {k: _U(v) for k, v in mapping.items()}
 
-    monkeypatch.setattr("gideon.skills.usage.SkillUsageStore", lambda: _Store())
-
-
-# ── aging transitions ──
+    monkeypatch.setattr(
+        "gideon.extensions.skills.usage.SkillUsageStore", lambda: _Store()
+    )
 
 
 def test_fresh_skill_stays_active(loader, monkeypatch):
@@ -83,14 +90,18 @@ def test_unused_90d_archived(loader, monkeypatch):
 
 def test_never_used_ages_by_created_at(loader, monkeypatch):
     _write_auto(loader, "old", created_at=(NOW - timedelta(days=200)).isoformat())
-    _stub_usage(monkeypatch, {})  # never used
+    _stub_usage(monkeypatch, {})
     report = run_aging(loader, now=NOW)
     assert report.to_archived == ["auto/old"]
 
 
 def test_reactivation_when_used_again(loader, monkeypatch):
-    # currently archived, but used yesterday → back to active
-    _write_auto(loader, "r", created_at=(NOW - timedelta(days=200)).isoformat(), status="archived")
+    _write_auto(
+        loader,
+        "r",
+        created_at=(NOW - timedelta(days=200)).isoformat(),
+        status="archived",
+    )
     _stub_usage(monkeypatch, {"auto/r": (NOW - timedelta(days=1)).isoformat()})
     report = run_aging(loader, now=NOW)
     assert report.reactivated == ["auto/r"]
@@ -98,7 +109,9 @@ def test_reactivation_when_used_again(loader, monkeypatch):
 
 
 def test_pinned_is_skipped(loader, monkeypatch):
-    _write_auto(loader, "p", created_at=(NOW - timedelta(days=200)).isoformat(), pinned=True)
+    _write_auto(
+        loader, "p", created_at=(NOW - timedelta(days=200)).isoformat(), pinned=True
+    )
     _stub_usage(monkeypatch, {"auto/p": (NOW - timedelta(days=200)).isoformat()})
     report = run_aging(loader, now=NOW)
     assert report.skipped_pinned == ["auto/p"]
@@ -110,7 +123,7 @@ def test_dry_run_does_not_write(loader, monkeypatch):
     _stub_usage(monkeypatch, {"auto/d": (NOW - timedelta(days=120)).isoformat()})
     report = run_aging(loader, now=NOW, dry_run=True)
     assert report.to_archived == ["auto/d"]
-    assert loader.list_skills()[0]["status"] == "active"  # unchanged on disk
+    assert loader.list_skills()[0]["status"] == "active"
 
 
 def test_idempotent(loader, monkeypatch):
@@ -118,21 +131,17 @@ def test_idempotent(loader, monkeypatch):
     _stub_usage(monkeypatch, {"auto/i": (NOW - timedelta(days=120)).isoformat()})
     run_aging(loader, now=NOW)
     report2 = run_aging(loader, now=NOW)
-    assert report2.changed == 0  # already archived → no further change
-
-
-# ── invariants ──
+    assert report2.changed == 0
 
 
 def test_non_auto_skills_untouched(loader, monkeypatch):
-    # a hand-authored skill (no auto/ prefix) — must never be aged
     (loader._dir / "manual").mkdir()
     (loader._dir / "manual" / "SKILL.md").write_text(
         "---\nname: manual\ndescription: hand-authored\n---\n# x\n"
     )
     _stub_usage(monkeypatch, {})
     report = run_aging(loader, now=NOW)
-    assert report.scanned == 0  # manual/ not scanned
+    assert report.scanned == 0
 
 
 def test_restore_reactivates(loader):
@@ -143,9 +152,6 @@ def test_restore_reactivates(loader):
 
 def test_restore_refuses_non_auto(loader):
     assert restore(loader, "manual/x") is False
-
-
-# ── report ──
 
 
 def test_report_summary_no_changes():

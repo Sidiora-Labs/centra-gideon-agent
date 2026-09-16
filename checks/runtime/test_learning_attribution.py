@@ -22,12 +22,17 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.learning import accountability
-from gideon.learning import attribution as A
-from gideon.learning import proposals as P
-from gideon.workflows import journal as journal_mod
-from gideon.workflows import store as store_mod
-from gideon.workflows.models import Failure, FailureClass, RunStatus, WorkflowRun
+from gideon.automation.workflows import journal as journal_mod
+from gideon.automation.workflows import store as store_mod
+from gideon.automation.workflows.models import (
+    Failure,
+    FailureClass,
+    RunStatus,
+    WorkflowRun,
+)
+from gideon.cognition.learning import accountability
+from gideon.cognition.learning import attribution as A
+from gideon.cognition.learning import proposals as P
 
 
 @pytest.fixture
@@ -40,7 +45,7 @@ def home(tmp_path, monkeypatch):
     neutralized so an accept does not try to resolve a real inbox item.
     """
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     monkeypatch.setattr(P, "_surface_in_inbox", lambda prop: None)
     monkeypatch.setattr(P, "_resolve_inbox_item", lambda pid, status: None)
     return tmp_path
@@ -95,12 +100,10 @@ _SCHEMA = "ValueError: schema validation failed: unexpected field bar"
 _CODE = "AttributeError: NoneType has no attribute foo"
 
 
-# ── accept-time: the bet is snapshotted ──
-
-
 def test_accepting_a_change_records_it_for_grading(home):
     """The instant a human accepts, the target + predicted_fixes + before-rates are frozen — the
-    only moment they are knowable, since `accept` unlinks the proposal two lines later."""
+    only moment they are knowable, since `accept` unlinks the proposal two lines later.
+    """
     before = _run("nightly", status=RunStatus.FAILED)
     _fail(before, "load", _SCHEMA)
     _accept_a_change("nightly", ["schema_violation"])
@@ -132,24 +135,20 @@ def test_a_change_with_no_target_is_not_recorded(home):
 
 
 def test_recording_is_off_when_attribution_disabled(home, monkeypatch):
-    from gideon.config.loader import AppConfig
+    from gideon.core.config.loader import AppConfig
 
     base = AppConfig.load()
     monkeypatch.setattr(A, "_attribution_enabled", lambda: False)
     _run("nightly", status=RunStatus.FAILED)
     _accept_a_change("nightly", ["schema_violation"])
     assert A._all() == []
-    assert base.learning.attribution_enabled is True  # default stays on
-
-
-# ── grading: the verdict ladder end to end ──
+    assert base.learning.attribution_enabled is True
 
 
 def test_pending_until_enough_post_acceptance_runs(home):
     before = _run("nightly", status=RunStatus.FAILED)
     _fail(before, "load", _SCHEMA)
     _accept_a_change("nightly", ["schema_violation"])
-    # only two clean runs since acceptance — below MIN_RUNS
     for _ in range(2):
         _run("nightly")
     report = A.grade_accepted_changes()
@@ -164,7 +163,7 @@ def test_a_change_that_delivered_is_EFFECTIVE_and_files_no_revert(home):
     before = _run("nightly", status=RunStatus.FAILED)
     _fail(before, "load", _SCHEMA)
     _accept_a_change("nightly", ["schema_violation"])
-    for _ in range(3):  # clean runs after acceptance
+    for _ in range(3):
         _run("nightly")
     report = A.grade_accepted_changes()
     assert report["graded"] == 1 and report["effective"] == 1 and report["reverts"] == 0
@@ -180,7 +179,6 @@ def test_a_harmful_change_auto_files_a_revert_that_names_what_broke(home):
     b1 = _run("nightly", status=RunStatus.FAILED)
     _fail(b1, "load", _SCHEMA)
     _accept_a_change("nightly", ["schema_violation"])
-    # after acceptance: schema still failing AND a brand-new code regression
     for _ in range(3):
         r = _run("nightly", status=RunStatus.FAILED)
         _fail(r, "load", _SCHEMA)
@@ -190,7 +188,7 @@ def test_a_harmful_change_auto_files_a_revert_that_names_what_broke(home):
     assert report["harmful"] == 1 and report["reverts"] == 1
     (rev,) = P.list_pending(kind=P.Kind.RETIREMENT.value)
     assert "nightly" in rev.title
-    assert "code" in rev.body  # the unattributed regression is named
+    assert "code" in rev.body
     assert rev.provenance == "inferred"
     (rec,) = A._all()
     assert rec.verdict == accountability.Verdict.HARMFUL.value
@@ -201,9 +199,8 @@ def test_a_mixed_change_files_no_revert(home):
     """A predicted fix landed AND something new regressed → MIXED: the change did something wanted,
     so reverting is the user's call, not automatic."""
     before = _run("nightly", status=RunStatus.FAILED)
-    _fail(before, "load", _SCHEMA)  # baseline has schema only, no code
+    _fail(before, "load", _SCHEMA)
     _accept_a_change("nightly", ["schema_violation"])
-    # after: schema is gone (predicted fix landed) but a brand-new code regression appeared
     for _ in range(3):
         r = _run("nightly", status=RunStatus.FAILED)
         _fail(r, "transform", _CODE)
@@ -215,15 +212,12 @@ def test_a_mixed_change_files_no_revert(home):
     assert P.list_pending(kind=P.Kind.RETIREMENT.value) == []
 
 
-# ── idempotency, scope, gating ──
-
-
 def test_grading_is_idempotent(home):
     """A resolved record is skipped on the next tick, so a HARMFUL revert is filed exactly once."""
     b1 = _run("nightly", status=RunStatus.FAILED)
     _fail(b1, "load", _SCHEMA)
     _accept_a_change("nightly", ["schema_violation"])
-    for _ in range(3):  # predicted schema fix never landed AND code regressed → HARMFUL
+    for _ in range(3):
         r = _run("nightly", status=RunStatus.FAILED)
         _fail(r, "load", _SCHEMA)
         _fail(r, "transform", _CODE)
@@ -240,9 +234,9 @@ def test_only_the_targets_own_runs_are_scored(home):
     b1 = _run("nightly", status=RunStatus.FAILED)
     _fail(b1, "load", _SCHEMA)
     _accept_a_change("nightly", ["schema_violation"])
-    for _ in range(3):  # nightly is now clean
+    for _ in range(3):
         _run("nightly")
-    for _ in range(3):  # a DIFFERENT template is on fire
+    for _ in range(3):
         r = _run("other-template", status=RunStatus.FAILED)
         _fail(r, "x", _CODE)
 
@@ -257,7 +251,7 @@ def test_non_terminal_runs_are_not_counted_as_evidence(home):
     _fail(before, "load", _SCHEMA)
     _accept_a_change("nightly", ["schema_violation"])
     for _ in range(5):
-        _run("nightly", status=RunStatus.RUNNING)  # non-terminal
+        _run("nightly", status=RunStatus.RUNNING)
     report = A.grade_accepted_changes()
     assert report["pending"] == 1 and report["graded"] == 0
 
@@ -286,14 +280,11 @@ def test_grading_is_off_when_attribution_disabled(home, monkeypatch):
     assert A.grade_accepted_changes()["graded"] == 0
 
 
-# ── the trust readout ──
-
-
 def test_verdict_history_feeds_proposer_trust(home):
     b1 = _run("nightly", status=RunStatus.FAILED)
     _fail(b1, "load", _SCHEMA)
     _accept_a_change("nightly", ["schema_violation"])
-    for _ in range(3):  # predicted fix never landed + code regressed → HARMFUL
+    for _ in range(3):
         r = _run("nightly", status=RunStatus.FAILED)
         _fail(r, "load", _SCHEMA)
         _fail(r, "transform", _CODE)
@@ -305,9 +296,6 @@ def test_verdict_history_feeds_proposer_trust(home):
     assert trust[0]["harm_rate"] == 1.0
 
 
-# ── the module is no longer inert (criterion 9's end-to-end check) ──
-
-
 def test_accountability_now_has_a_production_importer():
     """WF2LEA-5's headline: `accountability.py` had ZERO production importers. `attribution` is that
     importer, and it is itself wired into the curator tick in `history.py`."""
@@ -315,7 +303,7 @@ def test_accountability_now_has_a_production_importer():
 
     src = inspect.getsource(A)
     assert "accountability" in src
-    hist = inspect.getsource(__import__("gideon.history", fromlist=["_x"]))
+    hist = inspect.getsource(__import__("gideon.cognition.history", fromlist=["_x"]))
     assert "attribution.grade_accepted_changes" in hist
 
 
@@ -325,7 +313,7 @@ def test_a_harmful_verdict_also_revokes_standing_autonomy_grants(home, monkeypat
     live in test_guardrails_revocation.py."""
     calls: list[dict] = []
     monkeypatch.setattr(
-        "gideon.guardrails.ladder.revoke_granted_scopes",
+        "gideon.security.guardrails.ladder.revoke_granted_scopes",
         lambda **kw: calls.append(kw) or [],
     )
     b1 = _run("nightly", status=RunStatus.FAILED)
@@ -347,7 +335,7 @@ def test_a_harmful_verdict_also_revokes_standing_autonomy_grants(home, monkeypat
 def test_an_effective_verdict_revokes_nothing(home, monkeypatch):
     calls: list[dict] = []
     monkeypatch.setattr(
-        "gideon.guardrails.ladder.revoke_granted_scopes",
+        "gideon.security.guardrails.ladder.revoke_granted_scopes",
         lambda **kw: calls.append(kw) or [],
     )
     b1 = _run("nightly", status=RunStatus.FAILED)

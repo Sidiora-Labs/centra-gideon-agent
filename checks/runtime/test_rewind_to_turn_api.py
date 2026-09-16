@@ -16,8 +16,8 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 from chat_test_helpers import _make_state
 
-from gideon import turn_checkpoints as tc
-from gideon.dashboard.chat import (
+from gideon.engine import turn_checkpoints as tc
+from gideon.interfaces.dashboard.chat import (
     api_chat_session_rewind,
     api_chat_session_rewind_preview,
 )
@@ -26,7 +26,9 @@ from gideon.dashboard.chat import (
 def _app(state) -> web.Application:
     app = web.Application()
     app["state"] = state
-    app.router.add_get("/api/chat/sessions/{session}/rewind", api_chat_session_rewind_preview)
+    app.router.add_get(
+        "/api/chat/sessions/{session}/rewind", api_chat_session_rewind_preview
+    )
     app.router.add_post("/api/chat/sessions/{session}/rewind", api_chat_session_rewind)
     return app
 
@@ -38,7 +40,9 @@ def _sha(p: Path) -> str:
 @pytest.fixture
 def scene(tmp_path, monkeypatch):
     """A session with two turns and three files mangled in turn 2."""
-    monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+    )
     state = _make_state(tmp_path)
     session = state.get_or_create_session("s1")
     ws = tmp_path / "ws"
@@ -70,7 +74,6 @@ async def test_preview_lists_exactly_the_mangled_files_and_writes_nothing(scene)
     restores = {f["path"] for f in body["files"] if f["action"] == "restore"}
     assert restores == set(originals), restores
     assert all(f["diff"] for f in body["files"] if f["action"] == "restore")
-    # The .env is reported honestly as never captured, not silently omitted.
     env = [f for f in body["files"] if f["path"].endswith(".env")]
     assert env and env[0]["action"] == "not_captured" and env[0]["reason"] == "secret"
     assert "does NOT rewind the conversation" in body["notice"]
@@ -86,15 +89,21 @@ async def test_apply_without_confirm_is_refused_and_returns_the_preview(scene):
         assert r.status == 409
         body = await r.json()
     assert body["error"]["code"] == "confirmation_required"
-    assert body["preview"]["files"], "the refusal must carry the preview, not just an error"
-    assert {p: _sha(p) for p in ws.rglob("*") if p.is_file()} == before, "nothing may be written"
+    assert body["preview"][
+        "files"
+    ], "the refusal must carry the preview, not just an error"
+    assert {
+        p: _sha(p) for p in ws.rglob("*") if p.is_file()
+    } == before, "nothing may be written"
 
 
 @pytest.mark.asyncio
 async def test_apply_with_confirm_restores_byte_identical(scene):
     state, _session, _ws, originals = scene
     async with TestClient(TestServer(_app(state))) as client:
-        r = await client.post("/api/chat/sessions/s1/rewind", json={"turn": 1, "confirm": True})
+        r = await client.post(
+            "/api/chat/sessions/s1/rewind", json={"turn": 1, "confirm": True}
+        )
         assert r.status == 200, await r.text()
         body = await r.json()
     assert body["ok"] is True
@@ -108,7 +117,9 @@ async def test_apply_with_confirm_restores_byte_identical(scene):
 async def test_a_confirmed_rewind_does_not_restore_the_dotenv(scene):
     state, _session, ws, _originals = scene
     async with TestClient(TestServer(_app(state))) as client:
-        r = await client.post("/api/chat/sessions/s1/rewind", json={"turn": 1, "confirm": True})
+        r = await client.post(
+            "/api/chat/sessions/s1/rewind", json={"turn": 1, "confirm": True}
+        )
         assert r.status == 200
     assert (ws / ".env").read_text(encoding="utf-8") == "TOKEN=clobbered\n"
 
@@ -128,13 +139,13 @@ async def test_a_bad_turn_and_a_missing_session_use_the_stable_error_envelope(sc
 @pytest.mark.asyncio
 async def test_a_rewind_is_refused_while_a_turn_is_running(scene):
     state, session, ws, _originals = scene
-    # `running` is a derived property (task is not None and not done) — so a live turn is
-    # simulated by giving the session an unfinished task, the way the real code sees it.
     session.task = asyncio.get_running_loop().create_future()
     assert session.running is True
     before = {p: _sha(p) for p in ws.rglob("*") if p.is_file()}
     async with TestClient(TestServer(_app(state))) as client:
-        r = await client.post("/api/chat/sessions/s1/rewind", json={"turn": 1, "confirm": True})
+        r = await client.post(
+            "/api/chat/sessions/s1/rewind", json={"turn": 1, "confirm": True}
+        )
         assert r.status == 409 and (await r.json())["error"]["code"] == "turn_running"
     assert {p: _sha(p) for p in ws.rglob("*") if p.is_file()} == before
 
@@ -156,14 +167,18 @@ async def test_the_preview_finishes_a_rewind_that_died_mid_commit(scene, monkeyp
 
     monkeypatch.setattr(tc.os, "replace", flaky)
     async with TestClient(TestServer(_app(state))) as client:
-        r = await client.post("/api/chat/sessions/s1/rewind", json={"turn": 1, "confirm": True})
+        r = await client.post(
+            "/api/chat/sessions/s1/rewind", json={"turn": 1, "confirm": True}
+        )
         assert r.status == 500
         assert (await r.json())["error"]["code"] == "rewind_incomplete"
         assert tc.pending_rewinds(session.key), "the journal must survive the failure"
         monkeypatch.setattr(tc.os, "replace", real_replace)
         r = await client.get("/api/chat/sessions/s1/rewind?turn=1")
         assert r.status == 200
-        assert (await r.json())["resumed"], "the preview must report the resume it performed"
+        assert (await r.json())[
+            "resumed"
+        ], "the preview must report the resume it performed"
     assert not tc.pending_rewinds(session.key)
     for path, want in originals.items():
         assert _sha(Path(path)) == want

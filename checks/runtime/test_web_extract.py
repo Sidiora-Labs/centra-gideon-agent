@@ -1,4 +1,4 @@
-"""WS5b — the shared web content extractor (web/extract.py).
+"""WS5b — the shared web content extractor (apps/console/extract.py).
 
 Covers sanitization of untrusted HTML, main-content extraction (trafilatura when
 present, html2text fallback), title recovery, and graceful empty handling. Does not
@@ -7,8 +7,12 @@ hit the network — extraction is pure over an HTML string.
 
 from __future__ import annotations
 
-from gideon.web import extract as ex
-from gideon.web.extract import ExtractedDoc, extract_main_content, sanitize_html
+from gideon.integrations.web import extract as ex
+from gideon.integrations.web.extract import (
+    ExtractedDoc,
+    extract_main_content,
+    sanitize_html,
+)
 
 _PAGE = """
 <!DOCTYPE html>
@@ -42,17 +46,13 @@ def test_extract_returns_main_content():
     doc = extract_main_content(_PAGE, url="https://example.com/post")
     assert isinstance(doc, ExtractedDoc)
     assert "genuine article body" in doc.text
-    # boilerplate chrome should be gone
     assert "home about contact" not in doc.text
-    # never leaks script
     assert "alert(" not in doc.text
     assert doc.char_count == len(doc.text)
     assert doc.extractor in {"trafilatura", "html2text"}
 
 
 def test_extract_recovers_title():
-    # A title is recovered (trafilatura may prefer the <h1> over <title>; either is a
-    # real page title). The exact <title>-tag path is pinned by the fallback test.
     doc = extract_main_content(_PAGE, url="https://example.com/post")
     assert doc.title.strip() != ""
 
@@ -64,8 +64,6 @@ def test_extract_empty_html():
 
 
 def test_fallback_path_when_trafilatura_absent(monkeypatch):
-    # Force the html2text fallback (trafilatura unavailable) — still extracts text,
-    # still never leaks script (sanitize runs regardless).
     monkeypatch.setattr(ex, "_trafilatura", None)
     doc = extract_main_content(_PAGE, url="https://example.com/post")
     assert doc.extractor == "html2text"

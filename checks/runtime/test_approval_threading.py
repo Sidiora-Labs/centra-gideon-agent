@@ -14,7 +14,7 @@ What remains a CORE contract (and is tested below):
 - When no channel is registered, it falls back to
   ``dashboard_state.request_approval``.
 - The CLI ``--approval yolo|reads`` auto-approve short-circuit emits SEL audit.
-- SubagentManager threads ``parent_session_key`` through its approval hooks.
+- DelegationSupervisor threads ``parent_session_key`` through its approval hooks.
 """
 
 import contextlib
@@ -22,20 +22,19 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from gideon.llm_helpers import LLMEvent
+from gideon.integrations.llm_helpers import LLMEvent
 
 
 def _make_gateway():
-    from gideon.gateway import GatewayOrchestrator
+    from gideon.engine.gateway import RuntimeCoordinator
 
-    gateway = GatewayOrchestrator.__new__(GatewayOrchestrator)
+    gateway = RuntimeCoordinator.__new__(RuntimeCoordinator)
     gateway.sessions = MagicMock()
     gateway.sessions.get_pid = MagicMock(return_value=None)
-    # Channel delivery seam (replaces the old core `gateway.slack`).
     gateway._channel_delivery = MagicMock()
     gateway._channel_delivery.request_approval = AsyncMock(return_value=True)
     gateway.dashboard_state = MagicMock()
-    # Gateway reads global YOLO via gideon.trust_mode (patched off per test).
+    # Gateway reads global YOLO via gideon.security.trust_mode (patched off per test).
     gateway.dashboard_state.is_yolo_active.return_value = False
     gateway.dashboard_state._sessions = {}
     gateway.dashboard_state.request_approval = AsyncMock(return_value=True)
@@ -55,9 +54,6 @@ def _make_event(request_id: str = "req1", title: str = "shell: ls") -> LLMEvent:
     return LLMEvent(kind="permission_request", request_id=request_id, title=title)
 
 
-# ── Tests: _interactive_approval delegates to the channel delivery seam ──
-
-
 class TestChannelDelegation:
     """The core callback delegates approval to _channel_delivery.request_approval."""
 
@@ -67,14 +63,13 @@ class TestChannelDelegation:
         gateway = _make_gateway()
         gateway._channel_delivery.request_approval = AsyncMock(return_value=True)
 
-        with patch("gideon.trust_mode.is_yolo_active", return_value=False):
+        with patch("gideon.security.trust_mode.is_yolo_active", return_value=False):
             approve_fn = gateway._interactive_approval("subagent")
             result = await approve_fn(_make_event(), "1775113012.860459")
 
         assert result is True
         gateway._channel_delivery.request_approval.assert_awaited_once()
         call = gateway._channel_delivery.request_approval.call_args
-        # event is the first positional; source + routing context ride kwargs.
         assert call.args[0].request_id == "req1"
         assert call.kwargs["source"] == "subagent"
         assert call.kwargs["parent_session_key"] == "1775113012.860459"
@@ -86,7 +81,7 @@ class TestChannelDelegation:
         gateway = _make_gateway()
         gateway._channel_delivery.request_approval = AsyncMock(return_value=False)
 
-        with patch("gideon.trust_mode.is_yolo_active", return_value=False):
+        with patch("gideon.security.trust_mode.is_yolo_active", return_value=False):
             approve_fn = gateway._interactive_approval("subagent")
             result = await approve_fn(_make_event(), "cron:j1")
 
@@ -99,7 +94,7 @@ class TestChannelDelegation:
         gateway._channel_delivery = None
         gateway.dashboard_state.request_approval = AsyncMock(return_value=True)
 
-        with patch("gideon.trust_mode.is_yolo_active", return_value=False):
+        with patch("gideon.security.trust_mode.is_yolo_active", return_value=False):
             approve_fn = gateway._interactive_approval("subagent")
             result = await approve_fn(_make_event(), "")
 
@@ -115,7 +110,7 @@ class TestChannelDelegation:
         )
         gateway.dashboard_state.request_approval = AsyncMock(return_value=False)
 
-        with patch("gideon.trust_mode.is_yolo_active", return_value=False):
+        with patch("gideon.security.trust_mode.is_yolo_active", return_value=False):
             approve_fn = gateway._interactive_approval("subagent")
             result = await approve_fn(_make_event(), "")
 
@@ -123,16 +118,13 @@ class TestChannelDelegation:
         gateway.dashboard_state.request_approval.assert_awaited_once()
 
 
-# ── Tests: subagent passes parent_session_key to approval ──
-
-
 class TestSubagentPassesParentKey:
-    """SubagentManager must pass parent_session_key to approval callbacks."""
+    """DelegationSupervisor must pass parent_session_key to approval callbacks."""
 
     @pytest.mark.asyncio
     async def test_spawn_approval_receives_parent_session_key(self) -> None:
         """on_spawn_approval is called with parent_session_key."""
-        from gideon.subagent import SubagentManager
+        from gideon.engine.subagent import DelegationSupervisor
 
         captured_args: list = []
 
@@ -140,7 +132,7 @@ class TestSubagentPassesParentKey:
             request_id: str, description: str, parent_session_key: str = ""
         ) -> bool:
             captured_args.append((request_id, description, parent_session_key))
-            return False  # reject to avoid running
+            return False
 
         sessions = MagicMock()
         sessions.get_pid = MagicMock(return_value=None)
@@ -150,7 +142,7 @@ class TestSubagentPassesParentKey:
         ctx_builder = MagicMock()
         ctx_builder.hooks = MagicMock()
 
-        manager = SubagentManager(
+        manager = DelegationSupervisor(
             sessions=sessions,
             ctx_builder=ctx_builder,
             on_spawn_approval=mock_spawn_approval,
@@ -160,7 +152,6 @@ class TestSubagentPassesParentKey:
         info = manager.spawn("check oncall", parent_session_key="1775113012.860459")
         assert info is not None
 
-        # Await the spawned task directly (deterministic, no sleep)
         with contextlib.suppress(Exception):
             await manager._tasks[info.id]
 
@@ -170,17 +161,20 @@ class TestSubagentPassesParentKey:
     @pytest.mark.asyncio
     async def test_tool_approval_receives_parent_session_key(self) -> None:
         """on_tool_approval is called with parent_session_key during tool requests."""
-        from gideon.subagent import SubagentManager
+        from gideon.engine.subagent import DelegationSupervisor
 
         captured: list = []
 
-        async def mock_tool_approval(event: LLMEvent, parent_session_key: str = "") -> bool:
+        async def mock_tool_approval(
+            event: LLMEvent, parent_session_key: str = ""
+        ) -> bool:
             captured.append(parent_session_key)
-            return False  # reject to stop the loop
+            return False
 
-        # Mock client whose stream yields one permission_request then ends
         mock_client = MagicMock()
-        perm_event = LLMEvent(kind="permission_request", request_id="tool1", title="shell: ls")
+        perm_event = LLMEvent(
+            kind="permission_request", request_id="tool1", title="shell: ls"
+        )
 
         async def _stream(_msg: str):
             yield perm_event
@@ -198,7 +192,7 @@ class TestSubagentPassesParentKey:
         ctx_builder.hooks = MagicMock()
         ctx_builder.build_message = MagicMock(return_value=("task", {}))
 
-        manager = SubagentManager(
+        manager = DelegationSupervisor(
             sessions=sessions,
             ctx_builder=ctx_builder,
             on_tool_approval=mock_tool_approval,
@@ -214,9 +208,6 @@ class TestSubagentPassesParentKey:
 
         assert len(captured) == 1
         assert captured[0] == "1775113012.860459"
-
-
-# ── Tests: --approval CLI mode emits SEL audit events ──
 
 
 class TestApprovalModeSelAudit:
@@ -235,8 +226,8 @@ class TestApprovalModeSelAudit:
         mock_sel = MagicMock()
         mock_sel.log_api_access = MagicMock()
         with (
-            patch("gideon.gateway.sel", return_value=mock_sel),
-            patch("gideon.trust_mode.is_yolo_active", return_value=False),
+            patch("gideon.engine.gateway.sel", return_value=mock_sel),
+            patch("gideon.security.trust_mode.is_yolo_active", return_value=False),
         ):
             approve_fn = gateway._interactive_approval("cron")
             result = await approve_fn(_make_event(title="shell: rm -rf /"), "")
@@ -247,9 +238,6 @@ class TestApprovalModeSelAudit:
         assert kwargs["caller"] == "cli:approval=yolo"
         assert kwargs["operation"] == "cron.cli_approval_auto_approve"
         assert kwargs["outcome"] == "ok"
-        # Title is redacted — destructive command body still passes through
-        # (redaction targets credentials/URLs, not shell args), so the
-        # operation context is preserved for triage.
         assert "rm" in kwargs["resources"]
 
     @pytest.mark.asyncio
@@ -261,8 +249,8 @@ class TestApprovalModeSelAudit:
         mock_sel = MagicMock()
         mock_sel.log_api_access = MagicMock()
         with (
-            patch("gideon.gateway.sel", return_value=mock_sel),
-            patch("gideon.trust_mode.is_yolo_active", return_value=False),
+            patch("gideon.engine.gateway.sel", return_value=mock_sel),
+            patch("gideon.security.trust_mode.is_yolo_active", return_value=False),
         ):
             approve_fn = gateway._interactive_approval("subagent")
             result = await approve_fn(_make_event(title="read /tmp/foo.txt"), "")
@@ -286,14 +274,12 @@ class TestApprovalModeSelAudit:
         mock_sel = MagicMock()
         mock_sel.log_api_access = MagicMock()
         with (
-            patch("gideon.gateway.sel", return_value=mock_sel),
-            patch("gideon.trust_mode.is_yolo_active", return_value=False),
+            patch("gideon.engine.gateway.sel", return_value=mock_sel),
+            patch("gideon.security.trust_mode.is_yolo_active", return_value=False),
         ):
             approve_fn = gateway._interactive_approval("subagent")
             await approve_fn(_make_event(title="shell: rm -rf /"), "")
 
-        # No `cli_approval_auto_approve` event — the write tool fell
-        # through to the standard flow, not the auto-approve path.
         for call in mock_sel.log_api_access.call_args_list:
             assert "cli_approval_auto_approve" not in call.kwargs.get("operation", "")
 
@@ -305,10 +291,10 @@ class TestApprovalModeSelAudit:
 
         broken_sel = MagicMock(side_effect=RuntimeError("sel unavailable"))
         with (
-            patch("gideon.gateway.sel", broken_sel),
-            patch("gideon.trust_mode.is_yolo_active", return_value=False),
+            patch("gideon.engine.gateway.sel", broken_sel),
+            patch("gideon.security.trust_mode.is_yolo_active", return_value=False),
         ):
             approve_fn = gateway._interactive_approval("cron")
             result = await approve_fn(_make_event(), "")
 
-        assert result is True  # approval still proceeds
+        assert result is True

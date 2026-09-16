@@ -13,7 +13,7 @@ import time
 
 import pytest
 
-from gideon.dashboard import session_lifecycle as sl
+from gideon.interfaces.dashboard import session_lifecycle as sl
 
 
 class _Session:
@@ -45,9 +45,6 @@ class _State:
 
 NOW = 1_800_000_000.0
 DAY = 86400.0
-
-
-# ── the rule ──────────────────────────────────────────────────────────────────
 
 
 def test_a_stale_session_is_archived():
@@ -99,7 +96,9 @@ def test_already_archived_sessions_are_not_re_archived():
 
 
 def test_the_pass_is_idempotent():
-    st = _State({"a": _Session(last=NOW - 40 * DAY), "b": _Session(last=NOW - 50 * DAY)})
+    st = _State(
+        {"a": _Session(last=NOW - 40 * DAY), "b": _Session(last=NOW - 50 * DAY)}
+    )
     first = sl.run_auto_archive(st, days=30, now=NOW)
     assert sorted(first) == ["a", "b"]
     assert sl.run_auto_archive(st, days=30, now=NOW) == []
@@ -123,14 +122,13 @@ def test_preview_changes_nothing():
     assert st._sessions["old"].lifecycle == "active", "preview must be side-effect free"
 
 
-# ── set_lifecycle ─────────────────────────────────────────────────────────────
-
-
 def test_restoring_stamps_activity_so_the_next_sweep_does_not_re_archive():
     s = _Session(last=time.time() - 90 * DAY, lifecycle="archived")
     before = time.time()
     assert sl.set_lifecycle(s, "active") is True
-    assert s.last_activity_at >= before, "restore must stamp activity to clear staleness"
+    assert (
+        s.last_activity_at >= before
+    ), "restore must stamp activity to clear staleness"
     st = _State({"restored": s})
     assert sl.run_auto_archive(st, days=30) == []
 
@@ -158,11 +156,8 @@ def test_is_archived_tolerates_a_session_predating_the_field():
     assert sl.is_archived(_Old()) is False
 
 
-# ── the activity stamp on the real Session ────────────────────────────────────
-
-
 def test_real_session_stamps_activity_on_user_and_assistant_turns():
-    from gideon.dashboard.state import _ChatSession
+    from gideon.interfaces.dashboard.state import _ChatSession
 
     s = _ChatSession("chat-1-test", "test")
     assert s.last_activity_at == 0.0
@@ -176,7 +171,7 @@ def test_real_session_stamps_activity_on_user_and_assistant_turns():
 def test_stream_bookkeeping_does_not_count_as_activity():
     """`chunk`/`done` are stream mechanics — if they stamped activity, a session would
     keep itself perpetually 'active' by virtue of its own streaming."""
-    from gideon.dashboard.state import _ChatSession
+    from gideon.interfaces.dashboard.state import _ChatSession
 
     s = _ChatSession("chat-1-test", "test")
     s.append("chunk", "partial", broadcast=False)
@@ -190,18 +185,20 @@ def test_replaying_history_does_not_un_archive_a_loaded_session():
     so an un-archive-on-use rule that ignored `ts` would un-archive an archived chat
     merely by OPENING it (or by a restart restoring it). A replayed message carries its
     stored ts; a live turn does not."""
-    from gideon.dashboard.state import _ChatSession
+    from gideon.interfaces.dashboard.state import _ChatSession
 
     s = _ChatSession("chat-1-test", "test")
     s.lifecycle = "archived"
     s.append("user", "an old message", ts="2026-01-01T00:00:00+00:00", broadcast=False)
-    s.append("assistant", "an old reply", ts="2026-01-01T00:00:01+00:00", broadcast=False)
+    s.append(
+        "assistant", "an old reply", ts="2026-01-01T00:00:01+00:00", broadcast=False
+    )
     assert s.lifecycle == "archived", "replay must not un-archive"
     assert s.last_activity_at == 0.0, "replay must not stamp activity"
 
 
 def test_using_an_archived_session_un_archives_it():
-    from gideon.dashboard.state import _ChatSession
+    from gideon.interfaces.dashboard.state import _ChatSession
 
     s = _ChatSession("chat-1-test", "test")
     s.lifecycle = "archived"
@@ -210,7 +207,7 @@ def test_using_an_archived_session_un_archives_it():
 
 
 def test_lifecycle_fields_round_trip_through_to_dict():
-    from gideon.dashboard.state import _ChatSession
+    from gideon.interfaces.dashboard.state import _ChatSession
 
     s = _ChatSession("chat-1-test", "test")
     s.lifecycle = "archived"
@@ -223,7 +220,7 @@ def test_lifecycle_fields_round_trip_through_to_dict():
 
 
 def test_a_fresh_session_reports_the_defaults():
-    from gideon.dashboard.state import _ChatSession
+    from gideon.interfaces.dashboard.state import _ChatSession
 
     d = _ChatSession("chat-1-test", "test").to_dict()
     assert d["lifecycle"] == "active"
@@ -235,9 +232,6 @@ def test_now_defaults_to_wall_clock():
     """`now=None` must use the real clock, so the heartbeat needs no clock argument."""
     st = _State({"old": _Session(last=time.time() - 40 * DAY)})
     assert sl.run_auto_archive(st, days=30) == ["old"]
-
-
-# ── disk-only sessions (the half the rule originally missed) ──────────────────
 
 
 class _FakeLog:
@@ -268,7 +262,9 @@ class _DiskState(_State):
         self.conversation_log = log
 
 
-def _disk_state(meta: dict[str, dict], sessions: dict[str, _Session] | None = None) -> _DiskState:
+def _disk_state(
+    meta: dict[str, dict], sessions: dict[str, _Session] | None = None
+) -> _DiskState:
     return _DiskState(sessions or {}, _FakeLog(meta))
 
 
@@ -276,14 +272,18 @@ def test_a_stale_disk_only_session_is_archived():
     """THE bug this covers: with `restore_sessions` off (the default) an idle chat is
     never resident, so a memory-only sweep skipped exactly the sessions it exists to
     catch — while reporting success."""
-    st = _disk_state({"dashboard:old": {"lifecycle": "active", "last_activity_at": NOW - 40 * DAY}})
+    st = _disk_state(
+        {"dashboard:old": {"lifecycle": "active", "last_activity_at": NOW - 40 * DAY}}
+    )
     assert sl.stale_session_keys(st, days=30, now=NOW) == ["old"]
     assert sl.run_auto_archive(st, days=30, now=NOW) == ["old"]
     assert st.conversation_log.writes == [("dashboard:old", {"lifecycle": "archived"})]
 
 
 def test_a_fresh_disk_only_session_is_left_alone():
-    st = _disk_state({"dashboard:new": {"lifecycle": "active", "last_activity_at": NOW - 2 * DAY}})
+    st = _disk_state(
+        {"dashboard:new": {"lifecycle": "active", "last_activity_at": NOW - 2 * DAY}}
+    )
     assert sl.stale_session_keys(st, days=30, now=NOW) == []
     assert st.conversation_log.writes == []
 
@@ -334,12 +334,17 @@ def test_a_resident_session_is_not_double_counted():
     )
     assert sl.stale_session_keys(st, days=30, now=NOW) == ["dup"]
     assert sl.run_auto_archive(st, days=30, now=NOW) == ["dup"]
-    assert st.conversation_log.writes == []  # live object handled it
+    assert st.conversation_log.writes == []
 
 
 def test_dashboard_underscore_key_form_is_handled():
     st = _disk_state(
-        {"dashboard_legacy": {"lifecycle": "active", "last_activity_at": NOW - 40 * DAY}}
+        {
+            "dashboard_legacy": {
+                "lifecycle": "active",
+                "last_activity_at": NOW - 40 * DAY,
+            }
+        }
     )
     assert sl.stale_session_keys(st, days=30, now=NOW) == ["legacy"]
     assert sl.run_auto_archive(st, days=30, now=NOW) == ["legacy"]
@@ -347,7 +352,12 @@ def test_dashboard_underscore_key_form_is_handled():
 
 def test_both_halves_are_returned_oldest_first():
     st = _disk_state(
-        {"dashboard:diskold": {"lifecycle": "active", "last_activity_at": NOW - 90 * DAY}},
+        {
+            "dashboard:diskold": {
+                "lifecycle": "active",
+                "last_activity_at": NOW - 90 * DAY,
+            }
+        },
         {"memmid": _Session(last=NOW - 60 * DAY)},
     )
     assert sl.stale_session_keys(st, days=30, now=NOW) == ["diskold", "memmid"]
@@ -372,6 +382,8 @@ def test_no_conversation_log_still_works():
 
 
 def test_disabled_rule_reads_no_disk_at_all():
-    st = _disk_state({"dashboard:old": {"lifecycle": "active", "last_activity_at": NOW - 40 * DAY}})
+    st = _disk_state(
+        {"dashboard:old": {"lifecycle": "active", "last_activity_at": NOW - 40 * DAY}}
+    )
     assert sl.stale_session_keys(st, days=0, now=NOW) == []
     assert st.conversation_log.writes == []

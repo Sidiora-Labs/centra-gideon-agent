@@ -38,8 +38,8 @@ from pathlib import Path
 
 import pytest
 
-from gideon.action_providers import knowledge_retrieve_provider as P
-from gideon.knowledge.store import KnowledgeStore
+from gideon.cognition.knowledge.store import KnowledgeStore
+from gideon.integrations.action_providers import knowledge_retrieve_provider as P
 
 
 class _NoEmbedder:
@@ -72,16 +72,15 @@ def store():
     return s
 
 
-# ── the keyword rung ─────────────────────────────────────────────────────────
-
-
 class TestFtsRung:
     def test_a_plain_word_finds_the_item(self, store):
         """🔴 THE defect: this returned 0 for every query, in every store."""
         rows = P._fts(store, "latency", limit=10)
         assert [r["title"] for r in rows] == ["Cold-start latency"]
 
-    @pytest.mark.parametrize("query", ["cold-start", 'latency"', "latency:", "(latency"], ids=repr)
+    @pytest.mark.parametrize(
+        "query", ["cold-start", 'latency"', "latency:", "(latency"], ids=repr
+    )
     def test_a_join_only_fix_would_not_have_been_enough(self, store, query):
         """Each of these is an FTS5 syntax error as a RAW query, swallowed into
         `[]` — and each one's terms DO appear in the item, so a correct
@@ -95,7 +94,9 @@ class TestFtsRung:
         rows = P._fts(store, query, limit=10)
         assert rows, f"{query!r} returns nothing — the query is not being sanitized"
 
-    @pytest.mark.parametrize("query", ["latency AND", "AND", "x:y", "NOT latency"], ids=repr)
+    @pytest.mark.parametrize(
+        "query", ["latency AND", "AND", "x:y", "NOT latency"], ids=repr
+    )
     def test_an_operator_is_a_LITERAL_now_not_an_operator(self, store, query):
         """The other half of what sanitizing means, and deliberately its own test:
         these must not ERROR, and they must not MATCH either.
@@ -133,9 +134,6 @@ class TestFtsRung:
         assert P._fts(store, query, limit=10) == []
 
 
-# ── the last rung ────────────────────────────────────────────────────────────
-
-
 class TestSubstringRung:
     def test_it_finds_a_plain_substring(self, store):
         found = [r["title"] for r in P._substring(store, "latency", limit=10)]
@@ -156,7 +154,6 @@ class TestSubstringRung:
 
         assert [r["title"] for r in P._substring(s, "a_b", limit=10)] == ["a_b"]
         assert P._substring(s, "a%b", limit=10) == []
-        # …and the ordinary case still works, or the escaping broke plain search.
         assert [r["title"] for r in P._substring(s, "axb", limit=10)] == ["axb"]
 
     def test_a_backslash_in_the_query_is_literal_too(self):
@@ -164,7 +161,9 @@ class TestSubstringRung:
         be declared or SQLite treats the backslash as an ordinary character."""
         db = str(Path(tempfile.mkdtemp()) / "k.db")
         s = KnowledgeStore(db)
-        s.create_typed_item(item_type="note", title=r"path\to", content=r"a windows path\to thing")
+        s.create_typed_item(
+            item_type="note", title=r"path\to", content=r"a windows path\to thing"
+        )
         found = [r["title"] for r in P._substring(s, r"path\to", limit=10)]
         assert found == [r"path\to"]
 
@@ -175,9 +174,6 @@ class TestSubstringRung:
         assert P._like_escape("a%b") == r"a\%b"
         assert P._like_escape("a\\b") == "a\\\\b"
         assert P._like_escape("plain") == "plain"
-
-
-# ── the ladder chooses honestly ──────────────────────────────────────────────
 
 
 class TestTheLadderNamesTheTierThatAnswered:
@@ -195,7 +191,9 @@ class TestTheLadderNamesTheTierThatAnswered:
         assert rows, "the tier named itself and returned nothing"
 
     def test_a_dead_hybrid_retriever_degrades_to_fts_fallback(self, store, monkeypatch):
-        monkeypatch.setattr("gideon.knowledge.retrieval.HybridRetriever", _NoEmbedder)
+        monkeypatch.setattr(
+            "gideon.cognition.knowledge.retrieval.HybridRetriever", _NoEmbedder
+        )
         rows, strategy = P._search(store, "cold-start", top_k=5, mode="")
         assert strategy == "fts_fallback"
         assert rows, "the tier named itself and returned nothing"
@@ -203,7 +201,9 @@ class TestTheLadderNamesTheTierThatAnswered:
     def test_no_hybrid_and_no_FTS_INDEX_degrades_to_substring(self, store, monkeypatch):
         """Forced by DROPPING the FTS table, so `_fts` genuinely fails rather than
         being stubbed — the rung is exercised, not simulated."""
-        monkeypatch.setattr("gideon.knowledge.retrieval.HybridRetriever", _NoEmbedder)
+        monkeypatch.setattr(
+            "gideon.cognition.knowledge.retrieval.HybridRetriever", _NoEmbedder
+        )
         store.db.execute("DROP TABLE items_fts")
         rows, strategy = P._search(store, "latency", top_k=5, mode="")
         assert strategy == "substring_fallback"
@@ -212,7 +212,9 @@ class TestTheLadderNamesTheTierThatAnswered:
     def test_nothing_anywhere_is_reported_as_none(self, store, monkeypatch):
         """Vacuity floor for the ladder: `none` must stay reachable, or the tests
         above prove only that something always answers."""
-        monkeypatch.setattr("gideon.knowledge.retrieval.HybridRetriever", _NoEmbedder)
+        monkeypatch.setattr(
+            "gideon.cognition.knowledge.retrieval.HybridRetriever", _NoEmbedder
+        )
         rows, strategy = P._search(store, "kubernetes", top_k=5, mode="")
         assert strategy == "none"
         assert rows == []

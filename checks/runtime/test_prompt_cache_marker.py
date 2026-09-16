@@ -22,26 +22,24 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.agents.native.runtime import NativeAgentRuntime
-from gideon.agents.provider import AgentRuntimeDefinition
-from gideon.config.loader import AppConfig
-from gideon.context import ContextBuilder
-from gideon.llm import prompt_cache as pc_module
-from gideon.llm.anthropic import _VOLATILE_MESSAGE_KEY, _translate_messages
-from gideon.llm.base import ModelProvider
-from gideon.llm.capabilities import Capability, ProviderCapability
-from gideon.llm.credentials import Credential
-from gideon.llm.events import EVENT_COMPLETE, EVENT_TEXT_CHUNK, AgentEvent
-from gideon.llm.prompt_cache import (
+from gideon.cognition.context import PromptAssembler
+from gideon.cognition.memory import MemoryJournal
+from gideon.core.config.loader import AppConfig
+from gideon.engine.agents.native.runtime import NativeAgentRuntime
+from gideon.engine.agents.provider import AgentRuntimeDefinition
+from gideon.extensions.skills import ProcedureLibrary
+from gideon.integrations.llm import prompt_cache as pc_module
+from gideon.integrations.llm.anthropic import _VOLATILE_MESSAGE_KEY, _translate_messages
+from gideon.integrations.llm.base import ModelProvider
+from gideon.integrations.llm.capabilities import Capability, ProviderCapability
+from gideon.integrations.llm.credentials import Credential
+from gideon.integrations.llm.events import EVENT_COMPLETE, EVENT_TEXT_CHUNK, AgentEvent
+from gideon.integrations.llm.prompt_cache import (
     CACHE_HINT_KEY,
     PromptCache,
     effective_cache_mode,
     mark_cacheable_prefix,
 )
-from gideon.memory import MemoryStore
-from gideon.skills import SkillsLoader
-
-# ── mark_cacheable_prefix: NONE / AUTOMATIC leave the list untouched ──────────
 
 
 def _sample_messages() -> list[dict]:
@@ -56,7 +54,7 @@ def _sample_messages() -> list[dict]:
 def test_none_and_automatic_return_same_object(mode):
     msgs = _sample_messages()
     out = mark_cacheable_prefix(msgs, mode)
-    assert out is msgs  # identity, not just equality
+    assert out is msgs
     assert not any(CACHE_HINT_KEY in m for m in out)
 
 
@@ -67,36 +65,28 @@ def test_empty_list_returned_unchanged(mode):
     assert out is msgs
 
 
-# ── mark_cacheable_prefix: EXPLICIT marks exactly one message ─────────────────
-
-
 def test_explicit_marks_last_non_tool_non_volatile_and_is_shallow_copy():
     msgs = _sample_messages()
     original_last = msgs[-1]
     out = mark_cacheable_prefix(msgs, PromptCache.EXPLICIT, generation=7)
 
-    # New list, exactly one hinted message.
     assert out is not msgs
     hinted = [i for i, m in enumerate(out) if CACHE_HINT_KEY in m]
-    assert hinted == [len(out) - 1]  # documented boundary: last non-tool/non-volatile
+    assert hinted == [len(out) - 1]
     assert out[-1][CACHE_HINT_KEY] == {"generation": 7}
 
-    # Shallow copy: a NEW dict for the hinted message, carrying the same content.
     assert out[-1] is not original_last
     assert out[-1]["role"] == original_last["role"]
     assert out[-1]["content"] == original_last["content"]
 
-    # Non-mutation: the caller's dicts are untouched.
     assert not any(CACHE_HINT_KEY in m for m in msgs)
     assert original_last == {"role": "user", "content": "follow up"}
 
-    # Every non-hinted message passes through by reference.
     for i in range(len(out) - 1):
         assert out[i] is msgs[i]
 
 
 def test_explicit_skips_tool_and_volatile_tail():
-    # Volatile PCS-1 note + a trailing tool result must NOT be the boundary.
     msgs = [
         {"role": "user", "content": "head"},
         {"role": "assistant", "content": "mid"},
@@ -104,10 +94,9 @@ def test_explicit_skips_tool_and_volatile_tail():
         {"role": "system", "content": "per-turn note", "_volatile": True},
     ]
     out = mark_cacheable_prefix(msgs, PromptCache.EXPLICIT, generation=0)
-    # Boundary is the assistant message (index 1) — the last non-tool, non-volatile.
     assert CACHE_HINT_KEY in out[1]
     assert sum(1 for m in out if CACHE_HINT_KEY in m) == 1
-    assert not any(CACHE_HINT_KEY in m for m in msgs)  # inputs unmutated
+    assert not any(CACHE_HINT_KEY in m for m in msgs)
 
 
 def test_explicit_falls_back_to_head_when_all_tool_or_volatile():
@@ -121,16 +110,12 @@ def test_explicit_falls_back_to_head_when_all_tool_or_volatile():
     assert sum(1 for m in out if CACHE_HINT_KEY in m) == 1
 
 
-# ── Invariant 2: zero vendor cache strings in the neutral module ──────────────
-
-
 def test_zero_vendor_cache_strings_in_module_source():
     src = inspect.getsource(pc_module)
     for banned in ("cache_control", "cachePoint", "ephemeral"):
-        assert banned not in src, f"vendor string {banned!r} leaked into prompt_cache.py"
-
-
-# ── Capability + instance defaults ────────────────────────────────────────────
+        assert (
+            banned not in src
+        ), f"vendor string {banned!r} leaked into prompt_cache.py"
 
 
 def test_provider_capability_defaults_to_none():
@@ -166,8 +151,6 @@ def test_model_provider_instance_defaults_to_none():
 
 
 def test_branded_spec_threads_prompt_cache_into_capability():
-    # Import via the canonical app-facing path (gideon.sdk.model), which fixes
-    # the package import order for the sdk.model <-> provider_helpers deferred cycle.
     from gideon.sdk.model import (
         BrandedProviderSpec,
         ProviderResolutionError,
@@ -187,9 +170,6 @@ def test_branded_spec_threads_prompt_cache_into_capability():
         assert cap.prompt_cache is PromptCache.AUTOMATIC
     except ProviderResolutionError:
         pytest.skip("registry rejected the fixture type (already registered)")
-
-
-# ── Middleware: NONE is byte-identical; EXPLICIT is a new list ────────────────
 
 
 class _RecordingModel:
@@ -220,7 +200,7 @@ async def _drain(rt, msg="hi"):
 def test_middleware_two_lines_none_is_same_object():
     """The two middleware lines directly: undeclared provider → same object."""
     msgs = _sample_messages()
-    fake = _RecordingModel()  # no prompt_cache attr at all
+    fake = _RecordingModel()
     mode = getattr(fake, "prompt_cache", PromptCache.NONE)
     assert mode is PromptCache.NONE
     assert mark_cacheable_prefix(msgs, mode) is msgs
@@ -228,11 +208,10 @@ def test_middleware_two_lines_none_is_same_object():
 
 @pytest.mark.asyncio
 async def test_runtime_hands_same_object_to_complete_when_undeclared():
-    model = _RecordingModel()  # defaults NONE via getattr
+    model = _RecordingModel()
     rt = NativeAgentRuntime(definition=_defn(), model_provider=model, tool_providers=[])
     await rt.start()
     await _drain(rt)
-    # Byte-identical invariant: the object complete() saw is rt's own message list.
     assert model.seen is rt._messages
 
 
@@ -242,19 +221,9 @@ async def test_runtime_explicit_builds_new_list_without_mutating_history():
     rt = NativeAgentRuntime(definition=_defn(), model_provider=model, tool_providers=[])
     await rt.start()
     await _drain(rt)
-    # A NEW list with exactly one neutrally-hinted message reached complete()...
     assert model.seen is not rt._messages
     assert sum(1 for m in model.seen if CACHE_HINT_KEY in m) == 1
-    # ...and self._messages itself carries no hint (never mutated).
     assert not any(CACHE_HINT_KEY in m for m in rt._messages)
-
-
-# ── OpenAI: the adapter declares AUTOMATIC and translates nothing ─────────────
-#
-# PCS-3's clause "OpenAI adapter declares AUTOMATIC and translates nothing" was the one
-# clause of that atom left unmet while it read `done`. The two tests below are the two
-# halves of it, and they are deliberately INDEPENDENT: reverting the declaration reds
-# only the first, and making AUTOMATIC mutate the list reds only the second.
 
 
 @pytest.fixture
@@ -285,7 +254,7 @@ def test_openai_adapter_declares_automatic(fake_openai_module):
     resolves to ``ModelProvider.prompt_cache`` = NONE, i.e. "this provider does not
     cache" for a provider that does.
     """
-    from gideon.llm.openai import OpenAIProvider
+    from gideon.integrations.llm.openai import OpenAIProvider
 
     assert OpenAIProvider.prompt_cache is PromptCache.AUTOMATIC
     inst = OpenAIProvider(
@@ -304,16 +273,15 @@ def test_the_openai_posture_leaves_the_message_list_byte_identical():
     resolved to before) and through AUTOMATIC (what it declares now) is the SAME object,
     not merely an equal one.
     """
-    from gideon.llm.openai import OpenAIProvider
+    from gideon.integrations.llm.openai import OpenAIProvider
 
     msgs = _sample_messages()
     before = mark_cacheable_prefix(msgs, PromptCache.NONE)
     after = mark_cacheable_prefix(msgs, PromptCache.AUTOMATIC)
-    assert before is msgs  # the pre-change path
-    assert after is msgs  # identity, not equality
+    assert before is msgs
+    assert after is msgs
     assert after is before
     assert not any(CACHE_HINT_KEY in m for m in after)
-    # ...and whatever posture the adapter actually declares takes that untouched path.
     assert mark_cacheable_prefix(msgs, OpenAIProvider.prompt_cache) is msgs
 
 
@@ -324,7 +292,7 @@ async def test_runtime_hands_same_object_to_complete_under_the_openai_posture():
     The OpenAI posture reaches ``complete()`` carrying the loop's OWN list, exactly as
     an undeclared provider does. This is the assertion that protects the wire payload.
     """
-    from gideon.llm.openai import OpenAIProvider
+    from gideon.integrations.llm.openai import OpenAIProvider
 
     model = _RecordingModel(prompt_cache=OpenAIProvider.prompt_cache)
     rt = NativeAgentRuntime(definition=_defn(), model_provider=model, tool_providers=[])
@@ -334,32 +302,24 @@ async def test_runtime_hands_same_object_to_complete_under_the_openai_posture():
     assert not any(CACHE_HINT_KEY in m for m in rt._messages)
 
 
-# ── Compaction bumps the cache generation ─────────────────────────────────────
-
-
 def test_compaction_bumps_cache_generation(monkeypatch):
-    from gideon import context_compaction as cc
+    from gideon.cognition import context_compaction as cc
 
-    rt = NativeAgentRuntime(definition=_defn(), model_provider=_RecordingModel(), tool_providers=[])
+    rt = NativeAgentRuntime(
+        definition=_defn(), model_provider=_RecordingModel(), tool_providers=[]
+    )
     rt._messages = [{"role": "user", "content": "x" * 400}]
-    rt._last_context_pct = 99.0  # over the compaction threshold
+    rt._last_context_pct = 99.0
     assert rt._cache_generation == 0
 
-    # Force a compaction that shrinks the history.
     monkeypatch.setattr(cc, "should_compact", lambda saves: True)
-    monkeypatch.setattr(cc, "total_chars", lambda msgs: 400 if msgs is rt._messages else 40)
+    monkeypatch.setattr(
+        cc, "total_chars", lambda msgs: 400 if msgs is rt._messages else 40
+    )
     monkeypatch.setattr(cc, "compact", lambda msgs: [{"role": "user", "content": "x"}])
 
     rt._maybe_compact()
     assert rt._cache_generation == 1
-
-
-# ── §C6: the `agent.prompt_cache_enabled` switch ──────────────────────────────
-#
-# Five-point config wiring (dataclass+_meta, load(), to_dict(), the _EDITABLE_CONFIG
-# PATCH allowlist, the frontend control) plus the two behavioural clauses: disabled
-# reads as NONE through the SAME code path, and the §C2/§C3 ordering repairs are NOT
-# gated by it.
 
 
 @pytest.fixture()
@@ -373,7 +333,7 @@ def cache_switch(tmp_path, monkeypatch):
         p = tmp_path / "config.json"
         p.write_text(json.dumps({"agent": agent}), encoding="utf-8")
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-        monkeypatch.setattr("gideon.config.loader.config_path", lambda: p)
+        monkeypatch.setattr("gideon.core.config.loader.config_path", lambda: p)
         return p
 
     return _write
@@ -403,17 +363,18 @@ def test_disabled_still_runs_the_marker_call_one_path_not_a_bypass():
     either way and NONE's existing untouched-list contract does the work. So a
     disabled EXPLICIT provider takes the exact route an undeclared provider takes."""
     msgs = _sample_messages()
-    off = mark_cacheable_prefix(msgs, effective_cache_mode(PromptCache.EXPLICIT, enabled=False))
+    off = mark_cacheable_prefix(
+        msgs, effective_cache_mode(PromptCache.EXPLICIT, enabled=False)
+    )
     undeclared = mark_cacheable_prefix(msgs, PromptCache.NONE)
-    assert off is msgs and undeclared is msgs  # same object, same path
+    assert off is msgs and undeclared is msgs
     assert not any(CACHE_HINT_KEY in m for m in off)
 
 
-# ── the switch through the real native loop ───────────────────────────────────
-
-
 @pytest.mark.asyncio
-async def test_runtime_explicit_with_switch_off_hands_back_the_same_object(cache_switch):
+async def test_runtime_explicit_with_switch_off_hands_back_the_same_object(
+    cache_switch,
+):
     """The whole point of the atom: PCS-4 made the marker unconditional for an EXPLICIT
     adapter. With the switch off, complete() sees rt's own list — no marker at all."""
     cache_switch(False)
@@ -441,12 +402,13 @@ async def test_runtime_explicit_with_switch_on_still_marks(cache_switch):
 def test_unreadable_config_reads_as_enabled(monkeypatch):
     """An unparseable config must not silently change what is served: the field's
     default is True, so a failed read reports ENABLED."""
-    rt = NativeAgentRuntime(definition=_defn(), model_provider=_RecordingModel(), tool_providers=[])
-    monkeypatch.setattr(AppConfig, "load", classmethod(lambda cls: (_ for _ in ()).throw(OSError)))
+    rt = NativeAgentRuntime(
+        definition=_defn(), model_provider=_RecordingModel(), tool_providers=[]
+    )
+    monkeypatch.setattr(
+        AppConfig, "load", classmethod(lambda cls: (_ for _ in ()).throw(OSError))
+    )
     assert rt._prompt_cache_enabled() is True
-
-
-# ── NO DUAL PATH: the §C2/§C3 ordering repairs are not gated by the switch ────
 
 
 def test_ordering_repairs_are_not_gated_by_the_switch(cache_switch, tmp_path):
@@ -456,25 +418,28 @@ def test_ordering_repairs_are_not_gated_by_the_switch(cache_switch, tmp_path):
     forbids. This is the ratchet that makes gating them go red.
     """
     cache_switch(False)
-    assert AppConfig.load().agent.prompt_cache_enabled is False  # the switch really is off
+    assert AppConfig.load().agent.prompt_cache_enabled is False
 
-    # §C2 — stable assembled context still leads; the volatile per-turn note still
-    # rides at the TAIL rather than being hoisted into the out-of-band system=.
     system, out = _translate_messages(
         [
             {"role": "system", "content": "stable assembled context"},
             {"role": "user", "content": "hello"},
-            {"role": "system", "content": "per-turn tool catalog", _VOLATILE_MESSAGE_KEY: True},
+            {
+                "role": "system",
+                "content": "per-turn tool catalog",
+                _VOLATILE_MESSAGE_KEY: True,
+            },
         ]
     )
     assert system == "stable assembled context"
     assert "per-turn tool catalog" not in system
     assert out[-1] == {"role": "user", "content": "per-turn tool catalog"}
 
-    # §C3 — the assembled context still ENDS with the date line.
-    ctx = ContextBuilder(
-        memory=MemoryStore(workspace=tmp_path / "ws"),
-        skills=SkillsLoader(skills_path=tmp_path / "skills", install_builtins=False),
+    ctx = PromptAssembler(
+        memory=MemoryJournal(workspace=tmp_path / "ws"),
+        skills=ProcedureLibrary(
+            skills_path=tmp_path / "skills", install_builtins=False
+        ),
     ).build_session_context(session_key="s1")
     assert ctx.count("[CURRENT DATE]") == 1
     tail = ctx[ctx.rindex("[CURRENT DATE]") :]
@@ -490,7 +455,6 @@ async def test_switch_off_keeps_the_volatile_tag_on_the_per_turn_note(cache_swit
     model = _RecordingModel(prompt_cache=PromptCache.EXPLICIT)
     rt = NativeAgentRuntime(definition=_defn(), model_provider=model, tool_providers=[])
     await rt.start()
-    # Force a per-turn note so the tagging branch is reached regardless of tool surface.
     note = "per-turn tool catalog"
     rt._prepare_turn_tools = lambda message: (None, note)  # type: ignore[method-assign]
     await _drain(rt)
@@ -499,11 +463,8 @@ async def test_switch_off_keeps_the_volatile_tag_on_the_per_turn_note(cache_swit
     assert all(m.get("_volatile") is True for m in notes)
 
 
-# ── the PATCH allowlist round-trips (write it, then read it back) ─────────────
-
-
 def _patch_app():
-    from gideon.dashboard.handlers import api_gideon_config_patch
+    from gideon.interfaces.dashboard.handlers import api_gideon_config_patch
 
     app = web.Application()
     app.router.add_patch("/api/config/gideon", api_gideon_config_patch)
@@ -515,18 +476,20 @@ async def test_patch_round_trips_through_the_editable_allowlist(cache_switch):
     """Point 4 of the five: the field is PATCHable, the write lands in config.json, and
     a fresh load() reads it back — proving the allowlist entry and load()'s mapping
     agree. Then flip it back, so the round trip is proven in BOTH directions."""
-    from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+    from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
     assert _EDITABLE_CONFIG.get("agent.prompt_cache_enabled") == {"type": "bool"}
 
-    cfg_path = cache_switch(None)  # start from the default (ON)
+    cfg_path = cache_switch(None)
     async with TestClient(TestServer(_patch_app())) as c:
         resp = await c.patch(
             "/api/config/gideon",
             json={"path": "agent.prompt_cache_enabled", "value": False},
         )
         assert resp.status == 200
-        assert json.loads(cfg_path.read_text())["agent"]["prompt_cache_enabled"] is False
+        assert (
+            json.loads(cfg_path.read_text())["agent"]["prompt_cache_enabled"] is False
+        )
         assert AppConfig.load().agent.prompt_cache_enabled is False
 
         resp = await c.patch(
@@ -567,7 +530,7 @@ def test_the_field_carries_meta_for_the_settings_surface():
     labelled control rather than an anonymous key."""
     from dataclasses import fields as dc_fields
 
-    from gideon.config.loader import AgentConfig
+    from gideon.core.config.loader import AgentConfig
 
     f = next(f for f in dc_fields(AgentConfig) if f.name == "prompt_cache_enabled")
     assert f.default is True
@@ -575,25 +538,11 @@ def test_the_field_carries_meta_for_the_settings_surface():
     assert f.metadata.get("help")
 
 
-# ── The app-facing SDK surface (PCS-8) ────────────────────────────────────────
-#
-# An app whose provider owns its OWN wire (bedrock-models' Converse client) must READ
-# the neutral marker to translate it into its vendor's syntax — core never learns that
-# syntax. Apps may only reach core through ``gideon.sdk.*``
-# (tests/test_apps_import_boundary.py), so the marker key has to be ON that facade or
-# the out-of-repo consumer is stranded with a hand-copied string literal.
-
-
 def test_the_marker_key_is_on_the_app_facing_sdk_facade():
     """``CACHE_HINT_KEY`` is re-exported by ``gideon.sdk.model`` and is the SAME
     object as the neutral definition — not a second copy that could drift."""
-    from gideon.llm import prompt_cache as neutral
+    from gideon.integrations.llm import prompt_cache as neutral
     from gideon.sdk import model as sdk_model
-
-    # Imported the way an APP imports it — `from gideon.sdk.model import X` — and not
-    # only as an attribute read, because the inert-surface ratchet counts a `sdk_export` as
-    # consumed by scanning for exactly that ImportFrom shape. An attribute read through the
-    # module object leaves the export looking dead to the ratchet while an app depends on it.
     from gideon.sdk.model import CACHE_HINT_KEY as sdk_cache_hint_key
 
     assert sdk_cache_hint_key is neutral.CACHE_HINT_KEY

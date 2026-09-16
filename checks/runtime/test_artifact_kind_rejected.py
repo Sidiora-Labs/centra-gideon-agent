@@ -15,10 +15,10 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.artifacts import registry
-from gideon.artifacts.handlers import register_artifact_routes
-from gideon.artifacts.models import ALLOWED_KINDS, normalize_kind
-from gideon.artifacts.native import NativeArtifactProvider
+from gideon.workspace.artifacts import registry
+from gideon.workspace.artifacts.handlers import register_artifact_routes
+from gideon.workspace.artifacts.models import ALLOWED_KINDS, normalize_kind
+from gideon.workspace.artifacts.native import NativeArtifactProvider
 
 
 @pytest.fixture
@@ -32,8 +32,6 @@ def _make_app() -> web.Application:
     from unittest.mock import MagicMock
 
     app = web.Application()
-    # The create handler reads app["state"] for the restricted-session gate only;
-    # a MagicMock whose gate reports False keeps these route tests on the kind path.
     state = MagicMock()
     state.is_restricted_session.return_value = False
     app["state"] = state
@@ -47,7 +45,6 @@ class TestNormalizeKindStrict:
             normalize_kind("markdwon")
         msg = str(ei.value)
         assert "markdwon" in msg
-        # The refusal teaches: it carries the allowed vocabulary.
         assert "markdown" in msg and "widget" in msg
 
     def test_every_allowed_kind_still_passes(self):
@@ -58,8 +55,6 @@ class TestNormalizeKindStrict:
         assert normalize_kind("  MarkDown  ") == "markdown"
 
     def test_absent_kind_keeps_the_documented_widget_default(self):
-        # ABSENT is not UNKNOWN: callers default a missing kind to "widget"
-        # deliberately (saving a chat widget is the primary flow).
         assert normalize_kind("") == "widget"
         assert normalize_kind(None) == "widget"  # type: ignore[arg-type]
 
@@ -68,7 +63,6 @@ class TestProviderCreateRefusesUnknownKind:
     def test_typoed_kind_is_refused_not_stored_as_widget(self, prov):
         with pytest.raises(ValueError, match="markdwon"):
             prov.create(name="notes", content="# hi", kind="markdwon", source="chat")
-        # Nothing was persisted for the refused create.
         assert all(a.name != "notes" for a in prov.list())
 
     def test_known_kind_still_creates(self, prov):
@@ -86,14 +80,14 @@ class TestCreateRouteRefusesUnknownKind:
             assert resp.status == 400
             body = await resp.json()
             assert "md" in body["error"] and "markdown" in body["error"]
-        # The measured bug: this used to 201 and store kind='widget'.
         assert all(a.name != "doc" for a in prov.list())
 
     @pytest.mark.asyncio
     async def test_post_with_known_kind_still_201s(self, prov):
         async with TestClient(TestServer(_make_app())) as c:
             resp = await c.post(
-                "/api/artifacts", json={"name": "doc", "content": "x", "kind": "markdown"}
+                "/api/artifacts",
+                json={"name": "doc", "content": "x", "kind": "markdown"},
             )
             assert resp.status == 201
             assert (await resp.json())["kind"] == "markdown"
@@ -101,6 +95,8 @@ class TestCreateRouteRefusesUnknownKind:
     @pytest.mark.asyncio
     async def test_post_with_no_kind_keeps_the_widget_default(self, prov):
         async with TestClient(TestServer(_make_app())) as c:
-            resp = await c.post("/api/artifacts", json={"name": "w", "content": "<b>x</b>"})
+            resp = await c.post(
+                "/api/artifacts", json={"name": "w", "content": "<b>x</b>"}
+            )
             assert resp.status == 201
             assert (await resp.json())["kind"] == "widget"

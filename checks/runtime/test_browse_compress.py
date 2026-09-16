@@ -9,20 +9,20 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.browse.compress import (
+from gideon.cognition.learning.surfacing import count_tokens
+from gideon.integrations.browse.compress import (
     DEFAULT_MAX_TOKENS,
     PageOutline,
     assert_no_base64,
     compress_page,
 )
-from gideon.browse.extraction import extract_page
-from gideon.learning.surfacing import count_tokens
+from gideon.integrations.browse.extraction import extract_page
 
 
 def _huge_dom() -> str:
     """A ~100K-token DOM: a big screenshot-bearing <img>, thousands of prose paragraphs, a
     forest of links, and a login form — the shape a real heavy SPA snapshot has."""
-    base64_blob = "iVBORw0KGgoAAAANSUhEUg" + ("A" * 200_000)  # ~200KB base64 screenshot
+    base64_blob = "iVBORw0KGgoAAAANSUhEUg" + ("A" * 200_000)
     paras = "".join(
         f"<p>Paragraph {i} with a fair number of words to bulk out the DOM content here.</p>"
         for i in range(4000)
@@ -44,7 +44,6 @@ def _huge_dom() -> str:
 
 def test_huge_dom_compresses_under_1k_tokens():
     html = _huge_dom()
-    # Sanity: the raw DOM really is enormous (well over the target we compress to).
     assert count_tokens(html) > 50_000
     page = extract_page(html, url="https://example.com/")
     outline = compress_page(page, screenshot_path="/runs/abc/step1.png")
@@ -54,16 +53,19 @@ def test_huge_dom_compresses_under_1k_tokens():
 
 def test_no_base64_in_rendered_outline():
     html = _huge_dom()
-    outline = compress_page(extract_page(html, url="https://x/"), screenshot_path="/runs/a/s.png")
+    outline = compress_page(
+        extract_page(html, url="https://x/"), screenshot_path="/runs/a/s.png"
+    )
     rendered = outline.render()
     assert "base64" not in rendered
     assert "data:image" not in rendered
-    # The guard does not raise on clean output.
     assert_no_base64(rendered)
 
 
 def test_screenshot_referenced_by_path_not_inlined():
-    outline = compress_page(extract_page("<p>hi</p>"), screenshot_path="/runs/x/step3.png")
+    outline = compress_page(
+        extract_page("<p>hi</p>"), screenshot_path="/runs/x/step3.png"
+    )
     rendered = outline.render()
     assert "[SCREENSHOT: /runs/x/step3.png]" in rendered
     assert outline.screenshot_path == "/runs/x/step3.png"
@@ -81,12 +83,10 @@ def test_assert_no_base64_case_insensitive():
 
 
 def test_interactive_elements_preserved_when_text_trimmed():
-    # Even when prose is trimmed to fit the budget, the refs an agent must act on survive.
     html = _huge_dom()
     page = extract_page(html, url="https://x/")
     outline = compress_page(page, screenshot_path="/r/s.png", max_tokens=400)
     assert count_tokens(outline.render()) < 500
-    # login form fields are still addressable
     labels = {e.label for e in outline.elements}
     assert "email" in labels and "password" in labels
 

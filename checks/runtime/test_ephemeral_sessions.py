@@ -13,17 +13,15 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.dashboard.state import DashboardState, _ChatSession
-from gideon.history import ConversationLog
-
-# ── Helpers ──
+from gideon.cognition.history import ConversationLog
+from gideon.interfaces.dashboard.state import ConsoleState, _ChatSession
 
 
 def _make_state(tmp_path, **kwargs):
     sessions = MagicMock(count=0)
     sessions.remove = AsyncMock()
     sessions.get_pid = MagicMock(return_value=None)
-    return DashboardState(
+    return ConsoleState(
         sessions=sessions,
         start_time=0.0,
         conversation_log=ConversationLog(base_dir=tmp_path),
@@ -32,13 +30,13 @@ def _make_state(tmp_path, **kwargs):
 
 
 def _make_app(state):
-    from gideon.dashboard.chat import (
+    from gideon.interfaces.dashboard.chat import (
         api_chat_session_create,
         api_chat_session_delete,
         api_chat_session_resume,
         api_chat_sessions,
     )
-    from gideon.dashboard.handlers import api_lessons_create
+    from gideon.interfaces.dashboard.handlers import api_lessons_create
 
     app = web.Application()
     app["state"] = state
@@ -59,11 +57,10 @@ def _write_session(log, key, messages, *, memory_mode="persistent"):
         meta["memory_mode"] = memory_mode
     lines = [_json.dumps(meta)]
     for role, content in messages:
-        lines.append(_json.dumps({"role": role, "content": content, "ts": "2026-01-01T00:00:01"}))
+        lines.append(
+            _json.dumps({"role": role, "content": content, "ts": "2026-01-01T00:00:01"})
+        )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
-# ── Session model tests ──
 
 
 class TestSessionMemoryMode:
@@ -116,8 +113,12 @@ class TestSessionCreation:
         assert "dashboard:n1" not in state._restricted_keys
 
     @pytest.mark.asyncio
-    async def test_restricted_key_cleaned_on_session_delete(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+    async def test_restricted_key_cleaned_on_session_delete(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         state.get_or_create_session("reuse", memory_mode="incognito")
         assert "dashboard:reuse" in state._restricted_keys
@@ -137,14 +138,15 @@ class TestSessionCreation:
             state.get_or_create_session("x", memory_mode="incognito")
 
 
-# ── Conversation log persistence ──
-
-
 class TestHistoryPersistence:
-    def test_restricted_session_still_saves_conversation_log(self, tmp_path, monkeypatch):
+    def test_restricted_session_still_saves_conversation_log(
+        self, tmp_path, monkeypatch
+    ):
         """All memory modes write conversation log for tab recovery."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        from gideon.dashboard.chat import save_session_to_history
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        from gideon.interfaces.dashboard.chat import save_session_to_history
 
         state = _make_state(tmp_path)
         session = state.get_or_create_session("e1", memory_mode="temporary")
@@ -158,8 +160,10 @@ class TestHistoryPersistence:
 
     def test_restricted_metadata_flag_persisted(self, tmp_path, monkeypatch):
         """Conversation log metadata includes memory_mode for restricted sessions."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        from gideon.dashboard.chat import save_session_to_history
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        from gideon.interfaces.dashboard.chat import save_session_to_history
 
         state = _make_state(tmp_path)
         session = state.get_or_create_session("e1", memory_mode="incognito")
@@ -172,8 +176,10 @@ class TestHistoryPersistence:
 
     def test_persistent_session_no_memory_mode_metadata(self, tmp_path, monkeypatch):
         """Persistent sessions don't have memory_mode in metadata."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        from gideon.dashboard.chat import save_session_to_history
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        from gideon.interfaces.dashboard.chat import save_session_to_history
 
         state = _make_state(tmp_path)
         session = state.get_or_create_session("n1")
@@ -185,14 +191,16 @@ class TestHistoryPersistence:
         assert "memory_mode" not in meta or meta.get("memory_mode") == "persistent"
 
 
-# ── Restore on gateway restart ──
-
-
 class TestRestore:
     def test_restore_rebuilds_memory_mode(self, tmp_path, monkeypatch):
         """Gateway restart restores restricted sessions with memory_mode intact."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        from gideon.dashboard.chat import restore_recent_sessions, save_session_to_history
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        from gideon.interfaces.dashboard.chat import (
+            restore_recent_sessions,
+            save_session_to_history,
+        )
 
         state1 = _make_state(tmp_path)
         session = state1.get_or_create_session("e1", memory_mode="incognito")
@@ -209,9 +217,6 @@ class TestRestore:
         assert "dashboard:e1" in state2._restricted_keys
 
 
-# ── User-initiated resume from History tab ──
-
-
 class TestResumeFromHistory:
     """Resume endpoint (POST /api/chat/sessions/{session}/resume) must restore memory_mode.
 
@@ -222,9 +227,13 @@ class TestResumeFromHistory:
 
     @pytest.mark.asyncio
     async def test_resume_restores_incognito(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
-        _write_session(state.conversation_log, "e1", [("user", "hi")], memory_mode="incognito")
+        _write_session(
+            state.conversation_log, "e1", [("user", "hi")], memory_mode="incognito"
+        )
 
         async with TestClient(TestServer(_make_app(state))) as client:
             resp = await client.post("/api/chat/sessions/e1/resume", json={"key": "e1"})
@@ -237,9 +246,13 @@ class TestResumeFromHistory:
 
     @pytest.mark.asyncio
     async def test_resume_restores_temporary(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
-        _write_session(state.conversation_log, "t1", [("user", "hi")], memory_mode="temporary")
+        _write_session(
+            state.conversation_log, "t1", [("user", "hi")], memory_mode="temporary"
+        )
 
         async with TestClient(TestServer(_make_app(state))) as client:
             resp = await client.post("/api/chat/sessions/t1/resume", json={"key": "t1"})
@@ -251,8 +264,12 @@ class TestResumeFromHistory:
         assert "dashboard:t1" in state._restricted_keys
 
     @pytest.mark.asyncio
-    async def test_resume_persistent_leaves_restricted_keys_empty(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+    async def test_resume_persistent_leaves_restricted_keys_empty(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         _write_session(state.conversation_log, "p1", [("user", "hi")])
 
@@ -265,24 +282,36 @@ class TestResumeFromHistory:
         assert "dashboard:p1" not in state._restricted_keys
 
     @pytest.mark.asyncio
-    async def test_resume_missing_memory_mode_defaults_persistent(self, tmp_path, monkeypatch):
+    async def test_resume_missing_memory_mode_defaults_persistent(
+        self, tmp_path, monkeypatch
+    ):
         """Legacy sessions (pre-) without memory_mode metadata default to persistent."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         _write_session(state.conversation_log, "legacy", [("user", "hi")])
 
         async with TestClient(TestServer(_make_app(state))) as client:
-            resp = await client.post("/api/chat/sessions/legacy/resume", json={"key": "legacy"})
+            resp = await client.post(
+                "/api/chat/sessions/legacy/resume", json={"key": "legacy"}
+            )
             data = await resp.json()
 
         assert data["memory_mode"] == "persistent"
 
     @pytest.mark.asyncio
-    async def test_learn_add_blocked_after_resume_incognito(self, tmp_path, monkeypatch):
+    async def test_learn_add_blocked_after_resume_incognito(
+        self, tmp_path, monkeypatch
+    ):
         """Core regression: memory_remember must be blocked on a resumed incognito session."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
-        _write_session(state.conversation_log, "e1", [("user", "hi")], memory_mode="incognito")
+        _write_session(
+            state.conversation_log, "e1", [("user", "hi")], memory_mode="incognito"
+        )
 
         async with TestClient(TestServer(_make_app(state))) as client:
             await client.post("/api/chat/sessions/e1/resume", json={"key": "e1"})
@@ -295,25 +324,19 @@ class TestResumeFromHistory:
         assert resp.status == 403
 
 
-# ── Consolidation gate ──
-
-
 class TestConsolidation:
     def test_consolidation_not_triggered_for_restricted(self, tmp_path):
         """maybe_consolidate must not be called for restricted sessions."""
-        from gideon.dashboard.chat import _maybe_consolidate
+        from gideon.interfaces.dashboard.chat import _maybe_consolidate
 
         state = _make_state(tmp_path)
         state.consolidator = MagicMock()
         session = state.get_or_create_session("e1", memory_mode="incognito")
 
-        with patch("gideon.dashboard.chat_utils.sel") as mock_sel:
+        with patch("gideon.interfaces.dashboard.chat_utils.sel") as mock_sel:
             _maybe_consolidate(state, session)
 
         state.consolidator.maybe_consolidate.assert_not_called()
-        # Consolidation is the SESSION_END cadence, now routed through the LearningGate: a denial
-        # is audited with the gate's specific reason (`gate:<reason>`) rather than the old bespoke
-        # `restricted_session_block` string, so the audit trail is uniform with every other cadence.
         mock_sel().log_api_access.assert_called_once_with(
             caller="dashboard:e1",
             operation="consolidate",
@@ -324,7 +347,7 @@ class TestConsolidation:
 
     def test_consolidation_triggered_for_persistent(self, tmp_path):
         """maybe_consolidate must be called for persistent sessions."""
-        from gideon.dashboard.chat import _maybe_consolidate
+        from gideon.interfaces.dashboard.chat import _maybe_consolidate
 
         state = _make_state(tmp_path)
         state.consolidator = MagicMock()
@@ -335,15 +358,14 @@ class TestConsolidation:
         state.consolidator.maybe_consolidate.assert_called_once()
 
 
-# ── API: create session with memory_mode ──
-
-
 class TestSessionAPI:
     @pytest.mark.asyncio
     async def test_create_incognito_session_via_api(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
         monkeypatch.setattr(
-            "gideon.dashboard.chat_persistence.AppConfig.load",
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.chat_persistence.AppConfig.load",
             MagicMock(return_value=MagicMock(agents={})),
         )
         state = _make_state(tmp_path)
@@ -362,9 +384,11 @@ class TestSessionAPI:
 
     @pytest.mark.asyncio
     async def test_create_persistent_session_via_api(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
         monkeypatch.setattr(
-            "gideon.dashboard.chat_persistence.AppConfig.load",
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.chat_persistence.AppConfig.load",
             MagicMock(return_value=MagicMock(agents={})),
         )
         state = _make_state(tmp_path)
@@ -376,10 +400,14 @@ class TestSessionAPI:
         assert data["memory_mode"] == "persistent"
 
     @pytest.mark.asyncio
-    async def test_create_session_memory_mode_mismatch_returns_409(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+    async def test_create_session_memory_mode_mismatch_returns_409(
+        self, tmp_path, monkeypatch
+    ):
         monkeypatch.setattr(
-            "gideon.dashboard.chat_persistence.AppConfig.load",
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.chat_persistence.AppConfig.load",
             MagicMock(return_value=MagicMock(agents={})),
         )
         state = _make_state(tmp_path)
@@ -393,14 +421,15 @@ class TestSessionAPI:
             assert resp.status == 409
 
 
-# ── API: lessons blocked for restricted sessions ──
-
-
 class TestLessonsGate:
     @pytest.mark.asyncio
-    async def test_learn_add_blocked_for_restricted_session(self, tmp_path, monkeypatch):
+    async def test_learn_add_blocked_for_restricted_session(
+        self, tmp_path, monkeypatch
+    ):
         """POST /api/lessons returns 403 when X-Session-Key is restricted."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         state.get_or_create_session("e1", memory_mode="incognito")
 
@@ -415,11 +444,15 @@ class TestLessonsGate:
             assert "not allowed" in data["error"]
 
     @pytest.mark.asyncio
-    async def test_learn_add_allowed_for_persistent_session(self, tmp_path, monkeypatch):
+    async def test_learn_add_allowed_for_persistent_session(
+        self, tmp_path, monkeypatch
+    ):
         """POST /api/lessons succeeds for persistent sessions."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
         monkeypatch.setattr(
-            "gideon.dashboard.handlers._get_memory",
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.handlers._get_memory",
             MagicMock(return_value=MagicMock(vector_store=None)),
         )
         state = _make_state(tmp_path)
@@ -434,8 +467,12 @@ class TestLessonsGate:
             assert resp.status == 200
 
     @pytest.mark.asyncio
-    async def test_learn_add_rejected_without_session_header(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+    async def test_learn_add_rejected_without_session_header(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
 
         async with TestClient(TestServer(_make_app(state))) as client:
@@ -447,7 +484,9 @@ class TestLessonsGate:
 
     @pytest.mark.asyncio
     async def test_learn_add_rejected_for_unknown_session(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
 
         async with TestClient(TestServer(_make_app(state))) as client:
@@ -463,7 +502,9 @@ class TestLessonsGate:
         self, tmp_path, monkeypatch
     ):
         """Defense-in-depth: even if _restricted_keys loses the key, the session's own flag blocks writes."""  # noqa: E501
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         state.get_or_create_session("e1", memory_mode="incognito")
         state._restricted_keys.discard("dashboard:e1")
@@ -483,9 +524,11 @@ class TestLessonsGate:
         self, tmp_path, monkeypatch
     ):
         """Browser Memory page sends 'dashboard:ui' — allowed even when restricted sessions exist."""  # noqa: E501
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
         monkeypatch.setattr(
-            "gideon.dashboard.handlers._get_memory",
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.handlers._get_memory",
             MagicMock(return_value=MagicMock(vector_store=None)),
         )
         state = _make_state(tmp_path)
@@ -500,9 +543,6 @@ class TestLessonsGate:
             assert resp.status == 200
 
 
-# ── MCP core: session_key passthrough ──
-
-
 class TestMcpCoreSessionKeyPassthrough:
     """``GIDEON_PORT`` is set here because ``mcp_core`` now REFUSES rather than
     assuming the default port when it cannot resolve this instance's gateway (#2539) — so a
@@ -511,7 +551,9 @@ class TestMcpCoreSessionKeyPassthrough:
 
     def test_learn_add_sends_session_key_header(self):
         with (
-            patch("gideon.mcp_core.urllib.request.urlopen") as mock_urlopen,
+            patch(
+                "gideon.integrations.mcp_core.urllib.request.urlopen"
+            ) as mock_urlopen,
             patch.dict(
                 "os.environ",
                 {"GIDEON_SESSION_KEY": "dashboard:e1", "GIDEON_PORT": "7777"},
@@ -523,7 +565,7 @@ class TestMcpCoreSessionKeyPassthrough:
             mock_resp.__exit__ = MagicMock(return_value=False)
             mock_urlopen.return_value = mock_resp
 
-            from gideon.mcp_core import _post
+            from gideon.integrations.mcp_core import _post
 
             _post("/api/lessons", {"rule": "test", "category": "knowledge"})
 
@@ -532,8 +574,10 @@ class TestMcpCoreSessionKeyPassthrough:
 
     def test_learn_add_no_session_key_header_when_unset(self):
         with (
-            patch("gideon.mcp_core.urllib.request.urlopen") as mock_urlopen,
-            patch("gideon.mcp_core._resolve_session_key", return_value=""),
+            patch(
+                "gideon.integrations.mcp_core.urllib.request.urlopen"
+            ) as mock_urlopen,
+            patch("gideon.integrations.mcp_core._resolve_session_key", return_value=""),
             patch.dict("os.environ", {"GIDEON_PORT": "7777"}),
         ):
             mock_resp = MagicMock()
@@ -542,15 +586,12 @@ class TestMcpCoreSessionKeyPassthrough:
             mock_resp.__exit__ = MagicMock(return_value=False)
             mock_urlopen.return_value = mock_resp
 
-            from gideon.mcp_core import _post
+            from gideon.integrations.mcp_core import _post
 
             _post("/api/lessons", {"rule": "test", "category": "knowledge"})
 
         req = mock_urlopen.call_args[0][0]
         assert req.get_header("X-session-key") is None
-
-
-# ── Cross-tab privacy filtering (history.py) ──
 
 
 class TestCrossTabPrivacy:
@@ -559,7 +600,10 @@ class TestCrossTabPrivacy:
         log = ConversationLog(base_dir=tmp_path)
 
         _write_session(
-            log, "dashboard:e1", [("user", "secret private data")], memory_mode="incognito"
+            log,
+            "dashboard:e1",
+            [("user", "secret private data")],
+            memory_mode="incognito",
         )
         _write_session(log, "dashboard:n1", [("user", "normal public data")])
 
@@ -581,7 +625,10 @@ class TestCrossTabPrivacy:
         log = ConversationLog(base_dir=tmp_path)
         for i in range(4):
             _write_session(
-                log, f"dashboard:e{i}", [("user", f"secret-{i}")], memory_mode="temporary"
+                log,
+                f"dashboard:e{i}",
+                [("user", f"secret-{i}")],
+                memory_mode="temporary",
             )
             p = log._path(f"dashboard:e{i}")
             os.utime(p, (time.time() + 100 + i, time.time() + 100 + i))
@@ -601,7 +648,10 @@ class TestCrossTabPrivacy:
         log = ConversationLog(base_dir=tmp_path)
         for i in range(18):
             _write_session(
-                log, f"dashboard:e{i}", [("user", f"secret-{i}")], memory_mode="incognito"
+                log,
+                f"dashboard:e{i}",
+                [("user", f"secret-{i}")],
+                memory_mode="incognito",
             )
             p = log._path(f"dashboard:e{i}")
             os.utime(p, (time.time() + 200 + i, time.time() + 200 + i))
@@ -616,16 +666,9 @@ class TestCrossTabPrivacy:
         assert included == 5
 
 
-# ── Soft gate: incognito prompt prefix (chat.py) ──
-
-
 class TestSoftGatePrompt:
-    # The session-mode prefix is now a bundled snippet (``session-incognito`` /
-    # ``session-temporary``) rendered from GIDEON_HOME; the global autouse
-    # ``_isolate_gideon_home`` fixture (tests/conftest.py) seeds it into a
-    # throwaway home.
     def test_incognito_prefix_injected(self):
-        from gideon.dashboard.chat import _apply_incognito_prefix
+        from gideon.interfaces.dashboard.chat import _apply_incognito_prefix
 
         session = _ChatSession("e1", memory_mode="incognito")
         result = _apply_incognito_prefix(session, "Hello world")
@@ -633,7 +676,7 @@ class TestSoftGatePrompt:
         assert "Hello world" in result
 
     def test_temporary_prefix_injected(self):
-        from gideon.dashboard.chat import _apply_incognito_prefix
+        from gideon.interfaces.dashboard.chat import _apply_incognito_prefix
 
         session = _ChatSession("t1", memory_mode="temporary")
         result = _apply_incognito_prefix(session, "Hello world")
@@ -641,22 +684,19 @@ class TestSoftGatePrompt:
         assert "Hello world" in result
 
     def test_no_prefix_for_persistent_session(self):
-        from gideon.dashboard.chat import _apply_incognito_prefix
+        from gideon.interfaces.dashboard.chat import _apply_incognito_prefix
 
         session = _ChatSession("n1")
         result = _apply_incognito_prefix(session, "Hello world")
         assert result == "Hello world"
 
     def test_prefix_injected_for_resumed_restricted(self):
-        from gideon.dashboard.chat import _apply_incognito_prefix
+        from gideon.interfaces.dashboard.chat import _apply_incognito_prefix
 
         session = _ChatSession("e1", memory_mode="incognito")
         result = _apply_incognito_prefix(session, "Follow-up question")
         assert result.startswith("[INCOGNITO SESSION]")
         assert "Follow-up question" in result
-
-
-# ── History file integrity ──
 
 
 class TestHistoryFileIntegrity:
@@ -677,7 +717,9 @@ class TestHistoryFileIntegrity:
     def test_rewrite_session_preserves_memory_mode(self, tmp_path):
         """Compaction must not drop memory_mode from metadata."""
         log = ConversationLog(base_dir=tmp_path)
-        _write_session(log, "e1", [("user", "a"), ("assistant", "b")], memory_mode="incognito")
+        _write_session(
+            log, "e1", [("user", "a"), ("assistant", "b")], memory_mode="incognito"
+        )
 
         kept = [{"role": "user", "content": "a", "ts": "2026-01-01T00:00:01"}]
         log.rewrite_session("e1", kept)
@@ -689,33 +731,31 @@ class TestHistoryFileIntegrity:
         log = ConversationLog(base_dir=tmp_path)
         _write_session(log, "p1", [("user", "a")])
 
-        log.rewrite_session("p1", [{"role": "user", "content": "a", "ts": "2026-01-01T00:00:01"}])
+        log.rewrite_session(
+            "p1", [{"role": "user", "content": "a", "ts": "2026-01-01T00:00:01"}]
+        )
 
         meta = log.get_metadata("p1")
         assert "memory_mode" not in meta
 
 
-# ── Context builder: blocks_reads skips memory ──
-
-
 class TestBlocksReadsContext:
     def test_blocks_reads_skips_memory_and_lessons(self, tmp_path, monkeypatch):
         """build_session_context(blocks_reads=True) must not inject memory or lessons."""
-        from gideon.context import ContextBuilder
-        from gideon.memory import MemoryStore
+        from gideon.cognition.context import PromptAssembler
+        from gideon.cognition.memory import MemoryJournal
 
         ws_dir = tmp_path / "workspace"
         mem_dir = ws_dir / "memory"
         mem_dir.mkdir(parents=True, exist_ok=True)
         (mem_dir / "preferences.md").write_text("# User Preferences\n\n- Likes pizza\n")
 
-        mem = MemoryStore(workspace=ws_dir)
-        cb = ContextBuilder(memory=mem)
-        # Memory is resolved per-cwd via the static get_memory_for; pin it to the
-        # test's store so the assertion targets the blocks_reads gate, not the
-        # cwd→partition mapping.
+        mem = MemoryJournal(workspace=ws_dir)
+        cb = PromptAssembler(memory=mem)
         monkeypatch.setattr(
-            ContextBuilder, "get_memory_for", staticmethod(lambda cwd=None, memory_store=None: mem)
+            PromptAssembler,
+            "get_memory_for",
+            staticmethod(lambda cwd=None, memory_store=None: mem),
         )
 
         ctx_normal = cb.build_session_context(
@@ -728,9 +768,6 @@ class TestBlocksReadsContext:
 
         assert "Likes pizza" in ctx_normal
         assert "Likes pizza" not in ctx_blocked
-
-
-# ── Session session recovery via persisted JSONL ──
 
 
 class TestSessionRecovery:
@@ -753,14 +790,15 @@ class TestSessionRecovery:
         self, tmp_path, monkeypatch
     ):
         """Core fix: evicted session + existing JSONL → memory_remember proceeds."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
         monkeypatch.setattr(
-            "gideon.dashboard.handlers._get_memory",
+            "gideon.interfaces.dashboard.handlers._get_memory",
             MagicMock(return_value=MagicMock(vector_store=None)),
         )
         state = _make_state(tmp_path)
-        # Session was evicted — state._sessions is empty — but JSONL exists.
         self._write_sessions_jsonl(tmp_path, "1776000000.123456")
 
         async with TestClient(TestServer(_make_app(state))) as client:
@@ -776,10 +814,12 @@ class TestSessionRecovery:
         self, tmp_path, monkeypatch
     ):
         """dashboard_{stem}.jsonl fallback path from slack/interactions.py."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
         monkeypatch.setattr(
-            "gideon.dashboard.handlers._get_memory",
+            "gideon.interfaces.dashboard.handlers._get_memory",
             MagicMock(return_value=MagicMock(vector_store=None)),
         )
         state = _make_state(tmp_path)
@@ -794,12 +834,15 @@ class TestSessionRecovery:
             assert resp.status == 200
 
     @pytest.mark.asyncio
-    async def test_learn_add_still_rejected_when_no_jsonl_exists(self, tmp_path, monkeypatch):
+    async def test_learn_add_still_rejected_when_no_jsonl_exists(
+        self, tmp_path, monkeypatch
+    ):
         """Forged/stale keys with no backing JSONL are still rejected as unknown."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
         state = _make_state(tmp_path)
-        # Create an empty sessions dir so the path-exists check is meaningful.
         (tmp_path / ".gideon" / "sessions").mkdir(parents=True, exist_ok=True)
 
         async with TestClient(TestServer(_make_app(state))) as client:
@@ -813,41 +856,31 @@ class TestSessionRecovery:
             assert data["error"] == "unknown session"
 
     @pytest.mark.asyncio
-    async def test_learn_add_rejects_path_traversal_in_session_name(self, tmp_path, monkeypatch):
+    async def test_learn_add_rejects_path_traversal_in_session_name(
+        self, tmp_path, monkeypatch
+    ):
         """Defence-in-depth: session names with path separators, null bytes, or
         leading dots are rejected even when a matching file happens to exist
         at the resolved traversal target. This proves the guard itself blocks
         the request — without creating the target files, the test would pass
         even if the guard were removed because ``Path.exists()`` would return
         ``False`` for the missing file."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
         state = _make_state(tmp_path)
         sess_dir = tmp_path / ".gideon" / "sessions"
         sess_dir.mkdir(parents=True, exist_ok=True)
 
-        # Seed files at every resolved traversal target so that the guard —
-        # NOT the missing-file fallback — is what rejects each request.
-        # "../escape" → sess_dir/../escape.jsonl → ~/.gideon/escape.jsonl
         (tmp_path / ".gideon" / "escape.jsonl").write_text("{}\n")
-        # ".hidden" → sess_dir/.hidden.jsonl
         (sess_dir / ".hidden.jsonl").write_text("{}\n")
-        # "a/b" → sess_dir/a/b.jsonl
         sub = sess_dir / "a"
         sub.mkdir(parents=True, exist_ok=True)
         (sub / "b.jsonl").write_text("{}\n")
-        # "a\\b" (Windows path separator) → nominally sess_dir/a\b.jsonl.
-        # Create a literal single-filename entry with an embedded backslash
-        # so that, on Linux, a JSONL with that exact name exists — proving
-        # the guard rejects backslash independent of platform behaviour.
         (sess_dir / "a\\b.jsonl").write_text("{}\n")
 
         async with TestClient(TestServer(_make_app(state))) as client:
-            # These keys must be *rejected* — either by the server guard
-            # (status 400) or by aiohttp's own header validation before the
-            # request ever reaches the server (ValueError on newline / CR
-            # / null byte). Both outcomes prove the traversal attempt is
-            # blocked end-to-end.
             for bad_key in (
                 "dashboard:../escape",
                 "dashboard:.hidden",
@@ -861,10 +894,6 @@ class TestSessionRecovery:
                 )
                 assert resp.status == 400, f"path-traversal attempt passed: {bad_key!r}"
 
-            # Null byte: blocked at transport level. Older aiohttp raises
-            # ValueError client-side; newer versions reject at the HTTP parser
-            # (ServerDisconnectedError or similar). Either way, the request
-            # cannot reach the handler — verify it doesn't succeed.
             import aiohttp
 
             try:
@@ -874,13 +903,19 @@ class TestSessionRecovery:
                     headers={"X-Session-Key": "dashboard:bad\x00key"},
                 )
                 assert resp.status == 400, "null byte header reached handler"
-            except (ValueError, aiohttp.ServerDisconnectedError, aiohttp.ClientConnectionError):
-                pass  # transport-level rejection — acceptable
+            except (
+                ValueError,
+                aiohttp.ServerDisconnectedError,
+                aiohttp.ClientConnectionError,
+            ):
+                pass
 
     def test_session_has_persisted_history_unit(self, tmp_path, monkeypatch):
         """Direct unit test for the helper."""
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-        from gideon.dashboard.handlers._shared import _session_has_persisted_history
+        from gideon.interfaces.dashboard.handlers._shared import (
+            _session_has_persisted_history,
+        )
 
         assert _session_has_persisted_history("1776000000.123456") is False
         assert _session_has_persisted_history("") is False
@@ -894,33 +929,31 @@ class TestSessionRecovery:
         (sess_dir / "1776000000.123456.jsonl").write_text("{}\n")
         assert _session_has_persisted_history("1776000000.123456") is True
 
-        # dashboard_ prefix fallback
         (sess_dir / "dashboard_chat-1.jsonl").write_text("{}\n")
         assert _session_has_persisted_history("chat-1") is True
 
-        # Even if a file exists at a traversal-style path, the guard still
-        # rejects it — this is what actually proves defence-in-depth.
         (sess_dir / ".hidden.jsonl").write_text("{}\n")
         assert _session_has_persisted_history(".hidden") is False
         (sess_dir / "a\\b.jsonl").write_text("{}\n")
         assert _session_has_persisted_history("a\\b") is False
 
-    # ── Audit events on positive-match paths (security-controls rule) ──
-
     @pytest.mark.asyncio
-    async def test_learn_add_audits_live_session_allow_path(self, tmp_path, monkeypatch):
+    async def test_learn_add_audits_live_session_allow_path(
+        self, tmp_path, monkeypatch
+    ):
         """Live in-memory session → audit event with resources='live_session'."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
         monkeypatch.setattr(
-            "gideon.dashboard.handlers._get_memory",
+            "gideon.interfaces.dashboard.handlers._get_memory",
             MagicMock(return_value=MagicMock(vector_store=None)),
         )
         state = _make_state(tmp_path)
-        # Seed a live session so in_sessions=True on the guard.
         state.get_or_create_session("live1")
 
-        with patch("gideon.dashboard.handlers.schedule._sel") as mock_sel:
+        with patch("gideon.interfaces.dashboard.handlers.schedule._sel") as mock_sel:
             async with TestClient(TestServer(_make_app(state))) as client:
                 resp = await client.post(
                     "/api/lessons",
@@ -938,7 +971,9 @@ class TestSessionRecovery:
         )
 
     @pytest.mark.asyncio
-    async def test_learn_add_audits_restricted_key_allow_path(self, tmp_path, monkeypatch):
+    async def test_learn_add_audits_restricted_key_allow_path(
+        self, tmp_path, monkeypatch
+    ):
         """Key present in _restricted_keys → audit event with resources='restricted_key'.
 
         Restricted keys are blocked *later* in the handler by the
@@ -947,22 +982,20 @@ class TestSessionRecovery:
         audited for the security-controls rule even though the downstream
         write is denied.
         """
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
         state = _make_state(tmp_path)
-        # Populate _restricted_keys without a live session so in_sessions=False
-        # and in_restricted=True on the guard.
         state._restricted_keys.add("dashboard:r1")
 
-        with patch("gideon.dashboard.handlers.schedule._sel") as mock_sel:
+        with patch("gideon.interfaces.dashboard.handlers.schedule._sel") as mock_sel:
             async with TestClient(TestServer(_make_app(state))) as client:
                 resp = await client.post(
                     "/api/lessons",
                     json={"rule": "x", "category": "knowledge"},
                     headers={"X-Session-Key": "dashboard:r1"},
                 )
-                # Downstream _is_restricted_session still blocks the write
-                # with 403, but the session-scope allow decision fires first.
                 assert resp.status in (200, 403)
 
         mock_sel().log_api_access.assert_any_call(
@@ -974,17 +1007,21 @@ class TestSessionRecovery:
         )
 
     @pytest.mark.asyncio
-    async def test_learn_add_audits_channel_namespace_allow_path(self, tmp_path, monkeypatch):
+    async def test_learn_add_audits_channel_namespace_allow_path(
+        self, tmp_path, monkeypatch
+    ):
         """Key in the ``channel:`` namespace → audit event with resources='channel_namespace'."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
         monkeypatch.setattr(
-            "gideon.dashboard.handlers._get_memory",
+            "gideon.interfaces.dashboard.handlers._get_memory",
             MagicMock(return_value=MagicMock(vector_store=None)),
         )
         state = _make_state(tmp_path)
 
-        with patch("gideon.dashboard.handlers.schedule._sel") as mock_sel:
+        with patch("gideon.interfaces.dashboard.handlers.schedule._sel") as mock_sel:
             async with TestClient(TestServer(_make_app(state))) as client:
                 resp = await client.post(
                     "/api/lessons",
@@ -1002,20 +1039,24 @@ class TestSessionRecovery:
         )
 
     @pytest.mark.asyncio
-    async def test_learn_add_audits_dashboard_ui_allow_path(self, tmp_path, monkeypatch):
+    async def test_learn_add_audits_dashboard_ui_allow_path(
+        self, tmp_path, monkeypatch
+    ):
         """Browser UI's static ``dashboard:ui`` key → audit event with
         resources='dashboard_ui'. This key bypasses the session-scope block
         entirely; the allow decision still needs its own SEL event.
         """
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
         monkeypatch.setattr(
-            "gideon.dashboard.handlers._get_memory",
+            "gideon.interfaces.dashboard.handlers._get_memory",
             MagicMock(return_value=MagicMock(vector_store=None)),
         )
         state = _make_state(tmp_path)
 
-        with patch("gideon.dashboard.handlers.schedule._sel") as mock_sel:
+        with patch("gideon.interfaces.dashboard.handlers.schedule._sel") as mock_sel:
             async with TestClient(TestServer(_make_app(state))) as client:
                 resp = await client.post(
                     "/api/lessons",
@@ -1040,7 +1081,9 @@ class TestRestrictedListExclusion:
 
     @pytest.mark.asyncio
     async def test_live_incognito_session_hidden_from_list(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         state.get_or_create_session("spy-1", memory_mode="incognito")
         state.get_or_create_session("tmp-1", memory_mode="temporary")

@@ -28,13 +28,11 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.dashboard.handlers import uploads as up
-from gideon.dashboard.handlers import voice_profiles as vph
-from gideon.uploads.store import UploadStore
-from gideon.voice import bindings as vb
-from gideon.voice import profiles as vp
-
-# ── fixtures ────────────────────────────────────────────────────────────────
+from gideon.integrations.voice import bindings as vb
+from gideon.integrations.voice import profiles as vp
+from gideon.interfaces.dashboard.handlers import uploads as up
+from gideon.interfaces.dashboard.handlers import voice_profiles as vph
+from gideon.workspace.uploads.store import UploadStore
 
 
 class _FakeState:
@@ -70,17 +68,15 @@ def home(tmp_path, monkeypatch):
     """An isolated home for the profile + binding stores (never the real one)."""
     root = tmp_path / "home"
     root.mkdir()
-    # Both modules bind ``config_dir`` at import time, so patch the bound names —
-    # patching config.loader alone would leave these pointing at the real home.
-    monkeypatch.setattr("gideon.voice.profiles.config_dir", lambda: root)
-    monkeypatch.setattr("gideon.voice.bindings.config_dir", lambda: root)
+    monkeypatch.setattr("gideon.integrations.voice.profiles.config_dir", lambda: root)
+    monkeypatch.setattr("gideon.integrations.voice.bindings.config_dir", lambda: root)
     return root
 
 
 @pytest.fixture
 def sel_recorder(monkeypatch):
     recorder = _FakeSel()
-    monkeypatch.setattr("gideon.dashboard.handlers.sel", lambda: recorder)
+    monkeypatch.setattr("gideon.interfaces.dashboard.handlers.sel", lambda: recorder)
     return recorder
 
 
@@ -111,19 +107,20 @@ def _app(home, tmp_path, monkeypatch, state=None) -> web.Application:
     app.router.add_get("/api/voice/profiles/{id}/audio", vph.api_voice_profile_audio)
     app.router.add_post("/api/voice/profiles/{id}/lock", vph.api_voice_profile_lock)
     app.router.add_post("/api/voice/profiles/{id}/unlock", vph.api_voice_profile_unlock)
-    app.router.add_post("/api/voice/profiles/{id}/consent", vph.api_voice_profile_consent_record)
+    app.router.add_post(
+        "/api/voice/profiles/{id}/consent", vph.api_voice_profile_consent_record
+    )
     app.router.add_post(
         "/api/voice/profiles/{id}/consent/verify", vph.api_voice_profile_consent_verify
     )
-    app.router.add_delete("/api/voice/profiles/{id}/consent", vph.api_voice_profile_consent_revoke)
+    app.router.add_delete(
+        "/api/voice/profiles/{id}/consent", vph.api_voice_profile_consent_revoke
+    )
     app.router.add_post("/api/uploads/init", up.api_uploads_init)
     app.router.add_put("/api/uploads/{id}/part", up.api_uploads_part)
     app.router.add_get("/api/uploads/{id}", up.api_uploads_status)
     app.router.add_post("/api/uploads/{id}/complete", up.api_uploads_complete)
     return app
-
-
-# ── CRUD + typed WS events ──────────────────────────────────────────────────
 
 
 class TestCrud:
@@ -150,17 +147,27 @@ class TestCrud:
     @pytest.mark.asyncio
     async def test_routes_emit_typed_ws_events(self, home, tmp_path, monkeypatch):
         state = _FakeState()
-        async with TestClient(TestServer(_app(home, tmp_path, monkeypatch, state))) as client:
-            r = await client.post("/api/voice/profiles", json={"name": "Mine", "kind": "design"})
+        async with TestClient(
+            TestServer(_app(home, tmp_path, monkeypatch, state))
+        ) as client:
+            r = await client.post(
+                "/api/voice/profiles", json={"name": "Mine", "kind": "design"}
+            )
             assert r.status == 201
             pid = (await r.json())["id"]
-            assert (await (await client.get("/api/voice/profiles")).json())["profiles"][0][
-                "id"
-            ] == pid
-            assert (await client.put(f"/api/voice/profiles/{pid}", json={"name": "Yours"})).status
+            assert (await (await client.get("/api/voice/profiles")).json())["profiles"][
+                0
+            ]["id"] == pid
+            assert (
+                await client.put(f"/api/voice/profiles/{pid}", json={"name": "Yours"})
+            ).status
             assert (await client.delete(f"/api/voice/profiles/{pid}")).status == 200
         kinds = [name for name, _ in state.events]
-        assert kinds == ["voice_profile_created", "voice_profile_updated", "voice_profile_deleted"]
+        assert kinds == [
+            "voice_profile_created",
+            "voice_profile_updated",
+            "voice_profile_deleted",
+        ]
 
     @pytest.mark.asyncio
     async def test_unknown_profile_is_404_not_500(self, home, tmp_path, monkeypatch):
@@ -170,30 +177,27 @@ class TestCrud:
             assert (await r.json())["error"]["code"] == "not_found"
 
 
-# ── rail 1: verified_own_voice is recomputed, never believed ────────────────
-
-
 class TestVerifiedOwnVoiceIsRecomputed:
     def test_hand_edited_flag_does_not_verify(self, home):
         profile = vp.create_profile(name="Mine", kind="clone")
         path = vp.profile_path(profile.id)
         raw = json.loads(path.read_text())
-        # The forgery: flip the flag (and invent the provenance strings) by hand.
         raw["verified_own_voice"] = True
         raw["consent_text"] = "I consent"
         raw["consent_audio"] = "consent.wav"
         path.write_text(json.dumps(raw))
 
-        # No artifact on disk → the recompute overrules the file.
         assert vp.get_profile(profile.id).verified_own_voice is False
         assert vp.recompute_verified(vp.get_profile(profile.id)) is False
-        assert vp.profile_payload(vp.get_profile(profile.id))["verified_own_voice"] is False
+        assert (
+            vp.profile_payload(vp.get_profile(profile.id))["verified_own_voice"]
+            is False
+        )
 
     def test_too_short_recording_does_not_verify(self, home):
         profile = vp.create_profile(name="Mine", kind="clone")
         _wav(vp.artifact_path(profile.id, "consent.wav"), seconds=0.2)
         vp.record_consent(profile.id, consent_text="I consent")
-        # The audio exists but is under the one-second floor.
         assert vp.get_profile(profile.id).verified_own_voice is False
 
     def test_real_recording_plus_text_verifies(self, home):
@@ -201,7 +205,6 @@ class TestVerifiedOwnVoiceIsRecomputed:
         _wav(vp.artifact_path(profile.id, "consent.wav"))
         vp.record_consent(profile.id, consent_text="I consent to cloning my voice")
         assert vp.get_profile(profile.id).verified_own_voice is True
-        # Text alone is not enough either: drop the artifact and it un-verifies.
         vp.artifact_path(profile.id, "consent.wav").unlink()
         assert vp.get_profile(profile.id).verified_own_voice is False
 
@@ -221,9 +224,6 @@ class TestVerifiedOwnVoiceIsRecomputed:
         ops = [c["operation"] for c in sel_recorder.calls]
         assert ops == ["voice_profile.consent.verify"]
         assert sel_recorder.calls[0]["outcome"] == "denied"
-
-
-# ── rail 2: symlink-contained ids ──────────────────────────────────────────
 
 
 class TestContainment:
@@ -258,7 +258,6 @@ class TestContainment:
         with pytest.raises(vp.VoiceProfileError) as exc:
             vp.get_profile("vp-escape")
         assert exc.value.reason == "path_escape"
-        # …and the escaping record never shows up in a listing either.
         assert [p.id for p in vp.list_profiles()] == []
 
     def test_planted_dir_symlink_is_not_written_through(self, home, tmp_path):
@@ -285,14 +284,10 @@ class TestContainment:
         (keep / "precious.txt").write_text("do not delete me")
         profile = vp.create_profile(name="x", kind="design")
         pdir = vp.profile_dir(profile.id)
-        # Swap the profile's artifact dir for a symlink pointing outside.
         pdir.rmdir()
         os.symlink(keep, pdir)
         vp.delete_profile(profile.id)
         assert (keep / "precious.txt").is_file()
-
-
-# ── rail 3: revoked consent blocks use ─────────────────────────────────────
 
 
 class TestConsentRevocationBlocks:
@@ -309,7 +304,6 @@ class TestConsentRevocationBlocks:
         _wav(vp.artifact_path(profile.id, "consent.wav"))
 
         async with TestClient(TestServer(_app(home, tmp_path, monkeypatch))) as client:
-            # Unverified clone: the bytes do not leave the store.
             r = await client.get(f"/api/voice/profiles/{profile.id}/audio")
             assert r.status == 403
             assert (await r.json())["error"]["code"] == "consent_required"
@@ -319,9 +313,10 @@ class TestConsentRevocationBlocks:
                 json={"consent_text": "I consent to cloning my voice"},
             )
             assert (await r.json())["verified_own_voice"] is True
-            assert (await client.get(f"/api/voice/profiles/{profile.id}/audio")).status == 200
+            assert (
+                await client.get(f"/api/voice/profiles/{profile.id}/audio")
+            ).status == 200
 
-            # Revoke → blocked again, and the recording is gone from disk.
             r = await client.delete(f"/api/voice/profiles/{profile.id}/consent")
             assert (await r.json())["verified_own_voice"] is False
             r = await client.get(f"/api/voice/profiles/{profile.id}/audio")
@@ -340,8 +335,9 @@ class TestConsentRevocationBlocks:
             vp.assert_artifact_release_allowed(vp.get_profile(profile.id), "consent")
         assert exc.value.reason == "artifact_not_readable"
 
-    def test_sel_payload_carries_no_consent_text_or_audio(self, home, sel_recorder, monkeypatch):
-        # The audit trail is ids + verdicts; the consent statement is not logged.
+    def test_sel_payload_carries_no_consent_text_or_audio(
+        self, home, sel_recorder, monkeypatch
+    ):
         secret = "my spoken consent statement"
         profile = vp.create_profile(name="Mine", kind="clone")
         _wav(vp.artifact_path(profile.id, "consent.wav"))
@@ -350,7 +346,9 @@ class TestConsentRevocationBlocks:
 
         from aiohttp.test_utils import make_mocked_request
 
-        request = make_mocked_request("POST", f"/api/voice/profiles/{profile.id}/consent/verify")
+        request = make_mocked_request(
+            "POST", f"/api/voice/profiles/{profile.id}/consent/verify"
+        )
         request.match_info["id"] = profile.id
         asyncio.run(vph.api_voice_profile_consent_verify(request))
         blob = json.dumps(sel_recorder.calls)
@@ -360,14 +358,12 @@ class TestConsentRevocationBlocks:
 
     def test_unverified_clone_binding_warns(self, home):
         profile = vp.create_profile(name="Mine", kind="clone")
-        assert vb.binding_warning(profile, "channel:slack") == "unverified_clone_consent"
-        # Local synthesis is not an ethics checkpoint: no surface, no warning.
+        assert (
+            vb.binding_warning(profile, "channel:slack") == "unverified_clone_consent"
+        )
         assert vb.binding_warning(profile, "") == ""
         design = vp.create_profile(name="Designed", kind="design")
         assert vb.binding_warning(design, "channel:slack") == ""
-
-
-# ── rail 4: resumable ref-audio upload ─────────────────────────────────────
 
 
 class TestResumableRefAudioUpload:
@@ -375,7 +371,7 @@ class TestResumableRefAudioUpload:
     async def test_partial_then_resume_matches_a_single_upload(
         self, home, tmp_path, monkeypatch, sel_recorder
     ):
-        monkeypatch.setattr("gideon.uploads.store.PART_SIZE", 4096)
+        monkeypatch.setattr("gideon.workspace.uploads.store.PART_SIZE", 4096)
         payload = os.urandom(4096 * 5 + 17)
         one = vp.create_profile(name="One", kind="clone")
         two = vp.create_profile(name="Two", kind="clone")
@@ -405,20 +401,23 @@ class TestResumableRefAudioUpload:
             assert r.status == 200
 
         async with TestClient(TestServer(_app(home, tmp_path, monkeypatch))) as client:
-            # A: single pass, every part in order.
             info = await _init(client, one.id)
             for i in range(info["totalParts"]):
                 await _part(client, info["uploadId"], i, info["partSize"])
-            assert (await client.post(f"/api/uploads/{info['uploadId']}/complete")).status == 200
+            assert (
+                await client.post(f"/api/uploads/{info['uploadId']}/complete")
+            ).status == 200
 
-            # B: stall after two parts, "resume" (re-send one part, then the rest).
             info = await _init(client, two.id)
-            uid, part_size, total = info["uploadId"], info["partSize"], info["totalParts"]
+            uid, part_size, total = (
+                info["uploadId"],
+                info["partSize"],
+                info["totalParts"],
+            )
             for i in range(2):
                 await _part(client, uid, i, part_size)
             status = await (await client.get(f"/api/uploads/{uid}")).json()
             assert status["complete"] is False and sorted(status["received"]) == [0, 1]
-            # Resume: an idempotent re-send of part 1 must not corrupt the stream.
             await _part(client, uid, 1, part_size)
             for i in range(2, total):
                 await _part(client, uid, i, part_size)
@@ -427,11 +426,13 @@ class TestResumableRefAudioUpload:
         first = vp.artifact_path(one.id, vp.get_profile(one.id).ref_audio).read_bytes()
         second = vp.artifact_path(two.id, vp.get_profile(two.id).ref_audio).read_bytes()
         assert first == payload
-        assert second == payload  # byte-equality: resume produced the same file
+        assert second == payload
 
     @pytest.mark.asyncio
-    async def test_abandoned_partial_is_never_served_as_complete(self, home, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.uploads.store.PART_SIZE", 4096)
+    async def test_abandoned_partial_is_never_served_as_complete(
+        self, home, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr("gideon.workspace.uploads.store.PART_SIZE", 4096)
         payload = os.urandom(4096 * 3)
         profile = vp.create_profile(name="Mine", kind="clone")
         async with TestClient(TestServer(_app(home, tmp_path, monkeypatch))) as client:
@@ -451,18 +452,20 @@ class TestResumableRefAudioUpload:
                 data=payload[:4096],
                 headers={"Content-Type": "application/octet-stream"},
             )
-            # Never completed: the profile has no reference clip…
             assert vp.get_profile(profile.id).ref_audio == ""
-            assert vp.profile_payload(vp.get_profile(profile.id))["artifacts"]["ref_audio"] is False
-            # …and completing a half-uploaded session is refused outright.
+            assert (
+                vp.profile_payload(vp.get_profile(profile.id))["artifacts"]["ref_audio"]
+                is False
+            )
             r = await client.post(f"/api/uploads/{info['uploadId']}/complete")
             assert r.status >= 400
-            # …so the gated read has nothing to hand back.
             r = await client.get(f"/api/voice/profiles/{profile.id}/audio")
             assert r.status in (403, 404)
 
     @pytest.mark.asyncio
-    async def test_upload_target_validates_profile_and_kind(self, home, tmp_path, monkeypatch):
+    async def test_upload_target_validates_profile_and_kind(
+        self, home, tmp_path, monkeypatch
+    ):
         profile = vp.create_profile(name="Mine", kind="clone")
         async with TestClient(TestServer(_app(home, tmp_path, monkeypatch))) as client:
 
@@ -480,13 +483,14 @@ class TestResumableRefAudioUpload:
             assert (await _init(profile_id="../escape")).status == 400
             assert (await _init(profile_id="vp-nonexistent")).status == 404
             assert (await _init(kind="something-else")).status == 400
-            # Non-audio is refused: a voice profile is not a general file drop.
             assert (await _init(filename="notes.txt", mime="text/plain")).status == 415
             assert (await _init()).status == 200
 
     @pytest.mark.asyncio
-    async def test_consent_upload_slot_verifies_after_text(self, home, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.uploads.store.PART_SIZE", 4096)
+    async def test_consent_upload_slot_verifies_after_text(
+        self, home, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr("gideon.workspace.uploads.store.PART_SIZE", 4096)
         profile = vp.create_profile(name="Mine", kind="clone")
         clip = _wav(tmp_path / "consent-source.wav")
         payload = clip.read_bytes()
@@ -495,7 +499,6 @@ class TestResumableRefAudioUpload:
                 f"/api/voice/profiles/{profile.id}/consent",
                 json={"consent_text": "I consent to cloning my voice"},
             )
-            # Text first, audio second — verification is the recompute over both.
             assert vp.get_profile(profile.id).verified_own_voice is False
             r = await client.post(
                 "/api/uploads/init",
@@ -515,11 +518,10 @@ class TestResumableRefAudioUpload:
                     data=payload[i * info["partSize"] : (i + 1) * info["partSize"]],
                     headers={"Content-Type": "application/octet-stream"},
                 )
-            assert (await client.post(f"/api/uploads/{info['uploadId']}/complete")).status == 200
+            assert (
+                await client.post(f"/api/uploads/{info['uploadId']}/complete")
+            ).status == 200
         assert vp.get_profile(profile.id).verified_own_voice is True
-
-
-# ── lock from a bounded history ────────────────────────────────────────────
 
 
 class TestHistoryAndLock:
@@ -530,10 +532,8 @@ class TestHistoryAndLock:
             vp.append_history(profile.id, clip, seed=i)
         stored = vp.get_profile(profile.id)
         assert len(stored.history) == vp.HISTORY_MAX
-        # The FILES are pruned too, not just the records.
         files = list(vp.artifact_path(profile.id, "history").iterdir())
         assert len(files) == vp.HISTORY_MAX
-        # And it is the OLDEST that went: the newest seed is still there.
         assert stored.history[-1]["seed"] == vp.HISTORY_MAX * 2 + 4
         assert stored.history[0]["seed"] == vp.HISTORY_MAX + 5
 
@@ -569,16 +569,15 @@ class TestHistoryAndLock:
         assert params["ref_audio"].endswith("locked.wav")
 
 
-# ── the four-level precedence chain + zero-profile regression ──────────────
-
-
 def _resolve(monkeypatch, surface="", profile_id="", settings=None):
-    from gideon.tts import registry as tr
+    from gideon.integrations.tts import registry as tr
 
     monkeypatch.setattr(tr, "active_tts", lambda: (_FakeProvider(), "en_US-flat.onnx"))
-    monkeypatch.setattr(tr, "_provider_by_app_name", lambda name: _FakeProvider() if name else None)
     monkeypatch.setattr(
-        "gideon.providers.use_cases.load_use_case_settings",
+        tr, "_provider_by_app_name", lambda name: _FakeProvider() if name else None
+    )
+    monkeypatch.setattr(
+        "gideon.extensions.providers.use_cases.load_use_case_settings",
         lambda use_case: settings
         or {"speed": 1.0, "speech_voice": "nova", "enabled": True, "auto_speak": False},
     )
@@ -603,13 +602,14 @@ class TestPrecedenceChain:
 
     def test_deleting_every_profile_restores_the_flat_output(self, home, monkeypatch):
         def _comparable(params):
-            # The provider is a live object; compare by name plus every value key.
             return {k: v for k, v in params.items() if k != "provider"} | {
                 "provider_name": params["provider"].name
             }
 
         flat = _comparable(_resolve(monkeypatch))
-        profile = vp.create_profile(name="Mine", kind="design", provider="piper-tts", model="x")
+        profile = vp.create_profile(
+            name="Mine", kind="design", provider="piper-tts", model="x"
+        )
         vb.set_binding("default", profile.id)
         assert _resolve(monkeypatch)["profile_id"] == profile.id
         vp.delete_profile(profile.id)
@@ -617,22 +617,28 @@ class TestPrecedenceChain:
         assert _comparable(_resolve(monkeypatch)) == flat
 
     def test_binding_beats_default_and_explicit_beats_binding(self, home, monkeypatch):
-        fallback = vp.create_profile(name="Default", kind="design", provider="piper-tts")
+        fallback = vp.create_profile(
+            name="Default", kind="design", provider="piper-tts"
+        )
         bound = vp.create_profile(name="Bound", kind="design", provider="piper-tts")
-        explicit = vp.create_profile(name="Explicit", kind="design", provider="piper-tts")
+        explicit = vp.create_profile(
+            name="Explicit", kind="design", provider="piper-tts"
+        )
         vb.set_binding("default", fallback.id)
         vb.set_binding("channel:slack", bound.id)
 
-        # level 3 — default
         got = _resolve(monkeypatch, surface="channel:webui")
-        assert (got["profile_id"], got["profile_level"]) == (fallback.id, vb.LEVEL_DEFAULT)
-        # level 2 — the surface binding
+        assert (got["profile_id"], got["profile_level"]) == (
+            fallback.id,
+            vb.LEVEL_DEFAULT,
+        )
         got = _resolve(monkeypatch, surface="channel:slack")
         assert (got["profile_id"], got["profile_level"]) == (bound.id, vb.LEVEL_BINDING)
-        # level 1 — explicit wins over both
         got = _resolve(monkeypatch, surface="channel:slack", profile_id=explicit.id)
-        assert (got["profile_id"], got["profile_level"]) == (explicit.id, vb.LEVEL_EXPLICIT)
-        # level 4 — nothing bound and no default
+        assert (got["profile_id"], got["profile_level"]) == (
+            explicit.id,
+            vb.LEVEL_EXPLICIT,
+        )
         vb.clear_binding("default")
         vb.clear_binding("channel:slack")
         assert "profile_id" not in _resolve(monkeypatch, surface="agent:research")
@@ -662,9 +668,14 @@ class TestPrecedenceChain:
         assert params["design_params"] == {"accent": "us"}
         assert params["seed"] == 7
         assert params["ref_audio"].endswith("ref_audio.wav")
-        # The pre-profile keys are still all there — a caller that ignores the new
-        # keys keeps working.
-        for key in ("provider", "voice", "speed", "speech_voice", "enabled", "auto_speak"):
+        for key in (
+            "provider",
+            "voice",
+            "speed",
+            "speech_voice",
+            "enabled",
+            "auto_speak",
+        ):
             assert key in params
 
     def test_explicit_unknown_profile_raises(self, home, monkeypatch):
@@ -675,7 +686,7 @@ class TestPrecedenceChain:
     def test_stale_binding_degrades_to_the_next_level(self, home, monkeypatch):
         vb.save_bindings({"channel:slack": "vp-gone", "default": "vp-alsogone"})
         params = _resolve(monkeypatch, surface="channel:slack")
-        assert "profile_id" not in params  # falls through to built-in, no error
+        assert "profile_id" not in params
 
 
 class TestBindingStore:
@@ -685,7 +696,10 @@ class TestBindingStore:
             with pytest.raises(vp.VoiceProfileError) as exc:
                 vb.set_binding(bad, profile.id)
             assert exc.value.reason == "invalid_surface"
-        assert vb.set_binding("client:some-client", profile.id)["client:some-client"] == profile.id
+        assert (
+            vb.set_binding("client:some-client", profile.id)["client:some-client"]
+            == profile.id
+        )
 
     def test_binding_requires_an_existing_profile(self, home):
         with pytest.raises(vp.VoiceProfileError) as exc:
@@ -694,7 +708,9 @@ class TestBindingStore:
 
     def test_malformed_entries_are_dropped_on_read(self, home):
         vb.bindings_path().write_text(
-            json.dumps({"channel:webui": "../escape", "nonsense": "vp-a", "default": "vp-a"})
+            json.dumps(
+                {"channel:webui": "../escape", "nonsense": "vp-a", "default": "vp-a"}
+            )
         )
         assert vb.load_bindings() == {"default": "vp-a"}
 

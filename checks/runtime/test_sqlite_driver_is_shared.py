@@ -27,10 +27,8 @@ import pathlib
 
 import pytest
 
-SRC = pathlib.Path(__file__).resolve().parents[1] / "src" / "gideon"
+SRC = pathlib.Path(__file__).resolve().parents[2] / "runtime" / "gideon"
 
-#: Modules that reference `sqlite3.<Error>` in an except clause. Each must take the
-#: name from `sqlite_compat` rather than deciding for itself.
 CATCHERS = (
     "memory_graph.py",
     "memory.py",
@@ -47,7 +45,9 @@ CATCHERS = (
 def _imports_driver_from_compat(path: pathlib.Path) -> bool:
     tree = ast.parse(path.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and (node.module or "").endswith("sqlite_compat"):
+        if isinstance(node, ast.ImportFrom) and (node.module or "").endswith(
+            "sqlite_compat"
+        ):
             if any(a.name == "sqlite3" for a in node.names):
                 return True
     return False
@@ -57,7 +57,9 @@ def _declares_its_own_driver(path: pathlib.Path) -> bool:
     """Whether the module names `pysqlite3` in an import of its own."""
     tree = ast.parse(path.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
-        if isinstance(node, ast.Import) and any(a.name == "pysqlite3" for a in node.names):
+        if isinstance(node, ast.Import) and any(
+            a.name == "pysqlite3" for a in node.names
+        ):
             return True
     return False
 
@@ -67,7 +69,7 @@ def test_the_driver_name_comes_from_sqlite_compat(rel: str) -> None:
     path = SRC / rel
     assert path.exists(), f"{rel} moved — update this rail rather than deleting it"
     assert _imports_driver_from_compat(path), (
-        f"{rel} does not import `sqlite3` from gideon.sqlite_compat. "
+        f"{rel} does not import `sqlite3` from gideon.core.sqlite_compat. "
         "A module that catches a SQLite exception must use the same driver object the "
         "connection was opened with, or the except clause can silently never match."
     )
@@ -93,14 +95,14 @@ def test_sqlite_compat_is_the_only_place_that_names_pysqlite3() -> None:
             offenders.append(str(path.relative_to(SRC)))
     assert not offenders, (
         "these modules make their own SQLite driver decision: "
-        f"{offenders}. Import `sqlite3` from gideon.sqlite_compat instead."
+        f"{offenders}. Import `sqlite3` from gideon.core.sqlite_compat instead."
     )
 
 
 def test_the_shared_driver_is_the_same_object_every_caller_sees() -> None:
     """The semantic half. Passes trivially without pysqlite3 — see the module docstring."""
-    from gideon import memory_graph, vector_memory
-    from gideon.sqlite_compat import sqlite3 as compat_sqlite3
+    from gideon.cognition import memory_graph, vector_memory
+    from gideon.core.sqlite_compat import sqlite3 as compat_sqlite3
 
     assert memory_graph.sqlite3 is compat_sqlite3
     assert vector_memory.sqlite3 is compat_sqlite3
@@ -109,7 +111,7 @@ def test_the_shared_driver_is_the_same_object_every_caller_sees() -> None:
 
 def test_a_driver_actually_resolved() -> None:
     """Vacuity floor: everything above is satisfiable by resolving nothing."""
-    from gideon.sqlite_compat import driver_name, sqlite3
+    from gideon.core.sqlite_compat import driver_name, sqlite3
 
     assert driver_name() in {"sqlite3", "pysqlite3"}
     assert hasattr(sqlite3, "connect")

@@ -25,18 +25,14 @@ import json
 
 import pytest
 
-from gideon import review_triage as rt
-from gideon.review_triage import (
+from gideon.cognition import review_triage as rt
+from gideon.cognition.review_triage import (
     AnchorState,
     Finding,
     TriageDecision,
     TriageOutcome,
 )
 
-# ── fixtures: one real unified diff, five findings over it ───────────────────
-
-#: A real `git diff HEAD` shape: two files, one hunk each, added + context + removed lines.
-#: Line numbers on the NEW side: src/app.py 10..14, src/util.py 3..5.
 DIFF = """diff --git a/src/app.py b/src/app.py
 index 1111111..2222222 100644
 --- a/src/app.py
@@ -131,9 +127,6 @@ class _Spy:
         return self.ok
 
 
-# ── clause: a review stage emits line-anchored findings ──────────────────────
-
-
 class TestTheCanonicalFindingRecordIsParsedNotReinvented:
     def test_five_findings_parse_with_severity_location_and_auto_fixable(self):
         findings = _five_findings()
@@ -151,7 +144,10 @@ class TestTheCanonicalFindingRecordIsParsedNotReinvented:
 
     def test_a_row_with_no_problem_is_not_a_finding(self):
         """An empty row would occupy a triage slot and train the user to bulk-reject."""
-        assert rt.parse_findings({"findings": [{"severity": "Nit", "location": "a.py:1"}]}) == []
+        assert (
+            rt.parse_findings({"findings": [{"severity": "Nit", "location": "a.py:1"}]})
+            == []
+        )
 
     def test_output_may_arrive_as_a_json_string_or_a_bare_list(self):
         row = [{"severity": "Nit", "location": "a.py:1", "problem": "p"}]
@@ -186,16 +182,12 @@ class TestTheCanonicalFindingRecordIsParsedNotReinvented:
         assert moved.key == findings[0].key
 
 
-# ── clause: anchors validated against the REAL diff ──────────────────────────
-
-
 class TestAnchorsAreValidatedAgainstTheRealDiff:
     def test_the_diff_parses_to_new_side_line_numbers(self):
         table = rt.parse_diff_lines(DIFF)
         assert set(table) == {"src/app.py", "src/util.py"}
         assert table["src/app.py"][11] == "    if not token:"
         assert table["src/app.py"][14] == "    return render(token)"
-        # The REMOVED line has no new-side number: nothing may anchor to it.
         assert '    return "/tmp"' not in table["src/util.py"].values()
         assert table["src/util.py"][4] == '    return os.environ.get("CACHE", "/tmp")'
 
@@ -227,14 +219,26 @@ class TestAnchorsAreValidatedAgainstTheRealDiff:
 
     def test_a_location_with_no_line_is_honestly_unanchorable(self):
         findings = rt.parse_findings(
-            {"findings": [{"severity": "Major", "location": "the error handling", "problem": "p"}]}
+            {
+                "findings": [
+                    {
+                        "severity": "Major",
+                        "location": "the error handling",
+                        "problem": "p",
+                    }
+                ]
+            }
         )
         (only,) = rt.validate_anchors(findings, DIFF)
         assert (only.state, only.reason) == (AnchorState.UNANCHORED, "no_line_anchor")
 
     def test_a_file_outside_the_diff_is_unanchored(self):
         findings = rt.parse_findings(
-            {"findings": [{"severity": "Major", "location": "src/other.py:11", "problem": "p"}]}
+            {
+                "findings": [
+                    {"severity": "Major", "location": "src/other.py:11", "problem": "p"}
+                ]
+            }
         )
         (only,) = rt.validate_anchors(findings, DIFF)
         assert (only.state, only.reason) == (AnchorState.UNANCHORED, "file_not_in_diff")
@@ -248,7 +252,11 @@ class TestAnchorsAreValidatedAgainstTheRealDiff:
             "@@ -1,0 +1,1 @@\n+two\n"
         )
         findings = rt.parse_findings(
-            {"findings": [{"severity": "Nit", "location": "handlers.py:1", "problem": "p"}]}
+            {
+                "findings": [
+                    {"severity": "Nit", "location": "handlers.py:1", "problem": "p"}
+                ]
+            }
         )
         (only,) = rt.validate_anchors(findings, diff)
         assert (only.state, only.reason) == (AnchorState.UNANCHORED, "ambiguous_path")
@@ -274,9 +282,6 @@ class TestAnchorsAreValidatedAgainstTheRealDiff:
         )
         table = rt.parse_diff_lines(diff)
         assert table["src/app.py"] == {1: "one", 2: "two"}
-
-
-# ── clause: the user accepts 2 of 5 ──────────────────────────────────────────
 
 
 def _accept_two_reject_three(anchored):
@@ -310,19 +315,20 @@ class TestTheUserAcceptsTwoOfFive:
         """Acceptance means "apply this here" and there is no here."""
         anchored = rt.validate_anchors(_five_findings(), DIFF)
         stale = anchored[4]
-        result = rt.triage(anchored, [TriageDecision(stale.finding.key, TriageOutcome.ACCEPT)])
+        result = rt.triage(
+            anchored, [TriageDecision(stale.finding.key, TriageOutcome.ACCEPT)]
+        )
         assert result.accepted == []
         assert [a.finding.key for a, _ in result.refused] == [stale.finding.key]
         assert result.refused[0][1] == "content_moved"
 
     def test_a_decision_for_an_unknown_key_is_ignored(self):
         anchored = rt.validate_anchors(_five_findings(), DIFF)
-        result = rt.triage(anchored, [TriageDecision("deadbeefdeadbeef", TriageOutcome.ACCEPT)])
+        result = rt.triage(
+            anchored, [TriageDecision("deadbeefdeadbeef", TriageOutcome.ACCEPT)]
+        )
         assert result.accepted == []
         assert len(result.untriaged) == 5
-
-
-# ── clause: nothing was auto-written without acceptance ──────────────────────
 
 
 class TestNothingIsWrittenWithoutAcceptance:
@@ -336,7 +342,9 @@ class TestNothingIsWrittenWithoutAcceptance:
     def test_a_full_rejection_never_calls_the_delivery_seam(self):
         anchored = rt.validate_anchors(_five_findings(), DIFF)
         keys = [a.finding.key for a in anchored]
-        result = rt.triage(anchored, [TriageDecision(k, TriageOutcome.REJECT, "no") for k in keys])
+        result = rt.triage(
+            anchored, [TriageDecision(k, TriageOutcome.REJECT, "no") for k in keys]
+        )
         spy = _Spy()
         receipt = rt.dispatch_accepted(result, deliver=spy, target=RUN)
         assert spy.calls == [], "the write path was reached with nothing accepted"
@@ -389,7 +397,11 @@ class TestNothingIsWrittenWithoutAcceptance:
 
     def test_the_brief_cites_the_resolved_anchor_not_the_claimed_one(self):
         findings = rt.parse_findings(
-            {"findings": [{"severity": "Nit", "location": "app.py:11", "problem": "p"}]},
+            {
+                "findings": [
+                    {"severity": "Nit", "location": "app.py:11", "problem": "p"}
+                ]
+            },
             run_id=RUN,
             node_id=NODE,
         )
@@ -405,7 +417,6 @@ class TestNothingIsWrittenWithoutAcceptance:
         """`auto_fixable: true` on a REJECTED finding buys it nothing."""
         anchored = rt.validate_anchors(_five_findings(), DIFF)
         keys = [a.finding.key for a in anchored]
-        # Reject BOTH auto_fixable findings (index 1 Minor, index 2 Nit); accept the Critical one.
         result = rt.triage(
             anchored,
             [
@@ -415,7 +426,6 @@ class TestNothingIsWrittenWithoutAcceptance:
             ],
         )
         assert rt.auto_apply_candidates(result) == []
-        # VACUITY: accepting the same two puts them on the mechanical list.
         result2 = rt.triage(
             anchored,
             [
@@ -423,13 +433,18 @@ class TestNothingIsWrittenWithoutAcceptance:
                 TriageDecision(keys[2], TriageOutcome.ACCEPT),
             ],
         )
-        assert {a.finding.key for a in rt.auto_apply_candidates(result2)} == {keys[1], keys[2]}
+        assert {a.finding.key for a in rt.auto_apply_candidates(result2)} == {
+            keys[1],
+            keys[2],
+        }
 
     def test_a_critical_accept_is_not_mechanically_appliable(self):
         anchored = rt.validate_anchors(_five_findings(), DIFF)
         critical = anchored[0]
         critical.finding.auto_fixable = True
-        result = rt.triage(anchored, [TriageDecision(critical.finding.key, TriageOutcome.ACCEPT)])
+        result = rt.triage(
+            anchored, [TriageDecision(critical.finding.key, TriageOutcome.ACCEPT)]
+        )
         assert result.accepted and rt.auto_apply_candidates(result) == []
 
     def test_an_off_ladder_severity_is_not_mechanically_appliable(self):
@@ -455,7 +470,11 @@ class TestNothingIsWrittenWithoutAcceptance:
 
     def test_a_missing_origin_worker_is_a_no_send_not_a_broadcast(self):
         findings = rt.parse_findings(
-            {"findings": [{"severity": "Nit", "location": "src/app.py:11", "problem": "p"}]}
+            {
+                "findings": [
+                    {"severity": "Nit", "location": "src/app.py:11", "problem": "p"}
+                ]
+            }
         )
         anchored = rt.validate_anchors(findings, DIFF)
         result = rt.triage(
@@ -476,16 +495,15 @@ class TestNothingIsWrittenWithoutAcceptance:
         assert receipt.reason == "delivery_refused"
 
 
-# ── clause: rejected findings land in the calibration record ─────────────────
-
-
 class TestRejectionsLandInTheCalibrationRecord:
     def test_one_divergence_row_per_rejection_and_none_for_an_accept(self):
         anchored = rt.validate_anchors(_five_findings(), DIFF)
         result = rt.triage(anchored, _accept_two_reject_three(anchored))
         rows = rt.calibration_records(result, template="code-implementation")
         assert len(rows) == 3
-        assert {r["finding_key"] for r in rows} == {a.finding.key for a, _ in result.rejected}
+        assert {r["finding_key"] for r in rows} == {
+            a.finding.key for a, _ in result.rejected
+        }
         accepted_keys = {a.finding.key for a in result.accepted}
         assert not accepted_keys & {r["finding_key"] for r in rows}
 
@@ -505,7 +523,7 @@ class TestRejectionsLandInTheCalibrationRecord:
 
     def test_the_row_is_the_shape_the_existing_detector_reads(self):
         """Reusing `DivergenceRecord` is the point — a second dialect would be invisible to it."""
-        from gideon.workflows import judge_calibration
+        from gideon.automation.workflows import judge_calibration
 
         anchored = rt.validate_anchors(_five_findings(), DIFF)
         result = rt.triage(anchored, _accept_two_reject_three(anchored))
@@ -517,13 +535,10 @@ class TestRejectionsLandInTheCalibrationRecord:
         assert {p.template for p in parsed} == {"code-implementation"}
 
     def test_the_kind_is_in_the_ledger_vocabulary_so_the_panel_can_read_it_back(self):
-        from gideon.workflows import journal as journal_mod
+        from gideon.automation.workflows import journal as journal_mod
 
         assert journal_mod.REVIEW_FINDING == "review_finding"
         assert journal_mod.REVIEW_FINDING in journal_mod.LEDGER_KINDS
-
-
-# ── the engine emit: a review stage's output becomes ledger rows ─────────────
 
 
 class TestAReviewStageEmitsLineAnchoredFindings:
@@ -534,11 +549,13 @@ class TestAReviewStageEmitsLineAnchoredFindings:
     every test above would still be green.
     """
 
-    def test_the_controller_settle_path_emits_one_row_per_finding(self, tmp_path, monkeypatch):
-        from gideon.workflows import journal as journal_mod
-        from gideon.workflows import store
-        from gideon.workflows.controller import EngineServices, RunController
-        from gideon.workflows.models import WorkflowRun
+    def test_the_controller_settle_path_emits_one_row_per_finding(
+        self, tmp_path, monkeypatch
+    ):
+        from gideon.automation.workflows import journal as journal_mod
+        from gideon.automation.workflows import store
+        from gideon.automation.workflows.controller import EngineServices, RunController
+        from gideon.automation.workflows.models import WorkflowRun
 
         monkeypatch.setattr(store, "config_dir", lambda: tmp_path)
         run = store.create(WorkflowRun(id="", workflow_name="audit-sweep"))
@@ -548,7 +565,9 @@ class TestAReviewStageEmitsLineAnchoredFindings:
                 "kind": "transform",
                 "id": "reviewer",
                 "config": {
-                    "expr": json.dumps({"findings": [f.to_dict() for f in _five_findings()]})
+                    "expr": json.dumps(
+                        {"findings": [f.to_dict() for f in _five_findings()]}
+                    )
                 },
             },
         }
@@ -565,33 +584,36 @@ class TestAReviewStageEmitsLineAnchoredFindings:
 
     def test_a_stage_with_no_findings_emits_nothing(self, tmp_path, monkeypatch):
         """VACUITY: the emit above is conditional, so the absence case must be checked too."""
-        from gideon.workflows import journal as journal_mod
-        from gideon.workflows import store
-        from gideon.workflows.controller import EngineServices, RunController
-        from gideon.workflows.models import WorkflowRun
+        from gideon.automation.workflows import journal as journal_mod
+        from gideon.automation.workflows import store
+        from gideon.automation.workflows.controller import EngineServices, RunController
+        from gideon.automation.workflows.models import WorkflowRun
 
         monkeypatch.setattr(store, "config_dir", lambda: tmp_path)
         run = store.create(WorkflowRun(id="", workflow_name="plain"))
         spec = {
             "name": "plain",
-            "root": {"kind": "transform", "id": "writer", "config": {"expr": "just prose"}},
+            "root": {
+                "kind": "transform",
+                "id": "writer",
+                "config": {"expr": "just prose"},
+            },
         }
         store.write_spec(run.id, spec)
         import asyncio
 
         asyncio.run(
-            RunController(run, spec, services=EngineServices()).run_to_completion(timeout=30)
+            RunController(run, spec, services=EngineServices()).run_to_completion(
+                timeout=30
+            )
         )
         assert journal_mod.ledger(run.id, kinds={journal_mod.REVIEW_FINDING}) == []
-
-
-# ── the run-scoped service: diff read, TOCTOU re-anchor, dispatch, calibrate ─
 
 
 @pytest.fixture()
 def wf_home(tmp_path, monkeypatch):
     """An isolated run store. Never the real `~/.gideon`."""
-    from gideon.workflows import store
+    from gideon.automation.workflows import store
 
     home = tmp_path / "wfhome"
     home.mkdir()
@@ -601,9 +623,9 @@ def wf_home(tmp_path, monkeypatch):
 
 
 def _seed_run(findings, *, name="code-implementation"):
-    from gideon.workflows import journal as journal_mod
-    from gideon.workflows import store
-    from gideon.workflows.models import WorkflowRun
+    from gideon.automation.workflows import journal as journal_mod
+    from gideon.automation.workflows import store
+    from gideon.automation.workflows.models import WorkflowRun
 
     run = store.create(WorkflowRun(id="", workflow_name=name))
     journal = journal_mod.Journal(run.id)
@@ -619,7 +641,7 @@ def _seed_run(findings, *, name="code-implementation"):
 
 class TestTheRunScopedService:
     def test_findings_round_trip_through_the_ledger(self, wf_home):
-        from gideon.workflows import review_service
+        from gideon.automation.workflows import review_service
 
         run = _seed_run(_five_findings())
         back = review_service.findings_for(run.id)
@@ -629,7 +651,7 @@ class TestTheRunScopedService:
     def test_the_get_anchors_against_the_live_diff(self, wf_home, monkeypatch):
         import asyncio
 
-        from gideon.workflows import review_service
+        from gideon.automation.workflows import review_service
 
         run = _seed_run(_five_findings())
 
@@ -647,7 +669,7 @@ class TestTheRunScopedService:
         """The TOCTOU leg: the panel showed an anchored finding, the worker moved the line."""
         import asyncio
 
-        from gideon.workflows import review_service
+        from gideon.automation.workflows import review_service
 
         run = _seed_run(_five_findings())
         rendered = rt.validate_anchors(review_service.findings_for(run.id), DIFF)
@@ -667,7 +689,9 @@ class TestTheRunScopedService:
             lambda rid, text: sent.append(text) or {"ok": True},
         )
         out = asyncio.run(
-            review_service.apply_triage(run.id, [{"key": accept.key, "outcome": "accept"}])
+            review_service.apply_triage(
+                run.id, [{"key": accept.key, "outcome": "accept"}]
+            )
         )
         assert sent == [], "a stale accept reached the worker"
         assert out["receipt"]["reason"] == "nothing_accepted"
@@ -678,8 +702,8 @@ class TestTheRunScopedService:
     ):
         import asyncio
 
-        from gideon.workflows import journal as journal_mod
-        from gideon.workflows import review_service
+        from gideon.automation.workflows import journal as journal_mod
+        from gideon.automation.workflows import review_service
 
         run = _seed_run(_five_findings())
         anchored = rt.validate_anchors(review_service.findings_for(run.id), DIFF)
@@ -711,11 +735,13 @@ class TestTheRunScopedService:
         assert len(rows) == 3
         assert {r["source"] for r in rows} == {"review_triage"}
 
-    def test_a_dry_run_delivers_nothing_and_journals_nothing(self, wf_home, monkeypatch):
+    def test_a_dry_run_delivers_nothing_and_journals_nothing(
+        self, wf_home, monkeypatch
+    ):
         import asyncio
 
-        from gideon.workflows import journal as journal_mod
-        from gideon.workflows import review_service
+        from gideon.automation.workflows import journal as journal_mod
+        from gideon.automation.workflows import review_service
 
         run = _seed_run(_five_findings())
         anchored = rt.validate_anchors(review_service.findings_for(run.id), DIFF)
@@ -748,26 +774,31 @@ class TestTheRunScopedService:
     def test_an_unreadable_outcome_is_an_error_not_a_default(self, wf_home):
         import asyncio
 
-        from gideon.workflows import review_service
+        from gideon.automation.workflows import review_service
 
         run = _seed_run(_five_findings())
-        out = asyncio.run(review_service.apply_triage(run.id, [{"key": "abc", "outcome": "maybe"}]))
+        out = asyncio.run(
+            review_service.apply_triage(run.id, [{"key": "abc", "outcome": "maybe"}])
+        )
         assert out["ok"] is False
         assert out["code"] == "WF_TRIAGE_BAD_DECISIONS"
 
     def test_an_unknown_run_is_a_typed_failure(self, wf_home):
         import asyncio
 
-        from gideon.workflows import review_service
+        from gideon.automation.workflows import review_service
 
-        assert asyncio.run(review_service.review_findings("nope"))["code"] == "WF_RUN_NOT_FOUND"
+        assert (
+            asyncio.run(review_service.review_findings("nope"))["code"]
+            == "WF_RUN_NOT_FOUND"
+        )
 
     def test_a_terminal_run_parks_the_brief_instead_of_starting_one_unasked(
         self, wf_home, monkeypatch
     ):
         import asyncio
 
-        from gideon.workflows import review_service, store
+        from gideon.automation.workflows import review_service, store
 
         run = _seed_run(_five_findings())
         anchored = rt.validate_anchors(review_service.findings_for(run.id), DIFF)
@@ -801,12 +832,14 @@ class TestTheEndpointsAreRegistered:
     def test_both_review_routes_are_mounted(self):
         from aiohttp import web
 
-        from gideon.workflows.handlers import register_workflow_routes
+        from gideon.automation.workflows.handlers import register_workflow_routes
 
         app = web.Application()
         register_workflow_routes(app)
         mounted = {
-            (r.method, r.resource.canonical) for r in app.router.routes() if r.resource is not None
+            (r.method, r.resource.canonical)
+            for r in app.router.routes()
+            if r.resource is not None
         }
         assert ("GET", "/api/workflows/runs/{run_id}/review") in mounted
         assert ("POST", "/api/workflows/runs/{run_id}/review/triage") in mounted

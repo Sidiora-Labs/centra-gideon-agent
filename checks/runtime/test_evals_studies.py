@@ -30,9 +30,9 @@ from dataclasses import fields
 
 import pytest
 
-from gideon.evals import store, studies
-from gideon.evals.judge_bench import JudgeCall
-from gideon.evals.matrix import FAILED, PASSED, VERIFIER_ABSENT
+from gideon.assurance.evals import store, studies
+from gideon.assurance.evals.judge_bench import JudgeCall
+from gideon.assurance.evals.matrix import FAILED, PASSED, VERIFIER_ABSENT
 
 RUBRIC = "correctness (target 2)\nlegibility (target 2)\n"
 HYPOTHESIS = "adding the verify gate at step 3 reduces failed runs"
@@ -59,17 +59,16 @@ def eval_home(tmp_path, monkeypatch):
     """
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     monkeypatch.setattr(
-        "gideon.evals.pinning.model_fingerprint",
+        "gideon.assurance.evals.pinning.model_fingerprint",
         lambda: {"chat": "Fake:model-a", "eval_judge": "Fake:model-j"},
     )
     return tmp_path
 
 
-# ── fakes for the two injected seams ─────────────────────────────────────────
-
-
 def _answer(winner: str, *, cannot: str = "") -> str:
-    return json.dumps({"reasoning": "compared both", "winner": winner, "cannot_judge": cannot})
+    return json.dumps(
+        {"reasoning": "compared both", "winner": winner, "cannot_judge": cannot}
+    )
 
 
 def _slot_texts(prompt: str) -> tuple[str, str]:
@@ -90,7 +89,9 @@ class RecordingCaller:
     async def __call__(self, prompt: str, *, use_case: str = "eval_judge") -> JudgeCall:
         index = len(self.prompts)
         self.prompts.append(prompt)
-        return JudgeCall(text=self._decide(prompt, index), cost_usd=0.01, model="Fake:model-j")
+        return JudgeCall(
+            text=self._decide(prompt, index), cost_usd=0.01, model="Fake:model-j"
+        )
 
 
 def prefers(marker: str):
@@ -153,20 +154,23 @@ def register(**over) -> studies.StudyRegistration:
 
 def cases(n: int = 3) -> list[studies.StudyCase]:
     return [
-        studies.StudyCase(case_id=f"case-{i + 1}", goal="Summarize the queue", case_input="inbox")
+        studies.StudyCase(
+            case_id=f"case-{i + 1}", goal="Summarize the queue", case_input="inbox"
+        )
         for i in range(n)
     ]
 
 
-LOCKED_CMD = {"id": "reply_file_exists", "command": "test -f reply.txt", "expect_exit_code": 0}
+LOCKED_CMD = {
+    "id": "reply_file_exists",
+    "command": "test -f reply.txt",
+    "expect_exit_code": 0,
+}
 LOCKED_PHRASE = {
     "id": "cites_the_source",
     "path": "reply.txt",
     "required_phrases": ["Source: inbox-4711"],
 }
-
-
-# ── §2.1 the pre-registration is immutable ───────────────────────────────────
 
 
 def test_register_study_writes_the_registration_the_pinned_rubric_and_the_locked_checks(
@@ -191,14 +195,18 @@ def test_register_study_writes_the_registration_the_pinned_rubric_and_the_locked
 def test_a_second_registration_of_the_same_study_id_is_REFUSED(eval_home):
     reg = register()
     with pytest.raises(store.StudySealedError, match="immutable"):
-        register(study_id=reg.study_id, hypothesis="a nicer hypothesis after seeing results")
-    # And the original survived the attempt untouched.
+        register(
+            study_id=reg.study_id, hypothesis="a nicer hypothesis after seeing results"
+        )
     assert store.read_study_registration(reg.study_id)["hypothesis"] == HYPOTHESIS
 
 
 def test_the_registration_and_pinned_rubric_are_read_only_on_disk(eval_home):
     reg = register()
-    for path in (store.registration_path(reg.study_id), store.rubric_path(reg.study_id)):
+    for path in (
+        store.registration_path(reg.study_id),
+        store.rubric_path(reg.study_id),
+    ):
         mode = stat.S_IMODE(path.stat().st_mode)
         assert not mode & stat.S_IWUSR, f"{path.name} is writable ({oct(mode)})"
 
@@ -215,21 +223,19 @@ def test_a_registration_missing_its_pinned_rubric_is_not_silently_completed(eval
     reg = register()
     store.registration_path(reg.study_id).chmod(0o600)
     os.unlink(store.registration_path(reg.study_id))
-    # The rubric survives, so a re-register would pin to a rubric nobody registered.
     with pytest.raises(store.StudySealedError, match="rubric.md"):
         register(study_id=reg.study_id)
 
 
-def test_k_and_the_agreement_floor_default_from_EvalsConfig_not_from_literals(eval_home):
+def test_k_and_the_agreement_floor_default_from_EvalsConfig_not_from_literals(
+    eval_home,
+):
     reg = register(k=0, agreement_floor=0.0)
-    from gideon.config.loader import AppConfig
+    from gideon.core.config.loader import AppConfig
 
     evals = AppConfig.load().evals
     assert reg.k == evals.study_default_k
     assert reg.agreement_floor == pytest.approx(evals.judge_agreement_floor)
-
-
-# ── §2.3 a mid-study rubric edit invalidates, and it is decided on the HASH ───
 
 
 @pytest.mark.asyncio
@@ -247,15 +253,15 @@ async def test_a_midstudy_rubric_edit_INVALIDATES_the_study(eval_home):
     )
     assert result.verdict == studies.VERDICT_INVALIDATED
     assert result.fail_reason == studies.RUBRIC_LIVE_EDITED
-    # It is INVALIDATED, not merely flagged: no winner, no evidence, no proposal.
     assert result.wins == result.losses == 0
     assert result.evidence_ref == "" and result.demotion_proposal_id == ""
-    # And it spent nothing: the pin is checked before arm 1 runs.
     assert runner.calls == []
 
 
 @pytest.mark.asyncio
-async def test_tampering_with_the_studys_own_pinned_rubric_copy_also_invalidates(eval_home):
+async def test_tampering_with_the_studys_own_pinned_rubric_copy_also_invalidates(
+    eval_home,
+):
     reg = register()
     path = store.rubric_path(reg.study_id)
     path.chmod(0o600)
@@ -297,9 +303,6 @@ def test_a_missing_pinned_rubric_is_invalidation_not_a_shrug(eval_home):
     assert state == studies.RUBRIC_PIN_MISSING
 
 
-# ── §2.3 blinding ────────────────────────────────────────────────────────────
-
-
 def test_the_pair_prompt_carries_no_version_hypothesis_or_arm_label(eval_home):
     reg = register()
     prompt = studies.render_pair_prompt(
@@ -328,7 +331,7 @@ def test_assert_blinded_REFUSES_a_vacuous_token_set(eval_home):
     """A blinding guard with nothing to look for would certify every prompt."""
     reg = register(hypothesis="", subject={})
     bare = studies.StudyRegistration(
-        study_id="s",  # under MIN_LEAK_TOKEN_LEN, so it is filtered out too
+        study_id="s",
         subject={},
         hypothesis="",
         inputs=(),
@@ -338,9 +341,6 @@ def test_assert_blinded_REFUSES_a_vacuous_token_set(eval_home):
     assert bare.blinding_leak_tokens() == ()
     with pytest.raises(studies.LockedLeakError, match="vacuously"):
         studies.assert_blinded(bare, ("some prompt",))
-
-
-# ── §2.3 position swap ───────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -365,7 +365,7 @@ async def test_every_pair_is_judged_at_BOTH_positions_with_the_outputs_ACTUALLY_
         caller=caller,
     )
     samples = studies.DEFAULT_JUDGE_SAMPLES
-    pairs = 2 * 2  # 2 cases × k=2
+    pairs = 2 * 2
     assert len(caller.prompts) == pairs * len(studies.PRESENTATIONS) * samples
     per_pair = len(studies.PRESENTATIONS) * samples
     for pair_index in range(pairs):
@@ -373,17 +373,22 @@ async def test_every_pair_is_judged_at_BOTH_positions_with_the_outputs_ACTUALLY_
         direct_a, direct_b = _slot_texts(block[0])
         swapped_a, swapped_b = _slot_texts(block[samples])
         assert direct_a != swapped_a, "the slots were not exchanged"
-        assert direct_a.replace("CANDIDATE A", "") == swapped_b.replace("CANDIDATE B", "")
-        assert direct_b.replace("CANDIDATE B", "") == swapped_a.replace("CANDIDATE A", "")
+        assert direct_a.replace("CANDIDATE A", "") == swapped_b.replace(
+            "CANDIDATE B", ""
+        )
+        assert direct_b.replace("CANDIDATE B", "") == swapped_a.replace(
+            "CANDIDATE A", ""
+        )
 
 
 def test_slot_a_is_not_always_the_old_arm(eval_home):
     """If OLD always sat in slot A, a judge's position bias would read as a real effect."""
     assignments = {
-        studies.slot_a_arm_for("st-fixed", f"case-{i}", t) for i in range(12) for t in range(5)
+        studies.slot_a_arm_for("st-fixed", f"case-{i}", t)
+        for i in range(12)
+        for t in range(5)
     }
     assert assignments == set(studies.ARMS)
-    # …and the assignment is reproducible, so a study can be re-derived from its artifacts.
     assert studies.slot_a_arm_for("st-fixed", "case-1", 0) == studies.slot_a_arm_for(
         "st-fixed", "case-1", 0
     )
@@ -410,9 +415,6 @@ async def test_a_position_biased_judge_produces_NO_winner(eval_home):
     assert len(flipped) == 3
 
 
-# ── §2.3 median-of-3 ─────────────────────────────────────────────────────────
-
-
 def test_the_median_of_three_is_a_median_not_a_first_sample():
     assert studies.median_slot_winner(["A", "B", "B"]) == "B"
     assert studies.median_slot_winner(["B", "A", "A"]) == "A"
@@ -421,7 +423,9 @@ def test_the_median_of_three_is_a_median_not_a_first_sample():
 
 def test_cannot_judge_samples_are_dropped_before_the_median_not_imputed_as_a_tie():
     """Three refusals must not read as a confident tie."""
-    assert studies.median_slot_winner(["cannot_judge"] * 3) == studies.WINNER_CANNOT_JUDGE
+    assert (
+        studies.median_slot_winner(["cannot_judge"] * 3) == studies.WINNER_CANNOT_JUDGE
+    )
     assert studies.median_slot_winner(["cannot_judge", "B", "B"]) == "B"
 
 
@@ -432,15 +436,17 @@ def test_an_unparseable_answer_is_no_signal_never_a_slot_win():
         studies.parse_pair_answer('{"winner": "A", "cannot_judge": "no idea"}')
         == studies.WINNER_CANNOT_JUDGE
     )
-    # A malformed answer that happens to mention a slot must not hand it the pair.
-    assert studies.parse_pair_answer("I think CANDIDATE A wins") == studies.WINNER_CANNOT_JUDGE
+    assert (
+        studies.parse_pair_answer("I think CANDIDATE A wins")
+        == studies.WINNER_CANNOT_JUDGE
+    )
 
 
 @pytest.mark.asyncio
 async def test_three_samples_are_taken_per_presentation_from_the_engines_own_constant(
     eval_home,
 ):
-    from gideon.workflows import judge_contract
+    from gideon.automation.workflows import judge_contract
 
     assert studies.DEFAULT_JUDGE_SAMPLES == judge_contract.DEFAULT_JUDGE_SAMPLES == 3
     reg = register(k=1)
@@ -455,9 +461,6 @@ async def test_three_samples_are_taken_per_presentation_from_the_engines_own_con
         caller=caller,
     )
     assert len(caller.prompts) == 6, "one pair = 2 positions × 3 samples"
-
-
-# ── §2.3 the agreement floor and judge_unreliable routing ────────────────────
 
 
 def test_an_unmeasurable_agreement_is_below_every_floor():
@@ -505,7 +508,9 @@ def test_agreement_excludes_cannot_judge_pairs_from_the_denominator():
 
 
 @pytest.mark.asyncio
-async def test_below_the_floor_files_a_calibration_item_and_NO_template_verdict(eval_home):
+async def test_below_the_floor_files_a_calibration_item_and_NO_template_verdict(
+    eval_home,
+):
     reg = register(k=1)
     result = await studies.run_study(
         reg,
@@ -546,10 +551,9 @@ async def test_a_consistent_judge_clears_the_floor_and_produces_a_win(eval_home)
     assert result.judge_below_floor is False
 
 
-# ── 🔴 §2.2 locked/ is supervisor-side and never worker-visible ──────────────
-
-
-def test_a_locked_token_shorter_than_the_guard_can_see_is_REFUSED_at_registration(eval_home):
+def test_a_locked_token_shorter_than_the_guard_can_see_is_REFUSED_at_registration(
+    eval_home,
+):
     """The guard is never weakened; the input is refused instead."""
     with pytest.raises(studies.StudyError, match="shorter than"):
         studies.parse_locked_check({"id": "ok", "command": "test -f x"})
@@ -612,7 +616,8 @@ async def test_the_leak_guard_RAISES_when_a_locked_phrase_is_planted_in_a_templa
             reg,
             cases=cases(1),
             old_template_body=OLD_BODY,
-            new_template_body=NEW_BODY + "always write 'Source: inbox-4711' in the reply\n",
+            new_template_body=NEW_BODY
+            + "always write 'Source: inbox-4711' in the reply\n",
             arm_runner=runner,
             live_rubric_text=RUBRIC,
             caller=RecordingCaller(prefers(NEW_OUT)),
@@ -621,15 +626,21 @@ async def test_the_leak_guard_RAISES_when_a_locked_phrase_is_planted_in_a_templa
 
 
 @pytest.mark.asyncio
-async def test_the_leak_guard_also_catches_a_planted_COMMAND_and_a_planted_check_ID(eval_home):
+async def test_the_leak_guard_also_catches_a_planted_COMMAND_and_a_planted_check_ID(
+    eval_home,
+):
     reg = register(k=1, locked_checks=[LOCKED_CMD])
     for leak in ("test -f reply.txt", "reply_file_exists"):
         with pytest.raises(studies.LockedLeakError, match="VIOLATED"):
-            studies.assert_no_locked_leakage(reg.study_id, (f"do the work, then {leak}",))
+            studies.assert_no_locked_leakage(
+                reg.study_id, (f"do the work, then {leak}",)
+            )
 
 
 @pytest.mark.asyncio
-async def test_a_study_whose_DECLARED_locked_checks_are_missing_REFUSES_to_run(eval_home):
+async def test_a_study_whose_DECLARED_locked_checks_are_missing_REFUSES_to_run(
+    eval_home,
+):
     """The restore hole the export exclusion opens, closed loudly.
 
     `locked/` is `derived_within` on the `evals` inventory entry, so a home restored from a
@@ -662,25 +673,23 @@ def test_the_locked_answer_keys_are_excluded_from_exports_and_snapshots(eval_hom
     all until it was wired — so this asserts the glob is on the entry AND that both copy
     paths resolve it for `evals`.
     """
-    from gideon import snapshot
-    from gideon.durability import inventory as inv
+    from gideon.operations.durability import inventory as inv
+    from gideon.workspace import snapshot
 
     entry = next(e for e in inv.INVENTORY if e.id == "evals")
     assert "studies/*/locked" in entry.derived_within
     assert snapshot._derived_within("evals") == entry.derived_within
-    from gideon.portability import _is_derived_within
+    from gideon.workspace.portability import _is_derived_within
 
     assert _is_derived_within("evals", "studies/st-1/locked") is True
     assert _is_derived_within("evals", "studies/st-1/locked/check_01.json") is True
-    # …and it excludes ONLY the answer keys. The verdict must still travel, or a study could
-    # not be cited as evidence on another machine.
     assert _is_derived_within("evals", "studies/st-1/verdict.json") is False
     assert _is_derived_within("evals", "results.tsv") is False
 
 
 def test_the_leak_guard_REFUSES_a_vacuous_token_set(eval_home):
     """A negative assertion over an empty token set passes for every input."""
-    reg = register()  # deliberately no locked checks
+    reg = register()
     assert studies.locked_leak_tokens(reg.study_id) == ()
     with pytest.raises(studies.LockedLeakError, match="vacuously"):
         studies.assert_no_locked_leakage(reg.study_id, ("a whole prompt",))
@@ -689,9 +698,13 @@ def test_the_leak_guard_REFUSES_a_vacuous_token_set(eval_home):
 def test_the_leak_guard_REFUSES_an_empty_scan_set(eval_home):
     """…and so does a negative assertion over nothing to scan."""
     reg = register(locked_checks=[LOCKED_CMD])
-    with pytest.raises(studies.LockedLeakError, match="Refusing to certify an empty scan"):
+    with pytest.raises(
+        studies.LockedLeakError, match="Refusing to certify an empty scan"
+    ):
         studies.assert_no_locked_leakage(reg.study_id, ())
-    with pytest.raises(studies.LockedLeakError, match="Refusing to certify an empty scan"):
+    with pytest.raises(
+        studies.LockedLeakError, match="Refusing to certify an empty scan"
+    ):
         studies.assert_no_locked_leakage(reg.study_id, ("", ""))
 
 
@@ -705,7 +718,9 @@ def test_a_new_worker_payload_text_field_is_scanned_by_DEFAULT():
     names = {f.name for f in fields(studies.WorkerPayload)}
     scanned = names - studies.SUPERVISOR_ONLY_FIELDS
     assert scanned, "vacuity floor: something must be scanned"
-    assert studies.SUPERVISOR_ONLY_FIELDS <= names, "a stale name in the denylist guards nothing"
+    assert (
+        studies.SUPERVISOR_ONLY_FIELDS <= names
+    ), "a stale name in the denylist guards nothing"
     payload = studies.WorkerPayload(
         study_id="st-1",
         case_id="c",
@@ -718,9 +733,6 @@ def test_a_new_worker_payload_text_field_is_scanned_by_DEFAULT():
     visible = payload.worker_visible()
     assert set(visible) == {"BODY-MARKER", "INPUT-MARKER"}
     assert "/tmp/ws" not in visible and "st-1" not in visible
-
-
-# ── §2.2 supervisor-side execution in the child output workspace ─────────────
 
 
 @pytest.mark.asyncio
@@ -736,7 +748,6 @@ async def test_locked_checks_execute_in_the_arms_OUTPUT_workspace(eval_home, tmp
         "cites_the_source": PASSED,
         "reply_file_exists": PASSED,
     }
-    # And the same checks FAIL honestly on an empty workspace.
     empty = tmp_path / "empty-ws"
     empty.mkdir()
     failed = await studies.run_locked_checks(
@@ -753,7 +764,10 @@ async def test_a_locked_command_that_cannot_run_is_verifier_absent_never_a_pass(
     ws.mkdir()
     reg = register(
         locked_checks=[
-            {"id": "needs_a_missing_binary", "command": "pclaw-no-such-binary --check"},
+            {
+                "id": "needs_a_missing_binary",
+                "command": "gideon-no-such-binary --check",
+            },
         ]
     )
     outcomes = await studies.run_locked_checks(
@@ -763,7 +777,9 @@ async def test_a_locked_command_that_cannot_run_is_verifier_absent_never_a_pass(
 
 
 @pytest.mark.asyncio
-async def test_a_screened_locked_command_is_verifier_absent_not_a_silent_pass(eval_home, tmp_path):
+async def test_a_screened_locked_command_is_verifier_absent_not_a_silent_pass(
+    eval_home, tmp_path
+):
     """§2.2: execution goes through `audit_bash_command`, and a refusal is not a pass."""
     ws = tmp_path / "ws"
     ws.mkdir()
@@ -790,7 +806,7 @@ async def test_a_nonzero_expect_exit_code_still_distinguishes_absent_from_failed
             },
             {
                 "id": "expects_one_but_absent",
-                "command": "pclaw-no-such-binary -q",
+                "command": "gideon-no-such-binary -q",
                 "expect_exit_code": 1,
             },
         ]
@@ -807,7 +823,9 @@ async def test_a_nonzero_expect_exit_code_still_distinguishes_absent_from_failed
 
 
 @pytest.mark.asyncio
-async def test_a_locked_path_escaping_the_workspace_is_verifier_absent(eval_home, tmp_path):
+async def test_a_locked_path_escaping_the_workspace_is_verifier_absent(
+    eval_home, tmp_path
+):
     ws = tmp_path / "ws"
     ws.mkdir()
     secret = tmp_path / "outside.txt"
@@ -835,31 +853,32 @@ def test_the_output_workspace_never_held_the_locked_content(eval_home, tmp_path)
     (ws / "reply.txt").write_text("hello — Source: inbox-4711\n", encoding="utf-8")
     reg = register(locked_checks=[LOCKED_CMD])
     studies.assert_locked_absent_from_workspace(reg.study_id, ws)
-    # Falsification: write the check itself into the workspace.
-    (ws / "hints.md").write_text("run `test -f reply.txt` to be safe\n", encoding="utf-8")
+    (ws / "hints.md").write_text(
+        "run `test -f reply.txt` to be safe\n", encoding="utf-8"
+    )
     with pytest.raises(studies.LockedLeakError, match="VIOLATED"):
         studies.assert_locked_absent_from_workspace(reg.study_id, ws)
 
 
-# ── §2.1 ANY locked-check regression = fail regardless ───────────────────────
-
-
 @pytest.mark.asyncio
-async def test_a_locked_regression_FAILS_the_study_regardless_of_the_win_rate(eval_home, tmp_path):
+async def test_a_locked_regression_FAILS_the_study_regardless_of_the_win_rate(
+    eval_home, tmp_path
+):
     """The judge loves the candidate; a locked check says it broke. The check wins."""
     old_ws = tmp_path / "old"
     new_ws = tmp_path / "new"
     old_ws.mkdir()
     new_ws.mkdir()
     (old_ws / "reply.txt").write_text("baseline reply\n", encoding="utf-8")
-    # The NEW arm never produced reply.txt → the check that passed on OLD now fails.
     reg = register(k=1, locked_checks=[LOCKED_CMD])
     result = await studies.run_study(
         reg,
         cases=cases(),
         old_template_body=OLD_BODY,
         new_template_body=NEW_BODY,
-        arm_runner=arm_runner(workspaces={studies.ARM_OLD: old_ws, studies.ARM_NEW: new_ws}),
+        arm_runner=arm_runner(
+            workspaces={studies.ARM_OLD: old_ws, studies.ARM_NEW: new_ws}
+        ),
         live_rubric_text=RUBRIC,
         caller=RecordingCaller(prefers(NEW_OUT)),
     )
@@ -909,9 +928,6 @@ def test_a_locked_regression_outranks_the_agreement_floor_but_keeps_BOTH_facts()
     assert result.judge_below_floor is True, "the second fact must not be erased"
 
 
-# ── §2.4 what a verdict does ─────────────────────────────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_a_pass_emits_an_evidence_unit_and_a_pinned_results_tsv_row(eval_home):
     reg = register(k=1)
@@ -958,7 +974,7 @@ async def test_a_LOSS_on_the_win_rate_auto_files_a_demotion_proposal(eval_home):
     assert result.verdict == studies.VERDICT_LOSS
     assert result.win_rate == pytest.approx(0.0)
     assert result.demotion_proposal_id
-    from gideon.learning import proposals
+    from gideon.cognition.learning import proposals
 
     prop = proposals.get(result.demotion_proposal_id)
     assert prop is not None, "the demotion must land in the shared human-gated queue"
@@ -987,14 +1003,13 @@ async def test_EVERY_outcome_writes_a_verdict_json_including_invalidated(eval_ho
     assert store.read_study_runs(reg.study_id) == []
     rows = store.read_results()
     assert [r["verdict"] for r in rows] == [studies.VERDICT_INVALIDATED]
-    # An unmeasured score is BLANK, never 0 — a 0 would be averageable.
     assert rows[0]["score_new"] == "" and rows[0]["score_old"] == ""
 
 
 @pytest.mark.asyncio
 async def test_a_refused_ledger_pin_is_reported_not_hidden(eval_home, monkeypatch):
     """ES-2's pin requirement wins, but losing the verdict to it would be worse."""
-    monkeypatch.setattr("gideon.evals.pinning.model_fingerprint", dict)
+    monkeypatch.setattr("gideon.assurance.evals.pinning.model_fingerprint", dict)
     reg = register(k=1)
     result = await studies.run_study(
         reg,
@@ -1027,11 +1042,10 @@ async def test_a_low_power_study_is_LABELLED_not_silently_upgraded(eval_home):
     assert result.decided_cases == 1
 
 
-# ── the Learning-page view ───────────────────────────────────────────────────
-
-
 @pytest.mark.asyncio
-async def test_the_study_view_publishes_the_verdict_agreement_and_per_run_artifacts(eval_home):
+async def test_the_study_view_publishes_the_verdict_agreement_and_per_run_artifacts(
+    eval_home,
+):
     reg = register(k=2, locked_checks=[LOCKED_CMD])
     await studies.run_study(
         reg,
@@ -1082,20 +1096,11 @@ def test_an_unregistered_study_view_is_None(eval_home):
 
 def test_the_registration_hash_is_canonical_and_order_independent(eval_home):
     reg = register()
-    restored = studies.registration_from_dict(store.read_study_registration(reg.study_id))
+    restored = studies.registration_from_dict(
+        store.read_study_registration(reg.study_id)
+    )
     assert restored == reg
     assert restored.sha256() == reg.sha256()
-
-
-# ── 🔴 §2.1 the registration SEAL — what makes every pin above more than decor ─
-#
-# Every rail above this line reads its own threshold out of `registration.json`:
-# `rubric_sha256` pins the rubric, `agreement_floor` sets the judge floor, `k` sets the
-# design. Before the seal, that file and the pinned rubric it pins lived in the same
-# directory with the same owner, so the whole of §2.1 was defeated by editing the file the
-# checks are read FROM — no forgery of a hash required, just a text editor. These tests
-# assert the seal on the two things a self-referential hash can never do: catch an edit to
-# the design, and catch a rubric forgery whose own hash check comes back clean.
 
 
 def _rewrite_registration(study_id: str, **fields) -> studies.StudyRegistration:
@@ -1158,17 +1163,19 @@ async def test_an_edited_registration_is_INVALIDATED_and_spends_NOTHING(eval_hom
     )
     assert result.verdict == studies.VERDICT_INVALIDATED
     assert result.fail_reason == studies.SEAL_TAMPERED
-    # The CALL SITE assertion: deleting the seal check in `run_study` makes these two red.
     assert runner.calls == [], "a study that may not be interpreted may not spend"
     assert caller.prompts == []
     assert result.evidence_ref == "" and result.demotion_proposal_id == ""
-    # §2.4's append-only honesty applies to this outcome too.
-    assert (store.read_study_verdict(reg.study_id) or {})["fail_reason"] == studies.SEAL_TAMPERED
+    assert (store.read_study_verdict(reg.study_id) or {})[
+        "fail_reason"
+    ] == studies.SEAL_TAMPERED
     assert [r["verdict"] for r in store.read_results()] == [studies.VERDICT_INVALIDATED]
 
 
 @pytest.mark.asyncio
-async def test_a_forged_rubric_pin_that_the_RUBRIC_CHECK_calls_OK_is_still_invalidated(eval_home):
+async def test_a_forged_rubric_pin_that_the_RUBRIC_CHECK_calls_OK_is_still_invalidated(
+    eval_home,
+):
     """🔴 The discriminating test — the one thing `rubric_status` structurally cannot do.
 
     Rewrite the pinned rubric AND set `rubric_sha256` to the new rubric's hash. Both live in
@@ -1183,7 +1190,9 @@ async def test_a_forged_rubric_pin_that_the_RUBRIC_CHECK_calls_OK_is_still_inval
     rubric_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
     rubric_path.write_text(forged_rubric, encoding="utf-8")
     rubric_path.chmod(stat.S_IRUSR)
-    forged = _rewrite_registration(reg.study_id, rubric_sha256=studies.rubric_sha256(forged_rubric))
+    forged = _rewrite_registration(
+        reg.study_id, rubric_sha256=studies.rubric_sha256(forged_rubric)
+    )
 
     assert studies.rubric_status(forged, forged_rubric) == (
         studies.RUBRIC_OK,
@@ -1245,7 +1254,9 @@ def test_an_APPENDED_forged_seal_cannot_override_the_first(eval_home):
     assert studies.seal_status(tampered)[0] == studies.SEAL_TAMPERED
 
     store.append_study_seal("st-never-registered", "deadbeef", ts=2.0)
-    assert store.read_study_seal("st-never-registered") == "deadbeef", "floor: appends ARE read"
+    assert (
+        store.read_study_seal("st-never-registered") == "deadbeef"
+    ), "floor: appends ARE read"
 
 
 def test_a_registration_can_never_be_on_disk_without_its_seal(eval_home, monkeypatch):
@@ -1278,13 +1289,14 @@ def test_a_zero_agreement_floor_ROUND_TRIPS_or_the_seal_calls_an_honest_study_ta
     """
     monkeypatch.setattr(studies, "_config_defaults", lambda: (5, 0.0))
     reg = register(k=0, agreement_floor=0.0)
-    assert reg.agreement_floor == 0.0, "vacuity floor: the zero floor was actually registered"
-    restored = studies.registration_from_dict(store.read_study_registration(reg.study_id))
+    assert (
+        reg.agreement_floor == 0.0
+    ), "vacuity floor: the zero floor was actually registered"
+    restored = studies.registration_from_dict(
+        store.read_study_registration(reg.study_id)
+    )
     assert restored.agreement_floor == 0.0, "a zero floor must survive the read"
     assert studies.seal_status(restored) == (studies.SEAL_OK, "")
-
-
-# ── §4.4 mechanical revocation (ES-15): a failed study voids standing grants ──
 
 
 def test_a_study_loss_revokes_standing_autonomy_grants(monkeypatch):
@@ -1293,12 +1305,12 @@ def test_a_study_loss_revokes_standing_autonomy_grants(monkeypatch):
     semantics live in test_guardrails_revocation.py."""
     calls: list[dict] = []
     monkeypatch.setattr(
-        "gideon.guardrails.ladder.revoke_granted_scopes",
+        "gideon.security.guardrails.ladder.revoke_granted_scopes",
         lambda **kw: calls.append(kw) or [],
     )
     filed: list[dict] = []
     monkeypatch.setattr(
-        "gideon.learning.proposals.enqueue",
+        "gideon.cognition.learning.proposals.enqueue",
         lambda **kw: (filed.append(kw), (None, None))[1],
     )
     reg = studies.StudyRegistration(
@@ -1326,7 +1338,6 @@ def test_a_study_loss_revokes_standing_autonomy_grants(monkeypatch):
     assert calls[0]["evidence_id"] == "study:st-loss"
     assert "nightly-digest" in calls[0]["cause"]
 
-    # A WIN files nothing and revokes nothing.
     win = studies.StudyResult(
         study_id="st-win",
         kind=studies.KIND_TEMPLATE_AB,

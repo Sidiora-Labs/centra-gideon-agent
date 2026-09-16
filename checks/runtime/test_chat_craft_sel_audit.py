@@ -27,7 +27,7 @@ endpoint exists, and the modules make no request) rather than papered over with 
 because "we checked and it is correctly silent" and "we forgot" look identical in a
 report that only lists non-zero numbers.
 
-The SEL these tests read is the per-test temp one — ``tests/conftest.py`` reroutes
+The SEL these tests read is the per-test temp one — ``checks/runtime/conftest.py`` reroutes
 ``sel._default_dir`` and resets the singleton, so ``sel().recent()`` sees only events this
 test produced. A leak into the real ``~/.gideon`` would fail conftest's own rail.
 """
@@ -43,20 +43,20 @@ from aiohttp import FormData, web
 from aiohttp.test_utils import TestClient, TestServer
 from chat_test_helpers import _make_state
 
-from gideon.dashboard import chat_plan
-from gideon.dashboard.chat_followups import _maybe_followups
-from gideon.dashboard.chat_fork import (
+from gideon.interfaces.dashboard import chat_plan
+from gideon.interfaces.dashboard.chat_followups import _maybe_followups
+from gideon.interfaces.dashboard.chat_fork import (
     api_chat_session_fork,
     api_chat_session_fork_rewound,
 )
-from gideon.dashboard.chat_handlers import api_chat_session_interrupt
-from gideon.dashboard.chat_regenerate import api_chat_session_edit_resend
-from gideon.dashboard.handlers.files import api_upload_file
-from gideon.sel import sel
+from gideon.interfaces.dashboard.chat_handlers import api_chat_session_interrupt
+from gideon.interfaces.dashboard.chat_regenerate import api_chat_session_edit_resend
+from gideon.interfaces.dashboard.handlers.files import api_upload_file
+from gideon.security.sel import sel
 
 # The repo root, for the structural (client-only) assertions.
-_ROOT = Path(__file__).resolve().parents[1]
-_WEB = _ROOT / "web" / "src"
+_ROOT = Path(__file__).resolve().parents[2]
+_WEB = _ROOT / "apps/console" / "src"
 
 
 def _ops(operation: str) -> list[dict]:
@@ -87,19 +87,20 @@ async def _noop_run_chat(state, session, msg, **kwargs):
 
 @pytest.fixture(autouse=True)
 def _mock_run_chat(monkeypatch):
-    monkeypatch.setattr("gideon.dashboard.chat_regenerate.run_chat", _noop_run_chat)
+    monkeypatch.setattr(
+        "gideon.interfaces.dashboard.chat_regenerate.run_chat", _noop_run_chat
+    )
 
 
 def _seed(state, name: str, n_turns: int):
     session = state.get_or_create_session(name)
     for i in range(n_turns):
         session.append("user", f"q{i}", "msg msg-u", ts=f"2026-06-30T05:0{i}:00+00:00")
-        session.append("assistant", f"a{i}", "msg msg-a", ts=f"2026-06-30T05:0{i}:30+00:00")
+        session.append(
+            "assistant", f"a{i}", "msg msg-a", ts=f"2026-06-30T05:0{i}:30+00:00"
+        )
     session.drain()
     return session
-
-
-# ── 1. Rewind — the one mechanic that rewrites the transcript ────────────────────────
 
 
 class TestRewindSel:
@@ -107,8 +108,12 @@ class TestRewindSel:
     persisted transcript and resets the provider — the most destructive of the nine."""
 
     @pytest.mark.asyncio
-    async def test_one_rewind_event_per_rewind_and_never_zero(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+    async def test_one_rewind_event_per_rewind_and_never_zero(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         state.sessions.reset = AsyncMock()
         session = _seed(state, "s1", 3)
@@ -122,22 +127,30 @@ class TestRewindSel:
         async with TestClient(TestServer(app)) as client:
             r = await client.post(
                 "/api/chat/sessions/s1/edit-resend",
-                json={"ts": session.messages[0]["ts"], "content": "edited q0", "rewind": True},
+                json={
+                    "ts": session.messages[0]["ts"],
+                    "content": "edited q0",
+                    "rewind": True,
+                },
             )
             assert r.status == 200, await r.text()
 
         events = _ops("chat.rewind")
-        # NON-ZERO: the action really did log. EXACTLY ONE: no second writer.
-        assert len(events) == 1, f"expected exactly 1 chat.rewind event, got {len(events)}"
+        assert (
+            len(events) == 1
+        ), f"expected exactly 1 chat.rewind event, got {len(events)}"
         assert events[0]["outcome"] == "allowed"
         assert events[0]["resources"] == "s1"
-        # The non-rewind sibling must not also fire — one action, one vocabulary.
         assert _count("chat.edit_resend") == 0
 
     @pytest.mark.asyncio
-    async def test_two_rewinds_log_two_events_not_one_batched(self, tmp_path, monkeypatch):
+    async def test_two_rewinds_log_two_events_not_one_batched(
+        self, tmp_path, monkeypatch
+    ):
         """The count tracks ACTIONS. A per-session-once event would under-report."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         state.sessions.reset = AsyncMock()
         session = _seed(state, "s1", 4)
@@ -157,14 +170,17 @@ class TestRewindSel:
         assert _count("chat.rewind") == 2
 
     @pytest.mark.asyncio
-    async def test_restore_as_fork_logs_exactly_one_fork_rewound(self, tmp_path, monkeypatch):
+    async def test_restore_as_fork_logs_exactly_one_fork_rewound(
+        self, tmp_path, monkeypatch
+    ):
         """Restoring a rewound tail COPIES a transcript into a new slot — its own
         security-relevant action, and its own single event."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         state.sessions.reset = AsyncMock()
         session = _seed(state, "s1", 2)
-        # Stamp a rewound tail on the first user message, the shape rewind leaves behind.
         session.messages[0]["rewound"] = [
             {
                 "ts": "2026-06-30T05:00:10+00:00",
@@ -185,15 +201,14 @@ class TestRewindSel:
         async with TestClient(TestServer(app)) as client:
             r = await client.post(
                 "/api/chat/sessions/s1/fork-rewound",
-                json={"index": 0},  # visible index of the edited turn; latest tail by default
+                json={"index": 0},
             )
             assert r.status == 200, await r.text()
         events = _ops("chat.fork_rewound")
-        assert len(events) == 1, f"expected exactly 1 chat.fork_rewound, got {len(events)}"
+        assert (
+            len(events) == 1
+        ), f"expected exactly 1 chat.fork_rewound, got {len(events)}"
         assert "from=s1" in events[0]["resources"]
-
-
-# ── 2. Branch — duplicate a whole conversation into a new session ─────────────────────
 
 
 class TestBranchSel:
@@ -209,51 +224,69 @@ class TestBranchSel:
         return app
 
     @pytest.mark.asyncio
-    async def test_one_session_fork_event_per_branch_and_never_zero(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+    async def test_one_session_fork_event_per_branch_and_never_zero(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         _seed(state, "s1", 3)
 
-        assert _count("chat.session_fork") == 0, "a stale event exists before the action ran"
+        assert (
+            _count("chat.session_fork") == 0
+        ), "a stale event exists before the action ran"
         async with TestClient(TestServer(self._app(state))) as client:
-            r = await client.post("/api/chat/sessions/s1/fork", json={"at_message_index": 2})
+            r = await client.post(
+                "/api/chat/sessions/s1/fork", json={"at_message_index": 2}
+            )
             assert r.status == 200, await r.text()
             child = (await r.json())["key"]
 
         events = _ops("chat.session_fork")
-        assert len(events) == 1, f"expected exactly 1 chat.session_fork, got {len(events)}"
+        assert (
+            len(events) == 1
+        ), f"expected exactly 1 chat.session_fork, got {len(events)}"
         assert events[0]["outcome"] == "allowed"
-        # WHERE the cut was made is part of the record: an entry that cannot say how much of
-        # the conversation was duplicated cannot answer the only question asked of it.
         assert f"from=s1,to={child}" in events[0]["resources"]
         assert "at_index=2" in events[0]["resources"]
-        # Branch must not borrow rewind's vocabulary — "duplicated a conversation" and
-        # "restored a discarded ending" are different events on the audit page.
         assert _count("chat.fork_rewound") == 0
 
     @pytest.mark.asyncio
-    async def test_branching_the_same_message_twice_logs_two_events(self, tmp_path, monkeypatch):
+    async def test_branching_the_same_message_twice_logs_two_events(
+        self, tmp_path, monkeypatch
+    ):
         """The amendment's *"the same message may be branched repeatedly"* clause, counted.
         Two branches are two copies; a per-session-once event would under-report the
         second."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         _seed(state, "s1", 2)
         async with TestClient(TestServer(self._app(state))) as client:
             children = []
             for _ in range(2):
-                r = await client.post("/api/chat/sessions/s1/fork", json={"at_message_index": 1})
+                r = await client.post(
+                    "/api/chat/sessions/s1/fork", json={"at_message_index": 1}
+                )
                 assert r.status == 200, await r.text()
                 children.append((await r.json())["key"])
-        assert children[0] != children[1], "the second branch reused the first one's slot"
+        assert (
+            children[0] != children[1]
+        ), "the second branch reused the first one's slot"
         assert _count("chat.session_fork") == 2
 
     @pytest.mark.asyncio
-    async def test_a_refused_branch_records_the_refusal_not_an_allow(self, tmp_path, monkeypatch):
+    async def test_a_refused_branch_records_the_refusal_not_an_allow(
+        self, tmp_path, monkeypatch
+    ):
         """The other direction, and here the honest count is NOT zero: an incognito chat
         cannot be branched, and the endpoint records the refusal *with its reason*. The one
         thing that must never appear is an ``allowed`` event for a copy never made."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         session = _seed(state, "s1", 1)
         session.memory_mode = "incognito"
@@ -261,12 +294,11 @@ class TestBranchSel:
             r = await client.post("/api/chat/sessions/s1/fork", json={})
             assert r.status == 400, await r.text()
         events = _ops("chat.session_fork")
-        assert len(events) == 1, f"expected exactly 1 chat.session_fork, got {len(events)}"
+        assert (
+            len(events) == 1
+        ), f"expected exactly 1 chat.session_fork, got {len(events)}"
         assert [e["outcome"] for e in events] == ["denied"]
         assert "memory_mode=incognito" in events[0]["resources"]
-
-
-# ── 3. Chat plan mode — the review gate over the shared walkthrough ──────────────────
 
 
 class TestPlanModeSel:
@@ -280,17 +312,24 @@ class TestPlanModeSel:
         app = web.Application()
         app["state"] = state
         app.router.add_post(
-            "/api/chat/sessions/{session}/plan/activate", chat_plan.api_chat_plan_activate
+            "/api/chat/sessions/{session}/plan/activate",
+            chat_plan.api_chat_plan_activate,
         )
-        app.router.add_post("/api/chat/sessions/{session}/plan/edit", chat_plan.api_chat_plan_edit)
+        app.router.add_post(
+            "/api/chat/sessions/{session}/plan/edit", chat_plan.api_chat_plan_edit
+        )
         app.router.add_post(
             "/api/chat/sessions/{session}/plan/approve", chat_plan.api_chat_plan_approve
         )
         return app
 
     @pytest.mark.asyncio
-    async def test_activation_logs_exactly_one_plan_activate(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+    async def test_activation_logs_exactly_one_plan_activate(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         chat = _seed(state, "s1", 1)
 
@@ -298,15 +337,15 @@ class TestPlanModeSel:
         async with TestClient(TestServer(self._app(state))) as client:
             r = await client.post("/api/chat/sessions/s1/plan/activate")
             assert r.status == 200, await r.text()
-        # The posture really changed — otherwise the event describes a gate that isn't on.
         assert chat._task_mode == "plan"
 
         events = _ops("chat.plan_activate")
-        assert len(events) == 1, f"expected exactly 1 chat.plan_activate, got {len(events)}"
+        assert (
+            len(events) == 1
+        ), f"expected exactly 1 chat.plan_activate, got {len(events)}"
         assert events[0]["outcome"] == "enabled"
         assert "session=s1" in events[0]["resources"]
         assert "parked=False" in events[0]["resources"]
-        # Opening the gate is not approving anything.
         assert _count("chat.plan_approve") == 0
 
     @pytest.mark.asyncio
@@ -315,10 +354,12 @@ class TestPlanModeSel:
     ):
         """Parking a running turn is part of the SAME action, not a second one: the entry
         says a run was parked, and there is still exactly one event."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         chat = _seed(state, "s1", 1)
-        chat.task = _FakeTask()  # → chat.running is True
+        chat.task = _FakeTask()
         chat._stop_state = "idle"
         state.sessions.stop_turn = AsyncMock(return_value="soft")
         async with TestClient(TestServer(self._app(state))) as client:
@@ -326,20 +367,24 @@ class TestPlanModeSel:
             assert r.status == 200, await r.text()
             assert (await r.json())["parked"] is True
         events = _ops("chat.plan_activate")
-        assert len(events) == 1, f"expected exactly 1 chat.plan_activate, got {len(events)}"
+        assert (
+            len(events) == 1
+        ), f"expected exactly 1 chat.plan_activate, got {len(events)}"
         assert "parked=True" in events[0]["resources"]
 
     @pytest.mark.asyncio
     async def test_approval_logs_one_event_and_the_hand_edit_stays_silent(
         self, tmp_path, monkeypatch
     ):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         chat = _seed(state, "s1", 1)
         async with TestClient(TestServer(self._app(state))) as client:
-            assert (await client.post("/api/chat/sessions/s1/plan/activate")).status == 200
-            # The plan-mode turn's reply IS the artifact, handed over by the REAL turn-end
-            # hook — so the gate opens on the path production opens it on.
+            assert (
+                await client.post("/api/chat/sessions/s1/plan/activate")
+            ).status == 200
             chat.append("assistant", "## Plan\n1. read\n2. report", "msg msg-a")
             chat.drain()
             assert chat_plan.maybe_submit_plan_draft(state, chat) is True
@@ -355,26 +400,31 @@ class TestPlanModeSel:
             assert (await r.json())["complete"] is True
 
         approvals = _ops("chat.plan_approve")
-        assert len(approvals) == 1, f"expected exactly 1 chat.plan_approve, got {len(approvals)}"
+        assert (
+            len(approvals) == 1
+        ), f"expected exactly 1 chat.plan_approve, got {len(approvals)}"
         assert approvals[0]["outcome"] == "allowed"
         assert "step=chat-plan-1" in approvals[0]["resources"]
         assert "complete=True" in approvals[0]["resources"]
-        # The whole gate is TWO events: opening it, and approving out of it. The hand-edit
-        # in between only rewrote text still awaiting review, so it adds no third — and
-        # neither transition fired twice.
         ops = sorted(e.get("operation", "") for e in sel().recent(limit=500))
         assert ops == ["chat.plan_activate", "chat.plan_approve"], ops
 
     @pytest.mark.asyncio
-    async def test_an_approval_the_state_machine_refuses_logs_nothing(self, tmp_path, monkeypatch):
+    async def test_an_approval_the_state_machine_refuses_logs_nothing(
+        self, tmp_path, monkeypatch
+    ):
         """The vacuity check: a step that is not awaiting review is refused (409). An event
         here would claim a plan was approved and a read-only posture dropped when the
         walkthrough never opened the gate."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         _seed(state, "s1", 1)
         async with TestClient(TestServer(self._app(state))) as client:
-            assert (await client.post("/api/chat/sessions/s1/plan/activate")).status == 200
+            assert (
+                await client.post("/api/chat/sessions/s1/plan/activate")
+            ).status == 200
             r = await client.post(
                 "/api/chat/sessions/s1/plan/approve", json={"step_id": "chat-plan-1"}
             )
@@ -383,19 +433,20 @@ class TestPlanModeSel:
         assert _count("chat.plan_activate") == 1
 
 
-# ── 4. Queue interrupt-now ───────────────────────────────────────────────────────────
-
-
 class TestInterruptSel:
     """Mechanic 4 (S1b): interrupt-now. Security-relevant because it CANCELS a running
     provider turn and promotes someone else's queued message ahead of it."""
 
     @pytest.mark.asyncio
-    async def test_one_interrupt_event_and_the_promoted_id_is_recorded(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+    async def test_one_interrupt_event_and_the_promoted_id_is_recorded(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         session = _seed(state, "s1", 1)
-        session.task = _FakeTask()  # → session.running is True
+        session.task = _FakeTask()
         session._stop_state = "idle"
         qid_first = session.queue_append("first queued")
         qid_second = session.queue_append("second queued")
@@ -403,42 +454,46 @@ class TestInterruptSel:
         state.sessions.stop_turn = AsyncMock(return_value="soft")
         app = web.Application()
         app["state"] = state
-        app.router.add_post("/api/chat/sessions/{session}/interrupt", api_chat_session_interrupt)
+        app.router.add_post(
+            "/api/chat/sessions/{session}/interrupt", api_chat_session_interrupt
+        )
 
         assert _count("dashboard_interrupt") == 0
         async with TestClient(TestServer(app)) as client:
-            r = await client.post("/api/chat/sessions/s1/interrupt", json={"queue_id": qid_second})
+            r = await client.post(
+                "/api/chat/sessions/s1/interrupt", json={"queue_id": qid_second}
+            )
             assert r.status == 200, await r.text()
 
         events = _ops("dashboard_interrupt")
-        assert len(events) == 1, f"expected exactly 1 dashboard_interrupt, got {len(events)}"
+        assert (
+            len(events) == 1
+        ), f"expected exactly 1 dashboard_interrupt, got {len(events)}"
         assert events[0]["outcome"] == "soft"
         assert events[0]["metadata"]["session"] == "s1"
-        # /stop is the OTHER verb over the same session — it must not also fire, or the
-        # audit page cannot tell "cancelled and kept the queue" from "cancelled and
-        # cleared it".
         assert _count("dashboard_stop") == 0
 
     @pytest.mark.asyncio
     async def test_a_refused_interrupt_logs_nothing(self, tmp_path, monkeypatch):
         """The vacuity check in the other direction: an interrupt that is REFUSED
         (empty queue → 400) must not leave an event claiming a turn was cancelled."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         session = _seed(state, "s1", 1)
-        session.task = _FakeTask()  # → session.running is True
+        session.task = _FakeTask()
         session._stop_state = "idle"
         state.sessions.stop_turn = AsyncMock(return_value="soft")
         app = web.Application()
         app["state"] = state
-        app.router.add_post("/api/chat/sessions/{session}/interrupt", api_chat_session_interrupt)
+        app.router.add_post(
+            "/api/chat/sessions/{session}/interrupt", api_chat_session_interrupt
+        )
         async with TestClient(TestServer(app)) as client:
             r = await client.post("/api/chat/sessions/s1/interrupt", json={})
             assert r.status == 400
         assert _count("dashboard_interrupt") == 0
-
-
-# ── 7. Follow-up chips ───────────────────────────────────────────────────────────────
 
 
 def _mock_bg_stream(state, text):
@@ -447,10 +502,12 @@ def _mock_bg_stream(state, text):
     client._history = MagicMock()
 
     async def _stream(prompt):
-        yield __import__("gideon.llm.base", fromlist=["LLMEvent"]).LLMEvent(
-            kind="text_chunk", text=text
-        )
-        yield __import__("gideon.llm.base", fromlist=["LLMEvent"]).LLMEvent(kind="complete")
+        yield __import__(
+            "gideon.integrations.llm.base", fromlist=["LLMEvent"]
+        ).LLMEvent(kind="text_chunk", text=text)
+        yield __import__(
+            "gideon.integrations.llm.base", fromlist=["LLMEvent"]
+        ).LLMEvent(kind="complete")
 
     client.stream = _stream
     state.sessions.get_or_create = AsyncMock(return_value=(client, False, False))
@@ -464,7 +521,9 @@ class TestFollowupChipsSel:
 
     @pytest.mark.asyncio
     async def test_one_event_per_generation(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         session = state.get_or_create_session("s1")
         session.append("user", "how do I read a file?", "msg msg-u", broadcast=False)
@@ -480,10 +539,14 @@ class TestFollowupChipsSel:
         assert events[0]["metadata"]["session"] == "s1"
 
     @pytest.mark.asyncio
-    async def test_a_generation_that_produced_nothing_logs_nothing(self, tmp_path, monkeypatch):
+    async def test_a_generation_that_produced_nothing_logs_nothing(
+        self, tmp_path, monkeypatch
+    ):
         """No chips means no model output was shown to the user, so there is nothing to
         report. An event here would claim a suggestion the user never saw."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         session = state.get_or_create_session("s1")
         session.append("user", "hi", "msg msg-u", broadcast=False)
@@ -492,9 +555,6 @@ class TestFollowupChipsSel:
         _mock_bg_stream(state, "not json at all")
         await _maybe_followups(state, session)
         assert _count("chat_followups") == 0
-
-
-# ── 9. Screen-snip — rides the EXISTING upload SEL ───────────────────────────────────
 
 
 class TestSnipRidesUploadSel:
@@ -506,10 +566,11 @@ class TestSnipRidesUploadSel:
     @staticmethod
     def _app(tmp_path, monkeypatch) -> web.Application:
         monkeypatch.setattr(
-            "gideon.dashboard.handlers.files._upload_dir", lambda: tmp_path / "uploads"
+            "gideon.interfaces.dashboard.handlers.files._upload_dir",
+            lambda: tmp_path / "uploads",
         )
         monkeypatch.setattr(
-            "gideon.dashboard.attachment_extract.get_extractor",
+            "gideon.interfaces.dashboard.attachment_extract.get_extractor",
             lambda: type("E", (), {"start": lambda self, *a, **k: None})(),
         )
         app = web.Application()
@@ -517,21 +578,26 @@ class TestSnipRidesUploadSel:
         return app
 
     @pytest.mark.asyncio
-    async def test_a_snip_upload_logs_exactly_one_upload_file_event(self, tmp_path, monkeypatch):
+    async def test_a_snip_upload_logs_exactly_one_upload_file_event(
+        self, tmp_path, monkeypatch
+    ):
         app = self._app(tmp_path, monkeypatch)
-        # The bytes SnipOverlay produces: one PNG named like the crop it came from.
         png = b"\x89PNG\r\n\x1a\n" + b"snip-pixels" * 8
         assert _count("upload.file") == 0
         async with TestClient(TestServer(app)) as client:
             form = FormData()
-            form.add_field("file", png, filename="screen-snip-2026.png", content_type="image/png")
+            form.add_field(
+                "file", png, filename="screen-snip-2026.png", content_type="image/png"
+            )
             r = await client.post("/api/upload/file", data=form)
             assert r.status == 200, await r.text()
             body = await r.json()
             assert body["paths"] and body["paths"][0].endswith("screen-snip-2026.png")
 
         events = _ops("upload.file")
-        assert len(events) == 1, f"expected exactly 1 upload.file event, got {len(events)}"
+        assert (
+            len(events) == 1
+        ), f"expected exactly 1 upload.file event, got {len(events)}"
         assert events[0]["outcome"] == "success"
         assert events[0]["resources"] == "files:1"
 
@@ -545,17 +611,23 @@ class TestSnipRidesUploadSel:
         async with TestClient(TestServer(app)) as client:
             form = FormData()
             form.add_field(
-                "file", b"\x89PNG\r\n\x1a\npx", filename="snip.png", content_type="image/png"
+                "file",
+                b"\x89PNG\r\n\x1a\npx",
+                filename="snip.png",
+                content_type="image/png",
             )
             assert (await client.post("/api/upload/file", data=form)).status == 200
 
         ops = [e.get("operation", "") for e in sel().recent(limit=500)]
         assert ops == ["upload.file"], f"snip logged more than the upload event: {ops}"
-        for invented in ("chat.snip", "snip", "screen_capture", "screenshot", "display_capture"):
+        for invented in (
+            "chat.snip",
+            "snip",
+            "screen_capture",
+            "screenshot",
+            "display_capture",
+        ):
             assert invented not in ops
-
-
-# ── 5, 6, 8. The client-only three — correctly silent, asserted structurally ─────────
 
 
 class TestClientOnlyMechanicsAreCorrectlySilent:
@@ -568,11 +640,6 @@ class TestClientOnlyMechanicsAreCorrectlySilent:
     module that implements it."""
 
     def test_find_scans_memory_and_never_calls_the_server(self):
-        # KL-16 promoted the find bar to a shared primitive for the knowledge reader, so the
-        # three modules that implement Find no longer all live under `pages/chat/`: the bar and
-        # the text matcher moved to `ui/`, and only the chat-shaped segment extractor stayed.
-        # The paths are spelled out because `read_text` raises on a stale one — which is how
-        # this test caught the move rather than passing over a file that no longer exists.
         for parts in (
             ("ui", "FindBar.tsx"),
             ("ui", "findText.ts"),
@@ -580,43 +647,37 @@ class TestClientOnlyMechanicsAreCorrectlySilent:
         ):
             name = parts[-1]
             src = _WEB.joinpath(*parts).read_text(encoding="utf-8")
-            assert "api." not in src, f"{name} gained a server call — it now needs SEL cover"
-            assert "fetch(" not in src, f"{name} gained a fetch — it now needs SEL cover"
+            assert (
+                "api." not in src
+            ), f"{name} gained a server call — it now needs SEL cover"
+            assert (
+                "fetch(" not in src
+            ), f"{name} gained a fetch — it now needs SEL cover"
 
     def test_no_find_endpoint_exists_to_audit(self):
-        server = (_ROOT / "src" / "gideon" / "dashboard" / "server.py").read_text(
-            encoding="utf-8"
-        )
-        # SESSION-MANAGEMENT owns CROSS-session search; in-conversation find is a
-        # client-side scan of already-hydrated turns and adds no route.
+        server = (
+            _ROOT / "runtime" / "gideon" / "interfaces" / "dashboard" / "server.py"
+        ).read_text(encoding="utf-8")
         assert "find-in-conversation" not in server
         assert "/api/chat/sessions/{session}/find" not in server
 
     def test_the_streaming_reveal_only_paces_text_already_delivered(self):
-        src = (_WEB / "pages" / "chat" / "useStreamCoalescer.ts").read_text(encoding="utf-8")
+        src = (_WEB / "pages" / "chat" / "useStreamCoalescer.ts").read_text(
+            encoding="utf-8"
+        )
         assert "fetch(" not in src
         assert "api." not in src
-        # It is a reveal-cadence transform over chunks the turn already sent; the turn
-        # itself is what the SEL records.
         assert "CoalescerCore" in src
 
     def test_quote_reply_writes_into_the_composer_not_over_the_wire(self):
         page = (_WEB / "pages" / "ChatPage.tsx").read_text(encoding="utf-8")
         assert "function quoteToComposer" in page or "const quoteToComposer" in page
-        # The quote path's only effect is local composer state — the SEND that follows is
-        # an ordinary turn, already covered by the turn's own logging.
         idx = page.index("quoteToComposer")
         body = page[idx : idx + 900]
         assert "api." not in body, "quote-reply started calling the server"
 
 
-# ── The audit as a whole: every nine accounted for, none double-writing ─────────────
-
-
 class TestTheAuditIsComplete:
-    #: Every operation the nine mechanics emit, mapped to the module that emits it. This is
-    #: the audit's contract in one place: one distinct name per action, and the name the
-    #: user-facing guide prints is the name the code actually writes.
     _EMITTERS = {
         "chat.rewind": "dashboard/chat_regenerate.py",
         "chat.fork_rewound": "dashboard/chat_fork.py",
@@ -638,7 +699,7 @@ class TestTheAuditIsComplete:
         """
         assert len(set(self._EMITTERS)) == len(self._EMITTERS) == 8
         for op, rel in self._EMITTERS.items():
-            src = (_ROOT / "src" / "gideon" / rel).read_text(encoding="utf-8")
+            src = (_ROOT / "runtime" / "gideon" / rel).read_text(encoding="utf-8")
             assert f'"{op}"' in src, f"{op} is not emitted anywhere in {rel}"
 
     def test_the_guide_documents_all_nine_mechanics_and_everything_they_record(self):
@@ -650,20 +711,28 @@ class TestTheAuditIsComplete:
         in the one document whose job is the count. So the count, the section numbering and
         every recorded operation are asserted here, beside the audit they describe.
         """
-        guide = (_ROOT / "docs" / "guides" / "chat-surface.md").read_text(encoding="utf-8")
+        guide = (_ROOT / "docs" / "guides" / "chat-surface.md").read_text(
+            encoding="utf-8"
+        )
         numbered = re.findall(r"(?m)^## (\d+)\. ", guide)
         assert numbered == [str(i) for i in range(1, 10)], numbered
         assert "nine things the chat surface can do" in guide
         assert "of these nine change something a security log" in guide
         for op in self._EMITTERS:
-            assert f"`{op}`" in guide, f"the guide's recording table never mentions {op}"
+            assert (
+                f"`{op}`" in guide
+            ), f"the guide's recording table never mentions {op}"
 
     def test_the_two_newest_mechanics_are_named_in_the_guide_as_the_ui_names_them(self):
         """The guide's "Where:" line has to match the control a user is hunting for. Both
         new mechanics are reached by a label, so the label is checked against the frontend
         that renders it — a renamed affordance leaves the guide pointing at nothing."""
-        guide = (_ROOT / "docs" / "guides" / "chat-surface.md").read_text(encoding="utf-8")
-        actions = (_WEB / "pages" / "chat" / "MessageActions.tsx").read_text(encoding="utf-8")
+        guide = (_ROOT / "docs" / "guides" / "chat-surface.md").read_text(
+            encoding="utf-8"
+        )
+        actions = (_WEB / "pages" / "chat" / "MessageActions.tsx").read_text(
+            encoding="utf-8"
+        )
         page = (_WEB / "pages" / "ChatPage.tsx").read_text(encoding="utf-8")
         assert 'label="Branch from here"' in actions and "**Branch from here**" in guide
         assert 'label="Plan this first"' in page and "**Plan this first**" in guide
@@ -676,12 +745,15 @@ class TestTheAuditIsComplete:
         activation + one plan approval + one interrupt + one snip upload = SEVEN events, no
         more. This is the assertion a duplicate writer anywhere in the nine fails, and the
         assertion a dropped emitter fails."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
         monkeypatch.setattr(
-            "gideon.dashboard.handlers.files._upload_dir", lambda: tmp_path / "uploads"
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
         )
         monkeypatch.setattr(
-            "gideon.dashboard.attachment_extract.get_extractor",
+            "gideon.interfaces.dashboard.handlers.files._upload_dir",
+            lambda: tmp_path / "uploads",
+        )
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.attachment_extract.get_extractor",
             lambda: type("E", (), {"start": lambda self, *a, **k: None})(),
         )
         state = _make_state(tmp_path)
@@ -692,7 +764,11 @@ class TestTheAuditIsComplete:
             {
                 "ts": "2026-06-30T05:00:10+00:00",
                 "messages": [
-                    {"role": "assistant", "content": "old", "ts": "2026-06-30T05:00:11+00:00"}
+                    {
+                        "role": "assistant",
+                        "content": "old",
+                        "ts": "2026-06-30T05:00:11+00:00",
+                    }
                 ],
             }
         ]
@@ -706,31 +782,39 @@ class TestTheAuditIsComplete:
         )
         app.router.add_post("/api/chat/sessions/{session}/fork", api_chat_session_fork)
         app.router.add_post(
-            "/api/chat/sessions/{session}/plan/activate", chat_plan.api_chat_plan_activate
+            "/api/chat/sessions/{session}/plan/activate",
+            chat_plan.api_chat_plan_activate,
         )
         app.router.add_post(
             "/api/chat/sessions/{session}/plan/approve", chat_plan.api_chat_plan_approve
         )
-        app.router.add_post("/api/chat/sessions/{session}/interrupt", api_chat_session_interrupt)
+        app.router.add_post(
+            "/api/chat/sessions/{session}/interrupt", api_chat_session_interrupt
+        )
         app.router.add_post("/api/upload/file", api_upload_file)
 
         async with TestClient(TestServer(app)) as client:
-            # restore-as-fork first, while the rewound tail is still on message 0
             r = await client.post(
                 "/api/chat/sessions/s1/fork-rewound",
-                json={"index": 0},  # visible index of the edited turn; latest tail by default
+                json={"index": 0},
             )
             assert r.status == 200, await r.text()
             r = await client.post(
                 "/api/chat/sessions/s1/edit-resend",
-                json={"ts": session.messages[0]["ts"], "content": "edited", "rewind": True},
+                json={
+                    "ts": session.messages[0]["ts"],
+                    "content": "edited",
+                    "rewind": True,
+                },
             )
             assert r.status == 200, await r.text()
-            r = await client.post("/api/chat/sessions/s1/fork", json={"at_message_index": 0})
+            r = await client.post(
+                "/api/chat/sessions/s1/fork", json={"at_message_index": 0}
+            )
             assert r.status == 200, await r.text()
-            # Plan mode BEFORE the turn is made to look running, so this activation is the
-            # ordinary (unparked) one and the interrupt below still has a turn to cancel.
-            assert (await client.post("/api/chat/sessions/s1/plan/activate")).status == 200
+            assert (
+                await client.post("/api/chat/sessions/s1/plan/activate")
+            ).status == 200
             session.append("assistant", "## Plan\n1. read", "msg msg-a")
             session.drain()
             assert chat_plan.maybe_submit_plan_draft(state, session) is True
@@ -738,14 +822,17 @@ class TestTheAuditIsComplete:
                 "/api/chat/sessions/s1/plan/approve", json={"step_id": "chat-plan-1"}
             )
             assert r.status == 200, await r.text()
-            session.task = _FakeTask()  # → session.running is True
+            session.task = _FakeTask()
             session._stop_state = "idle"
             session.queue_append("queued")
             r = await client.post("/api/chat/sessions/s1/interrupt", json={})
             assert r.status == 200, await r.text()
             form = FormData()
             form.add_field(
-                "file", b"\x89PNG\r\n\x1a\npx", filename="snip.png", content_type="image/png"
+                "file",
+                b"\x89PNG\r\n\x1a\npx",
+                filename="snip.png",
+                content_type="image/png",
             )
             assert (await client.post("/api/upload/file", data=form)).status == 200
 

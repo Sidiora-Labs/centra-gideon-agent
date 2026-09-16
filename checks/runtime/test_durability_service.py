@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from gideon.durability import retention, service
+from gideon.operations.durability import retention, service
 
 
 def _snap(directory: Path, when: datetime, *, size: int = 100) -> Path:
@@ -28,19 +28,9 @@ def _snap(directory: Path, when: datetime, *, size: int = 100) -> Path:
 def _isolate(tmp_path, monkeypatch):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path / "home"))
     (tmp_path / "home").mkdir(parents=True, exist_ok=True)
-    # 🪤 AN ISOLATED HOME DOES NOT CONFINE THE WORKSPACE. `workspace_root()` reads
-    # `GIDEON_WORKSPACE` first and otherwise falls through to the platform default
-    # — the developer's REAL `~/workplace/gideon-workspace`. Harmless while every
-    # job here only touched the home; DAS-9's history job takes the memory workspace as a
-    # git work tree, so an unpinned workspace would point it at real user notes. Pinned
-    # here rather than in that one test, because the next job to reach the workspace
-    # should inherit the isolation rather than rediscover this.
     monkeypatch.setenv("GIDEON_WORKSPACE", str(tmp_path / "ws"))
     (tmp_path / "ws").mkdir(parents=True, exist_ok=True)
     yield
-
-
-# ── Retention ──
 
 
 class TestRetention:
@@ -71,7 +61,6 @@ class TestRetention:
         keep, prune = retention.plan_retention(retention.list_snapshots(tmp_path))
         assert len(keep) < 40, "a year should cost tens of files, not hundreds"
         assert len(prune) > 350
-        # And the spread genuinely spans the year rather than the last fortnight.
         months = {s.month for s in keep}
         assert len(months) >= 10
 
@@ -117,7 +106,9 @@ class TestRetention:
         for i in range(30):
             _snap(tmp_path, base - timedelta(days=i))
         before = len(list(tmp_path.glob("*.tar.gz")))
-        result = retention.apply_retention(tmp_path, daily=1, weekly=0, monthly=0, dry_run=True)
+        result = retention.apply_retention(
+            tmp_path, daily=1, weekly=0, monthly=0, dry_run=True
+        )
         assert result["dry_run"] is True
         assert result["pruned"]
         assert len(list(tmp_path.glob("*.tar.gz"))) == before
@@ -141,15 +132,12 @@ class TestRetention:
         assert result["bytes_freed"] == 4000
 
 
-# ── Change detection ──
-
-
 class TestChangeDetection:
     def test_wal_writes_are_noticed(self, tmp_path):
         """The bug this guards: every store runs in WAL mode, so a committed write
         lands in the `-wal` sidecar and the .db mtime never moves. Fingerprinting
         the .db alone reported "unchanged" through a whole session of writes."""
-        from gideon.durability.shards import _fingerprint
+        from gideon.operations.durability.shards import _fingerprint
 
         db_path = tmp_path / "store.db"
         conn = sqlite3.connect(db_path)
@@ -164,7 +152,7 @@ class TestChangeDetection:
         assert before != after, "a committed WAL write must change the fingerprint"
 
     def test_fingerprint_is_stable_without_writes(self, tmp_path):
-        from gideon.durability.shards import _fingerprint
+        from gideon.operations.durability.shards import _fingerprint
 
         path = tmp_path / "f.txt"
         path.write_text("stable")
@@ -184,7 +172,7 @@ class TestChangeDetection:
         "dirty detection settles completely" test failed on loaded CI while passing
         locally. A change fingerprint must key on durable content only.
         """
-        from gideon.durability.shards import _fingerprint
+        from gideon.operations.durability.shards import _fingerprint
 
         db_path = tmp_path / "store.db"
         conn = sqlite3.connect(db_path)
@@ -217,7 +205,7 @@ class TestChangeDetection:
         frames into the main file with a passive checkpoint and fingerprints the main file
         alone, so a later foreign checkpoint is invisible.
         """
-        from gideon.durability.shards import _fingerprint
+        from gideon.operations.durability.shards import _fingerprint
 
         db_path = tmp_path / "store.db"
         conn = sqlite3.connect(db_path)
@@ -228,13 +216,12 @@ class TestChangeDetection:
         conn.commit()
         try:
             before = _fingerprint(db_path)
-            # A DIFFERENT connection truncates the WAL — exactly the foreign checkpoint
-            # that lands mid-run on loaded CI. No data changes.
             other = sqlite3.connect(db_path)
             other.execute("PRAGMA wal_checkpoint(TRUNCATE)")
             other.close()
-            assert _fingerprint(db_path) == before, "a foreign WAL checkpoint is not a data change"
-            # And a real committed write must still be seen.
+            assert (
+                _fingerprint(db_path) == before
+            ), "a foreign WAL checkpoint is not a data change"
             conn.execute("INSERT INTO t VALUES ('genuinely new')")
             conn.commit()
             assert (
@@ -244,13 +231,10 @@ class TestChangeDetection:
             conn.close()
 
 
-# ── Jobs ──
-
-
 class TestIncrementalExport:
     """🔴 Every seeded store here is CLOSED before any fingerprint is taken.
 
-    A `VectorMemoryStore` participates in a reference cycle, so dropping the last
+    A `SemanticArchive` participates in a reference cycle, so dropping the last
     name for one does not close its SQLite connection — only the cyclic collector
     does, at a moment nothing in the test controls. That close checkpoints the
     `-wal` and DELETES the sidecar, and `_fingerprint` folds the `-wal` in (it must:
@@ -273,12 +257,12 @@ class TestIncrementalExport:
         self._stores = []
         yield
         for store in self._stores:
-            store.close()  # idempotent, so an explicit close in a test is fine
+            store.close()
 
     def _seed(self):
-        from gideon.vector_memory import VectorMemoryStore
+        from gideon.cognition.vector_memory import SemanticArchive
 
-        store = VectorMemoryStore()
+        store = SemanticArchive()
         store.init()
         store.set_semantic("user.note.a", "a fact worth keeping", 0.9, "user_explicit")
         self._stores.append(store)
@@ -309,7 +293,7 @@ class TestIncrementalExport:
         first = service.run_incremental_export()
         assert first.ok
         first_count = first.extra["entries_exported"]
-        assert first_count >= 1  # memory.db at minimum
+        assert first_count >= 1
         second = service.run_incremental_export()
         second_count = second.extra["entries_exported"]
         assert (
@@ -327,7 +311,7 @@ class TestIncrementalExport:
         the store being measured still has an open connection (see the class docstring)
         or change detection has genuinely broken.
         """
-        from gideon.durability.shards import default_shard_dir, dirty_entries
+        from gideon.operations.durability.shards import default_shard_dir, dirty_entries
 
         self._seed_and_close()
         home = Path(service.active_home())
@@ -336,12 +320,9 @@ class TestIncrementalExport:
         assert dirty_entries(home, state_path) == []
 
     def test_a_new_fact_is_picked_up(self):
-        # Keeps the store open on purpose — it has to write. Safe here because the
-        # assertion is a LOWER bound, so the sidecar can only help it; the fixture
-        # closes it in teardown so it cannot perturb the next test.
         store = self._seed()
         service.run_incremental_export()
-        service.run_incremental_export()  # settle
+        service.run_incremental_export()
         store.set_semantic("user.note.b", "something new", 0.9, "user_explicit")
         assert service.run_incremental_export().extra["entries_exported"] >= 1
 
@@ -351,10 +332,13 @@ class TestIncrementalExport:
         service.run_incremental_export()
         result = service.run_incremental_export()
         assert "store(s)" in result.detail or result.detail == "nothing changed"
-        assert result.extra["entries_exported"] <= result.extra.get("manifest_shards", 0) or True
+        assert (
+            result.extra["entries_exported"] <= result.extra.get("manifest_shards", 0)
+            or True
+        )
 
     def test_a_failure_is_reported_not_raised(self, monkeypatch):
-        import gideon.durability.shards as shards_mod
+        import gideon.operations.durability.shards as shards_mod
 
         monkeypatch.setattr(
             shards_mod,
@@ -368,7 +352,7 @@ class TestIncrementalExport:
 
 class TestNightlySnapshot:
     def test_creates_a_snapshot_and_applies_retention(self, tmp_path):
-        from gideon.config.loader import config_dir
+        from gideon.core.config.loader import config_dir
 
         (Path(config_dir()) / "config.json").write_text(json.dumps({"agent": {}}))
         result = service.run_nightly_snapshot()
@@ -378,7 +362,7 @@ class TestNightlySnapshot:
         assert "kept" in result.extra
 
     def test_a_failing_snapshot_is_reported_not_raised(self, monkeypatch):
-        import gideon.snapshot as snap_mod
+        import gideon.workspace.snapshot as snap_mod
 
         monkeypatch.setattr(snap_mod, "snapshot_main", lambda **k: 1)
         result = service.run_nightly_snapshot()
@@ -386,7 +370,7 @@ class TestNightlySnapshot:
         assert "exited 1" in result.detail
 
     def test_an_exception_is_reported_not_raised(self, monkeypatch):
-        import gideon.snapshot as snap_mod
+        import gideon.workspace.snapshot as snap_mod
 
         def _boom(**kwargs):
             raise RuntimeError("tar exploded")
@@ -402,10 +386,10 @@ class TestRestoreDrill:
         assert "no snapshot" in service.run_restore_drill().skipped
 
     def test_passes_on_a_healthy_snapshot(self):
-        from gideon.config.loader import config_dir
-        from gideon.vector_memory import VectorMemoryStore
+        from gideon.cognition.vector_memory import SemanticArchive
+        from gideon.core.config.loader import config_dir
 
-        store = VectorMemoryStore()
+        store = SemanticArchive()
         store.init()
         store.set_semantic("user.note.a", "drill me", 0.9, "user_explicit")
         (Path(config_dir()) / "config.json").write_text(json.dumps({"agent": {}}))
@@ -416,13 +400,12 @@ class TestRestoreDrill:
 
     def test_fails_loudly_on_a_corrupt_database(self, tmp_path):
         """A drill that passes on a corrupt backup is worse than no drill."""
-        from gideon.config.loader import config_dir
+        from gideon.core.config.loader import config_dir
 
         snap_dir = Path(config_dir()) / "snapshots"
         snap_dir.mkdir(parents=True, exist_ok=True)
         staging = tmp_path / "staging"
         staging.mkdir()
-        # A file that claims to be SQLite but isn't.
         (staging / "broken.db").write_bytes(b"SQLite format 3\x00" + b"\xff" * 400)
         archive = snap_dir / "gideon-snapshot-20260728T010000Z.tar.gz"
         with tarfile.open(archive, "w:gz") as tar:
@@ -432,7 +415,7 @@ class TestRestoreDrill:
         assert result.extra["problems"]
 
     def test_fails_on_an_empty_archive(self, tmp_path):
-        from gideon.config.loader import config_dir
+        from gideon.core.config.loader import config_dir
 
         snap_dir = Path(config_dir()) / "snapshots"
         snap_dir.mkdir(parents=True, exist_ok=True)
@@ -443,7 +426,7 @@ class TestRestoreDrill:
 
     def test_a_failure_notifies_as_a_warning(self, tmp_path):
         """A failed drill must outrank quiet-hours info suppression."""
-        from gideon.config.loader import config_dir
+        from gideon.core.config.loader import config_dir
 
         snap_dir = Path(config_dir()) / "snapshots"
         snap_dir.mkdir(parents=True, exist_ok=True)
@@ -454,10 +437,10 @@ class TestRestoreDrill:
         assert seen == ["warning"]
 
     def test_a_pass_notifies_as_info(self):
-        from gideon.config.loader import config_dir
-        from gideon.vector_memory import VectorMemoryStore
+        from gideon.cognition.vector_memory import SemanticArchive
+        from gideon.core.config.loader import config_dir
 
-        store = VectorMemoryStore()
+        store = SemanticArchive()
         store.init()
         (Path(config_dir()) / "config.json").write_text(json.dumps({"agent": {}}))
         service.run_nightly_snapshot()
@@ -467,10 +450,7 @@ class TestRestoreDrill:
 
     def test_no_notifier_is_fine(self):
         """CLI/headless: the drill still runs and audits, it just has nobody to tell."""
-        service.run_restore_drill(notifier=None)  # must not raise
-
-
-# ── Scheduling ──
+        service.run_restore_drill(notifier=None)
 
 
 class TestScheduling:
@@ -480,9 +460,9 @@ class TestScheduling:
         assert status["snapshot"]["due"] is True
 
     def test_running_stamps_the_state(self):
-        from gideon.vector_memory import VectorMemoryStore
+        from gideon.cognition.vector_memory import SemanticArchive
 
-        VectorMemoryStore().init()
+        SemanticArchive().init()
         service.run_due_jobs(force="export")
         assert service.load_state().get("last_export")
 
@@ -491,7 +471,12 @@ class TestScheduling:
 
         now = time.time()
         service.save_state(
-            {"last_export": now, "last_snapshot": now, "last_drill": now, "last_history": now}
+            {
+                "last_export": now,
+                "last_snapshot": now,
+                "last_drill": now,
+                "last_history": now,
+            }
         )
         assert service.run_due_jobs(now=now + 60) == []
 
@@ -500,17 +485,20 @@ class TestScheduling:
 
         now = time.time()
         service.save_state(
-            {"last_export": now, "last_snapshot": now, "last_drill": now, "last_history": now}
+            {
+                "last_export": now,
+                "last_snapshot": now,
+                "last_drill": now,
+                "last_history": now,
+            }
         )
         jobs = [r.job for r in service.run_due_jobs(now=now + service.HOURLY_SECS + 1)]
-        # Two jobs share the hourly cadence now — the shard export and DAS-9's memory
-        # history commit — and neither nightly nor monthly is due yet.
         assert jobs == ["incremental_export", "history_commit"]
 
     def test_a_failed_drill_is_still_stamped(self, tmp_path):
         """Otherwise a failing drill retries every tick and buries the user in
         warnings — the warning is already delivered once."""
-        from gideon.config.loader import config_dir
+        from gideon.core.config.loader import config_dir
 
         snap_dir = Path(config_dir()) / "snapshots"
         snap_dir.mkdir(parents=True, exist_ok=True)
@@ -524,16 +512,20 @@ class TestScheduling:
         assert service.load_state() == {}
 
     def test_drills_can_be_switched_off(self, monkeypatch):
-        from gideon.config.loader import DurabilityConfig
+        from gideon.core.config.loader import DurabilityConfig
 
-        monkeypatch.setattr(service, "_cfg", lambda: DurabilityConfig(restore_drills=False))
-        service.save_state({"last_export": 9e9, "last_snapshot": 9e9, "last_history": 9e9})
+        monkeypatch.setattr(
+            service, "_cfg", lambda: DurabilityConfig(restore_drills=False)
+        )
+        service.save_state(
+            {"last_export": 9e9, "last_snapshot": 9e9, "last_history": 9e9}
+        )
         assert [r.job for r in service.run_due_jobs()] == []
 
 
 class TestConfigWiring:
     def test_defaults(self):
-        from gideon.config.loader import AppConfig
+        from gideon.core.config.loader import AppConfig
 
         cfg = AppConfig().durability
         assert cfg.auto_backup is True
@@ -541,14 +533,14 @@ class TestConfigWiring:
         assert cfg.keep_daily > 0
 
     def test_round_trips_through_to_dict(self):
-        from gideon.config.loader import AppConfig
+        from gideon.core.config.loader import AppConfig
 
         cfg = AppConfig()
         cfg.durability.keep_daily = 3
         assert cfg.to_dict()["durability"]["keep_daily"] == 3
 
     def test_loads_from_a_config_file(self):
-        from gideon.config.loader import AppConfig, config_path
+        from gideon.core.config.loader import AppConfig, config_path
 
         config_path().write_text(
             json.dumps({"durability": {"auto_backup": False, "keep_daily": 5}})
@@ -560,26 +552,25 @@ class TestConfigWiring:
     def test_guard_polarity_keeps_backups_on_when_ambiguous(self):
         """Losing scheduled backups to an unreadable value is the exact failure
         this plan exists to prevent."""
-        from gideon.config.loader import AppConfig, config_path
+        from gideon.core.config.loader import AppConfig, config_path
 
-        config_path().write_text(json.dumps({"durability": {"auto_backup": "nonsense"}}))
+        config_path().write_text(
+            json.dumps({"durability": {"auto_backup": "nonsense"}})
+        )
         assert AppConfig.load().durability.auto_backup is True
 
     def test_enabled_reflects_config(self):
-        from gideon.config.loader import config_path
+        from gideon.core.config.loader import config_path
 
         config_path().write_text(json.dumps({"durability": {"auto_backup": False}}))
         assert service.enabled() is False
-
-
-# ── Endpoints ──
 
 
 class TestEndpoints:
     def _app(self):
         from aiohttp import web
 
-        from gideon.dashboard.handlers import durability as mod
+        from gideon.interfaces.dashboard.handlers import durability as mod
 
         app = web.Application()
         app.router.add_get("/api/durability/status", mod.api_durability_status)
@@ -604,7 +595,7 @@ class TestEndpoints:
     async def test_archive_shows_the_retention_plan(self, tmp_path):
         from aiohttp.test_utils import TestClient, TestServer
 
-        from gideon.config.loader import config_dir
+        from gideon.core.config.loader import config_dir
 
         snap_dir = Path(config_dir()) / "snapshots"
         snap_dir.mkdir(parents=True, exist_ok=True)
@@ -616,12 +607,9 @@ class TestEndpoints:
         assert len(body["archives"]) == 40
         assert body["would_prune"], "the plan must show what a real run would remove"
         assert any(s["retained"] for s in body["archives"])
-        # §6's row shape: every archive is addressable and carries a domains slot (None
-        # for these fixtures, which are empty files with no manifest inside).
         assert all(a["id"] == a["name"] for a in body["archives"])
         assert all("domains" in a and "validate" in a for a in body["archives"])
         assert body["last_drill"]["ran"] is False
-        # Inspecting the plan must not delete anything.
         assert len(list(snap_dir.glob("*.tar.gz"))) == 40
 
     @pytest.mark.asyncio
@@ -644,11 +632,13 @@ class TestEndpoints:
     async def test_run_export_returns_a_report(self):
         from aiohttp.test_utils import TestClient, TestServer
 
-        from gideon.vector_memory import VectorMemoryStore
+        from gideon.cognition.vector_memory import SemanticArchive
 
-        VectorMemoryStore().init()
+        SemanticArchive().init()
         async with TestClient(TestServer(self._app())) as client:
-            body = await (await client.post("/api/durability/run", json={"job": "export"})).json()
+            body = await (
+                await client.post("/api/durability/run", json={"job": "export"})
+            ).json()
         assert body["job"] == "incremental_export"
 
     @pytest.mark.asyncio
@@ -657,10 +647,12 @@ class TestEndpoints:
         endpoint broke rather than the backup."""
         from aiohttp.test_utils import TestClient, TestServer
 
-        import gideon.durability.shards as shards_mod
+        import gideon.operations.durability.shards as shards_mod
 
         monkeypatch.setattr(
-            shards_mod, "dirty_entries", lambda *a, **k: (_ for _ in ()).throw(OSError("nope"))
+            shards_mod,
+            "dirty_entries",
+            lambda *a, **k: (_ for _ in ()).throw(OSError("nope")),
         )
         async with TestClient(TestServer(self._app())) as client:
             resp = await client.post("/api/durability/run", json={"job": "export"})
@@ -674,12 +666,14 @@ class TestServiceLoop:
         import asyncio
 
         monkeypatch.setattr(
-            service, "run_due_jobs", lambda **k: (_ for _ in ()).throw(RuntimeError("boom"))
+            service,
+            "run_due_jobs",
+            lambda **k: (_ for _ in ()).throw(RuntimeError("boom")),
         )
         svc = service.DurabilityService(tick_secs=0.01)
         await svc.start()
         await asyncio.sleep(0.05)
-        svc.stop()  # would have raised out of the task if unhandled
+        svc.stop()
 
     @pytest.mark.asyncio
     async def test_disabled_config_runs_no_jobs(self, monkeypatch):
@@ -719,21 +713,15 @@ class TestConfigContract:
         "keep_weekly",
         "keep_monthly",
         "restore_drills",
-        # DURABILITY-AND-SYNC §4 — the runtime-editable sync knobs (DAS-6c-ii-j).
         "sync_enabled",
         "sync_transport",
         "sync_stale_after_secs",
-        # §4.4 (DAS-8) — the encryption tri-state. The PASSPHRASE is deliberately NOT a
-        # field here or on the dataclass: it lives in the credential store, so there is
-        # nothing for a PATCH to carry.
         "sync_encrypt",
-        # §5 (DAS-9) — the time-travel switch. Its FE control is the Time Travel
-        # section of Settings → Backups, so it completes all five legs.
         "time_travel",
     )
 
     def test_every_field_is_patchable(self):
-        from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+        from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
         for name in self._FIELDS:
             assert f"durability.{name}" in _EDITABLE_CONFIG, name
@@ -746,18 +734,22 @@ class TestConfigContract:
         """
         import dataclasses
 
-        from gideon.config.loader import DurabilityConfig
-        from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+        from gideon.core.config.loader import DurabilityConfig
+        from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
         declared = {f.name for f in dataclasses.fields(DurabilityConfig)}
-        allowlisted = {k.split(".", 1)[1] for k in _EDITABLE_CONFIG if k.startswith("durability.")}
-        assert allowlisted <= declared, f"allowlists a non-field: {allowlisted - declared}"
+        allowlisted = {
+            k.split(".", 1)[1] for k in _EDITABLE_CONFIG if k.startswith("durability.")
+        }
+        assert (
+            allowlisted <= declared
+        ), f"allowlists a non-field: {allowlisted - declared}"
         assert allowlisted == set(self._FIELDS)
 
     def test_retention_specs_are_bounded_and_allow_disabling_a_tier(self):
         """0 must be reachable (disable a tier) and the ceiling must be finite (a
         typo shouldn't budget a decade of archives)."""
-        from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+        from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
         for name in ("keep_daily", "keep_weekly", "keep_monthly"):
             spec = _EDITABLE_CONFIG[f"durability.{name}"]
@@ -766,7 +758,7 @@ class TestConfigContract:
             assert 0 < spec["max"] <= 365, name
 
     def test_the_two_switches_are_bools(self):
-        from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+        from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
         for name in ("auto_backup", "restore_drills"):
             assert _EDITABLE_CONFIG[f"durability.{name}"] == {"type": "bool"}
@@ -779,11 +771,11 @@ class TestConfigContract:
         failure the plan exists to prevent), so a DELIBERATE False has to survive the
         round trip rather than being read back as True.
         """
-        from gideon.config.loader import AppConfig, DurabilityConfig
+        from gideon.core.config.loader import AppConfig, DurabilityConfig
 
         path = tmp_path / "config.json"
         path.write_text("{}", encoding="utf-8")
-        monkeypatch.setattr("gideon.config.loader.config_path", lambda: path)
+        monkeypatch.setattr("gideon.core.config.loader.config_path", lambda: path)
 
         cfg = AppConfig.load()
         cfg.durability = DurabilityConfig(
@@ -798,4 +790,8 @@ class TestConfigContract:
 
         assert reloaded.auto_backup is False
         assert reloaded.restore_drills is False
-        assert (reloaded.keep_daily, reloaded.keep_weekly, reloaded.keep_monthly) == (3, 0, 1)
+        assert (reloaded.keep_daily, reloaded.keep_weekly, reloaded.keep_monthly) == (
+            3,
+            0,
+            1,
+        )

@@ -9,7 +9,7 @@ through two proposal stores (#459).
 
 **What this suite guards, in three layers.**
 
-1. :mod:`gideon.record_ids` — the primitive: what a safe id is, and that a refusal
+1. :mod:`gideon.core.record_ids` — the primitive: what a safe id is, and that a refusal
    is raised rather than returned.
 2. The stores — each proven instance refuses a traversal id *end to end*, on a real
    filesystem, for read AND for the destructive verb. Asserting the primitive alone
@@ -35,7 +35,7 @@ from unittest.mock import patch
 
 import pytest
 
-from gideon.record_ids import (
+from gideon.core.record_ids import (
     MAX_RECORD_ID_LEN,
     UnsafeRecordId,
     is_safe_record_id,
@@ -43,10 +43,8 @@ from gideon.record_ids import (
     require_safe_record_id,
 )
 
-SRC = Path(__file__).resolve().parent.parent / "src" / "gideon"
+SRC = Path(__file__).resolve().parent.parent.parent / "runtime" / "gideon"
 
-# Every id shape that must be refused. Each entry is (id, why) so a failure names the
-# evasion rather than just an index.
 UNSAFE_IDS: list[tuple[object, str]] = [
     ("/tmp/zz56-rmtest", "absolute POSIX path — pathlib discards the left operand"),
     ("/etc/passwd", "absolute path to a system file"),
@@ -92,10 +90,15 @@ class TestPrimitive:
 
     def test_prefix_and_suffix_are_applied_around_the_checked_id(self, tmp_path):
         """The template is the store's, the id is the caller's — and the id is checked
-        BEFORE interpolation, so a separator cannot be smuggled in through either end."""
-        assert record_path(tmp_path, "t1", prefix="_comments_").name == "_comments_t1.json"
+        BEFORE interpolation, so a separator cannot be smuggled in through either end.
+        """
+        assert (
+            record_path(tmp_path, "t1", prefix="_comments_").name == "_comments_t1.json"
+        )
         assert record_path(tmp_path, "p1", suffix="").name == "p1"
-        assert record_path(tmp_path, "r1", suffix=".runner.json").name == "r1.runner.json"
+        assert (
+            record_path(tmp_path, "r1", suffix=".runner.json").name == "r1.runner.json"
+        )
 
     def test_message_names_the_parameter(self):
         """A 400 that doesn't say which field was wrong is a 400 the client can't act on."""
@@ -125,8 +128,6 @@ class TestPrimitive:
         outside.mkdir()
         link = tmp_path / "root-link"
         link.symlink_to(outside)
-        # A safe id under a symlinked root still lands inside the resolved root — the
-        # check must not reject the ordinary case.
         assert record_path(link, "ok").name == "ok.json"
 
 
@@ -135,9 +136,9 @@ class TestTaskStoreRefusesTraversal:
 
     @pytest.fixture()
     def provider(self, tmp_path):
-        from gideon.tasks.native import NativeTaskProvider
+        from gideon.engine.tasks.native import NativeTaskProvider
 
-        with patch("gideon.tasks.native.config_dir", return_value=tmp_path):
+        with patch("gideon.engine.tasks.native.config_dir", return_value=tmp_path):
             yield NativeTaskProvider()
 
     @pytest.fixture()
@@ -190,9 +191,9 @@ class TestHierarchyStoreRefusesTraversal:
 
     @pytest.fixture()
     def store(self, tmp_path):
-        from gideon.tasks.hierarchy import HierarchyStore
+        from gideon.engine.tasks.hierarchy import HierarchyStore
 
-        with patch("gideon.tasks.hierarchy.config_dir", return_value=tmp_path):
+        with patch("gideon.engine.tasks.hierarchy.config_dir", return_value=tmp_path):
             yield HierarchyStore()
 
     def test_project_read_refuses(self, store):
@@ -204,7 +205,9 @@ class TestHierarchyStoreRefusesTraversal:
         (victim / "subdir").mkdir(parents=True, exist_ok=True)
         keep = victim / "subdir" / "IMPORTANT.txt"
         keep.write_text("unrelated sibling content")
-        (victim / "project.json").write_text(json.dumps({"id": "zz-victim", "name": "outside"}))
+        (victim / "project.json").write_text(
+            json.dumps({"id": "zz-victim", "name": "outside"})
+        )
 
         with pytest.raises(UnsafeRecordId):
             store.delete_project(str(victim))
@@ -233,42 +236,46 @@ class TestProposalStoresRefuseTraversal:
     """#459 — learning and skill proposals read and unlinked .json outside the home."""
 
     def test_learning_proposal_load_refuses(self, tmp_path):
-        from gideon.learning import proposals
+        from gideon.cognition.learning import proposals
 
-        with patch("gideon.config.loader.config_dir", return_value=tmp_path):
+        with patch("gideon.core.config.loader.config_dir", return_value=tmp_path):
             with pytest.raises(UnsafeRecordId):
                 proposals._load("/tmp/zz57-outside")
 
     def test_learning_proposal_reject_refuses_before_unlinking(self, tmp_path):
-        from gideon.learning import proposals
+        from gideon.cognition.learning import proposals
 
         outside = tmp_path.parent / "zz-learn"
         outside.mkdir(exist_ok=True)
         f = outside / "zz-outside.json"
-        f.write_text(json.dumps({"id": "zz-outside", "kind": "lesson", "title": "t", "body": "b"}))
-        with patch("gideon.config.loader.config_dir", return_value=tmp_path):
+        f.write_text(
+            json.dumps(
+                {"id": "zz-outside", "kind": "lesson", "title": "t", "body": "b"}
+            )
+        )
+        with patch("gideon.core.config.loader.config_dir", return_value=tmp_path):
             with pytest.raises(UnsafeRecordId):
                 proposals._load(str(f.with_suffix("")))
         assert f.exists()
 
     def test_skill_proposal_load_refuses(self, tmp_path):
-        from gideon.skills import proposals as skill_proposals
+        from gideon.extensions.skills import proposals as skill_proposals
 
-        with patch("gideon.skills.loader.config_dir", return_value=tmp_path):
+        with patch("gideon.extensions.skills.loader.config_dir", return_value=tmp_path):
             with pytest.raises(UnsafeRecordId):
                 skill_proposals._load("/tmp/zz57-sk-outside")
 
     def test_skill_proposal_reject_refuses(self, tmp_path):
-        from gideon.skills import proposals as skill_proposals
+        from gideon.extensions.skills import proposals as skill_proposals
 
-        with patch("gideon.skills.loader.config_dir", return_value=tmp_path):
+        with patch("gideon.extensions.skills.loader.config_dir", return_value=tmp_path):
             with pytest.raises(UnsafeRecordId):
                 skill_proposals.reject("../../../tmp/zz-evil")
 
     def test_attribution_record_load_refuses(self, tmp_path):
-        from gideon.learning import attribution
+        from gideon.cognition.learning import attribution
 
-        with patch("gideon.config.loader.config_dir", return_value=tmp_path):
+        with patch("gideon.core.config.loader.config_dir", return_value=tmp_path):
             with pytest.raises(UnsafeRecordId):
                 attribution._load("/tmp/zz-attr-outside")
 
@@ -277,39 +284,27 @@ class TestUseCaseSettingsSymmetry:
     """The load path had no closed-set check while the save path always did."""
 
     def test_load_refuses_an_unknown_use_case(self, tmp_path):
-        from gideon.providers import use_cases
+        from gideon.extensions.providers import use_cases
 
-        with patch("gideon.config.loader.config_dir", return_value=tmp_path):
+        with patch("gideon.core.config.loader.config_dir", return_value=tmp_path):
             assert use_cases.load_use_case_settings("../../../etc/hosts") == {}
             assert use_cases.load_use_case_settings("not-a-use-case") == {}
 
     def test_a_real_use_case_still_round_trips(self, tmp_path):
-        from gideon.providers.use_cases import (
+        from gideon.extensions.providers.use_cases import (
             VALID_USE_CASES,
             load_use_case_settings,
             save_use_case_settings,
         )
 
         kind = sorted(VALID_USE_CASES)[0]
-        with patch("gideon.config.loader.config_dir", return_value=tmp_path):
+        with patch("gideon.core.config.loader.config_dir", return_value=tmp_path):
             save_use_case_settings(kind, {"auto_speak": True})
             assert load_use_case_settings(kind) == {"auto_speak": True}
 
 
-# ── The ratchet ─────────────────────────────────────────────────────────────────
-#
-# Matches `<something>_dir(...) / f"...{expr}..."` — the expression that IS the class.
-# Deliberately broad: it matches sanitized sites too, and the allowlist below is where
-# each one earns its exemption with a reason. A narrow regex that only matched the
-# unsanitized form would go green the moment someone spelled a new one differently.
 _INTERPOLATION_RE = re.compile(r"""[Dd]ir\(\)\s*/\s*f["'][^"']*\{""")
 
-# Every site the census finds must satisfy one of:
-#   * it goes through `record_path` (the whole point), OR
-#   * it appears here, with the reason it is not route-reachable.
-#
-# ADDING A ROW IS A DECISION, not a formality: it asserts that no untrusted string
-# reaches that expression. If you cannot say why, use `record_path` instead.
 ALLOWED_RAW_INTERPOLATION: dict[str, str] = {
     "agent_metadata.py": "ids pass `_validate_name` in the same expression",
     "agents/runners.py": "`sidecar_path` raises on `_SAFE_ID_RE.fullmatch` first",
@@ -332,19 +327,17 @@ ALLOWED_RAW_INTERPOLATION: dict[str, str] = {
     "workflows/pool.py": "the id is a locally computed `safe` token",
 }
 
-# The population the census measured when this rail was written. A scan that finds fewer
-# sites than this has itself broken — see the module docstring on vacuity.
 INTERPOLATION_SITE_FLOOR = 15
 
 
 def census() -> dict[str, list[int]]:
-    """file (relative to src/gideon) → line numbers holding a raw interpolation."""
+    """file (relative to runtime/gideon) → line numbers holding a raw interpolation."""
     found: dict[str, list[int]] = {}
     for py in sorted(SRC.rglob("*.py")):
         rel = py.relative_to(SRC).as_posix()
         for n, line in enumerate(py.read_text(encoding="utf-8").splitlines(), start=1):
             if line.lstrip().startswith("#") or "``" in line:
-                continue  # a comment or a docstring quoting the pattern is not a call site
+                continue
             if _INTERPOLATION_RE.search(line):
                 found.setdefault(rel, []).append(n)
     return found
@@ -361,11 +354,16 @@ class TestRatchet:
 
     def test_no_unallowlisted_raw_interpolation(self):
         offenders = {
-            f: lines for f, lines in census().items() if f not in ALLOWED_RAW_INTERPOLATION
+            f: lines
+            for f, lines in census().items()
+            if f not in ALLOWED_RAW_INTERPOLATION
         }
         assert not offenders, (
             "a record id is being interpolated into a path without `record_ids.record_path`:\n"
-            + "\n".join(f"  src/gideon/{f}:{lines}" for f, lines in sorted(offenders.items()))
+            + "\n".join(
+                f"  runtime/gideon/{f}:{lines}"
+                for f, lines in sorted(offenders.items())
+            )
             + "\n\nUse `record_path(root, id, ...)`, or add the file to "
             "ALLOWED_RAW_INTERPOLATION with the reason no untrusted string reaches it."
         )
@@ -402,7 +400,7 @@ class TestGateIsInstalled:
     def test_middleware_is_in_the_app_not_merely_importable(self):
         """A gate that is importable but uninstalled maps nothing — the reason
         ``api_version_middleware`` is a factory with a marker attribute too."""
-        from gideon.dashboard.invalid_id_gate import invalid_id_middleware
+        from gideon.interfaces.dashboard.invalid_id_gate import invalid_id_middleware
 
         mw = invalid_id_middleware()
         assert getattr(mw, "_is_invalid_id_gate", False) is True
@@ -410,7 +408,6 @@ class TestGateIsInstalled:
     def test_server_installs_it_innermost(self):
         src = (SRC / "dashboard" / "server.py").read_text(encoding="utf-8")
         assert "invalid_id_middleware()" in src
-        # Innermost = last before spa_fallback, so it wraps the handler and nothing else.
         gate = src.index("invalid_id_middleware()")
         fallback = src.index("spa_fallback,\n    ]")
         assert gate < fallback, "the gate must precede spa_fallback in the ordering"

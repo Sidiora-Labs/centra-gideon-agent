@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from gideon.agents.native.builtin_tools import NativeBuiltinToolProvider
+from gideon.engine.agents.native.builtin_tools import NativeBuiltinToolProvider
 
 
 def _run(coro):
@@ -42,8 +42,11 @@ class TestRepoMap:
     def test_lists_tool(self, ws):
         names = {t.name for t in _run(_prov(ws).list_tools())}
         assert "repo_map" in names
-        # the shell-wrapper tools are gone — the agent uses bash for these.
-        assert "run_tests" not in names and "diagnostics" not in names and "git" not in names
+        assert (
+            "run_tests" not in names
+            and "diagnostics" not in names
+            and "git" not in names
+        )
 
     def test_repo_map_shows_python_defs_and_classes(self, ws):
         r = _run(_prov(ws).invoke("repo_map", {}))
@@ -63,7 +66,7 @@ class TestRepoMap:
 
     def test_repo_map_empty_dir(self, tmp_path):
         (tmp_path / "docs").mkdir()
-        (tmp_path / "docs" / "x.md").write_text("# hi")  # not a source ext
+        (tmp_path / "docs" / "x.md").write_text("# hi")
         r = _run(_prov(tmp_path).invoke("repo_map", {}))
         assert "no source files" in r.output.lower()
 
@@ -72,8 +75,6 @@ class TestRepoMap:
         assert r.success is False
 
     def test_repo_map_prunes_skip_dirs_at_any_depth(self, tmp_path):
-        # A source file nested inside a skip-dir (node_modules) must never appear —
-        # the walk prunes those dirs rather than descending + filtering after.
         (tmp_path / "real.py").write_text("def keep(): pass\n")
         nm = tmp_path / "node_modules" / "pkg" / "lib"
         nm.mkdir(parents=True)
@@ -84,8 +85,6 @@ class TestRepoMap:
         assert "vendored.py" not in r.output and "node_modules" not in r.output
 
     def test_repo_map_signals_truncation(self, tmp_path):
-        # More source files than max_files → the map must SAY it's partial (not
-        # report the capped count as the whole repo).
         for i in range(5):
             (tmp_path / f"m{i}.py").write_text("def f(): pass\n")
         r = _run(_prov(tmp_path).invoke("repo_map", {"max_files": 2}))

@@ -21,8 +21,8 @@ import sys
 
 import pytest
 
-from gideon import sandbox
-from gideon.sandbox import (
+from gideon.security import sandbox
+from gideon.security.sandbox import (
     PROFILE_TOOL,
     ResourceCeilings,
     cgroup_scope_argv,
@@ -30,7 +30,7 @@ from gideon.sandbox import (
     spawn_shim_argv,
 )
 
-_SANDBOX_LOGGER = "gideon.sandbox"
+_SANDBOX_LOGGER = "gideon.security.sandbox"
 _WARN_MARKER = "sandbox ceilings NOT enforced"
 
 
@@ -47,7 +47,9 @@ def _isolate_module_state(monkeypatch):
     probe_cgroup_scopes.cache_clear()
 
 
-def _simulate_host(monkeypatch, tmp_path, *, cgroup2: bool, systemd: bool, bus: bool = True):
+def _simulate_host(
+    monkeypatch, tmp_path, *, cgroup2: bool, systemd: bool, bus: bool = True
+):
     """Point the probe's filesystem/PATH/env inputs at a simulated Linux host."""
     monkeypatch.setattr(sandbox.sys, "platform", "linux")
     controllers = tmp_path / "cgroup.controllers"
@@ -57,7 +59,9 @@ def _simulate_host(monkeypatch, tmp_path, *, cgroup2: bool, systemd: bool, bus: 
     monkeypatch.setattr(
         sandbox.shutil,
         "which",
-        lambda name: "/usr/bin/systemd-run" if (systemd and name == "systemd-run") else None,
+        lambda name: (
+            "/usr/bin/systemd-run" if (systemd and name == "systemd-run") else None
+        ),
     )
     if bus:
         monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
@@ -77,16 +81,15 @@ def _force_probe(monkeypatch, available: bool):
     probe_cgroup_scopes.cache_clear()
 
 
-# ── The probe ──
-
-
 def test_probe_never_raises_on_this_host():
     result = probe_cgroup_scopes()
     assert isinstance(result, tuple)
     assert len(result) == 2
     available, detail = result
     assert isinstance(available, bool)
-    assert isinstance(detail, str) and detail, "the probe must always explain its verdict"
+    assert (
+        isinstance(detail, str) and detail
+    ), "the probe must always explain its verdict"
     if sys.platform != "linux":
         assert available is False
         assert "not Linux" in detail
@@ -97,7 +100,6 @@ def test_probe_available_when_cgroup2_and_systemd_present(monkeypatch, tmp_path)
     available, detail = probe_cgroup_scopes()
     assert available is True
     assert "cgroup v2" in detail and "systemd" in detail
-    # The delegated controllers are surfaced so the doctor line shows what the host has.
     assert "pids" in detail and "memory" in detail
 
 
@@ -130,7 +132,9 @@ def test_probe_accepts_the_xdg_runtime_bus_socket(monkeypatch, tmp_path):
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
     probe_cgroup_scopes.cache_clear()
     available, _detail = probe_cgroup_scopes()
-    assert available is True, "$XDG_RUNTIME_DIR/bus is the fallback evidence of a user bus"
+    assert (
+        available is True
+    ), "$XDG_RUNTIME_DIR/bus is the fallback evidence of a user bus"
 
 
 def test_probe_is_cached_after_the_first_call(monkeypatch):
@@ -148,14 +152,14 @@ def test_probe_is_cached_after_the_first_call(monkeypatch):
     assert len(calls) == 1, "the probe sits on the spawn path; it must run at most once"
 
 
-# ── cgroup_scope_argv ──
-
 _ARGV = ["/bin/echo", "hi"]
 
 
 def test_scope_argv_with_both_ceilings(monkeypatch):
     _force_probe(monkeypatch, True)
-    ceilings = ResourceCeilings(nofile=4096, max_pids=64, max_rss_mb=512, cgroup_scopes=True)
+    ceilings = ResourceCeilings(
+        nofile=4096, max_pids=64, max_rss_mb=512, cgroup_scopes=True
+    )
     assert cgroup_scope_argv(_ARGV, ceilings) == [
         "systemd-run",
         "--user",
@@ -172,7 +176,9 @@ def test_scope_argv_with_both_ceilings(monkeypatch):
 
 def test_scope_argv_with_pids_only(monkeypatch):
     _force_probe(monkeypatch, True)
-    ceilings = ResourceCeilings(nofile=4096, max_pids=64, max_rss_mb=0, cgroup_scopes=True)
+    ceilings = ResourceCeilings(
+        nofile=4096, max_pids=64, max_rss_mb=0, cgroup_scopes=True
+    )
     assert cgroup_scope_argv(_ARGV, ceilings) == [
         "systemd-run",
         "--user",
@@ -187,7 +193,9 @@ def test_scope_argv_with_pids_only(monkeypatch):
 
 def test_scope_argv_with_rss_only(monkeypatch):
     _force_probe(monkeypatch, True)
-    ceilings = ResourceCeilings(nofile=4096, max_pids=0, max_rss_mb=512, cgroup_scopes=True)
+    ceilings = ResourceCeilings(
+        nofile=4096, max_pids=0, max_rss_mb=512, cgroup_scopes=True
+    )
     out = cgroup_scope_argv(_ARGV, ceilings)
     assert out == [
         "systemd-run",
@@ -200,8 +208,6 @@ def test_scope_argv_with_rss_only(monkeypatch):
         "/bin/echo",
         "hi",
     ]
-    # An unconfigured ceiling must not be emitted at all: TasksMax=0 is a total denial of
-    # forking, not a disabled limit.
     assert not [tok for tok in out if "TasksMax" in tok]
 
 
@@ -213,7 +219,10 @@ def test_memory_swap_max_is_always_emitted_with_memory_max(monkeypatch, max_pids
     out = cgroup_scope_argv(_ARGV, ceilings)
     assert "--property=MemoryMax=256M" in out
     assert "--property=MemorySwapMax=0" in out
-    assert out.index("--property=MemorySwapMax=0") == out.index("--property=MemoryMax=256M") + 1
+    assert (
+        out.index("--property=MemorySwapMax=0")
+        == out.index("--property=MemoryMax=256M") + 1
+    )
 
 
 def test_scope_argv_unchanged_when_opted_out(monkeypatch):
@@ -231,7 +240,9 @@ def test_scope_argv_unchanged_when_probe_says_unavailable(monkeypatch):
 def test_scope_argv_unchanged_when_no_ceiling_is_configured(monkeypatch):
     """A scope with no properties would cost a systemd round-trip and enforce nothing."""
     _force_probe(monkeypatch, True)
-    ceilings = ResourceCeilings(nofile=4096, max_pids=0, max_rss_mb=0, cgroup_scopes=True)
+    ceilings = ResourceCeilings(
+        nofile=4096, max_pids=0, max_rss_mb=0, cgroup_scopes=True
+    )
     assert cgroup_scope_argv(_ARGV, ceilings) == _ARGV
 
 
@@ -241,18 +252,15 @@ def test_scope_argv_of_empty_argv_is_empty(monkeypatch):
     assert cgroup_scope_argv([], ceilings) == []
 
 
-# ── Layering: the scope wraps the shim, it does not replace it ──
-
-
 def test_spawn_shim_argv_wraps_the_shim_in_the_scope(monkeypatch):
     _force_probe(monkeypatch, True)
-    ceilings = ResourceCeilings(nofile=4096, max_pids=64, max_rss_mb=512, cgroup_scopes=True)
+    ceilings = ResourceCeilings(
+        nofile=4096, max_pids=64, max_rss_mb=512, cgroup_scopes=True
+    )
     out = spawn_shim_argv(list(_ARGV), PROFILE_TOOL, ceilings)
 
-    # The scope tokens come FIRST — it is the outer layer.
     assert out[:4] == ["systemd-run", "--user", "--scope", "--quiet"]
 
-    # The NOFILE shim is still there, intact, inside the scope — NOT replaced by it.
     sep = out.index("--")
     inner = out[sep + 1 :]
     assert inner[:3] == [sys.executable, "-m", sandbox._SHIM_MODULE]
@@ -265,13 +273,12 @@ def test_spawn_shim_argv_wraps_the_shim_in_the_scope(monkeypatch):
 def test_spawn_shim_argv_is_shim_only_without_the_tier(monkeypatch):
     """Opted out, the composition is byte-identical to the pre-tier behaviour."""
     _force_probe(monkeypatch, True)
-    ceilings = ResourceCeilings(nofile=4096, max_pids=64, max_rss_mb=512, cgroup_scopes=False)
+    ceilings = ResourceCeilings(
+        nofile=4096, max_pids=64, max_rss_mb=512, cgroup_scopes=False
+    )
     out = spawn_shim_argv(list(_ARGV), PROFILE_TOOL, ceilings)
     assert out[:3] == [sys.executable, "-m", sandbox._SHIM_MODULE]
     assert "systemd-run" not in out
-
-
-# ── The one loud warning ──
 
 
 def _warnings(caplog) -> list[str]:
@@ -280,13 +287,19 @@ def _warnings(caplog) -> list[str]:
 
 def test_warning_fires_exactly_once_across_repeated_spawns(caplog):
     caplog.set_level(logging.WARNING, logger=_SANDBOX_LOGGER)
-    ceilings = ResourceCeilings(nofile=4096, max_pids=64, max_rss_mb=512, cgroup_scopes=False)
+    ceilings = ResourceCeilings(
+        nofile=4096, max_pids=64, max_rss_mb=512, cgroup_scopes=False
+    )
     for _ in range(4):
         spawn_shim_argv(list(_ARGV), PROFILE_TOOL, ceilings)
     found = _warnings(caplog)
-    assert len(found) == 1, f"expected exactly one warning per process, got {len(found)}"
+    assert (
+        len(found) == 1
+    ), f"expected exactly one warning per process, got {len(found)}"
     text = found[0]
-    assert "pids" in text and "RSS" in text, "the warning must name what is not enforced"
+    assert (
+        "pids" in text and "RSS" in text
+    ), "the warning must name what is not enforced"
     assert "NOFILE" in text, "and must say the NOFILE floor still applies"
     assert "cgroup_scopes" in text, "and must point at the remedy"
 
@@ -294,7 +307,9 @@ def test_warning_fires_exactly_once_across_repeated_spawns(caplog):
 def test_no_warning_when_neither_ceiling_is_configured(caplog):
     """Nothing was asked for, so nothing is unenforced — silence is correct."""
     caplog.set_level(logging.WARNING, logger=_SANDBOX_LOGGER)
-    ceilings = ResourceCeilings(nofile=4096, max_pids=0, max_rss_mb=0, cgroup_scopes=False)
+    ceilings = ResourceCeilings(
+        nofile=4096, max_pids=0, max_rss_mb=0, cgroup_scopes=False
+    )
     for _ in range(3):
         spawn_shim_argv(list(_ARGV), PROFILE_TOOL, ceilings)
     assert _warnings(caplog) == []
@@ -303,24 +318,23 @@ def test_no_warning_when_neither_ceiling_is_configured(caplog):
 def test_no_warning_when_the_cgroup_tier_is_in_effect(monkeypatch, caplog):
     caplog.set_level(logging.WARNING, logger=_SANDBOX_LOGGER)
     _force_probe(monkeypatch, True)
-    ceilings = ResourceCeilings(nofile=4096, max_pids=64, max_rss_mb=512, cgroup_scopes=True)
+    ceilings = ResourceCeilings(
+        nofile=4096, max_pids=64, max_rss_mb=512, cgroup_scopes=True
+    )
     spawn_shim_argv(list(_ARGV), PROFILE_TOOL, ceilings)
     assert _warnings(caplog) == []
 
 
-def test_warning_fires_when_opted_in_but_the_host_cannot_host_a_scope(monkeypatch, caplog):
+def test_warning_fires_when_opted_in_but_the_host_cannot_host_a_scope(
+    monkeypatch, caplog
+):
     caplog.set_level(logging.WARNING, logger=_SANDBOX_LOGGER)
     _force_probe(monkeypatch, False)
-    ceilings = ResourceCeilings(nofile=4096, max_pids=64, max_rss_mb=512, cgroup_scopes=True)
+    ceilings = ResourceCeilings(
+        nofile=4096, max_pids=64, max_rss_mb=512, cgroup_scopes=True
+    )
     spawn_shim_argv(list(_ARGV), PROFILE_TOOL, ceilings)
     assert len(_warnings(caplog)) == 1
-
-
-# ── Vacuity assertions: the unenforced-ness the warning claims is REAL ──
-#
-# These are the reason the warning is allowed to exist. Each measures the platform in a
-# fresh child rather than trusting folklore, and each fails LOUDLY (not silently passes) if
-# the platform starts enforcing the ceiling — at which point the warning must be narrowed.
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="measures Darwin rlimit semantics")
@@ -338,14 +352,17 @@ def test_darwin_cannot_enforce_an_rss_ceiling():
         "    print('ENFORCED'); sys.exit(8)\n"
         "print('IGNORED'); sys.exit(9)\n"
     )
-    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120)
+    proc = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, timeout=120
+    )
     assert proc.returncode != 8, (
         "RLIMIT_AS is now ENFORCED on this host: the unenforced-RSS half of the warning in "
         f"sandbox._warn_unenforced_ceilings has become a LIE and must be narrowed. {proc.stdout}"
     )
-    assert proc.returncode in (7, 9), f"unexpected probe outcome: {proc.returncode} {proc.stderr}"
-    # Measured on Darwin 26.6.1: the kernel rejects any finite RLIMIT_AS (it aliases
-    # RLIMIT_RSS), so the ceiling is never even installed — exit 7, not 9.
+    assert proc.returncode in (
+        7,
+        9,
+    ), f"unexpected probe outcome: {proc.returncode} {proc.stderr}"
     assert proc.returncode == 7 and "REJECTED" in proc.stdout
 
 
@@ -360,9 +377,6 @@ def test_darwin_nproc_counts_the_user_not_the_process_tree():
     live = len([ln for ln in listing.stdout.splitlines() if ln.strip()])
     if live < 8:
         pytest.skip(f"only {live} processes for this uid — too idle to discriminate")
-    # A cap comfortably ABOVE the two processes this tree will hold, and comfortably BELOW
-    # the uid's live process count. A per-tree limit would permit the fork; a per-user one
-    # cannot. That gap is what makes this measurement non-vacuous.
     cap = live // 2
     assert cap >= 2
     code = (
@@ -381,7 +395,9 @@ def test_darwin_nproc_counts_the_user_not_the_process_tree():
         "os.waitpid(pid, 0)\n"
         "print('FORKED'); sys.exit(9)\n"
     )
-    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120)
+    proc = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, timeout=120
+    )
     assert proc.returncode == 8, (
         f"a fork from a ONE-process tree under RLIMIT_NPROC={cap} was permitted "
         f"(exit {proc.returncode}: {proc.stdout.strip()}). RLIMIT_NPROC may now be a "

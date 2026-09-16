@@ -29,10 +29,9 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.config.loader import AppConfig, KnowledgeConfig
-from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+from gideon.core.config.loader import AppConfig, KnowledgeConfig
+from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
-# The three fields, their documented defaults, and their PATCH-allowlist keys.
 _FIELDS: tuple[tuple[str, object], ...] = (
     ("similarity_min_score", 0.55),
     ("similarity_top_k", 8),
@@ -47,16 +46,13 @@ def cfg_file(tmp_path, monkeypatch):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     p = tmp_path / "config.json"
     p.write_text("{}", encoding="utf-8")
-    with patch("gideon.config.loader.config_path", return_value=p):
+    with patch("gideon.core.config.loader.config_path", return_value=p):
         yield p
 
 
 def _write(cfg_file, **knowledge_values):
     """Hand-edit ``config.json``'s knowledge section, the way an owner would."""
     cfg_file.write_text(json.dumps({"knowledge": knowledge_values}), encoding="utf-8")
-
-
-# ── 1. dataclass + _meta, and the documented defaults ─────────────────────────────────────
 
 
 def test_fields_are_declared_with_meta():
@@ -89,9 +85,6 @@ def test_defaults_load_from_an_empty_config(cfg_file):
         assert getattr(cfg.knowledge, name) == default, name
 
 
-# ── 2. to_dict() ──────────────────────────────────────────────────────────────────────────
-
-
 def test_fields_appear_in_to_dict(cfg_file):
     """to_dict() goes through asdict, so this is a verification, not an assumption."""
     d = AppConfig.load().to_dict()["knowledge"]
@@ -106,15 +99,14 @@ def test_to_dict_output_reloads_unchanged(cfg_file):
     Catches the asymmetric case where to_dict() emits a key under a name load() does not map:
     the save looks successful and the value is gone on the next read.
     """
-    _write(cfg_file, similarity_min_score=0.5, similarity_top_k=3, similarity_degree_cap=12)
+    _write(
+        cfg_file, similarity_min_score=0.5, similarity_top_k=3, similarity_degree_cap=12
+    )
     once = AppConfig.load()
     cfg_file.write_text(json.dumps(once.to_dict()), encoding="utf-8")
     twice = AppConfig.load()
     for name, _default in _FIELDS:
         assert getattr(twice.knowledge, name) == getattr(once.knowledge, name), name
-
-
-# ── 3. _EDITABLE_CONFIG PATCH allowlist ───────────────────────────────────────────────────
 
 
 def test_editable_config_declares_all_three_keys():
@@ -164,9 +156,6 @@ def test_min_score_bounds_reject_a_floor_of_zero_and_anything_above_one():
     assert spec["max"] == 1.0
 
 
-# ── 4. a reader actually receives the value ───────────────────────────────────────────────
-
-
 def test_configured_values_are_read_back_from_disk(cfg_file):
     """A hand-written config.json value must survive load().
 
@@ -174,7 +163,12 @@ def test_configured_values_are_read_back_from_disk(cfg_file):
     load()'s knowledge mapping and its assertion here reverts to the default and goes red,
     while the dataclass and to_dict() tests above still pass.
     """
-    _write(cfg_file, similarity_min_score=0.62, similarity_top_k=5, similarity_degree_cap=21)
+    _write(
+        cfg_file,
+        similarity_min_score=0.62,
+        similarity_top_k=5,
+        similarity_degree_cap=21,
+    )
     k = AppConfig.load().knowledge
     assert k.similarity_min_score == pytest.approx(0.62)
     assert k.similarity_top_k == 5
@@ -196,7 +190,7 @@ def test_a_reader_receives_the_configured_edge_knobs():
     stub.knowledge.similarity_degree_cap = 17
 
     def read(key: str) -> object:
-        from gideon.config.loader import AppConfig as Loaded
+        from gideon.core.config.loader import AppConfig as Loaded
 
         return getattr(Loaded.load().knowledge, key.partition(".")[2])
 
@@ -206,16 +200,15 @@ def test_a_reader_receives_the_configured_edge_knobs():
         assert read("knowledge.similarity_degree_cap") == 17
 
 
-# ── 5. hostile hand-edited values — ZERO and NEGATIVE, deliberately separate ───────────────
-
-
 def test_zero_values_take_the_shipped_default(cfg_file):
     """A configured 0 falls back to the default via this block's ``or <default>`` idiom.
 
     Kept apart from the negative case ON PURPOSE. This test passes with every clamp in
     load() deleted, so it can only ever prove the fallback — never a floor.
     """
-    _write(cfg_file, similarity_min_score=0, similarity_top_k=0, similarity_degree_cap=0)
+    _write(
+        cfg_file, similarity_min_score=0, similarity_top_k=0, similarity_degree_cap=0
+    )
     k = AppConfig.load().knowledge
     assert k.similarity_min_score == pytest.approx(0.55)
     assert k.similarity_top_k == 8
@@ -229,7 +222,12 @@ def test_negative_values_are_floored_not_passed_through(cfg_file):
     to fail: a negative cosine floor resolves to the DEFAULT (below zero there is no floor to
     loosen), while a negative count clamps to the minimum useful value of 1.
     """
-    _write(cfg_file, similarity_min_score=-0.5, similarity_top_k=-3, similarity_degree_cap=-9)
+    _write(
+        cfg_file,
+        similarity_min_score=-0.5,
+        similarity_top_k=-3,
+        similarity_degree_cap=-9,
+    )
     k = AppConfig.load().knowledge
     assert k.similarity_min_score == pytest.approx(0.55)
     assert k.similarity_top_k == 1
@@ -257,16 +255,8 @@ def test_unparseable_values_degrade_to_defaults_without_raising(cfg_file):
     assert k.similarity_degree_cap == 32
 
 
-# ── 6. the PATCH endpoint, driven for real ────────────────────────────────────────────────
-#
-# The allowlist assertions above are structural: they prove an entry is DECLARED. These drive
-# the endpoint, because a declared entry can still be unreachable, and a PATCH that reports
-# success while load() then discards the value is the exact "setting that changes nothing"
-# defect the allowlist exists to prevent.
-
-
 def _patch_app() -> web.Application:
-    from gideon.dashboard.handlers import api_gideon_config_patch
+    from gideon.interfaces.dashboard.handlers import api_gideon_config_patch
 
     app = web.Application()
     app.router.add_patch("/api/config/gideon", api_gideon_config_patch)

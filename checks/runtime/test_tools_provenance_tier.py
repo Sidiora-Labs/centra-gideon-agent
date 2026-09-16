@@ -25,8 +25,8 @@ import json
 
 import pytest
 
-import gideon.dashboard.handlers.tools as tools_mod
-from gideon.apps.manager import InstalledApp, app_dir
+import gideon.interfaces.dashboard.handlers.tools as tools_mod
+from gideon.extensions.apps.manager import InstalledApp, app_dir
 
 
 class _DummyRequest:
@@ -42,10 +42,9 @@ def _install_record(name: str, **fields) -> None:
     d = app_dir(name)
     d.mkdir(parents=True, exist_ok=True)
     meta = InstalledApp(name=name, version="1.0.0", **fields)
-    (d / "installed.json").write_text(json.dumps(meta.to_dict(), indent=2), encoding="utf-8")
-
-
-# ── the tier of an app at rest ───────────────────────────────────────────────
+    (d / "installed.json").write_text(
+        json.dumps(meta.to_dict(), indent=2), encoding="utf-8"
+    )
 
 
 def test_recorded_tier_wins_over_the_origin_fallback():
@@ -55,7 +54,7 @@ def test_recorded_tier_wins_over_the_origin_fallback():
     when it verifies a maintainer signature. Re-deriving from origin would quietly drop
     that, so the recorded value has to take precedence.
     """
-    from gideon.apps.app_manager import trust_tier_of
+    from gideon.extensions.apps.app_manager import trust_tier_of
 
     _install_record("signed-local-app", origin="local", tier="official")
     assert trust_tier_of("signed-local-app") == "official"
@@ -63,7 +62,7 @@ def test_recorded_tier_wins_over_the_origin_fallback():
 
 def test_absent_tier_falls_back_to_what_the_origin_earns():
     """A record written before the field existed still resolves — and never to ``builtin``."""
-    from gideon.apps.app_manager import trust_tier_of
+    from gideon.extensions.apps.app_manager import trust_tier_of
 
     _install_record("legacy-local-app", origin="local")
     _install_record("legacy-registry-app", origin="registry")
@@ -75,19 +74,21 @@ def test_absent_tier_falls_back_to_what_the_origin_earns():
 
 def test_unknown_app_is_community_not_builtin():
     """The whole direction of the defect: unknown provenance must not read as first-party."""
-    from gideon.apps.app_manager import trust_tier_of
+    from gideon.extensions.apps.app_manager import trust_tier_of
 
     assert trust_tier_of("never-installed-app") == "community"
 
 
 def test_a_junk_tier_on_disk_is_dropped_not_trusted():
     """An unreadable tier resolves from ``origin`` rather than persisting a bogus claim."""
-    from gideon.apps.app_manager import trust_tier_of
+    from gideon.extensions.apps.app_manager import trust_tier_of
 
     d = app_dir("tampered-app")
     d.mkdir(parents=True, exist_ok=True)
     (d / "installed.json").write_text(
-        json.dumps({"name": "tampered-app", "origin": "local", "tier": "totally-trustworthy"}),
+        json.dumps(
+            {"name": "tampered-app", "origin": "local", "tier": "totally-trustworthy"}
+        ),
         encoding="utf-8",
     )
     assert trust_tier_of("tampered-app") == "community"
@@ -97,11 +98,7 @@ def test_the_install_record_round_trips_the_tier():
     """``tier`` survives the on-disk hop — the value the gate wrote is the value read back."""
     meta = InstalledApp(name="a", origin="local", tier="community")
     assert InstalledApp.from_dict(meta.to_dict()).tier == "community"
-    # "" stays "" (a legacy record), rather than being defaulted to a tier nothing verified.
     assert InstalledApp.from_dict(InstalledApp(name="a").to_dict()).tier == ""
-
-
-# ── the tier on the catalog wire ─────────────────────────────────────────────
 
 
 class _FakeTool:
@@ -140,27 +137,36 @@ class _FakeExtRegistry:
         return self._exts if provider_type == "tool" else []
 
 
-def _patch_catalog(monkeypatch, *, providers: dict, apps: list, exts: list, mcp=None) -> None:
+def _patch_catalog(
+    monkeypatch, *, providers: dict, apps: list, exts: list, mcp=None
+) -> None:
     """Point every source the catalog reads at fakes. Source 1 (the cwd-coupled platform
-    provider) is left real — it contributes no app-owned provider and so needs no tier."""
-    from gideon.tool_providers import registry as reg
+    provider) is left real — it contributes no app-owned provider and so needs no tier.
+    """
+    from gideon.integrations.tool_providers import registry as reg
 
     monkeypatch.setattr(reg, "_providers", providers)
-    monkeypatch.setattr("gideon.apps.manager.list_apps", lambda: apps, raising=False)
     monkeypatch.setattr(
-        "gideon.providers.registry.get_provider_registry",
+        "gideon.extensions.apps.manager.list_apps", lambda: apps, raising=False
+    )
+    monkeypatch.setattr(
+        "gideon.extensions.providers.registry.get_provider_registry",
         lambda: _FakeExtRegistry(exts),
         raising=False,
     )
     monkeypatch.setattr(
-        "gideon.mcp_client.get_mcp_client_registry", lambda: mcp, raising=False
+        "gideon.integrations.mcp_client.get_mcp_client_registry",
+        lambda: mcp,
+        raising=False,
     )
 
 
 async def _catalog(monkeypatch, **kw) -> dict[str, str]:
     """``GET /api/tools`` → ``{tool name: tier}``."""
     _patch_catalog(monkeypatch, **kw)
-    resp = await asyncio.wait_for(tools_mod.api_tools_list(_DummyRequest()), timeout=10.0)
+    resp = await asyncio.wait_for(
+        tools_mod.api_tools_list(_DummyRequest()), timeout=10.0
+    )
     payload = json.loads(resp.body.decode())
     return {t["name"]: t["tier"] for t in payload["tools"]}
 
@@ -178,14 +184,14 @@ async def test_an_app_contributed_provider_carries_the_apps_tier(monkeypatch):
         exts=[_FakeExt("spec-builder", bundle)],
     )
     assert tiers["spec_outline"] == "community"
-    # …and a provider no app contributed is still the platform's own.
     assert tiers["memory_search"] == "builtin"
 
 
 @pytest.mark.asyncio
 async def test_a_multi_instance_provider_is_keyed_by_its_instance_name(monkeypatch):
     """An app declaring several provider instances registers them as ``{app}:{instance}`` —
-    which is the string the catalog tags its tools with, so that is what must be keyed."""
+    which is the string the catalog tags its tools with, so that is what must be keyed.
+    """
     _install_record("multi-app", origin="local", tier="community")
     one = _FakeProvider("multi-app:alpha", "alpha_tool")
     two = _FakeProvider("multi-app:beta", "beta_tool")
@@ -213,7 +219,7 @@ async def test_an_external_mcp_server_claims_no_tier(monkeypatch):
             return {"some-server": _Conn()}.items()
 
     monkeypatch.setattr(
-        "gideon.tool_providers.registry.list_all_tools",
+        "gideon.integrations.tool_providers.registry.list_all_tools",
         _noop_list_all_tools,
         raising=False,
     )
@@ -222,19 +228,25 @@ async def test_an_external_mcp_server_claims_no_tier(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_broken_registry_read_degrades_to_builtin_not_to_a_blank_page(monkeypatch):
+async def test_a_broken_registry_read_degrades_to_builtin_not_to_a_blank_page(
+    monkeypatch,
+):
     """The tier resolution is best-effort: it must never be able to empty the Tools page."""
 
     def _boom():
         raise RuntimeError("registry exploded")
 
     core = _FakeProvider("gideon-memory", "memory_search")
-    from gideon.tool_providers import registry as reg
+    from gideon.integrations.tool_providers import registry as reg
 
     monkeypatch.setattr(reg, "_providers", {core.name: core})
-    monkeypatch.setattr("gideon.apps.manager.list_apps", _boom, raising=False)
     monkeypatch.setattr(
-        "gideon.mcp_client.get_mcp_client_registry", lambda: None, raising=False
+        "gideon.extensions.apps.manager.list_apps", _boom, raising=False
+    )
+    monkeypatch.setattr(
+        "gideon.integrations.mcp_client.get_mcp_client_registry",
+        lambda: None,
+        raising=False,
     )
     resp = await tools_mod.api_tools_list(_DummyRequest())
     payload = json.loads(resp.body.decode())

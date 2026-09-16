@@ -1,6 +1,6 @@
 """Tests for _parse_options — powers inline Waiting-lane buttons on the board."""
 
-from gideon.dashboard.state import _parse_options
+from gideon.interfaces.dashboard.state import _parse_options
 
 
 def test_parse_simple_options():
@@ -17,11 +17,13 @@ def test_single_option():
 
 
 def test_whitespace_is_stripped():
-    assert _parse_options("[OPTIONS:   Apply now  |   Hold off   ]") == ["Apply now", "Hold off"]
+    assert _parse_options("[OPTIONS:   Apply now  |   Hold off   ]") == [
+        "Apply now",
+        "Hold off",
+    ]
 
 
 def test_multiple_markers_uses_last():
-    # An assistant message might quote an earlier OPTIONS block then ask a new question.
     txt = "Earlier I said [OPTIONS: old1 | old2]. Now choose:\n[OPTIONS: new1 | new2 | new3]"
     assert _parse_options(txt) == ["new1", "new2", "new3"]
 

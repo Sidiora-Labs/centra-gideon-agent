@@ -6,7 +6,7 @@ tolerant parser and its typed authoring-time validator — and lands it **delibe
 
 The centre of this file is the two-directional honesty rail (the `WF2LOO-12` convention):
 a control with no caller must SAY it has no caller, and that claim must go RED if it ever
-stops being true in EITHER direction. It is a static AST census over ``src/gideon`` —
+stops being true in EITHER direction. It is a static AST census over ``runtime/gideon`` —
 never an import-time probe — carrying a vacuity floor so it cannot pass by scanning nothing.
 """
 
@@ -15,18 +15,16 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from gideon.workflows import supervisor_policy as sp
-from gideon.workflows.autonomy import Attention
-from gideon.workflows.judge_contract import RubricCriterion
-from gideon.workflows.loop_middleware import DEFAULT_LADDER, Rung
-from gideon.workflows.scope import ScopeMode
-from gideon.workflows.supervisor_policy import (
+from gideon.automation.workflows import supervisor_policy as sp
+from gideon.automation.workflows.autonomy import Attention
+from gideon.automation.workflows.judge_contract import RubricCriterion
+from gideon.automation.workflows.loop_middleware import DEFAULT_LADDER, Rung
+from gideon.automation.workflows.scope import ScopeMode
+from gideon.automation.workflows.supervisor_policy import (
     SupervisorPolicy,
     parse_supervisor_policy,
 )
-from gideon.workflows.validator import validate_spec
-
-# ── helpers ──
+from gideon.automation.workflows.validator import validate_spec
 
 
 def _codes(supervisor: object) -> set[str]:
@@ -41,9 +39,6 @@ def _codes(supervisor: object) -> set[str]:
         },
     }
     return {i.code for i in validate_spec(spec).issues}
-
-
-# ── the two-directional honesty rail (the heart of PP-14) ──
 
 
 def _count_policy_callers(tree: ast.AST) -> int:
@@ -71,9 +66,9 @@ def _count_policy_callers(tree: ast.AST) -> int:
 
 
 def _census() -> tuple[dict[str, int], int]:
-    """Scan every ``src/gideon`` module except the declaration itself."""
+    """Scan every ``runtime/gideon`` module except the declaration itself."""
     module_path = Path(sp.__file__).resolve()
-    root = module_path.parents[1]  # .../src/gideon
+    root = module_path.parents[1]
     hits: dict[str, int] = {}
     scanned = 0
     for py in root.rglob("*.py"):
@@ -88,9 +83,10 @@ def _census() -> tuple[dict[str, int], int]:
 
 def test_the_census_can_actually_find_a_caller():
     """Vacuity control on the DETECTOR: a green census is meaningless unless the matcher can
-    detect the thing it swears is absent. This is the positive half of the two-sided floor."""
+    detect the thing it swears is absent. This is the positive half of the two-sided floor.
+    """
     tree = ast.parse(
-        "from gideon.workflows.supervisor_policy import parse_supervisor_policy\n"
+        "from gideon.automation.workflows.supervisor_policy import parse_supervisor_policy\n"
         "parse_supervisor_policy({})\n"
         "SupervisorPolicy()\n"
     )
@@ -100,7 +96,9 @@ def test_the_census_can_actually_find_a_caller():
 def test_the_census_scans_real_source_not_nothing():
     """Vacuity control on the SCAN: a rule that matched an empty file set would pass forever."""
     _hits, scanned = _census()
-    assert scanned >= 50, f"census only scanned {scanned} modules — it is not seeing src/"
+    assert (
+        scanned >= 50
+    ), f"census only scanned {scanned} modules — it is not seeing src/"
 
 
 def test_DIRECTION_1_the_wired_policy_still_has_its_production_caller():
@@ -110,7 +108,8 @@ def test_DIRECTION_1_the_wired_policy_still_has_its_production_caller():
     PP-15 INVERTED this direction. It used to assert that NO caller existed while the marker
     claimed zero; the marker now claims one, so the drift worth catching is the opposite one.
     A deletion that strands `_supervisor_policy` would otherwise leave a `SupervisorPolicy`
-    nothing reads, declaring itself wired — the exact lie the convention exists to prevent."""
+    nothing reads, declaring itself wired — the exact lie the convention exists to prevent.
+    """
     hits, _scanned = _census()
     assert hits, (
         "SupervisorPolicy claims a production caller but the census found none — either the "
@@ -123,7 +122,8 @@ def test_DIRECTION_1_the_wired_policy_still_has_its_production_caller():
 
 def test_DIRECTION_2_the_wired_module_declares_itself_wired():
     """RED if the module goes back to claiming it is inert while a caller exists — the original
-    lie, in the other direction. (Falsification probe: flip the constant back to ``True``.)"""
+    lie, in the other direction. (Falsification probe: flip the constant back to ``True``.)
+    """
     src = Path(sp.__file__).read_text()
     assert (
         "zero production callers" not in src
@@ -136,12 +136,10 @@ def test_DIRECTION_2_the_wired_module_declares_itself_wired():
 def test_the_marker_and_reality_agree():
     """The coupling invariant both probes derive from: the claim must equal the fact. Unchanged
     by PP-15 — the two DIRECTION rails flipped which side of it they guard, but the invariant
-    itself is what makes either lie impossible, so it is stated once and never edited."""
+    itself is what makes either lie impossible, so it is stated once and never edited.
+    """
     hits, _scanned = _census()
     assert sp.HAS_ZERO_PRODUCTION_CALLERS == (len(hits) == 0)
-
-
-# ── the parser: tolerant reads, closed field set ──
 
 
 def test_a_missing_field_tolerates_with_the_default():
@@ -166,17 +164,20 @@ def test_a_malformed_value_never_raises_and_keeps_the_default():
     """A model that answers garbage for every field must run with the strict defaults."""
     pol = parse_supervisor_policy(
         {
-            "judge_model_tier": "wizard",  # unknown tier → default
-            "hitl_posture": "sometimes",  # unknown posture → AFK
-            "marginal_value_band": "banana",  # unusable → default band
-            "gates": 42,  # not a dict → default StepConfig
-            "budget": "lots",  # unusable → 0
-            "rubric": "not-a-list",  # → ()
+            "judge_model_tier": "wizard",
+            "hitl_posture": "sometimes",
+            "marginal_value_band": "banana",
+            "gates": 42,
+            "budget": "lots",
+            "rubric": "not-a-list",
         }
     )
     assert pol.judge_model_tier == "standard"
     assert pol.hitl_posture is Attention.AFK
-    assert pol.marginal_value_band == (sp.DEFAULT_MARGINAL_FLOOR, sp.DEFAULT_MARGINAL_TARGET)
+    assert pol.marginal_value_band == (
+        sp.DEFAULT_MARGINAL_FLOOR,
+        sp.DEFAULT_MARGINAL_TARGET,
+    )
     assert pol.budget_max_cycles == 0
     assert pol.rubric == ()
 
@@ -204,7 +205,9 @@ def test_well_formed_fields_reuse_the_existing_types():
             "hitl_posture": "hitl",
         }
     )
-    assert pol.rubric == (RubricCriterion(criterion="tests pass", target_score=2, weight=1.5),)
+    assert pol.rubric == (
+        RubricCriterion(criterion="tests pass", target_score=2, weight=1.5),
+    )
     assert pol.escalation_ladder == (Rung.CLASSIFIED_RETRY, Rung.SURFACE)
     assert pol.failure_mutations == {"malformed_output": "return valid JSON only"}
     assert pol.gates.min_dwell_secs == 3.0
@@ -221,14 +224,18 @@ def test_well_formed_fields_reuse_the_existing_types():
 
 def test_an_out_of_range_marginal_band_is_clamped_and_ordered():
     """Reuses ``clamp_marginal`` (0-5) and never lets floor exceed target."""
-    pol = parse_supervisor_policy({"marginal_value_band": {"floor": 9.0, "target": -3.0}})
+    pol = parse_supervisor_policy(
+        {"marginal_value_band": {"floor": 9.0, "target": -3.0}}
+    )
     lo, hi = pol.marginal_value_band
     assert 0.0 <= lo <= hi <= 5.0
 
 
 def test_a_ladder_typo_drops_the_bad_rung_and_stays_surface_terminal():
     """Reuses ``loop_middleware._resolve_ladder`` — an unknown rung is dropped, SURFACE forced."""
-    pol = parse_supervisor_policy({"escalation_ladder": ["classified_retry", "teleport"]})
+    pol = parse_supervisor_policy(
+        {"escalation_ladder": ["classified_retry", "teleport"]}
+    )
     assert pol.escalation_ladder == (Rung.CLASSIFIED_RETRY, Rung.SURFACE)
 
 
@@ -237,9 +244,6 @@ def test_an_unknown_failure_class_key_is_dropped_by_the_parser():
         {"failure_mutations": {"malformed_output": "ok", "made_up_class": "x"}}
     )
     assert pol.failure_mutations == {"malformed_output": "ok"}
-
-
-# ── the authoring-time validator: typed WF_ codes, closed field set ──
 
 
 def test_no_supervisor_key_adds_no_issues():
@@ -284,7 +288,9 @@ def test_a_bad_judge_model_tier_is_a_typed_error():
 
 
 def test_a_bad_escalation_rung_is_a_typed_error():
-    assert "WF_SUPERVISOR_BAD_RUNG" in _codes({"escalation_ladder": ["classified_retry", "warp"]})
+    assert "WF_SUPERVISOR_BAD_RUNG" in _codes(
+        {"escalation_ladder": ["classified_retry", "warp"]}
+    )
 
 
 def test_a_bad_hitl_posture_is_a_typed_error():
@@ -292,12 +298,16 @@ def test_a_bad_hitl_posture_is_a_typed_error():
 
 
 def test_a_bad_failure_class_key_is_a_typed_error():
-    assert "WF_SUPERVISOR_BAD_FAILURE_CLASS" in _codes({"failure_mutations": {"nope": "x"}})
+    assert "WF_SUPERVISOR_BAD_FAILURE_CLASS" in _codes(
+        {"failure_mutations": {"nope": "x"}}
+    )
 
 
 def test_the_validator_accumulates_every_problem_at_once():
     """Never one-error-per-turn: a spec with three problems reports three codes together."""
-    codes = _codes({"made_up": 1, "judge_model_tier": "wizard", "hitl_posture": "maybe"})
+    codes = _codes(
+        {"made_up": 1, "judge_model_tier": "wizard", "hitl_posture": "maybe"}
+    )
     assert {
         "WF_SUPERVISOR_UNKNOWN_FIELD",
         "WF_SUPERVISOR_BAD_TIER",

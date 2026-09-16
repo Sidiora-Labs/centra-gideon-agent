@@ -12,19 +12,21 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon import feedback as fb
-from gideon.dashboard.handlers.feedback import register_feedback_routes
+from gideon.cognition import feedback as fb
+from gideon.interfaces.dashboard.handlers.feedback import register_feedback_routes
 
 
 @pytest.fixture(autouse=True)
 def isolated(tmp_path, monkeypatch):
-    import gideon.config.loader as cfg
-    import gideon.providers.entity_routes as er
+    import gideon.core.config.loader as cfg
+    import gideon.extensions.providers.entity_routes as er
 
     monkeypatch.setattr(cfg, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(cfg, "config_path", lambda: tmp_path / "config.json")
     monkeypatch.setattr(
-        er, "_entity_settings_path", lambda entity: tmp_path / "entity_settings" / f"{entity}.json"
+        er,
+        "_entity_settings_path",
+        lambda entity: tmp_path / "entity_settings" / f"{entity}.json",
     )
     fb._invalidate()
     yield tmp_path
@@ -34,7 +36,7 @@ def isolated(tmp_path, monkeypatch):
 def _make_app(app_token_name: str = "") -> web.Application:
     app = web.Application()
     if app_token_name:
-        # Simulate the auth middleware's app-scoped-token stamping.
+
         @web.middleware
         async def stamp_app(request, handler):
             request["app"] = app_token_name
@@ -61,23 +63,31 @@ class TestRecordRoute:
         async with TestClient(TestServer(_make_app())) as c:
             resp = await c.post("/api/feedback", json=BODY)
             assert resp.status == 200
-            got = await (await c.get("/api/feedback/target/inbox_classification/item-1")).json()
+            got = await (
+                await c.get("/api/feedback/target/inbox_classification/item-1")
+            ).json()
             assert got["verdict"] == "down" and got["reason"] == "wrong"
 
     @pytest.mark.asyncio
     async def test_missing_target_hydrates_null(self):
         async with TestClient(TestServer(_make_app())) as c:
-            got = await (await c.get("/api/feedback/target/inbox_classification/nope")).json()
+            got = await (
+                await c.get("/api/feedback/target/inbox_classification/nope")
+            ).json()
             assert got["verdict"] is None
 
     @pytest.mark.asyncio
     async def test_bad_bodies_rejected(self):
         async with TestClient(TestServer(_make_app())) as c:
-            assert (await c.post("/api/feedback", json={**BODY, "verdict": "meh"})).status == 400
+            assert (
+                await c.post("/api/feedback", json={**BODY, "verdict": "meh"})
+            ).status == 400
             assert (
                 await c.post("/api/feedback", json={**BODY, "target_kind": "chat"})
             ).status == 400
-            assert (await c.post("/api/feedback", json={**BODY, "target_id": ""})).status == 400
+            assert (
+                await c.post("/api/feedback", json={**BODY, "target_id": ""})
+            ).status == 400
             assert (await c.post("/api/feedback", data="not json")).status == 400
 
     @pytest.mark.asyncio
@@ -95,17 +105,20 @@ class TestRecordRoute:
 
     @pytest.mark.asyncio
     async def test_kill_switch_404s_every_route(self, isolated):
-        (isolated / "config.json").write_text(json.dumps({"feedback": {"enabled": False}}))
+        (isolated / "config.json").write_text(
+            json.dumps({"feedback": {"enabled": False}})
+        )
         async with TestClient(TestServer(_make_app())) as c:
             assert (await c.post("/api/feedback", json=BODY)).status == 404
-            assert (await c.get("/api/feedback/target/inbox_classification/x")).status == 404
+            assert (
+                await c.get("/api/feedback/target/inbox_classification/x")
+            ).status == 404
             assert (await c.get("/api/feedback/producers")).status == 404
 
 
 class TestProducersRoute:
     @pytest.mark.asyncio
     async def test_min_n_gating(self):
-        # 2 verdicts < min_n 5 → "collecting", no accuracy number
         for i in range(2):
             fb.record_feedback(
                 target_kind="inbox_classification",
@@ -142,8 +155,12 @@ class TestProducersRoute:
             got = await (await c.get("/api/feedback/producers")).json()
         row = next(r for r in got["producers"] if r["producer_id"] == "wf_x")
         assert row["accuracy"] == 0.0
-        assert row.get("proposal_only") is True, "below threshold must report the honest state"
-        assert "suppressed" not in row, "an unenforced kind must not claim it stopped surfacing"
+        assert (
+            row.get("proposal_only") is True
+        ), "below threshold must report the honest state"
+        assert (
+            "suppressed" not in row
+        ), "an unenforced kind must not claim it stopped surfacing"
 
     @pytest.mark.asyncio
     async def test_snooze_and_clear_round_trip(self):
@@ -157,7 +174,13 @@ class TestProducersRoute:
             )
         async with TestClient(TestServer(_make_app())) as c:
             body = {"producer_kind": "workflow_surfacing", "producer_id": "wf_x"}
-            assert (await c.post("/api/feedback/producers/snooze", json=body)).status == 200
+            assert (
+                await c.post("/api/feedback/producers/snooze", json=body)
+            ).status == 200
             assert ("workflow_surfacing", "wf_x") not in fb.suppressed_producers()
-            assert (await c.post("/api/feedback/producers/clear", json=body)).status == 200
-            assert (await c.post("/api/feedback/producers/snooze", json={})).status == 400
+            assert (
+                await c.post("/api/feedback/producers/clear", json=body)
+            ).status == 200
+            assert (
+                await c.post("/api/feedback/producers/snooze", json={})
+            ).status == 400

@@ -19,20 +19,24 @@ from collections import Counter
 
 import pytest
 
-from gideon.agents.native import dispatch_plan
-from gideon.agents.native.approval import APPROVE
-from gideon.agents.native.runtime import NativeAgentRuntime
-from gideon.agents.provider import AgentRuntimeDefinition
-from gideon.llm.events import (
+from gideon.engine.agents.native import dispatch_plan
+from gideon.engine.agents.native.approval import APPROVE
+from gideon.engine.agents.native.runtime import NativeAgentRuntime
+from gideon.engine.agents.provider import AgentRuntimeDefinition
+from gideon.integrations.llm.events import (
     EVENT_COMPLETE,
     EVENT_PERMISSION_REQUEST,
     EVENT_TOOL_CALL,
     EVENT_TOOL_RESULT,
     AgentEvent,
 )
-from gideon.tool_providers.base import RiskLevel, ToolDefinition, ToolProvider, ToolResult
+from gideon.integrations.tool_providers.base import (
+    RiskLevel,
+    ToolDefinition,
+    ToolProvider,
+    ToolResult,
+)
 
-# A turn's requested calls, as (tool_name, json args).
 Call = tuple[str, str]
 
 
@@ -51,7 +55,10 @@ class _ScriptedModel:
         if self.calls == 1:
             for i, (name, args) in enumerate(self._turn):
                 yield AgentEvent(
-                    kind=EVENT_TOOL_CALL, tool_call_id=f"c{i}", title=name, tool_input=args
+                    kind=EVENT_TOOL_CALL,
+                    tool_call_id=f"c{i}",
+                    title=name,
+                    tool_input=args,
                 )
         yield AgentEvent(kind=EVENT_COMPLETE)
 
@@ -101,29 +108,24 @@ class _IntervalTool(ToolProvider):
             d("write_file", RiskLevel.CAUTION),
             d("glob", RiskLevel.SAFE),
             d("grep", RiskLevel.SAFE),
-            # Declared so the turn can name it and land in the UNCLASSIFIED bucket for a
-            # resource reason. Left ungated on purpose: with a gate it would run alone
-            # because of the gate, and the test would prove nothing about classification.
             d("bash", RiskLevel.SAFE),
         ]
 
     async def invoke(self, tool_name, arguments):
-        arg = str(arguments.get("path") or arguments.get("pattern") or arguments.get("query") or "")
-        # Keyed by TOOL:ARG, not by arg alone, so a read and a write of one path are
-        # distinguishable intervals — otherwise "the write intersected nothing" could not be
-        # stated at all.
+        arg = str(
+            arguments.get("path")
+            or arguments.get("pattern")
+            or arguments.get("query")
+            or ""
+        )
         key = f"{tool_name}:{arg}"
         self.log.append(("start", key))
         try:
             if key in self._raise_on:
                 raise RuntimeError(f"boom on {arg}")
             if self._barrier is not None and key in self._rendezvous_on:
-                # Completes only if every rendezvous member is in flight at the same time.
                 await self._barrier.wait()
             else:
-                # One scheduling point so a serial run still yields the event loop — without
-                # it "serial" would be indistinguishable from "synchronous", and the overlap
-                # assertions would pass for the wrong reason.
                 await asyncio.sleep(0)
         finally:
             self.log.append(("end", key))
@@ -189,11 +191,10 @@ def _overlapping_pairs(log: list[tuple[str, str]]) -> list[tuple[str, str]]:
 
 def _outputs(events: list[AgentEvent]) -> dict[str, str]:
     return {
-        ev.tool_call_id or "": ev.tool_output or "" for ev in events if ev.kind == EVENT_TOOL_RESULT
+        ev.tool_call_id or "": ev.tool_output or ""
+        for ev in events
+        if ev.kind == EVENT_TOOL_RESULT
     }
-
-
-# ── overlap is real ──
 
 
 @pytest.mark.asyncio
@@ -238,9 +239,6 @@ async def test_two_reads_of_the_SAME_file_are_in_flight_together():
     assert _overlapping_pairs(tool.log) == [("read_file:same.py", "read_file:same.py")]
 
 
-# ── a write serializes against every reader and writer of its path ──
-
-
 @pytest.mark.asyncio
 async def test_a_write_intersects_nothing_while_its_readers_overlap_each_other():
     tool = _IntervalTool(
@@ -252,12 +250,11 @@ async def test_a_write_intersects_nothing_while_its_readers_overlap_each_other()
         ("write_file", '{"path": "a.py"}'),
     ]
     await asyncio.wait_for(_run(turn, tool), timeout=10)
-    # The two reads overlapped, and that is the ONLY overlap: the write's interval
-    # intersects nothing, which is the reader/writer rule stated as an ordering fact.
     assert _overlapping_pairs(tool.log) == [("read_file:a.py", "read_file:b.py")]
-    # …and it ran after both readers finished rather than before them.
     ivs = dict((k, (s, e)) for k, s, e in _intervals(tool.log))
-    assert ivs["write_file:a.py"][0] > max(ivs["read_file:a.py"][1], ivs["read_file:b.py"][1])
+    assert ivs["write_file:a.py"][0] > max(
+        ivs["read_file:a.py"][1], ivs["read_file:b.py"][1]
+    )
 
 
 @pytest.mark.asyncio
@@ -269,7 +266,6 @@ async def test_a_read_after_a_write_of_the_same_path_waits_for_it():
         ("read_file", '{"path": "a.py"}'),
     ]
     await asyncio.wait_for(_run(turn, tool), timeout=10)
-    # Three disjoint intervals in the requested order: nothing raced anything.
     assert _overlapping_pairs(tool.log) == []
     assert [k for k, _s, _e in _intervals(tool.log)] == [
         "read_file:a.py",
@@ -289,7 +285,10 @@ async def test_a_glob_read_serializes_the_write_it_matches():
     ]
     await asyncio.wait_for(_run(turn, tool), timeout=10)
     assert _overlapping_pairs(tool.log) == []
-    assert [k for k, _s, _e in _intervals(tool.log)] == ["glob:**/*.py", "write_file:pkg/mod.py"]
+    assert [k for k, _s, _e in _intervals(tool.log)] == [
+        "glob:**/*.py",
+        "write_file:pkg/mod.py",
+    ]
 
 
 @pytest.mark.asyncio
@@ -303,14 +302,17 @@ async def test_an_unclassified_tool_runs_alone():
     rt, _events = await asyncio.wait_for(_run(turn, tool), timeout=10)
     prepped = [
         rt._prepare_call(
-            AgentEvent(kind=EVENT_TOOL_CALL, tool_call_id=f"c{i}", title=n, tool_input=a)
+            AgentEvent(
+                kind=EVENT_TOOL_CALL, tool_call_id=f"c{i}", title=n, tool_input=a
+            )
         )
         for i, (n, a) in enumerate(turn)
     ]
-    assert dispatch_plan.plan([p.reservations for p in prepped]).waves == ((0,), (1,), (2,))
-
-
-# ── the audit trail of a concurrent turn matches the serial one ──
+    assert dispatch_plan.plan([p.reservations for p in prepped]).waves == (
+        (0,),
+        (1,),
+        (2,),
+    )
 
 
 @pytest.mark.asyncio
@@ -328,26 +330,23 @@ async def test_a_concurrent_turn_emits_the_same_events_and_history_as_a_serial_o
         return Counter((e.kind, e.tool_call_id, e.title) for e in evs)
 
     assert trail(con) == trail(ser)
-    # Every call's card still precedes its own result…
     for i in range(len(turn)):
         cid = f"c{i}"
         kinds = [e.kind for e in con if e.tool_call_id == cid]
         assert kinds == [EVENT_TOOL_CALL, EVENT_TOOL_RESULT]
-    # …and history is byte-identical, which is the only reason the next inference sees the
-    # same conversation.
     assert rt_con._messages == rt_ser._messages
 
 
 @pytest.mark.asyncio
 async def test_the_dispatch_timing_line_reports_the_plan(caplog):
-    from harness.tool_dispatch_bench import parse_timing_line
+    from checks.harness.tool_dispatch_bench import parse_timing_line
 
     turn: list[Call] = [
         ("read_file", '{"path": "a.py"}'),
         ("read_file", '{"path": "b.py"}'),
         ("write_file", '{"path": "a.py"}'),
     ]
-    with caplog.at_level("INFO", logger="gideon.agents.native.runtime"):
+    with caplog.at_level("INFO", logger="gideon.engine.agents.native.runtime"):
         await _run(turn, _IntervalTool())
     rows = [r for r in (parse_timing_line(m) for m in caplog.messages) if r is not None]
     assert len(rows) == 1
@@ -358,21 +357,18 @@ async def test_the_dispatch_timing_line_reports_the_plan(caplog):
 
 @pytest.mark.asyncio
 async def test_the_timing_line_reports_serial_at_concurrency_one(caplog):
-    from harness.tool_dispatch_bench import parse_timing_line
+    from checks.harness.tool_dispatch_bench import parse_timing_line
 
     turn: list[Call] = [
         ("read_file", '{"path": "a.py"}'),
         ("read_file", '{"path": "b.py"}'),
     ]
-    with caplog.at_level("INFO", logger="gideon.agents.native.runtime"):
+    with caplog.at_level("INFO", logger="gideon.engine.agents.native.runtime"):
         await _run(turn, _IntervalTool(), concurrency=1)
     rows = [r for r in (parse_timing_line(m) for m in caplog.messages) if r is not None]
     assert [(r.mode, r.calls, r.waves, r.widest) for r in rows] == [
         (dispatch_plan.MODE_SERIAL, 2, 2, 1)
     ]
-
-
-# ── failure semantics ──
 
 
 @pytest.mark.asyncio
@@ -382,21 +378,17 @@ async def test_a_failure_spares_independent_siblings_but_stops_a_dependent_call(
         ("read_file", '{"path": "ok1.py"}'),
         ("read_file", '{"path": "boom.py"}'),
         ("read_file", '{"path": "ok2.py"}'),
-        ("write_file", '{"path": "boom.py"}'),  # DEPENDENT: same path as the failure
-        ("read_file", '{"path": "other.py"}'),  # INDEPENDENT of it
+        ("write_file", '{"path": "boom.py"}'),
+        ("read_file", '{"path": "other.py"}'),
     ]
     _rt, events = await asyncio.wait_for(_run(turn, tool), timeout=10)
     out = _outputs(events)
-    # Siblings in the failing call's own wave still ran and still reported.
     assert out["c0"] == "OUT:ok1.py"
     assert out["c2"] == "OUT:ok2.py"
-    # The raiser became an observation instead of taking the turn down.
     assert out["c1"].startswith("Error:") and "RuntimeError" in out["c1"]
-    # The dependent call was NOT run…
     assert "was not run" in out["c3"]
     assert ("start", "read_file:boom.py") in tool.log
     assert ("start", "write_file:boom.py") not in tool.log
-    # …while an independent later call was unaffected.
     assert out["c4"] == "OUT:other.py"
 
 
@@ -414,9 +406,6 @@ async def test_every_call_still_gets_exactly_one_result_message_when_one_fails()
     assert len(tool_msgs) == 2
 
 
-# ── ordering-sensitive semantics are preserved ──
-
-
 @pytest.mark.asyncio
 async def test_an_approval_gated_call_reserves_everything_and_runs_alone():
     """A gate is a round trip to a human. Two prompts racing would change the order the
@@ -426,7 +415,10 @@ async def test_an_approval_gated_call_reserves_everything_and_runs_alone():
     tool = _IntervalTool(gated=frozenset({"write_file"}))
     turn: list[Call] = [
         ("read_file", '{"path": "a.py"}'),
-        ("write_file", '{"path": "z.py"}'),  # a DIFFERENT path — only the gate isolates it
+        (
+            "write_file",
+            '{"path": "z.py"}',
+        ),
         ("read_file", '{"path": "b.py"}'),
     ]
     rt = NativeAgentRuntime(
@@ -438,14 +430,19 @@ async def test_an_approval_gated_call_reserves_everything_and_runs_alone():
     await rt.start()
     prepped = [
         rt._prepare_call(
-            AgentEvent(kind=EVENT_TOOL_CALL, tool_call_id=f"c{i}", title=n, tool_input=a)
+            AgentEvent(
+                kind=EVENT_TOOL_CALL, tool_call_id=f"c{i}", title=n, tool_input=a
+            )
         )
         for i, (n, a) in enumerate(turn)
     ]
     assert prepped[1].reservations == (dispatch_plan.EVERYTHING,)
-    assert dispatch_plan.plan([p.reservations for p in prepped]).waves == ((0,), (1,), (2,))
+    assert dispatch_plan.plan([p.reservations for p in prepped]).waves == (
+        (0,),
+        (1,),
+        (2,),
+    )
 
-    # …and the permission request still surfaces per call, exactly as it does serially.
     events: list[AgentEvent] = []
 
     async def drive():

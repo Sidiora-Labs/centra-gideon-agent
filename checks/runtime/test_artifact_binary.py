@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.artifacts.models import ext_for_mime, is_binary_kind
-from gideon.artifacts.native import NativeArtifactProvider
+from gideon.workspace.artifacts.models import ext_for_mime, is_binary_kind
+from gideon.workspace.artifacts.native import NativeArtifactProvider
 
 _PNG = b"\x89PNG\r\n\x1a\n" + b"fakeimagedata" * 4
 
@@ -18,15 +18,14 @@ _PNG = b"\x89PNG\r\n\x1a\n" + b"fakeimagedata" * 4
 class TestBinaryArtifact:
     def test_create_binary_stores_bytes_and_ref(self, tmp_path):
         prov = NativeArtifactProvider(root=tmp_path)
-        art = prov.create_binary(name="A Cat", data=_PNG, mime="image/png", actor="agent")
+        art = prov.create_binary(
+            name="A Cat", data=_PNG, mime="image/png", actor="agent"
+        )
         assert art.kind == "image"
         assert art.mime == "image/png"
-        # content is the raw REF, never the bytes (no base64-in-content)
         assert art.content == f"/api/artifacts/{art.slug}/raw"
-        # bytes are on disk as current.png (not .html)
         assert (tmp_path / art.slug / "current.png").read_bytes() == _PNG
         assert (tmp_path / art.slug / "versions" / "v1.png").read_bytes() == _PNG
-        # NOT written as text
         assert not (tmp_path / art.slug / "current.html").exists()
 
     def test_raw_bytes_roundtrip(self, tmp_path):
@@ -52,7 +51,6 @@ class TestBinaryArtifact:
         new = b"\x89PNG\r\n\x1a\n" + b"editeddata" * 8
         updated = prov.update_binary(art.slug, data=new, actor="agent")
         assert updated is not None and updated.version == 2
-        # live serves the new bytes; v1 snapshot keeps the original
         assert prov.raw_bytes(art.slug)[0] == new
         assert prov.raw_bytes(art.slug, version=1)[0] == _PNG
         assert prov.raw_bytes(art.slug, version=2)[0] == new
@@ -85,7 +83,7 @@ class TestBinaryArtifact:
         prov.create_binary(name="cat", data=_PNG, mime="image/png")
         imgs = prov.list(kind="image")
         assert len(imgs) == 1 and imgs[0].kind == "image"
-        assert imgs[0].content is None  # list omits content
+        assert imgs[0].content is None
 
 
 class TestBinaryRevert:
@@ -101,21 +99,20 @@ class TestBinaryRevert:
         v2 = b"\x89PNG\r\n\x1a\n" + b"editedXX" * 4
         art = prov.create_binary(name="leaf", data=v1, mime="image/png", actor="agent")
         prov.update_binary(art.slug, data=v2, actor="agent")
-        # revert to v1 → a NEW v3 whose bytes equal v1
         reverted = prov.revert(art.slug, 1, actor="user")
         assert reverted is not None and reverted.version == 3
         assert prov.list_versions(art.slug) == [1, 2, 3]
-        # live + v3 bytes == v1; v2 snapshot is untouched
         assert prov.raw_bytes(art.slug)[0] == v1
         assert prov.raw_bytes(art.slug, version=3)[0] == v1
         assert prov.raw_bytes(art.slug, version=2)[0] == v2
-        # the new version's body is a real binary file (not a text ref)
         assert (tmp_path / art.slug / "versions" / "v3.png").read_bytes() == v1
         assert not (tmp_path / art.slug / "current.html").exists()
 
     def test_revert_emits_reverted_event_by_user(self, tmp_path):
         prov = NativeArtifactProvider(root=tmp_path)
-        art = prov.create_binary(name="leaf", data=_PNG, mime="image/png", actor="agent")
+        art = prov.create_binary(
+            name="leaf", data=_PNG, mime="image/png", actor="agent"
+        )
         prov.update_binary(art.slug, data=_PNG + b"x", actor="agent")
         prov.revert(art.slug, 1, actor="user")
         ev = prov.get(art.slug).events[-1]
@@ -150,7 +147,6 @@ class TestBinaryRevert:
         jpg = b"\xff\xd8\xff\xe0" + b"jpgdata" * 4
         art = prov.create_binary(name="pic", data=png, mime="image/png", actor="agent")
         prov.update_binary(art.slug, data=jpg, mime="image/jpeg", actor="agent")
-        # historical reads report each version's OWN mime, not the current one
         assert prov.raw_bytes(art.slug, version=1) == (png, "image/png")
         assert prov.raw_bytes(art.slug, version=2) == (jpg, "image/jpeg")
         reverted = prov.revert(art.slug, 1, actor="user")
@@ -164,7 +160,7 @@ class TestMimeHelpers:
         assert ext_for_mime("image/png") == "png"
         assert ext_for_mime("image/jpeg") == "jpg"
         assert ext_for_mime("image/webp") == "webp"
-        assert ext_for_mime("application/weird") == "png"  # default
+        assert ext_for_mime("application/weird") == "png"
 
     def test_is_binary_kind(self):
         assert is_binary_kind("image") is True

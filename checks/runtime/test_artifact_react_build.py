@@ -44,8 +44,8 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.artifacts import registry
-from gideon.artifacts.build import (
+from gideon.workspace.artifacts import registry
+from gideon.workspace.artifacts.build import (
     BUNDLE_CSS,
     BUNDLE_JS,
     ENTRY_HTML,
@@ -58,20 +58,13 @@ from gideon.artifacts.build import (
     needs_build,
     resolve_toolchain,
 )
-from gideon.artifacts.deploy import SERVE_URL_PREFIX, ArtifactDeployStore
-from gideon.artifacts.handlers import register_artifact_routes
-from gideon.artifacts.native import NativeArtifactProvider
+from gideon.workspace.artifacts.deploy import SERVE_URL_PREFIX, ArtifactDeployStore
+from gideon.workspace.artifacts.handlers import register_artifact_routes
+from gideon.workspace.artifacts.native import NativeArtifactProvider
 
-#: The soft NOFILE this file installs on ITSELF before probing a child. It is a literal
-#: chosen here, which is what makes it a floor rather than a restatement of the value it
-#: is meant to pin: a child that reports 4321 inherited our limit and therefore did NOT
-#: go through the shim.
 PROBE_SOFT_NOFILE = 4321
 
 JSX = "function App() { return <h1>hello</h1> }"
-
-
-# ── harness ──────────────────────────────────────────────────────────────────
 
 
 @contextmanager
@@ -102,7 +95,9 @@ def _toolchain(root: Path, script: str) -> Path:
     (nm / ".bin").mkdir(parents=True, exist_ok=True)
     for pkg in ("react", "react-dom"):
         (nm / pkg).mkdir(parents=True, exist_ok=True)
-        (nm / pkg / "package.json").write_text(json.dumps({"name": pkg, "version": "0.0.0-test"}))
+        (nm / pkg / "package.json").write_text(
+            json.dumps({"name": pkg, "version": "0.0.0-test"})
+        )
     esbuild = nm / ".bin" / "esbuild"
     esbuild.write_text(script)
     esbuild.chmod(0o755)
@@ -121,7 +116,9 @@ def stub_ok(bundle: str = "window.__built=1;", css: str | None = None) -> str:
     """A bundler that succeeds, writing *bundle* (and optionally a stylesheet)."""
     css_line = ""
     if css is not None:
-        css_line = f'[ -n "$out" ] && printf %s {json.dumps(css)} > "${{out%.js}}.css"\n'
+        css_line = (
+            f'[ -n "$out" ] && printf %s {json.dumps(css)} > "${{out%.js}}.css"\n'
+        )
     return (
         "#!/bin/sh\n"
         + _OUTFILE_SH
@@ -134,7 +131,9 @@ def stub_ok(bundle: str = "window.__built=1;", css: str | None = None) -> str:
 def stub_ok_with_external(url: str) -> str:
     """A bundler that succeeds but reports, in its metafile, that it left *url* external —
     exactly what real esbuild does with a URL import (rc 0, no warning)."""
-    meta = json.dumps({"inputs": {"entry.jsx": {"imports": [{"path": url, "external": True}]}}})
+    meta = json.dumps(
+        {"inputs": {"entry.jsx": {"imports": [{"path": url, "external": True}]}}}
+    )
     return (
         "#!/bin/sh\n"
         + _OUTFILE_SH
@@ -175,11 +174,12 @@ def stub_reports_limits(report: Path) -> str:
 @pytest.fixture
 def home(tmp_path, monkeypatch) -> Path:
     """An isolated home. ``GIDEON_HOME`` is the safe lever: read per call, cached
-    nowhere, so it also redirects the import-bound stores a ``config_dir`` patch misses."""
+    nowhere, so it also redirects the import-bound stores a ``config_dir`` patch misses.
+    """
     h = tmp_path / "home"
     h.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(h))
-    from gideon.config.loader import config_dir
+    from gideon.core.config.loader import config_dir
 
     assert config_dir() == h, "GIDEON_HOME did not redirect config_dir"
     return h
@@ -213,9 +213,6 @@ async def _read(report: Path) -> tuple[str, str]:
     return soft, hard
 
 
-# ── the build rides the resource-limited spawn ───────────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_the_build_spawn_is_the_shim_carrying_the_build_policy(
     tmp_path, home, monkeypatch
@@ -237,12 +234,9 @@ async def test_the_build_spawn_is_the_shim_carrying_the_build_policy(
 
     assert len(seen) == 1, f"the build must spawn exactly once, saw {len(seen)}"
     argv = seen[0]
-    assert argv[:3] == [sys.executable, "-m", "gideon._spawn_exec_shim"], (
+    assert argv[:3] == [sys.executable, "-m", "gideon.engine._spawn_exec_shim"], (
         "the build did not go through the post-exec resource shim: " f"{argv[:3]}"
     )
-    # The `build` profile's policy, spelled out rather than recomputed: NOFILE raised to
-    # the inherited hard limit (the sentinel the shim resolves in-child) and the OOM bias
-    # KEPT. `tool` would carry a numeric NOFILE soft; `none` would carry no shim at all.
     assert json.loads(argv[3]) == {
         "limits": {"RLIMIT_NOFILE": ["hard", "hard"]},
         "oom_score_adj": 1000,
@@ -252,7 +246,9 @@ async def test_the_build_spawn_is_the_shim_carrying_the_build_policy(
 
 
 @pytest.mark.asyncio
-async def test_the_ceiling_actually_reaches_the_build_child(tmp_path, home, monkeypatch) -> None:
+async def test_the_ceiling_actually_reaches_the_build_child(
+    tmp_path, home, monkeypatch
+) -> None:
     """In-child evidence, with its own vacuity floor.
 
     The floor is the first assertion: spawned WITHOUT the build path, the stub reports the
@@ -265,7 +261,6 @@ async def test_the_ceiling_actually_reaches_the_build_child(tmp_path, home, monk
     root_through = _toolchain(tmp_path / "tc-through", stub_reports_limits(through))
 
     with lowered_nofile(PROBE_SOFT_NOFILE):
-        # FLOOR: the same stub, spawned raw. A child that skipped the shim inherits ours.
         proc = await asyncio.create_subprocess_exec(
             str(root_base / "node_modules" / ".bin" / "esbuild"),
             "--outfile=" + str(tmp_path / "ignored.js"),
@@ -279,9 +274,10 @@ async def test_the_ceiling_actually_reaches_the_build_child(tmp_path, home, monk
             f"NOFILE ({base_soft} != {PROBE_SOFT_NOFILE}) — the probe below cannot "
             "discriminate on this host"
         )
-        assert base_soft != base_hard, "soft == hard unshimmed: the raise-to-hard is unobservable"
+        assert (
+            base_soft != base_hard
+        ), "soft == hard unshimmed: the raise-to-hard is unobservable"
 
-        # THE PROPERTY: through the build path, the child's soft limit was raised to hard.
         monkeypatch.setenv(TOOLCHAIN_ROOT_ENV, str(root_through))
         await build_react_artifact(slug="w", source=JSX, files_root=tmp_path / "out")
 
@@ -294,9 +290,6 @@ async def test_the_ceiling_actually_reaches_the_build_child(tmp_path, home, monk
         f"the build child's NOFILE is {got_soft}, not raised to its hard limit {got_hard} — "
         "this is not the `build` profile's ceiling"
     )
-
-
-# ── the build never reaches the network ──────────────────────────────────────
 
 
 def test_the_build_command_cannot_install_or_fetch(tmp_path, home, monkeypatch) -> None:
@@ -314,16 +307,25 @@ def test_the_build_command_cannot_install_or_fetch(tmp_path, home, monkeypatch) 
 
     assert argv[0] == str(root / "node_modules" / ".bin" / "esbuild")
     assert "--bundle" in argv
-    # The metafile is load-bearing, not diagnostics: it is the only signal that says an
-    # import was left external (measured — esbuild is silent about a URL import at rc 0).
     assert any(a.startswith("--metafile=") for a in argv)
     joined = " ".join(argv).lower()
-    for forbidden in ("npm", "npx", "yarn", "pnpm", "install", "://", "--servedir", "--serve"):
+    for forbidden in (
+        "npm",
+        "npx",
+        "yarn",
+        "pnpm",
+        "install",
+        "://",
+        "--servedir",
+        "--serve",
+    ):
         assert forbidden not in joined, f"the build argv contains {forbidden!r}: {argv}"
 
 
 @pytest.mark.asyncio
-async def test_an_import_left_outside_the_bundle_is_refused(tmp_path, home, monkeypatch) -> None:
+async def test_an_import_left_outside_the_bundle_is_refused(
+    tmp_path, home, monkeypatch
+) -> None:
     """MEASURED with esbuild 0.25.12: a URL import builds at rc 0 with no warning and the
     URL is baked into the output as an external import. Only the metafile says so, so the
     refusal reads it — otherwise a deployed page would fetch off-origin."""
@@ -341,12 +343,18 @@ def test_a_clean_metafile_leaves_no_externals(tmp_path) -> None:
     """The floor for the refusal above: the SAME reader over a metafile with
     ``external`` absent yields nothing, so the refusal is keyed on the flag rather than
     on the presence of imports."""
-    from gideon.artifacts.build import external_imports
+    from gideon.workspace.artifacts.build import external_imports
 
     clean = tmp_path / "clean.json"
     clean.write_text(
         json.dumps(
-            {"inputs": {"entry.jsx": {"imports": [{"path": "react", "kind": "import-statement"}]}}}
+            {
+                "inputs": {
+                    "entry.jsx": {
+                        "imports": [{"path": "react", "kind": "import-statement"}]
+                    }
+                }
+            }
         )
     )
     assert external_imports(clean) == []
@@ -355,7 +363,9 @@ def test_a_clean_metafile_leaves_no_externals(tmp_path) -> None:
         json.dumps(
             {
                 "inputs": {
-                    "entry.jsx": {"imports": [{"path": "https://x.example/y", "external": True}]}
+                    "entry.jsx": {
+                        "imports": [{"path": "https://x.example/y", "external": True}]
+                    }
                 }
             }
         )
@@ -369,7 +379,7 @@ def test_a_host_with_no_toolchain_is_refused_not_installed_into(
 ) -> None:
     monkeypatch.setenv(TOOLCHAIN_ROOT_ENV, str(tmp_path / "nothing-here"))
     with patch(
-        "gideon.artifacts.build.toolchain_candidates",
+        "gideon.workspace.artifacts.build.toolchain_candidates",
         return_value=[tmp_path / "nothing-here"],
     ):
         with pytest.raises(ArtifactBuildError) as exc:
@@ -386,7 +396,9 @@ def test_a_partial_toolchain_is_not_accepted(tmp_path, home, monkeypatch) -> Non
     esbuild = root / "node_modules" / ".bin" / "esbuild"
     esbuild.write_text(stub_ok())
     esbuild.chmod(0o755)
-    with patch("gideon.artifacts.build.toolchain_candidates", return_value=[root]):
+    with patch(
+        "gideon.workspace.artifacts.build.toolchain_candidates", return_value=[root]
+    ):
         with pytest.raises(ArtifactBuildError):
             resolve_toolchain()
 
@@ -399,8 +411,6 @@ def test_the_served_page_references_only_its_own_files() -> None:
     assert f'href="./{BUNDLE_CSS}"' in doc
     assert "://" not in doc, "the served document reaches off-origin"
     assert 'id="root"' in doc
-    # And no stylesheet link when the build emitted no CSS: the page must not request a
-    # file that is not there.
     assert BUNDLE_CSS not in entry_document("My widget", with_css=False)
 
 
@@ -413,9 +423,6 @@ def test_the_entry_module_keeps_the_preview_contract() -> None:
     assert "from 'react'" in mod and "from 'react-dom/client'" in mod
     assert "globalThis.React" in mod and "globalThis.ReactDOM" in mod
     assert "getElementById('root')" in mod
-
-
-# ── a failure is reported, not swallowed ─────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -460,21 +467,24 @@ async def test_a_build_that_never_finishes_is_stopped_and_reported(
     monkeypatch.setenv(TOOLCHAIN_ROOT_ENV, str(root))
     started = time.monotonic()
     with pytest.raises(ArtifactBuildError) as exc:
-        await build_react_artifact(slug="w", source=JSX, files_root=tmp_path / "out", timeout=1.0)
+        await build_react_artifact(
+            slug="w", source=JSX, files_root=tmp_path / "out", timeout=1.0
+        )
     elapsed = time.monotonic() - started
     assert "timed out" in exc.value.what
     assert elapsed < 20, f"the build was not bounded: {elapsed:.1f}s for a 1s timeout"
 
 
 @pytest.mark.asyncio
-async def test_an_empty_react_body_is_refused_before_any_spawn(tmp_path, home, monkeypatch) -> None:
+async def test_an_empty_react_body_is_refused_before_any_spawn(
+    tmp_path, home, monkeypatch
+) -> None:
     monkeypatch.setenv(TOOLCHAIN_ROOT_ENV, str(_toolchain(tmp_path / "tc", stub_ok())))
     with pytest.raises(ArtifactBuildError) as exc:
-        await build_react_artifact(slug="w", source="   \n", files_root=tmp_path / "out")
+        await build_react_artifact(
+            slug="w", source="   \n", files_root=tmp_path / "out"
+        )
     assert "nothing to build" in exc.value.what
-
-
-# ── the deploy route: it builds, and it reports ──────────────────────────────
 
 
 def test_only_react_needs_a_build() -> None:
@@ -489,7 +499,9 @@ async def test_deploy_builds_a_react_artifact_and_serves_the_static_bundle(
 ) -> None:
     """PEP-9's first clause end to end: deploy builds, and the deploy route serves the
     emitted static files (not the JSX) with the entry the build declared."""
-    root = _toolchain(tmp_path / "tc", stub_ok(bundle="window.__built=42;", css="body{margin:0}"))
+    root = _toolchain(
+        tmp_path / "tc", stub_ok(bundle="window.__built=42;", css="body{margin:0}")
+    )
     monkeypatch.setenv(TOOLCHAIN_ROOT_ENV, str(root))
     prov = patched_native
     art = prov.create(name="Counter", content=JSX, kind="react")
@@ -499,7 +511,9 @@ async def test_deploy_builds_a_react_artifact_and_serves_the_static_bundle(
         assert resp.status == 200, await resp.text()
         payload = await resp.json()
         assert payload["deployment"]["entry"] == ENTRY_HTML
-        assert sorted(payload["build"]["files"]) == sorted([ENTRY_HTML, BUNDLE_JS, BUNDLE_CSS])
+        assert sorted(payload["build"]["files"]) == sorted(
+            [ENTRY_HTML, BUNDLE_JS, BUNDLE_CSS]
+        )
 
         page = await client.get(f"{SERVE_URL_PREFIX}/{art.slug}/")
         assert page.status == 200
@@ -543,10 +557,14 @@ async def test_deploy_reports_a_build_failure_and_publishes_nothing(
         assert envelope["code"] == "artifact_build_failed", envelope
         message = envelope["message"]
         assert "React build failed" in message
-        assert 'Expected ")"' in message, f"the bundler's reason was swallowed: {message}"
+        assert (
+            'Expected ")"' in message
+        ), f"the bundler's reason was swallowed: {message}"
         assert "Fix:" in message
 
-        assert ArtifactDeployStore(prov.root).get(art.slug) is None, "a failed build published"
+        assert (
+            ArtifactDeployStore(prov.root).get(art.slug) is None
+        ), "a failed build published"
         assert (await client.get(f"{SERVE_URL_PREFIX}/{art.slug}/")).status == 404
     finally:
         await client.close()
@@ -561,8 +579,6 @@ async def test_a_react_artifact_with_no_bundle_is_never_served_as_its_own_body(
     origin and render nothing."""
     prov = patched_native
     art = prov.create(name="Unbuilt", content=JSX, kind="react")
-    # Registered directly, bypassing the deploy route's build — the only way to reach the
-    # unbuilt state, and exactly the state a stale registry row would leave behind.
     ArtifactDeployStore(prov.root).deploy(art.slug)
     client = await _client(prov)
     try:
@@ -580,7 +596,8 @@ async def test_rebuilding_drops_a_stale_stylesheet(tmp_path, home, monkeypatch) 
     current bundle never produced."""
     files_root = tmp_path / "out"
     monkeypatch.setenv(
-        TOOLCHAIN_ROOT_ENV, str(_toolchain(tmp_path / "tc1", stub_ok(css="body{color:red}")))
+        TOOLCHAIN_ROOT_ENV,
+        str(_toolchain(tmp_path / "tc1", stub_ok(css="body{color:red}"))),
     )
     first = await build_react_artifact(slug="w", source=JSX, files_root=files_root)
     assert BUNDLE_CSS in first.files
@@ -594,15 +611,16 @@ async def test_rebuilding_drops_a_stale_stylesheet(tmp_path, home, monkeypatch) 
 
 
 @pytest.mark.asyncio
-async def test_the_build_leaves_no_workspace_behind(tmp_path, home, monkeypatch) -> None:
+async def test_the_build_leaves_no_workspace_behind(
+    tmp_path, home, monkeypatch
+) -> None:
     """The temp build workspace is removed on the failing path too — a bundler crash must
     not accumulate node_modules symlinks in the temp directory."""
     import tempfile
 
-    monkeypatch.setenv(TOOLCHAIN_ROOT_ENV, str(_toolchain(tmp_path / "tc", stub_fails("boom"))))
-    # A PRIVATE temp root, not the shared one: sibling xdist workers create and remove
-    # their own build workspaces, so a count taken over the shared directory measures the
-    # other workers rather than this build.
+    monkeypatch.setenv(
+        TOOLCHAIN_ROOT_ENV, str(_toolchain(tmp_path / "tc", stub_fails("boom")))
+    )
     tmp_root = tmp_path / "tmproot"
     tmp_root.mkdir()
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_root))
@@ -618,17 +636,19 @@ async def test_the_build_leaves_no_workspace_behind(tmp_path, home, monkeypatch)
     with pytest.raises(ArtifactBuildError):
         await build_react_artifact(slug="leak", source=JSX, files_root=tmp_path / "out")
 
-    # Floor first: a workspace really WAS created, so "nothing left behind" cannot be an
-    # artefact of the build never getting that far.
-    assert made and "pc-artifact-build-leak-" in made[0], f"no build workspace created: {made}"
+    assert (
+        made and "gideon-artifact-build-leak-" in made[0]
+    ), f"no build workspace created: {made}"
     assert not Path(made[0]).exists(), f"build workspace leaked: {made[0]}"
-    assert not sorted(tmp_root.glob("pc-artifact-build-*"))
+    assert not sorted(tmp_root.glob("gideon-artifact-build-*"))
 
 
-def test_the_toolchain_env_lever_wins_and_is_read_per_call(tmp_path, home, monkeypatch) -> None:
+def test_the_toolchain_env_lever_wins_and_is_read_per_call(
+    tmp_path, home, monkeypatch
+) -> None:
     """The lever is an env var read on every call — no cache — so pointing the build at a
     different toolchain does not need a gateway restart."""
-    from gideon.artifacts.build import toolchain_candidates
+    from gideon.workspace.artifacts.build import toolchain_candidates
 
     monkeypatch.setenv(TOOLCHAIN_ROOT_ENV, str(tmp_path / "one"))
     assert toolchain_candidates()[0] == tmp_path / "one"
@@ -636,5 +656,4 @@ def test_the_toolchain_env_lever_wins_and_is_read_per_call(tmp_path, home, monke
     assert toolchain_candidates()[0] == tmp_path / "two"
     monkeypatch.delenv(TOOLCHAIN_ROOT_ENV)
     assert toolchain_candidates()[0] != tmp_path / "two"
-    # The home-local toolchain slot follows the isolated home, never the real one.
     assert os.environ["GIDEON_HOME"] in str(toolchain_candidates()[-1])

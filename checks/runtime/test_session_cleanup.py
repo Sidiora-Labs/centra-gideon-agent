@@ -5,7 +5,7 @@ Property-based tests (Hypothesis) and unit tests for:
 - ACP session file cleanup
 - Cleanup error resilience
 - Cleanup restriction to subagent sessions
-- SubagentManager cleanup integration
+- DelegationSupervisor cleanup integration
 - Session ID persistence
 - Tombstone pruning with session file cleanup
 - Startup sweep processing
@@ -21,8 +21,7 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from gideon.llm.cleanup import _is_safe_path
-from gideon.subagent_persistence import (
+from gideon.engine.subagent_persistence import (
     _cleanup_session_files_sync,
     create_agent_folder,
     prune_stale_tombstones,
@@ -30,31 +29,29 @@ from gideon.subagent_persistence import (
     update_state,
     write_tombstone,
 )
-
-# ── Fixtures ──────────────────────────────────────────────────────────
+from gideon.integrations.llm.cleanup import _is_safe_path
 
 
 @pytest.fixture()
 def agent_root(tmp_path, monkeypatch):
     """Point subagent persistence at a temp directory."""
-    monkeypatch.setattr("gideon.subagent_persistence._subagents_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "gideon.engine.subagent_persistence._subagents_dir", lambda: tmp_path
+    )
     return tmp_path
 
 
 @pytest.fixture(autouse=True)
 def _mock_memory_ok(monkeypatch):
     """Prevent memory guard from refusing spawns on low-RAM build machines."""
-    monkeypatch.setattr("gideon.subagent.check_memory_available", lambda **_kw: (True, 8.0))
-
-
-# ══════════════════════════════════════════════════════════════════════
-# ══════════════════════════════════════════════════════════════════════
+    monkeypatch.setattr(
+        "gideon.engine.subagent.check_memory_available", lambda **_kw: (True, 8.0)
+    )
 
 
 class TestIsSafePathTraversal:
     """Path traversal is blocked."""
 
-    # Strategy: generate strings with path traversal sequences
     traversal_ids = st.one_of(
         st.just("../../../etc/passwd"),
         st.just(".."),
@@ -68,7 +65,9 @@ class TestIsSafePathTraversal:
         ),
     )
 
-    @settings(max_examples=100, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @settings(
+        max_examples=100, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    )
     @given(session_id=traversal_ids)
     def test_traversal_blocked_or_resolves_under_root(self, tmp_path, session_id):
         """For any session_id with traversal sequences, _is_safe_path either
@@ -78,10 +77,8 @@ class TestIsSafePathTraversal:
         root.mkdir(exist_ok=True)
         target = root / session_id
         if _is_safe_path(target, root):
-            # If considered safe, verify it actually resolves under root
             resolved = target.resolve()
             assert str(resolved).startswith(str(root.resolve()))
-        # If not safe, that's the correct behavior — traversal blocked
 
     def test_absolute_path_blocked(self, tmp_path):
         """Absolute paths outside root are blocked."""
@@ -117,15 +114,25 @@ class TestIsSafePathTraversal:
         target = root / "."
         assert not _is_safe_path(target, root)
 
-
-# ══════════════════════════════════════════════════════════════════════
-# ══════════════════════════════════════════════════════════════════════
+    def test_symlink_escape_and_cycle_are_rejected(self, tmp_path):
+        root = tmp_path / "sessions"
+        root.mkdir()
+        outside = tmp_path / "elsewhere"
+        outside.mkdir()
+        escape = root / "escape"
+        escape.symlink_to(outside, target_is_directory=True)
+        cycle = root / "cycle"
+        cycle.symlink_to(cycle)
+        assert not _is_safe_path(escape / "record.json", root)
+        assert not _is_safe_path(cycle, root)
 
 
 class TestAcpCleanupDeletesFiles:
     """ACP cleanup deletes all session files."""
 
-    @settings(max_examples=100, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @settings(
+        max_examples=100, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    )
     @given(session_id=st.from_regex(r"[a-f0-9]{8}", fullmatch=True))
     def test_acp_cleanup_deletes_both_files(self, tmp_path, session_id):
         """For any valid session ID, when _cleanup_session_files_sync is called
@@ -147,7 +154,6 @@ class TestAcpCleanupDeletesFiles:
     def test_acp_cleanup_missing_files_no_error(self, tmp_path):
         """Cleanup succeeds when files don't exist."""
         with patch.dict("os.environ", {"GIDEON_HOME": str(tmp_path)}):
-            # Should not raise
             _cleanup_session_files_sync("nonexistent-id")
 
     def test_acp_cleanup_partial_files(self, tmp_path):
@@ -163,20 +169,17 @@ class TestAcpCleanupDeletesFiles:
         assert not json_file.exists()
 
 
-# ══════════════════════════════════════════════════════════════════════
-# ══════════════════════════════════════════════════════════════════════
-
-
 class TestCleanupNeverRaises:
     """Cleanup never raises exceptions."""
 
-    @settings(max_examples=100, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @settings(
+        max_examples=100, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    )
     @given(session_id=st.text(min_size=0, max_size=64))
     def test_cleanup_never_raises_any_input(self, tmp_path, session_id):
         """For any session ID (including empty, special chars, non-existent paths),
         _cleanup_session_files_sync returns without raising.
         """
-        # Should never raise regardless of input
         with patch.dict("os.environ", {"GIDEON_HOME": str(tmp_path)}):
             _cleanup_session_files_sync(session_id)
 
@@ -191,14 +194,12 @@ class TestCleanupNeverRaises:
             _cleanup_session_files_sync("abc\x00def")
 
 
-# ══════════════════════════════════════════════════════════════════════
-# ══════════════════════════════════════════════════════════════════════
-
-
 class TestCleanupIdempotent:
     """Cleanup is idempotent."""
 
-    @settings(max_examples=100, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @settings(
+        max_examples=100, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    )
     @given(session_id=st.from_regex(r"[a-f0-9]{8}", fullmatch=True))
     def test_cleanup_idempotent(self, tmp_path, session_id):
         """Calling cleanup multiple times (including after files are deleted)
@@ -211,22 +212,15 @@ class TestCleanupIdempotent:
 
         with patch.dict("os.environ", {"GIDEON_HOME": str(tmp_path)}):
             _cleanup_session_files_sync(session_id)
-            # Second call — files already gone
             _cleanup_session_files_sync(session_id)
-            # Third call — still no error
             _cleanup_session_files_sync(session_id)
 
         assert not json_file.exists()
 
 
-# ══════════════════════════════════════════════════════════════════════
-# ══════════════════════════════════════════════════════════════════════
-
-
 class TestCleanupRestriction:
     """Cleanup restricted to subagent sessions."""
 
-    # Non-subagent session key prefixes
     non_subagent_keys = st.one_of(
         st.just("dashboard:chat-1"),
         st.just("slack:T123:C456:ts789"),
@@ -241,17 +235,16 @@ class TestCleanupRestriction:
     @given(key=non_subagent_keys)
     async def test_non_subagent_keys_skip_cleanup(self, key):
         """For any session key that does not start with 'subagent:', the
-        SessionManager.release() with cleanup=True does NOT invoke cleanup_session.
+        ConversationDirectory.release() with cleanup=True does NOT invoke cleanup_session.
         """
-        from gideon.session import SessionManager
+        from gideon.engine.session import ConversationDirectory
 
         cfg = MagicMock()
         cfg.session.pool_size = 0
         cfg.session.pool_agent = ""
         cfg.session.pool_ttl_secs = 0
-        manager = SessionManager(cfg=cfg, provider_factory=None)
+        manager = ConversationDirectory(cfg=cfg, provider_factory=None)
 
-        # Create a mock session with a provider that has session_id
         provider = MagicMock()
         provider.session_id = "some-session-id"
         provider.cleanup_session = AsyncMock()
@@ -263,21 +256,18 @@ class TestCleanupRestriction:
 
         manager.release(key, cleanup=True)
 
-        # cleanup_session should NOT be called for non-subagent keys
-        # (asyncio.ensure_future would have been called if it were a subagent key)
-        # Verify by checking that no future was scheduled
         provider.cleanup_session.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_subagent_key_triggers_cleanup(self):
         """Subagent keys DO trigger cleanup."""
-        from gideon.session import SessionManager
+        from gideon.engine.session import ConversationDirectory
 
         cfg = MagicMock()
         cfg.session.pool_size = 0
         cfg.session.pool_agent = ""
         cfg.session.pool_ttl_secs = 0
-        manager = SessionManager(cfg=cfg, provider_factory=None)
+        manager = ConversationDirectory(cfg=cfg, provider_factory=None)
 
         provider = MagicMock()
         provider.session_id = "test-session-uuid"
@@ -289,24 +279,27 @@ class TestCleanupRestriction:
         manager._sessions["subagent:abc123"] = session
 
         manager.release("subagent:abc123", cleanup=True)
-        # Give the ensure_future task a chance to run
         await asyncio.sleep(0.01)
         provider.cleanup_session.assert_awaited_once_with("test-session-uuid")
 
 
 # ══════════════════════════════════════════════════════════════════════
-# Unit tests: SubagentManager cleanup integration
+# Unit tests: DelegationSupervisor cleanup integration
 # ══════════════════════════════════════════════════════════════════════
 
 
 class TestSubagentManagerCleanupIntegration:
-    """Unit tests for SubagentManager cleanup integration."""
+    """Unit tests for DelegationSupervisor cleanup integration."""
 
     @pytest.mark.asyncio
     async def test_completion_calls_release_with_cleanup(self, agent_root):
         """Successful completion passes cleanup=True to release()."""
-        from gideon.llm.base import EVENT_COMPLETE, EVENT_TEXT_CHUNK, LLMEvent
-        from gideon.subagent import SubagentManager
+        from gideon.engine.subagent import DelegationSupervisor
+        from gideon.integrations.llm.base import (
+            EVENT_COMPLETE,
+            EVENT_TEXT_CHUNK,
+            LLMEvent,
+        )
 
         sessions = MagicMock()
         sessions.get_pid = MagicMock(return_value=None)
@@ -333,14 +326,13 @@ class TestSubagentManagerCleanupIntegration:
         ctx.hooks.on_tool_call = MagicMock()
         ctx.hooks.auto_approve_subagent_spawn = True
 
-        manager = SubagentManager(sessions=sessions, ctx_builder=ctx)
+        manager = DelegationSupervisor(sessions=sessions, ctx_builder=ctx)
 
-        with patch("gideon.subagent.Stats"), patch("gideon.subagent.sel"):
+        with patch("gideon.engine.subagent.Stats"), patch("gideon.engine.subagent.sel"):
             info = manager.spawn("cleanup test", parent_session_key="dashboard:default")
             assert info is not None
             await manager._tasks[info.id]
 
-        # Verify release was called with cleanup=True
         sessions.release.assert_called()
         call_kwargs = sessions.release.call_args
         assert call_kwargs[1].get("cleanup") is True
@@ -348,7 +340,7 @@ class TestSubagentManagerCleanupIntegration:
     @pytest.mark.asyncio
     async def test_error_completion_calls_release_with_cleanup(self, agent_root):
         """Error completion still passes cleanup=True to release()."""
-        from gideon.subagent import SubagentManager
+        from gideon.engine.subagent import DelegationSupervisor
 
         sessions = MagicMock()
         sessions.get_pid = MagicMock(return_value=None)
@@ -356,7 +348,7 @@ class TestSubagentManagerCleanupIntegration:
         provider.start = AsyncMock()
         provider.shutdown = AsyncMock()
         provider.context_usage_pct = lambda: 0.0
-        provider.session_id = ""  # empty — no cleanup scheduled
+        provider.session_id = ""
 
         async def _error_stream(*_a, **_kw):
             raise RuntimeError("LLM error")
@@ -375,14 +367,13 @@ class TestSubagentManagerCleanupIntegration:
         ctx.hooks.on_tool_call = MagicMock()
         ctx.hooks.auto_approve_subagent_spawn = True
 
-        manager = SubagentManager(sessions=sessions, ctx_builder=ctx)
+        manager = DelegationSupervisor(sessions=sessions, ctx_builder=ctx)
 
-        with patch("gideon.subagent.Stats"), patch("gideon.subagent.sel"):
+        with patch("gideon.engine.subagent.Stats"), patch("gideon.engine.subagent.sel"):
             info = manager.spawn("error test", parent_session_key="dashboard:default")
             assert info is not None
             await manager._tasks[info.id]
 
-        # Even on error, release should be called with cleanup=True
         sessions.release.assert_called()
         call_kwargs = sessions.release.call_args
         assert call_kwargs[1].get("cleanup") is True
@@ -390,8 +381,12 @@ class TestSubagentManagerCleanupIntegration:
     @pytest.mark.asyncio
     async def test_cleanup_failure_does_not_disrupt_completion(self, agent_root):
         """Cleanup failure doesn't prevent normal completion flow."""
-        from gideon.llm.base import EVENT_COMPLETE, EVENT_TEXT_CHUNK, LLMEvent
-        from gideon.subagent import SubagentManager
+        from gideon.engine.subagent import DelegationSupervisor
+        from gideon.integrations.llm.base import (
+            EVENT_COMPLETE,
+            EVENT_TEXT_CHUNK,
+            LLMEvent,
+        )
 
         sessions = MagicMock()
         sessions.get_pid = MagicMock(return_value=None)
@@ -407,7 +402,6 @@ class TestSubagentManagerCleanupIntegration:
 
         provider.stream = MagicMock(side_effect=lambda *a, **kw: _ok())
         sessions.get_or_create = AsyncMock(return_value=(provider, True, False))
-        # Make release raise to simulate a cleanup failure
         sessions.release = MagicMock(side_effect=OSError("cleanup failed"))
         sessions.reset = AsyncMock()
         sessions.record_success = MagicMock()
@@ -420,27 +414,28 @@ class TestSubagentManagerCleanupIntegration:
         ctx.hooks.auto_approve_subagent_spawn = True
 
         on_done = AsyncMock()
-        manager = SubagentManager(sessions=sessions, ctx_builder=ctx, on_done=on_done)
+        manager = DelegationSupervisor(
+            sessions=sessions, ctx_builder=ctx, on_done=on_done
+        )
 
-        with patch("gideon.subagent.Stats"), patch("gideon.subagent.sel"):
-            info = manager.spawn("cleanup fail test", parent_session_key="dashboard:default")
+        with patch("gideon.engine.subagent.Stats"), patch("gideon.engine.subagent.sel"):
+            info = manager.spawn(
+                "cleanup fail test", parent_session_key="dashboard:default"
+            )
             assert info is not None
             await manager._tasks[info.id]
-            await manager.flush_deliveries()  # coalesced delivery (C1.1)
+            await manager.flush_deliveries()
 
-        # Completion should still succeed (on_done called) despite release raising
         on_done.assert_awaited_once()
         assert info.done
-
-
-# ══════════════════════════════════════════════════════════════════════
-# ══════════════════════════════════════════════════════════════════════
 
 
 class TestSessionIdPersistence:
     """Session ID correctly persisted."""
 
-    @settings(max_examples=100, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @settings(
+        max_examples=100, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    )
     @given(
         session_id=st.from_regex(r"[a-f0-9\-]{8,36}", fullmatch=True),
         provider_type=st.sampled_from(["acp", "acp_agent", "openai"]),
@@ -451,7 +446,6 @@ class TestSessionIdPersistence:
         provider's reported session ID.
         """
         agent_id = "persist-test"
-        # Clean up from previous hypothesis iteration
         import shutil
 
         d = agent_root / agent_id
@@ -477,14 +471,12 @@ class TestSessionIdPersistence:
         assert state["provider"] == "openai"
 
 
-# ══════════════════════════════════════════════════════════════════════
-# ══════════════════════════════════════════════════════════════════════
-
-
 class TestTombstonePruningCleansSessionFiles:
     """Tombstone pruning cleans session files."""
 
-    @settings(max_examples=50, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @settings(
+        max_examples=50, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    )
     @given(session_id=st.from_regex(r"[a-f0-9]{8,16}", fullmatch=True))
     def test_pruning_deletes_session_files(self, tmp_path, agent_root, session_id):
         """For any tombstoned subagent folder older than max age that contains
@@ -493,17 +485,14 @@ class TestTombstonePruningCleansSessionFiles:
         """
         import shutil
 
-        # Clean up from previous hypothesis iteration
         agent_id = "prune-test"
         d = agent_root / agent_id
         if d.exists():
             shutil.rmtree(d)
 
-        # Create subagent folder with session_id in state
         create_agent_folder(agent_id, task="old task")
         update_state(agent_id, session_id=session_id, provider="acp")
 
-        # Write an old tombstone (8 days ago)
         write_tombstone(agent_id, cause="timeout", recovery_action="delivered")
         ts_path = agent_root / agent_id / "tombstone.json"
         ts = json.loads(ts_path.read_text())
@@ -511,7 +500,6 @@ class TestTombstonePruningCleansSessionFiles:
         ts["session_id"] = session_id
         ts_path.write_text(json.dumps(ts))
 
-        # Create corresponding session files
         sessions_dir = tmp_path / "sessions"
         sessions_dir.mkdir(parents=True, exist_ok=True)
         json_file = sessions_dir / f"{session_id}.json"
@@ -522,9 +510,7 @@ class TestTombstonePruningCleansSessionFiles:
         with patch.dict("os.environ", {"GIDEON_HOME": str(tmp_path)}):
             pruned = prune_stale_tombstones(max_age_days=7)
 
-        # Subagent folder should be deleted
         assert not (agent_root / agent_id).exists()
-        # Session files should be deleted
         assert not json_file.exists()
         assert not jsonl_file.exists()
         assert pruned >= 1
@@ -543,15 +529,13 @@ class TestTombstonePruningCleansSessionFiles:
         assert pruned == 1
 
 
-# ══════════════════════════════════════════════════════════════════════
-# ══════════════════════════════════════════════════════════════════════
-
-
 class TestStartupSweep:
     """Startup sweep processes all tombstoned entries."""
 
     @pytest.mark.asyncio
-    @settings(max_examples=50, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @settings(
+        max_examples=50, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    )
     @given(
         session_ids=st.lists(
             st.from_regex(r"[a-f0-9]{8}", fullmatch=True),
@@ -560,35 +544,34 @@ class TestStartupSweep:
             unique=True,
         )
     )
-    async def test_startup_sweep_processes_all_entries(self, tmp_path, agent_root, session_ids):
+    async def test_startup_sweep_processes_all_entries(
+        self, tmp_path, agent_root, session_ids
+    ):
         """For any set of orphaned subagent folders with recorded session IDs,
         the startup sweep attempts cleanup for each entry.
         """
         import shutil
 
-        # Clean up from previous hypothesis iteration
         for d in agent_root.iterdir():
             if d.is_dir():
                 shutil.rmtree(d)
 
-        # Create orphaned subagent folders with session_ids
         for i, sid in enumerate(session_ids):
             agent_id = f"orphan-{i}"
             create_agent_folder(agent_id, task=f"task-{i}")
             update_state(agent_id, session_id=sid, provider="acp", pid=99999 + i)
 
-        from gideon.subagent import SubagentManager
+        from gideon.engine.subagent import DelegationSupervisor
 
         sessions = MagicMock()
-        manager = SubagentManager(sessions=sessions, ctx_builder=MagicMock())
+        manager = DelegationSupervisor(sessions=sessions, ctx_builder=MagicMock())
 
         with (
             patch.object(manager, "_is_pid_alive", return_value=False),
-            patch("gideon.subagent._cleanup_session_files_sync") as mock_cleanup,
+            patch("gideon.engine.subagent._cleanup_session_files_sync") as mock_cleanup,
         ):
             await manager._reconcile_orphans()
 
-        # Verify cleanup was called for each session_id
         called_sids = [call[0][0] for call in mock_cleanup.call_args_list]
         for sid in session_ids:
             assert sid in called_sids, f"Session {sid} not cleaned up"
@@ -596,16 +579,15 @@ class TestStartupSweep:
     @pytest.mark.asyncio
     async def test_sweep_continues_on_individual_failure(self, agent_root):
         """Individual cleanup failures don't stop processing remaining entries."""
-        from gideon.subagent import SubagentManager
+        from gideon.engine.subagent import DelegationSupervisor
 
-        # Create two orphans
         create_agent_folder("fail-orphan", task="t1")
         update_state("fail-orphan", session_id="fail-sid", provider="acp", pid=88888)
         create_agent_folder("ok-orphan", task="t2")
         update_state("ok-orphan", session_id="ok-sid", provider="acp", pid=88889)
 
         sessions = MagicMock()
-        manager = SubagentManager(sessions=sessions, ctx_builder=MagicMock())
+        manager = DelegationSupervisor(sessions=sessions, ctx_builder=MagicMock())
 
         call_count = 0
 
@@ -618,11 +600,10 @@ class TestStartupSweep:
         with (
             patch.object(manager, "_is_pid_alive", return_value=False),
             patch(
-                "gideon.subagent._cleanup_session_files_sync",
+                "gideon.engine.subagent._cleanup_session_files_sync",
                 side_effect=_failing_cleanup,
             ),
         ):
             await manager._reconcile_orphans()
 
-        # Both should have been attempted despite the first one failing
         assert call_count == 2

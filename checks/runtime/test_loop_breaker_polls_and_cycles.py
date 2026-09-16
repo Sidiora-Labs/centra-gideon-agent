@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.guardrails import loop_breaker as lb
+from gideon.security.guardrails import loop_breaker as lb
 
 
 def sig(tool: str, args: object, result: str) -> str:
@@ -35,14 +35,13 @@ def run(breaker: lb.LoopBreaker, seq: list[str], times: int) -> list[str]:
     return out
 
 
-# ── (a) polling is waiting, not looping ─────────────────────────────────────────
-
-
 def test_a_shell_status_poll_is_not_flagged_at_the_normal_threshold():
     """The reported case: `bash("systemctl is-active x")` while a service starts."""
     poll = sig("bash", {"command": "systemctl is-active nginx"}, "activating")
     reasons = run(lb.LoopBreaker(), [poll], lb.STRUCT_REPEAT + 2)
-    assert reasons == [], f"a status poll was called a loop after {lb.STRUCT_REPEAT + 2} calls"
+    assert (
+        reasons == []
+    ), f"a status poll was called a loop after {lb.STRUCT_REPEAT + 2} calls"
 
 
 def test_a_poll_that_never_terminates_IS_eventually_flagged():
@@ -53,7 +52,9 @@ def test_a_poll_that_never_terminates_IS_eventually_flagged():
     poll = sig("workflow_status", {"run": "r1"}, "running")
     reasons = run(lb.LoopBreaker(), [poll], lb.STRUCT_POLL_REPEAT)
     assert reasons, f"a poll repeated {lb.STRUCT_POLL_REPEAT}× was never flagged"
-    assert "status poll" in reasons[0], f"the note does not name the waiting case: {reasons[0]!r}"
+    assert (
+        "status poll" in reasons[0]
+    ), f"the note does not name the waiting case: {reasons[0]!r}"
 
 
 def test_a_shell_ACTION_is_still_flagged_at_the_normal_threshold():
@@ -73,10 +74,9 @@ def test_a_read_only_tool_is_exempt_from_the_no_progress_rule():
 def test_the_exemption_is_keyed_on_the_TOOL_not_on_the_result():
     """A write repeating identically is still a loop even if its result never changes."""
     write = sig("write", {"path": "a.py", "content": "x"}, "ok")
-    assert run(lb.LoopBreaker(), [write], lb.STRUCT_REPEAT), "an identical write was exempted"
-
-
-# ── (b) cycles longer than two ──────────────────────────────────────────────────
+    assert run(
+        lb.LoopBreaker(), [write], lb.STRUCT_REPEAT
+    ), "an identical write was exempted"
 
 
 def test_a_period_3_cycle_is_detected():
@@ -114,7 +114,9 @@ def test_a_degenerate_cycle_is_left_to_the_no_progress_rule():
     a = sig("write", {"p": "a"}, "ok")
     b = sig("write", {"p": "b"}, "ok")
     reasons = run(lb.LoopBreaker(), [a, a, b], 9)
-    assert all("cycling" not in r for r in reasons), f"one loop reported twice: {reasons}"
+    assert all(
+        "cycling" not in r for r in reasons
+    ), f"one loop reported twice: {reasons}"
 
 
 def test_the_window_can_hold_the_longest_cycle_it_claims_to_detect():

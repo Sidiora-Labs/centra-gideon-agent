@@ -12,7 +12,7 @@ mechanism is exercised directly rather than through a run:
 3. the binding grammar threads a value: `{{nodes.a.output.n}}` resolves against a context,
    and whole-value refs preserve their source type.
 
-Runnable standalone: `python -m harness.exemplars.slice_0.exemplar` (or `smoke.sh`).
+Runnable standalone: `python -m checks.harness.exemplars.slice_0.exemplar` (or `smoke.sh`).
 `main()` self-asserts and returns 0 when all three hold, non-zero otherwise.
 """
 
@@ -20,11 +20,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from gideon.workflows.bindings import BindingContext, resolve
-from gideon.workflows.validator import validate_spec
+from gideon.automation.workflows.bindings import BindingContext, resolve
+from gideon.automation.workflows.validator import validate_spec
 
-#: A valid two-node sequence: `gather` produces a value, `report` binds it. Structurally
-#: sound and acyclic, so the validator returns concurrency levels and no errors.
 VALID_SPEC: dict[str, Any] = {
     "name": "slice0-valid",
     "root": {
@@ -41,8 +39,6 @@ VALID_SPEC: dict[str, Any] = {
     },
 }
 
-#: The same shape, but `report` binds a node id that does not exist. A run would fail at
-#: ready-time with a BindingError; the validator catches it now as `WF_UNKNOWN_NODE_REF`.
 INVALID_SPEC: dict[str, Any] = {
     "name": "slice0-dangling-ref",
     "root": {
@@ -50,14 +46,17 @@ INVALID_SPEC: dict[str, Any] = {
         "id": "root",
         "children": [
             {"kind": "transform", "id": "gather", "config": {"expr": {"n": 3}}},
-            {"kind": "transform", "id": "report", "config": {"expr": "{{nodes.ghost.output}}"}},
+            {
+                "kind": "transform",
+                "id": "report",
+                "config": {"expr": "{{nodes.ghost.output}}"},
+            },
         ],
     },
 }
 
 
 def main() -> int:
-    # 1. The valid spec validates clean and yields concurrency levels.
     good = validate_spec(VALID_SPEC)
     if not good.ok:
         print(f"FAIL: expected the valid spec to pass, got issues: {good.summary()}")
@@ -66,7 +65,6 @@ def main() -> int:
         print("FAIL: a valid acyclic spec should produce Kahn concurrency levels")
         return 1
 
-    # 2. The dangling reference is flagged — a typed issue, and the validator did not throw.
     bad = validate_spec(INVALID_SPEC)
     if bad.ok:
         print("FAIL: expected the dangling node reference to be flagged")
@@ -75,7 +73,6 @@ def main() -> int:
         print(f"FAIL: expected a WF_UNKNOWN_NODE_REF error, got: {bad.summary()}")
         return 1
 
-    # 3. The binding grammar threads a value and preserves the source type on a whole-value ref.
     ctx = BindingContext(node_outputs={"a": {"n": 42, "items": [1, 2, 3]}})
     interpolated = resolve("count is {{nodes.a.output.n}}", ctx)
     if interpolated != "count is 42":

@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.loop import kinds
-from gideon.loop.loop import Loop
+from gideon.automation.loop import kinds
+from gideon.automation.loop.loop import Loop
 
 
 @pytest.fixture(autouse=True)
@@ -23,7 +23,9 @@ def _loaded():
 def _research_loop(**cfg) -> Loop:
     base = kinds.get("research").default_kind_config()
     base.update(cfg)
-    return Loop(id="r1", name="n", kind="research", task="research the thing", kind_config=base)
+    return Loop(
+        id="r1", name="n", kind="research", task="research the thing", kind_config=base
+    )
 
 
 def test_default_kind_config_has_budget_axes():
@@ -39,7 +41,6 @@ def test_brief_names_the_real_tools():
     brief = kinds.get("research").build_brief(_research_loop())
     assert "web_search" in brief
     assert "web_fetch" in brief
-    # the recency use-case is surfaced for time-sensitive subtopics
     assert "search-news" in brief
 
 
@@ -47,15 +48,14 @@ def test_brief_surfaces_breadth_depth_and_max_uses():
     brief = kinds.get("research").build_brief(
         _research_loop(breadth=4, depth=3, max_uses_per_cycle=20)
     )
-    assert "4" in brief and "3" in brief  # breadth / depth values
-    assert "20" in brief  # max-uses ceiling
+    assert "4" in brief and "3" in brief
+    assert "20" in brief
     assert "breadth" in brief.lower() and "depth" in brief.lower()
 
 
 def test_brief_handles_non_int_budget_gracefully():
-    # A malformed config value must not raise — falls back to the default.
     brief = kinds.get("research").build_brief(_research_loop(breadth="lots"))
-    assert "web_search" in brief  # still renders
+    assert "web_search" in brief
 
 
 def test_cycle_nudge_names_real_tools():
@@ -75,8 +75,6 @@ def test_source_budget_still_surfaced_when_set():
 
 
 def test_brief_instructs_knowledge_persistence():
-    # §5: fetched sources land as Knowledge items (via the existing knowledge_create
-    # tool — no new mechanism) so the report cites back into them.
     brief = kinds.get("research").build_brief(_research_loop())
     assert "knowledge_create" in brief
     assert "bookmark" in brief

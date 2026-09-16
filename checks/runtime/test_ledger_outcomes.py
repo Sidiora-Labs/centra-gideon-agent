@@ -29,26 +29,23 @@ from typing import Any
 
 import pytest
 
-from gideon.learning import decay
-from gideon.ledger import outcomes
-from gideon.workflows import journal as journal_mod
-from gideon.workflows import store as store_mod
-from gideon.workflows.models import InstanceState, Node, WorkflowRun
+from gideon.assurance.ledger import outcomes
+from gideon.automation.workflows import journal as journal_mod
+from gideon.automation.workflows import store as store_mod
+from gideon.automation.workflows.models import InstanceState, Node, WorkflowRun
+from gideon.cognition.learning import decay
 
 
 @pytest.fixture
 def home(tmp_path, monkeypatch):
     """`workflows.store` binds `config_dir` at import, so the env var is what isolates it."""
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     return tmp_path
 
 
 def _run(name: str = "pp9") -> WorkflowRun:
     return store_mod.create(WorkflowRun(id="", workflow_name=name))
-
-
-# ── the closed vocabulary ──
 
 
 def test_an_unknown_producer_is_refused(home):
@@ -62,7 +59,8 @@ def test_an_unknown_producer_is_refused(home):
 
 def test_an_unknown_metric_source_is_refused(home):
     """The source is what tells the resolver HOW to read ground truth. An unknown one would be
-    silently skipped forever, which reads exactly like a question still inside its horizon."""
+    silently skipped forever, which reads exactly like a question still inside its horizon.
+    """
     with pytest.raises(ValueError, match="unknown outcome metric source"):
         journal_mod.Journal(_run().id).open_outcome(
             producer=outcomes.PRODUCER_CONTROL,
@@ -103,9 +101,6 @@ def test_a_producer_keeps_its_own_context_fields(home):
     assert record["action"] == "create"
 
 
-# ── idempotency via pending_event_id ──
-
-
 def _question(**over: Any) -> dict[str, Any]:
     base = {
         "kind": journal_mod.PENDING_OUTCOME,
@@ -124,7 +119,8 @@ def _question(**over: Any) -> dict[str, Any]:
 
 def test_an_answered_question_is_not_open(home):
     """The idempotency primitive, in isolation: a resolution citing the question's `event_id`
-    removes it from the open set. No flag file, no timestamp — the ledger IS the state."""
+    removes it from the open set. No flag file, no timestamp — the ledger IS the state.
+    """
     events = [
         _question(),
         {"kind": journal_mod.OUTCOME_RESOLVED, "pending_event_id": "R-evt-1"},
@@ -150,15 +146,19 @@ def test_a_question_with_no_event_id_is_ignored(home):
 
 def test_a_pre_generalization_record_reads_back_as_a_decision(home):
     """Records written before PP-9 carry no `producer`/`metric_source`. Tolerant reads mean the
-    resolver grades them as the decision questions they were instead of skipping them."""
+    resolver grades them as the decision questions they were instead of skipping them.
+    """
     (question,) = outcomes.open_questions(
-        [{k: v for k, v in _question().items() if k not in ("producer", "metric_source")}]
+        [
+            {
+                k: v
+                for k, v in _question().items()
+                if k not in ("producer", "metric_source")
+            }
+        ]
     )
     assert question.producer == outcomes.PRODUCER_DECISION
     assert question.metric_source == outcomes.SOURCE_MEMORY
-
-
-# ── measured vs inconclusive drive different decay ──
 
 
 def test_the_two_resolutions_map_onto_different_decay_profiles(home):
@@ -176,7 +176,7 @@ def test_an_inconclusive_outcome_decays_out_while_a_measured_one_survives(home):
     evidence of a bet nobody could grade and keeps the evidence of one that was measured. An
     unmeasurable outcome ageing at a measured one's rate would let a permanently unreadable metric
     sit in the library looking like a confirmed result."""
-    age = 60.0  # active days
+    age = 60.0
     measured = decay.evaluate(
         kind=outcomes.decay_profile(outcomes.MEASURED), active_days_since_use=age
     )
@@ -189,11 +189,15 @@ def test_an_inconclusive_outcome_decays_out_while_a_measured_one_survives(home):
 
 def test_the_proposal_tier_follows_the_resolution(home):
     """One place decides what a resolution is worth to the human-gated queue, so the resolver
-    cannot rank a measurement as a hunch in one branch and a hunch as a measurement in another."""
+    cannot rank a measurement as a hunch in one branch and a hunch as a measurement in another.
+    """
     assert outcomes.evidence_strength(outcomes.MEASURED) == "correlated"
     assert outcomes.evidence_strength(outcomes.INCONCLUSIVE) == "anecdotal"
     assert outcomes.confidence(outcomes.MEASURED, -0.6) == pytest.approx(0.6)
-    assert outcomes.confidence(outcomes.INCONCLUSIVE, -0.6) == outcomes.INCONCLUSIVE_CONFIDENCE
+    assert (
+        outcomes.confidence(outcomes.INCONCLUSIVE, -0.6)
+        == outcomes.INCONCLUSIVE_CONFIDENCE
+    )
 
 
 def test_an_unreadable_metric_resolves_inconclusive_rather_than_zero(home):
@@ -220,9 +224,6 @@ def test_a_resolution_stamps_the_ageing_rule_on_the_record(home):
     assert resolved["decay_profile"] == outcomes.decay_profile(outcomes.INCONCLUSIVE)
 
 
-# ── the ledger-sourced measurement ──
-
-
 def _escalation(event_id: str = "R-evt-1") -> dict[str, Any]:
     return _question(
         event_id=event_id,
@@ -247,13 +248,18 @@ def test_a_boolean_value_field_is_a_measurement(home):
     (question,) = outcomes.open_questions([_escalation()])
     events = [_escalation(), _answer(approved=True)]
     assert outcomes.measure_from_events(question, events) == 1.0
-    assert outcomes.measure_from_events(question, [_escalation(), _answer(approved=False)]) == 0.0
+    assert (
+        outcomes.measure_from_events(question, [_escalation(), _answer(approved=False)])
+        == 0.0
+    )
 
 
 def test_a_non_matching_event_does_not_measure(home):
     """`match` is what keeps two concurrent gates in one run from answering each other."""
     (question,) = outcomes.open_questions([_escalation()])
-    assert outcomes.measure_from_events(question, [_escalation(), _answer("c-2")]) is None
+    assert (
+        outcomes.measure_from_events(question, [_escalation(), _answer("c-2")]) is None
+    )
 
 
 def test_an_event_BEFORE_the_question_does_not_measure(home):
@@ -280,9 +286,6 @@ def test_presence_alone_measures_when_no_value_field_is_declared(home):
     assert outcomes.measure_from_events(question, [question_record, _answer()]) == 1.0
 
 
-# ── producer 1: a published artifact opens a question ──
-
-
 class _FakeArtifact:
     slug = "weekly-digest"
     content = ""
@@ -296,7 +299,9 @@ class _FakeProvider:
     def find_similar(self, name: str) -> None:
         return None
 
-    def get(self, slug: str) -> None:  # pragma: no cover - only reached when find_similar hits
+    def get(
+        self, slug: str
+    ) -> None:  # pragma: no cover - only reached when find_similar hits
         return None
 
     def create(self, **kwargs: Any) -> _FakeArtifact:
@@ -304,16 +309,23 @@ class _FakeProvider:
 
 
 def _publish(run_id: str, monkeypatch) -> Any:
-    from gideon.workflows.engine import NodeResult, apply_publish
+    from gideon.automation.workflows.engine import NodeResult, apply_publish
 
     monkeypatch.setattr(
-        "gideon.artifacts.registry.get_provider", lambda *a, **k: _FakeProvider()
+        "gideon.workspace.artifacts.registry.get_provider",
+        lambda *a, **k: _FakeProvider(),
     )
     node = Node.from_dict(
-        {"kind": "stage", "id": "write", "config": {"prompt": "x", "publish": "Weekly digest"}}
+        {
+            "kind": "stage",
+            "id": "write",
+            "config": {"prompt": "x", "publish": "Weekly digest"},
+        }
     )
     return apply_publish(
-        node, NodeResult(state=InstanceState.DONE, output="a body worth reading"), run_id=run_id
+        node,
+        NodeResult(state=InstanceState.DONE, output="a body worth reading"),
+        run_id=run_id,
     )
 
 
@@ -328,11 +340,7 @@ def test_publishing_an_artifact_opens_an_outcome(home, monkeypatch):
     (question,) = journal_mod.ledger(run.id, kinds={journal_mod.PENDING_OUTCOME})
     assert question["producer"] == outcomes.PRODUCER_PUBLISH
     assert question["metric"] == "artifact.weekly-digest.consumed"
-    # PP-10 moved this off `SOURCE_MEMORY`: the metric was a semantic key nothing wrote, so the bet
-    # always closed `inconclusive`. Consumption is read off the artifact's own timeline and the pin
-    # list instead, which grades for real and needs no vector store.
     assert question["metric_source"] == outcomes.SOURCE_CONSUMPTION
-    # the bet: a deliverable is for somebody, so one consumption is the baseline to beat
     assert question["baseline"] == 1.0
     assert question["horizon_secs"] > 0.0
 
@@ -342,7 +350,3 @@ def test_a_publish_with_no_run_opens_nothing(home, monkeypatch):
     invent one — a question in nobody's log can never be resolved."""
     _publish("", monkeypatch)
     assert journal_mod.ledger("", kinds={journal_mod.PENDING_OUTCOME}) == []
-
-
-# Producer 2 — a gate escalation — is driven end to end against a real parked gate in
-# `test_workflows_confirm_emission.py`, beside the `confirmation_pending` emission it rides.

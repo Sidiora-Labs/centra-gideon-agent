@@ -10,15 +10,15 @@ from __future__ import annotations
 
 import json
 
-from gideon.config.loader import config_dir
-from gideon.durability import shards
-from gideon.durability import tombstones as tomb
+from gideon.core.config.loader import config_dir
+from gideon.operations.durability import shards
+from gideon.operations.durability import tombstones as tomb
 
 
 def _store(tmp_path, monkeypatch):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     assert config_dir() == tmp_path
-    from gideon.tasks.hierarchy import HierarchyStore
+    from gideon.engine.tasks.hierarchy import HierarchyStore
 
     return HierarchyStore()
 
@@ -27,7 +27,6 @@ class TestProjectSubtreeTombstones:
     def test_every_synced_row_gets_a_tombstone(self, tmp_path, monkeypatch):
         store = _store(tmp_path, monkeypatch)
         proj = store.create_project(name="doomed")
-        # Give it context + a worktree (derived) so we can prove the worktree is skipped.
         ctx = store.context_dir(proj.id)
         (ctx / "brief.json").write_text('{"note": "x"}', encoding="utf-8")
         wt = tmp_path / "projects" / proj.id / "worktrees"
@@ -37,9 +36,9 @@ class TestProjectSubtreeTombstones:
         assert store.delete_project(proj.id) is True
 
         markers = {t["id"] for t in tomb.read_tombstones(tmp_path / "projects")}
-        assert f"{proj.id}/project" in markers  # the project entity row
-        assert f"{proj.id}/context/brief" in markers  # the context row
-        assert f"{proj.id}/worktrees/checkout" not in markers  # derived — no tombstone
+        assert f"{proj.id}/project" in markers
+        assert f"{proj.id}/context/brief" in markers
+        assert f"{proj.id}/worktrees/checkout" not in markers
 
     def test_deleted_project_markers_ride_the_export(self, tmp_path, monkeypatch):
         store = _store(tmp_path, monkeypatch)
@@ -55,8 +54,9 @@ class TestProjectSubtreeTombstones:
             if ln.strip()
         ]
         by_id = {r["id"]: r for r in rows}
-        # The kept project's row is live; the dropped project's row is a tombstone.
-        assert f"{keep.id}/project" in by_id and not by_id[f"{keep.id}/project"].get("deleted_at")
+        assert f"{keep.id}/project" in by_id and not by_id[f"{keep.id}/project"].get(
+            "deleted_at"
+        )
         assert by_id[f"{drop.id}/project"].get("deleted_at")
 
     def test_default_project_cannot_be_deleted(self, tmp_path, monkeypatch):
@@ -66,5 +66,4 @@ class TestProjectSubtreeTombstones:
         default = next(p for p in store.list_projects() if p.is_builtin_project())
         with pytest.raises(ValueError):
             store.delete_project(default.id)
-        # And no tombstone was written for a delete that didn't happen.
         assert tomb.read_tombstones(tmp_path / "projects") == []

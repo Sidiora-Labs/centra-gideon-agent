@@ -35,28 +35,28 @@ from types import SimpleNamespace
 
 import pytest
 
-from gideon.acp.adapter import acp_event_to_agent_event
-from gideon.acp.translate import (
+from gideon.engine.task_modes import infer_risk_from_name, resolve_effective_risk
+from gideon.integrations.acp.adapter import acp_event_to_agent_event
+from gideon.integrations.acp.translate import (
     extract_tool_event,
     extract_tool_update_events,
 )
-from gideon.acp.types import EVENT_TOOL_CALL_UPDATE, JsonRpcMessage
-from gideon.dashboard.chat_runner import (
+from gideon.integrations.acp.types import EVENT_TOOL_CALL_UPDATE, JsonRpcMessage
+from gideon.interfaces.dashboard.chat_runner import (
     _capture_declared_file_change,
     _redact_tool_input_obj,
 )
-from gideon.task_modes import infer_risk_from_name, resolve_effective_risk
-
-# ── frames a real CLI puts on the wire ───────────────────────────────────────
 
 _DIALECTS = (
-    "mcp.gideon-core.{name}",  # codex
-    "mcp__gideon-core__{name}",  # claude-code
-    "@gideon-core/{name}",  # kiro-cli
+    "mcp.gideon-core.{name}",
+    "mcp__gideon-core__{name}",
+    "@gideon-core/{name}",
 )
 
 
-def _call_frame(raw_input: object, *, title: str = "Read", kind: str = "read") -> JsonRpcMessage:
+def _call_frame(
+    raw_input: object, *, title: str = "Read", kind: str = "read"
+) -> JsonRpcMessage:
     update: dict = {
         "sessionUpdate": "tool_call",
         "toolCallId": "c1",
@@ -78,15 +78,13 @@ def _session():
     return SimpleNamespace(_file_changes=[])
 
 
-# ── gap 7a: the object reaches the renderer ──────────────────────────────────
-
-
 class TestStructuredInputSurvivesToTheRenderer:
     def test_tool_call_frame_carries_the_object_and_the_string(self):
-        ev = extract_tool_event(_call_frame({"path": "/tmp/a.txt", "limit": 40}), {}, {}, [])
+        ev = extract_tool_event(
+            _call_frame({"path": "/tmp/a.txt", "limit": 40}), {}, {}, []
+        )
         assert ev is not None
         assert ev.tool_input_obj == {"path": "/tmp/a.txt", "limit": 40}
-        # The string is untouched: the card's existing preview must not change shape.
         assert json.loads(ev.tool_input) == {"path": "/tmp/a.txt", "limit": 40}
 
     def test_update_frame_carries_the_object(self):
@@ -111,11 +109,15 @@ class TestStructuredInputSurvivesToTheRenderer:
     def test_the_renderer_now_returns_fields_instead_of_none(self):
         """The whole point, end to end: before this change the renderer got the string
         and returned None by contract."""
-        ev = extract_tool_event(_call_frame({"path": "/tmp/a.txt", "limit": 40}), {}, {}, [])
+        ev = extract_tool_event(
+            _call_frame({"path": "/tmp/a.txt", "limit": 40}), {}, {}, []
+        )
         assert ev is not None
         agent_ev = acp_event_to_agent_event(ev)
         rendered = _redact_tool_input_obj(
-            agent_ev.tool_input_obj if agent_ev.tool_input_obj is not None else agent_ev.tool_input
+            agent_ev.tool_input_obj
+            if agent_ev.tool_input_obj is not None
+            else agent_ev.tool_input
         )
         assert rendered == {"path": "/tmp/a.txt", "limit": 40}
 
@@ -141,7 +143,9 @@ class TestStructuredInputSurvivesToTheRenderer:
         dict, because ``_redact_tool_input_obj`` is the single redaction+cap point for
         the structured shape. So prove the secret does not survive that point."""
         ev = extract_tool_event(
-            _call_frame({"cmd": "curl -H 'Authorization: Bearer sk-ant-api03-SECRETVALUE'"}),
+            _call_frame(
+                {"cmd": "curl -H 'Authorization: Bearer sk-ant-api03-SECRETVALUE'"}
+            ),
             {},
             {},
             [],
@@ -150,9 +154,6 @@ class TestStructuredInputSurvivesToTheRenderer:
         rendered = _redact_tool_input_obj(acp_event_to_agent_event(ev).tool_input_obj)
         assert rendered is not None
         assert "sk-ant-api03-SECRETVALUE" not in json.dumps(rendered)
-
-
-# ── gap 7b: a declared edit becomes a chip ───────────────────────────────────
 
 
 class TestDeclaredFileChangeBecomesAChip:
@@ -166,34 +167,47 @@ class TestDeclaredFileChangeBecomesAChip:
         events = extract_tool_update_events(self._diff_update("a\n", "b\n"), {}, {})
         upd = [e for e in events if e.kind == EVENT_TOOL_CALL_UPDATE]
         assert upd, "no update event produced"
-        assert upd[0].file_change == {"path": "src/a.py", "before": "a\n", "after": "b\n"}
+        assert upd[0].file_change == {
+            "path": "src/a.py",
+            "before": "a\n",
+            "after": "b\n",
+        }
 
     def test_the_chip_lands_on_the_session(self):
         events = extract_tool_update_events(self._diff_update("a\n", "b\n"), {}, {})
-        ev = acp_event_to_agent_event([e for e in events if e.kind == EVENT_TOOL_CALL_UPDATE][0])
+        ev = acp_event_to_agent_event(
+            [e for e in events if e.kind == EVENT_TOOL_CALL_UPDATE][0]
+        )
         session = _session()
         _capture_declared_file_change(session, ev.file_change)
-        assert session._file_changes == [{"path": "src/a.py", "before": "a\n", "after": "b\n"}]
+        assert session._file_changes == [
+            {"path": "src/a.py", "before": "a\n", "after": "b\n"}
+        ]
 
     def test_a_noop_edit_files_no_chip(self):
         """Same guard the native path enforces — an edit that changed nothing must not
         render a chip that implies it did."""
         session = _session()
-        _capture_declared_file_change(session, {"path": "src/a.py", "before": "x", "after": "x"})
+        _capture_declared_file_change(
+            session, {"path": "src/a.py", "before": "x", "after": "x"}
+        )
         assert session._file_changes == []
 
     def test_a_pathless_declaration_files_no_chip(self):
         """``_flush_file_changes`` dedups per path, so a chip keyed on "" would collapse
         every unnamed edit in the turn into one row."""
         session = _session()
-        _capture_declared_file_change(session, {"path": "", "before": "a", "after": "b"})
+        _capture_declared_file_change(
+            session, {"path": "", "before": "a", "after": "b"}
+        )
         assert session._file_changes == []
 
     def test_strreplace_fragments_are_deliberately_not_a_chip(self):
         """``oldStr``/``newStr`` are the FRAGMENTS being replaced, not the file's
         contents. Filing one as ``before`` would render a chip asserting the file
         contained only that fragment. The unified diff still shows the user the change —
-        assert that too, so this reads as a scoped withholding and not a lost feature."""
+        assert that too, so this reads as a scoped withholding and not a lost feature.
+        """
         events = extract_tool_update_events(
             _update_frame(
                 rawInput={
@@ -233,7 +247,11 @@ class TestDeclaredFileChangeBecomesAChip:
         session = _session()
         _capture_declared_file_change(
             session,
-            {"path": "src/a.py", "before": '    return "hello"', "after": '    return "bye"'},
+            {
+                "path": "src/a.py",
+                "before": '    return "hello"',
+                "after": '    return "bye"',
+            },
         )
         _capture_declared_file_change(
             session,
@@ -255,21 +273,27 @@ class TestDeclaredFileChangeBecomesAChip:
         """Vacuity floor for the replacement above — it is keyed per path, so an agent
         editing two files must not have the second chip overwrite the first."""
         session = _session()
-        _capture_declared_file_change(session, {"path": "a.py", "before": "1", "after": "2"})
-        _capture_declared_file_change(session, {"path": "b.py", "before": "3", "after": "4"})
+        _capture_declared_file_change(
+            session, {"path": "a.py", "before": "1", "after": "2"}
+        )
+        _capture_declared_file_change(
+            session, {"path": "b.py", "before": "3", "after": "4"}
+        )
         assert [c["path"] for c in session._file_changes] == ["a.py", "b.py"]
 
     def test_a_huge_snapshot_is_capped(self):
-        from gideon.dashboard.chat_runner import _MAX_FILE_SNAPSHOT
+        from gideon.interfaces.dashboard.chat_runner import _MAX_FILE_SNAPSHOT
 
         session = _session()
         _capture_declared_file_change(
-            session, {"path": "src/a.py", "before": "", "after": "x" * (_MAX_FILE_SNAPSHOT + 500)}
+            session,
+            {
+                "path": "src/a.py",
+                "before": "",
+                "after": "x" * (_MAX_FILE_SNAPSHOT + 500),
+            },
         )
         assert len(session._file_changes[0]["after"]) < _MAX_FILE_SNAPSHOT + 100
-
-
-# ── gap 8: the declared level and the inferred level are ONE function ────────
 
 
 _CORE_TOOL_RISK = {
@@ -283,14 +307,18 @@ _CORE_TOOL_RISK = {
 class TestDeclaredRiskNeedsNoPlumbing:
     @pytest.mark.parametrize("bare,expected", sorted(_CORE_TOOL_RISK.items()))
     @pytest.mark.parametrize("dialect", _DIALECTS)
-    def test_every_dialect_infers_the_same_risk_as_the_bare_name(self, dialect, bare, expected):
+    def test_every_dialect_infers_the_same_risk_as_the_bare_name(
+        self, dialect, bare, expected
+    ):
         """§2.5 gap 8 measured: the ACP-rendered name does NOT break inference, in any of
         the three dialects a live drive observed. This is why no name-normalizing
         resolver was added — it would have returned the same value it was handed."""
         assert infer_risk_from_name(dialect.format(name=bare)) == expected
 
     @pytest.mark.parametrize("dialect", _DIALECTS)
-    def test_a_destructive_core_tool_resolves_destructive_through_the_acp_path(self, dialect):
+    def test_a_destructive_core_tool_resolves_destructive_through_the_acp_path(
+        self, dialect
+    ):
         """The clause that matters on screen: the approval card for a destructive core
         tool must show destructive, with the empty ``declared`` an ACP event carries."""
         name = dialect.format(name="artifact_delete")
@@ -300,9 +328,9 @@ class TestDeclaredRiskNeedsNoPlumbing:
         """The plumbing would only ever matter for a tool that declares a level the name
         does not imply. Prove the resolver already honours that, so the day a core tool
         does declare one, passing it through is the whole change."""
-        assert resolve_effective_risk("destructive", "knowledge_search", "other", "") == (
-            "destructive"
-        )
+        assert resolve_effective_risk(
+            "destructive", "knowledge_search", "other", ""
+        ) == ("destructive")
 
     def test_no_core_tool_dict_declares_an_explicit_risk_level(self):
         """The census this conclusion rests on, as a rail. If a core tool ever sets
@@ -316,18 +344,15 @@ class TestDeclaredRiskNeedsNoPlumbing:
         import importlib
         import pathlib
 
-        from gideon.mcp_core import _AGGREGATED_CATEGORY_MODULES
+        from gideon.integrations.mcp_core import _AGGREGATED_CATEGORY_MODULES
 
-        # Resolved through the import system, not by joining the last dotted segment onto
-        # the package root. That shortcut was silently wrong for a NESTED category module and
-        # its own vacuity floor is what caught it: `gideon.computer_use.tools` (DCU-4)
-        # reduced to `tools.py`, pointing the census at an unrelated top-level module. Asking
-        # the module where it lives cannot drift from where it actually lives.
-        modules = ["gideon.mcp_core", *_AGGREGATED_CATEGORY_MODULES]
-        paths = [pathlib.Path(importlib.import_module(m).__file__ or "") for m in modules]
-        # Vacuity floor: a mistyped path would scan nothing and pass. Assert the sweep
-        # actually opened the modules, and enough of them to be the real set.
-        assert all(p.is_file() for p in paths), [str(p) for p in paths if not p.is_file()]
+        modules = ["gideon.integrations.mcp_core", *_AGGREGATED_CATEGORY_MODULES]
+        paths = [
+            pathlib.Path(importlib.import_module(m).__file__ or "") for m in modules
+        ]
+        assert all(p.is_file() for p in paths), [
+            str(p) for p in paths if not p.is_file()
+        ]
         assert len(paths) >= 6, len(paths)
         offenders = []
         for path in paths:

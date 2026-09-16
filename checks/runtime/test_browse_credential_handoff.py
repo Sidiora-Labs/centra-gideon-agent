@@ -30,19 +30,19 @@ from types import SimpleNamespace
 
 import pytest
 
-from gideon.action_providers.base import ActionContext
-from gideon.action_providers.browse_provider import (
+from gideon.integrations.action_providers.base import ActionContext
+from gideon.integrations.action_providers.browse_provider import (
     OUTCOME_NEEDS_INPUT,
     BrowseActionProvider,
 )
-from gideon.browse.credentials import (
+from gideon.integrations.browse.credentials import (
     WITHHELD,
     is_credential_input,
     screen_action_render,
     screen_url,
 )
-from gideon.browse.extraction import extract_page, render_links_dsl
-from gideon.browse.handoff import (
+from gideon.integrations.browse.extraction import extract_page, render_links_dsl
+from gideon.integrations.browse.handoff import (
     AUTH_STATE_ACTIVE,
     AUTH_STATE_EXPIRED,
     PARK_LOGIN_REQUIRED,
@@ -63,20 +63,13 @@ from gideon.browse.handoff import (
     session_state,
     site_slug,
 )
-from gideon.browse.loop import run_browse_loop
+from gideon.integrations.browse.loop import run_browse_loop
 
-# ── the planted credentials ───────────────────────────────────────────────────
-#
-# Distinctive literals, so a sweep that finds one has found THAT value and not a substring of
-# something innocent. Each stands for a different clause of the invariant: a password, a 2FA code,
-# an OAuth authorization code and an implicit-flow bearer token.
 PASSWORD = "hunter2-CORRECTHORSE"
 OTP_CODE = "418290-ONETIMECODE"
 OAUTH_CODE = "AUTHZ-4f9d2e-CODEVALUE"
 BEARER = "eyJBEARERTOKENVALUE"
 
-#: The control value: an ordinary field's contents. Present on exactly the surfaces the credentials
-#: must be absent from, which is what makes the absence assertions non-vacuous.
 ORDINARY = "alice-ORDINARYVALUE"
 
 LOGIN_URL = "https://bank.test/login"
@@ -117,9 +110,6 @@ def _isolated_home(tmp_path, monkeypatch):
     home.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(home))
     return home
-
-
-# ── harness ───────────────────────────────────────────────────────────────────
 
 
 class _FakePage:
@@ -219,7 +209,9 @@ def _surfaces(decide: _Decide, result, caplog) -> dict[str, str]:
     payload = result.to_payload() if hasattr(result, "to_payload") else result
     return {
         "prompts": "\n".join(decide.prompts),
-        "steps": "\n".join(f"{s.action} {s.note} {s.verification}" for s in result.steps),
+        "steps": "\n".join(
+            f"{s.action} {s.note} {s.verification}" for s in result.steps
+        ),
         "notes": "\n".join(result.notes),
         "payload": json.dumps(payload),
         "park": f"{result.park_reason} {result.park_detail}",
@@ -239,8 +231,12 @@ def _assert_present(surfaces: dict[str, str], value: str, *, on: str) -> None:
     ), f"{value!r} is NOT on the {on!r} surface, so an absence assertion over it proves nothing"
 
 
-def _login_run(decide: _Decide, *, start: str = LOGIN_URL, pages: dict[str, str] | None = None):
-    page = _FakePage(pages or {LOGIN_URL: LOGIN_HTML, HOME_URL: DASHBOARD_HTML}, url=start)
+def _login_run(
+    decide: _Decide, *, start: str = LOGIN_URL, pages: dict[str, str] | None = None
+):
+    page = _FakePage(
+        pages or {LOGIN_URL: LOGIN_HTML, HOME_URL: DASHBOARD_HTML}, url=start
+    )
     session = _FakeSession(page)
     result = _run(
         run_browse_loop(
@@ -254,11 +250,6 @@ def _login_run(decide: _Decide, *, start: str = LOGIN_URL, pages: dict[str, str]
         )
     )
     return result, page, session
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# CLAUSE 4 (the one that matters most): credentials never transit the agent
-# ══════════════════════════════════════════════════════════════════════════════
 
 
 class TestTheInvariant:
@@ -323,7 +314,9 @@ class TestTheInvariant:
         assert not (result.parked and result.park_reason == PARK_LOGIN_REQUIRED)
         _assert_present(_surfaces(decide, result, caplog), ORDINARY, on="steps")
 
-    def test_an_oauth_authorization_code_in_the_url_never_reaches_any_surface(self, caplog):
+    def test_an_oauth_authorization_code_in_the_url_never_reaches_any_surface(
+        self, caplog
+    ):
         """The post-login redirect is where a real token lives. The URL reaches the model three
         ways (the outline header, the fence's source, and a link's target) and the user three more
         (the payload, the park sentence, the SEL row) — one screen at the read site covers all six.
@@ -337,10 +330,11 @@ class TestTheInvariant:
         )
         surfaces = _surfaces(decide, result, caplog)
         _assert_absent(surfaces, OAUTH_CODE)
-        # …and the URL is still DIAGNOSABLE: the key survives, and so does the innocent parameter.
         assert "code=" in surfaces["prompts"] and "country=US" in surfaces["prompts"]
 
-    def test_an_implicit_flow_bearer_token_in_the_fragment_never_reaches_any_surface(self, caplog):
+    def test_an_implicit_flow_bearer_token_in_the_fragment_never_reaches_any_surface(
+        self, caplog
+    ):
         """The fragment matters MORE, not less: it never reaches a server, so it is the one place a
         token is guaranteed to be sitting in the URL of the page the agent just read."""
         caplog.set_level(logging.DEBUG)
@@ -358,12 +352,13 @@ class TestTheInvariant:
         implicit flow returns. Driven before this test existed: the token reached the rendered
         target verbatim.
         """
-        html = f'<html><body><a href="/r#access_token={BEARER}">Resume</a></body></html>'
+        html = (
+            f'<html><body><a href="/r#access_token={BEARER}">Resume</a></body></html>'
+        )
         extraction = extract_page(html, url=HOME_URL)
         rendered = render_links_dsl(extraction.links)
         assert BEARER not in rendered
         assert WITHHELD in rendered
-        # The REF keeps the real href, which is what the CDP locator matches on first.
         assert BEARER in extraction.links[0].target
 
     def test_a_credential_in_a_link_QUERY_is_closed_by_the_keep_params_allowlist(self):
@@ -374,17 +369,22 @@ class TestTheInvariant:
         html = f'<html><body><a href="/r?access_token={BEARER}&q=hi">Resume</a></body></html>'
         extraction = extract_page(html, url=HOME_URL)
         assert BEARER not in extraction.links[0].target
-        assert "q=hi" in extraction.links[0].target, "the allowlist must still keep what it allows"
+        assert (
+            "q=hi" in extraction.links[0].target
+        ), "the allowlist must still keep what it allows"
 
     def test_the_refusal_warning_names_the_field_and_never_the_value(self, caplog):
         """A refusal that echoed the value back would defeat itself by explaining itself. The
-        warning becomes the NEXT prompt's WARNINGS block, so this is a model-visible surface."""
+        warning becomes the NEXT prompt's WARNINGS block, so this is a model-visible surface.
+        """
         caplog.set_level(logging.DEBUG)
         ref = _ref_of(LOGIN_HTML, LOGIN_URL, "password")
         decide = _Decide(f"TYPE {ref}({PASSWORD})")
         result, _page, _session = _login_run(decide)
         recorded = "\n".join(s.action for s in result.steps)
-        assert ref in recorded, "the refusal must still name the field, or it is not legible"
+        assert (
+            ref in recorded
+        ), "the refusal must still name the field, or it is not legible"
         assert PASSWORD not in recorded
         assert WITHHELD in recorded
 
@@ -409,11 +409,17 @@ class TestTheScreenItself:
 
     @pytest.mark.parametrize(
         "itype,name",
-        [("text", "username"), ("email", "email"), ("text", "postal_code"), ("text", "zip")],
+        [
+            ("text", "username"),
+            ("email", "email"),
+            ("text", "postal_code"),
+            ("text", "zip"),
+        ],
     )
     def test_ordinary_inputs_are_not(self, itype, name):
         """The other direction. `postal_code` is why `code` alone is not a name token: screening it
-        would blind the agent to fields it legitimately fills while protecting nothing."""
+        would blind the agent to fields it legitimately fills while protecting nothing.
+        """
         assert not is_credential_input(itype, name=name)
 
     def test_screen_url_is_idempotent(self):
@@ -433,13 +439,13 @@ class TestTheScreenItself:
         assert screen_action_render("TYPE ab12cd34(sekrit)", credential=True) == (
             f"TYPE ab12cd34({WITHHELD})"
         )
-        assert screen_action_render("CLICK ab12cd34", credential=True) == "CLICK ab12cd34"
-        assert screen_action_render("TYPE ab12cd34(x)", credential=False) == "TYPE ab12cd34(x)"
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# CLAUSE 1: the run PARKS on needs-input
-# ══════════════════════════════════════════════════════════════════════════════
+        assert (
+            screen_action_render("CLICK ab12cd34", credential=True) == "CLICK ab12cd34"
+        )
+        assert (
+            screen_action_render("TYPE ab12cd34(x)", credential=False)
+            == "TYPE ab12cd34(x)"
+        )
 
 
 class TestThePark:
@@ -449,7 +455,9 @@ class TestThePark:
         result, _page, _session = _login_run(decide)
         assert result.parked is True
         assert result.park_reason == PARK_LOGIN_REQUIRED
-        assert result.ok is True, "a login wall is not a failure — the notes are the deliverable"
+        assert (
+            result.ok is True
+        ), "a login wall is not a failure — the notes are the deliverable"
 
     def test_the_loop_parks_rather_than_sailing_past_the_login_wall_control(self):
         """CONTROL: the same harness, the same page, a NON-credential TYPE. It does NOT park, so
@@ -459,9 +467,12 @@ class TestThePark:
         result, _page, _session = _login_run(decide)
         assert result.park_reason != PARK_LOGIN_REQUIRED
 
-    def test_the_provider_projects_the_park_onto_the_shipped_needs_input_gate(self, monkeypatch):
+    def test_the_provider_projects_the_park_onto_the_shipped_needs_input_gate(
+        self, monkeypatch
+    ):
         """`outcome="needs_input"` — the value the engine's action-node dispatch maps to WAITING and
-        `workflows/attention.py` projects into the inbox. BA-4 adds a reason, not a second gate."""
+        `workflows/attention.py` projects into the inbox. BA-4 adds a reason, not a second gate.
+        """
         result = _run(
             BrowseActionProvider().execute(
                 {"goal": "sign in", "start_url": LOGIN_URL}, ActionContext(event="e")
@@ -479,7 +490,7 @@ class TestThePark:
             calls.append(prompt)
             return "DONE"
 
-        import gideon.action_providers.browse_provider as bp
+        import gideon.integrations.action_providers.browse_provider as bp
 
         monkeypatch.setattr(bp, "_decide", _never)
         record_login(HOME_URL)
@@ -487,7 +498,8 @@ class TestThePark:
 
         result = _run(
             BrowseActionProvider().execute(
-                {"goal": "read the balance", "start_url": HOME_URL}, ActionContext(event="e")
+                {"goal": "read the balance", "start_url": HOME_URL},
+                ActionContext(event="e"),
             )
         )
         assert result.outcome == OUTCOME_NEEDS_INPUT
@@ -500,7 +512,9 @@ class TestThePark:
             )
         )
         assert "bank.test" in result.stderr
-        assert PARK_LOGIN_REQUIRED not in result.stderr, "a reason code is not a sentence"
+        assert (
+            PARK_LOGIN_REQUIRED not in result.stderr
+        ), "a reason code is not a sentence"
         assert "never sees what you type" in result.stderr
 
     def test_the_needs_input_card_carries_no_field_a_credential_could_occupy(self):
@@ -509,11 +523,6 @@ class TestThePark:
         assert OAUTH_CODE not in blob
         assert handoff.item["block_kind"]
         assert handoff.item["choices"], "a card with no choices is not answerable"
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# CLAUSES 2 + 3: the session is persisted, and a later run reuses it
-# ══════════════════════════════════════════════════════════════════════════════
 
 
 class TestProfilePersistenceAndReuse:
@@ -527,7 +536,9 @@ class TestProfilePersistenceAndReuse:
         assert meta is not None and meta.auth_state == AUTH_STATE_ACTIVE
         assert (profile_dir(HOME_URL) / ".meta.json").is_file()
 
-    def test_a_second_run_reuses_the_persisted_profile_without_re_auth(self, monkeypatch):
+    def test_a_second_run_reuses_the_persisted_profile_without_re_auth(
+        self, monkeypatch
+    ):
         """The atom's third clause, end to end at the provider.
 
         Run 1 hits a sign-in page and parks. The human authenticates (simulated by the same
@@ -541,14 +552,12 @@ class TestProfilePersistenceAndReuse:
         )
         assert first.outcome == OUTCOME_NEEDS_INPUT, "run 1 must ask for the handoff"
 
-        record_login(LOGIN_URL)  # the human authenticated in the headful window
+        record_login(LOGIN_URL)
 
-        # Run 2: no browser configured, so it stops at ERR_BROWSE_NO_TARGET — which is the POINT.
-        # Reaching the missing-target error proves it got PAST the pre-run session check, i.e. it
-        # reused the profile instead of asking the human again.
         second = _run(
             BrowseActionProvider().execute(
-                {"goal": "read the balance", "start_url": LOGIN_URL}, ActionContext(event="e")
+                {"goal": "read the balance", "start_url": LOGIN_URL},
+                ActionContext(event="e"),
             )
         )
         assert (
@@ -560,7 +569,8 @@ class TestProfilePersistenceAndReuse:
     def test_a_second_run_re_authenticates_when_persistence_is_broken(self):
         """The falsification partner of the test above, as a permanent test rather than a one-off
         mutation: DELETE the persisted profile between the two runs and the second run parks again.
-        Without this, "run 2 did not park" is equally consistent with "the check never runs"."""
+        Without this, "run 2 did not park" is equally consistent with "the check never runs".
+        """
         _run(
             BrowseActionProvider().execute(
                 {"goal": "sign in", "start_url": LOGIN_URL}, ActionContext(event="e")
@@ -571,7 +581,8 @@ class TestProfilePersistenceAndReuse:
 
         again = _run(
             BrowseActionProvider().execute(
-                {"goal": "read the balance", "start_url": LOGIN_URL}, ActionContext(event="e")
+                {"goal": "read the balance", "start_url": LOGIN_URL},
+                ActionContext(event="e"),
             )
         )
         assert again.outcome == OUTCOME_NEEDS_INPUT
@@ -590,7 +601,9 @@ class TestProfilePersistenceAndReuse:
 
     def test_a_corrupt_meta_fails_toward_asking_the_human(self):
         record_login(HOME_URL)
-        (profile_dir(HOME_URL) / ".meta.json").write_text("{ not json", encoding="utf-8")
+        (profile_dir(HOME_URL) / ".meta.json").write_text(
+            "{ not json", encoding="utf-8"
+        )
         assert session_state(HOME_URL) == SESSION_EXPIRED
 
     def test_the_meta_file_holds_no_credential_fields(self):
@@ -611,8 +624,8 @@ class TestProfilePersistenceAndReuse:
         This is `record_login`'s production caller — without it the mechanism would ship inert and
         the user would be re-prompted on every single run.
         """
-        import gideon.action_providers.browse_provider as bp
-        from gideon.browse.loop import BrowseLoopResult
+        import gideon.integrations.action_providers.browse_provider as bp
+        from gideon.integrations.browse.loop import BrowseLoopResult
 
         async def _fake_loop(**kwargs):
             return BrowseLoopResult(ok=True, goal="g", final_url=HOME_URL)
@@ -626,12 +639,18 @@ class TestProfilePersistenceAndReuse:
         assert session_state(HOME_URL) == SESSION_ABSENT
         result = _run(
             BrowseActionProvider().execute(
-                {"goal": "read the balance", "start_url": HOME_URL, "cdp_url": "ws://x"},
+                {
+                    "goal": "read the balance",
+                    "start_url": HOME_URL,
+                    "cdp_url": "ws://x",
+                },
                 ActionContext(event="e"),
             )
         )
         assert result.success and result.outcome == ""
-        assert session_state(HOME_URL) == SESSION_FRESH, "record_login has no production caller"
+        assert (
+            session_state(HOME_URL) == SESSION_FRESH
+        ), "record_login has no production caller"
 
 
 def _done(value):
@@ -643,7 +662,9 @@ def _done(value):
 
 class TestTheProfileDirectory:
     def test_the_slug_comes_from_the_host_only(self):
-        assert site_slug("https://bank.test/login?x=1") == site_slug("https://bank.test/other")
+        assert site_slug("https://bank.test/login?x=1") == site_slug(
+            "https://bank.test/other"
+        )
         assert site_slug("https://bank.test/a") == "bank.test"
 
     @pytest.mark.parametrize(
@@ -665,7 +686,9 @@ class TestTheProfileDirectory:
         resolved = profile_dir(hostile).resolve()
         root = profiles_root().resolve()
         assert root in resolved.parents or resolved == root
-        assert resolved != root, "an empty slug would share one profile across every bad URL"
+        assert (
+            resolved != root
+        ), "an empty slug would share one profile across every bad URL"
 
     def test_userinfo_never_lands_in_a_directory_name(self):
         assert PASSWORD not in str(profile_dir(f"https://alice:{PASSWORD}@bank.test/x"))
@@ -674,15 +697,17 @@ class TestTheProfileDirectory:
         assert profile_dir("https://a.test/") != profile_dir("https://b.test/")
 
     def test_the_handoff_binds_the_headful_window_to_the_same_profile(self):
-        from gideon.browse.handoff import chrome_launch_args
+        from gideon.integrations.browse.handoff import chrome_launch_args
 
         args = chrome_launch_args(LOGIN_URL, headful=True)
         assert f"--user-data-dir={profile_dir(LOGIN_URL)}" in args
-        assert not any("headless" in a for a in args), "the human must be able to see the window"
+        assert not any(
+            "headless" in a for a in args
+        ), "the human must be able to see the window"
         assert "--disable-blink-features=AutomationControlled" in args
 
     def test_the_unattended_form_is_headless(self):
-        from gideon.browse.handoff import chrome_launch_args
+        from gideon.integrations.browse.handoff import chrome_launch_args
 
         assert "--headless=new" in chrome_launch_args(LOGIN_URL, headful=False)
 
@@ -706,11 +731,8 @@ class TestTheProfileNeverTravels:
     def test_the_profile_root_is_claimed_by_the_state_inventory(self, tmp_path):
         """A path under the home that nobody claims fails `audit_home`, so an unclaimed profile
         directory would report as unmanaged drift the first time anyone browsed."""
-        from gideon.durability import inventory as inv
+        from gideon.operations.durability import inventory as inv
 
-        # A dedicated directory, NOT `tmp_path`: the autouse `_isolated_home` fixture already put
-        # `home/` there, and auditing it would report that unrelated directory as the unclaimed one
-        # — a red that says nothing about the profile path this test is actually about.
         fake_home = tmp_path / "audit-home"
         (fake_home / "browse" / "profiles" / "bank.test").mkdir(parents=True)
         assert inv.audit_home(fake_home).ok
@@ -719,7 +741,7 @@ class TestTheProfileNeverTravels:
         """CONTROL for the test above. The same audit over the same shape with an UNDECLARED
         directory fails — so the pass above is the `browse` claim working, not `audit_home` being
         vacuous on a tiny tree."""
-        from gideon.durability import inventory as inv
+        from gideon.operations.durability import inventory as inv
 
         fake_home = tmp_path / "audit-home-2"
         (fake_home / "not-a-real-store").mkdir(parents=True)
@@ -730,13 +752,10 @@ class TestTheProfileNeverTravels:
         from EXPORTS but CAPTURED by snapshots on purpose (so a backup can restore the credential
         store). A browser profile holds the cookies that ARE the authentication, and a snapshot is
         restored onto another machine — so it must not travel at all."""
-        from gideon.durability import inventory as inv
+        from gideon.operations.durability import inventory as inv
 
         assert inv.is_ignored("browse")
         assert not any(e.path.split("/")[0] == "browse" for e in inv.INVENTORY)
-        # `backup_entries` is the SNAPSHOT projection and `export_entries` the portable one. Both,
-        # because the point is that a profile is in NEITHER — a `secret=True` entry would be absent
-        # from the second and present in the first.
         assert not any(e.path.startswith("browse") for e in inv.backup_entries())
         assert not any(e.path.startswith("browse") for e in inv.export_entries())
         assert "browse" not in inv.secret_paths()
@@ -744,7 +763,7 @@ class TestTheProfileNeverTravels:
     def test_an_export_carries_no_profile_bytes(self, _isolated_home):
         """Driven rather than reasoned: build a real export zip over a home holding a profile with
         a recognisable cookie, and assert no member came from it."""
-        from gideon import portability
+        from gideon.workspace import portability
 
         record_login(LOGIN_URL)
         (profile_dir(LOGIN_URL) / "Default").mkdir(parents=True, exist_ok=True)
@@ -759,7 +778,7 @@ class TestTheProfileNeverTravels:
     def test_an_export_carries_no_profile_bytes_control(self, _isolated_home):
         """CONTROL for the test above: the SAME export DOES carry an ordinary declared store, so
         the empty result is the exclusion working rather than the export being empty."""
-        from gideon import portability
+        from gideon.workspace import portability
 
         (_isolated_home / "config.json").write_text('{"x": 1}', encoding="utf-8")
         _zip_bytes, manifest = portability.create_export_zip()
@@ -767,15 +786,9 @@ class TestTheProfileNeverTravels:
         assert "config.json" in members, members
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# BA-5 — the per-site profile-encryption key lives in the credential store,
-#        NEVER in the profile dir, and is hidden from the user's vault.
-# ══════════════════════════════════════════════════════════════════════════════
-
-
 class TestTheProfileEncryptionKey:
     def test_a_recorded_login_puts_the_profile_key_in_the_credential_store(self):
-        from gideon.config.credentials import credential_names
+        from gideon.core.config.credentials import credential_names
 
         assert not has_profile_key(HOME_URL)
         record_login(HOME_URL)
@@ -791,7 +804,8 @@ class TestTheProfileEncryptionKey:
 
     def test_the_key_value_is_never_written_into_the_profile_dir(self):
         """The whole point of §5.1: a key that sat beside the cookies it protects protects nothing.
-        Build a real profile with a session file, then sweep every byte under the profile dir."""
+        Build a real profile with a session file, then sweep every byte under the profile dir.
+        """
         key = ensure_profile_key(HOME_URL)
         pdir = profile_dir(HOME_URL)
         (pdir / "Default").mkdir(parents=True, exist_ok=True)
@@ -804,8 +818,9 @@ class TestTheProfileEncryptionKey:
 
     def test_the_profile_key_is_hidden_from_the_users_secrets_vault(self):
         """It is machine-managed key material, not a secret the user typed — so it must never
-        appear as a vault row they could see or DELETE (which would break the profile)."""
-        from gideon.secrets_vault import is_reserved_key, list_presence
+        appear as a vault row they could see or DELETE (which would break the profile).
+        """
+        from gideon.security.secrets_vault import is_reserved_key, list_presence
 
         record_login(HOME_URL)
         assert is_reserved_key(profile_key_name(HOME_URL))
@@ -814,11 +829,12 @@ class TestTheProfileEncryptionKey:
 
     def test_an_ordinary_secret_still_appears_in_the_vault(self):
         """CONTROL for the test above: the SAME vault read DOES surface an ordinary user secret, so
-        the profile key's absence is the exclusion working, not `list_presence` being empty."""
-        from gideon.config.credentials import save_credential
-        from gideon.secrets_vault import list_presence
+        the profile key's absence is the exclusion working, not `list_presence` being empty.
+        """
+        from gideon.core.config.credentials import save_credential
+        from gideon.security.secrets_vault import list_presence
 
-        record_login(HOME_URL)  # also writes the (hidden) profile key
+        record_login(HOME_URL)
         save_credential("MY_API_TOKEN", "value")
         names = {r.name for r in list_presence()}
         assert "MY_API_TOKEN" in names
@@ -830,12 +846,6 @@ class TestTheProfileEncryptionKey:
         rows = expired_sites()
         row = next((r for r in rows if r["site"] == "bank.test"), None)
         assert row is not None and row["key_present"] is True
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# BA-5 — an expired session surfaces a persistent banner + a needs_input inbox
-#        item, and produces zero failed ticks (the tick stays success=True).
-# ══════════════════════════════════════════════════════════════════════════════
 
 
 class _FakeDashboardState:
@@ -856,9 +866,12 @@ class TestTheExpiredSurfacing:
     def test_the_expired_park_surfaces_a_banner_and_a_needs_input_item(self):
         """At the auth_state=expired write, BA-5 raises the banner (a `browse_auth_expired` frame)
         and a durable needs_input inbox row — independent of the engine's own attention path, so a
-        schedule/hook/manual run surfaces it too. The tick stays success=True (no failed tick)."""
-        from gideon.inbox import InboxStore
-        from gideon.inbox_providers.native_source import set_dashboard_state
+        schedule/hook/manual run surfaces it too. The tick stays success=True (no failed tick).
+        """
+        from gideon.integrations.inbox import InboxStore
+        from gideon.integrations.inbox_providers.native_source import (
+            set_dashboard_state,
+        )
 
         record_login(HOME_URL)
         mark_expired(HOME_URL)
@@ -869,35 +882,37 @@ class TestTheExpiredSurfacing:
         try:
             result = _run(
                 BrowseActionProvider().execute(
-                    {"goal": "read the balance", "start_url": HOME_URL}, ActionContext(event="e")
+                    {"goal": "read the balance", "start_url": HOME_URL},
+                    ActionContext(event="e"),
                 )
             )
         finally:
             set_dashboard_state(None)
 
-        # Zero failed ticks: an expired session is needs_input, never a failure.
         assert result.success is True
         assert result.outcome == OUTCOME_NEEDS_INPUT
-        # The persistent banner.
-        assert any(t == "browse_auth_expired" for t, _ in fake.ws), "no banner broadcast"
-        # The durable inbox row.
+        assert any(
+            t == "browse_auth_expired" for t, _ in fake.ws
+        ), "no banner broadcast"
         store = InboxStore()
         store.load()
-        rows = [i for i in store.items.values() if i.refs.get("browse_auth") == "expired"]
+        rows = [
+            i for i in store.items.values() if i.refs.get("browse_auth") == "expired"
+        ]
         assert rows, "no needs_input inbox row for the expired session"
         assert rows[0].item_kind == "needs_input"
 
     def test_a_fresh_session_surfaces_nothing(self):
         """CONTROL: a fresh session does NOT hit the expired path, so no banner and no row — the
         surfacing above is the expiry, not something every run does."""
-        from gideon.inbox_providers.native_source import set_dashboard_state
+        from gideon.integrations.inbox_providers.native_source import (
+            set_dashboard_state,
+        )
 
-        record_login(HOME_URL)  # fresh, not expired
+        record_login(HOME_URL)
         fake = _FakeDashboardState()
         set_dashboard_state(fake)
         try:
-            # No CDP target, so it stops at ERR_BROWSE_NO_TARGET — the point is it got PAST the
-            # session check without parking on auth, so nothing was surfaced.
             _run(
                 BrowseActionProvider().execute(
                     {"goal": "read", "start_url": HOME_URL}, ActionContext(event="e")

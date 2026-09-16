@@ -19,11 +19,11 @@ import io
 
 import pytest
 
-from gideon.documents.model import Sheet, SheetCell, SheetModel
-from gideon.documents.model_codec import MODEL_KINDS, get_codec
-from gideon.documents.sheet_json import sheet_from_dict, sheet_to_dict
-from gideon.documents.writers.xlsx_writer import render_xlsx
-from gideon.documents.xlsx_parser import parse_xlsx
+from gideon.workspace.documents.model import Sheet, SheetCell, SheetModel
+from gideon.workspace.documents.model_codec import MODEL_KINDS, get_codec
+from gideon.workspace.documents.sheet_json import sheet_from_dict, sheet_to_dict
+from gideon.workspace.documents.writers.xlsx_writer import render_xlsx
+from gideon.workspace.documents.xlsx_parser import parse_xlsx
 
 
 def _lap(model: SheetModel) -> SheetModel:
@@ -46,9 +46,6 @@ def _openpyxl(data: bytes):
     return load_workbook(io.BytesIO(data))
 
 
-# ── clause 1: a formula stays a formula ──────────────────────────────────────
-
-
 def test_a_formula_stays_a_formula_through_the_round_trip() -> None:
     """The atom's headline clause. ``=SUM(A1:A2)`` must come back as a FORMULA — in the
     ``formula`` field, not as a string sitting in ``value``."""
@@ -68,8 +65,6 @@ def test_a_formula_stays_a_formula_through_the_round_trip() -> None:
     back = _cell_at(_lap(model), row=2)
 
     assert back.formula == "=SUM(A1:A2)"
-    # And it is NOT a string literal — the two fields are the whole distinction, so
-    # asserting only `formula` would pass for a cell that carried both.
     assert back.value is None
 
 
@@ -117,15 +112,12 @@ def test_from_rows_leaves_a_formula_looking_value_a_literal() -> None:
     assert model.sheets[0].cells[0][0].value == "=SUM(A1)"
 
 
-# ── clause 2: a number format survives download/read-back ────────────────────
-
-
 @pytest.mark.parametrize("code", ["0.0%", "#,##0.00", '#,##0.00" kg"', "0.00E+00"])
 def test_a_number_format_survives_download_and_read_back(code: str) -> None:
     back = _cell_at(_lap(_one(SheetCell(value=0.25, number_format=code))))
 
     assert back.number_format == code
-    assert back.value == 0.25  # the format must not have eaten the value
+    assert back.value == 0.25
 
 
 def test_a_date_format_survives_but_says_its_value_became_text() -> None:
@@ -137,7 +129,9 @@ def test_a_date_format_survives_but_says_its_value_became_text() -> None:
     Writing an ISO-looking string back as a date would be the same sniffing this atom
     abolished, so the answer is an honest report item, not a cleverer guess.
     """
-    back, loss = parse_xlsx(render_xlsx(_one(SheetCell(value=0.25, number_format="yyyy-mm-dd"))))
+    back, loss = parse_xlsx(
+        render_xlsx(_one(SheetCell(value=0.25, number_format="yyyy-mm-dd")))
+    )
 
     assert _cell_at(back).number_format == "yyyy-mm-dd"
     assert _cell_at(back).value == "06:00:00"
@@ -156,9 +150,6 @@ def test_an_unformatted_cell_reads_back_unformatted() -> None:
     assert back.number_format == ""
 
 
-# ── clause 3: a cell edit survives download/read-back ────────────────────────
-
-
 def test_a_cell_edit_survives_download_and_read_back() -> None:
     """The editor's actual circuit: load a sheet, change ONE cell, save, re-read.
 
@@ -172,8 +163,14 @@ def test_a_cell_edit_survives_download_and_read_back() -> None:
                 Sheet(
                     name="Q1",
                     cells=[
-                        [SheetCell(value="Region", bold=True), SheetCell(value="Rev", bold=True)],
-                        [SheetCell(value="EMEA"), SheetCell(value=120, number_format="#,##0.00")],
+                        [
+                            SheetCell(value="Region", bold=True),
+                            SheetCell(value="Rev", bold=True),
+                        ],
+                        [
+                            SheetCell(value="EMEA"),
+                            SheetCell(value=120, number_format="#,##0.00"),
+                        ],
                     ],
                 )
             ]
@@ -186,8 +183,6 @@ def test_a_cell_edit_survives_download_and_read_back() -> None:
     edited, _ = parse_xlsx(render_xlsx(sheet_from_dict(payload)))
 
     assert _cell_at(edited, row=1, col=0).value == "APAC"
-    # The edit must not have disturbed its neighbours — a save that rewrites one cell and
-    # flattens the rest is the fidelity failure, not a fix.
     assert _cell_at(edited, row=1, col=1).value == 120
     assert _cell_at(edited, row=1, col=1).number_format == "#,##0.00"
     assert _cell_at(edited, row=0, col=0).bold is True
@@ -205,9 +200,6 @@ def test_an_edited_formula_is_still_a_formula_after_the_save() -> None:
 
     assert _openpyxl(data)["S"]["A1"].data_type == "f"
     assert _cell_at(parse_xlsx(data)[0]).formula == "=2+2"
-
-
-# ── the rest of the styled model ─────────────────────────────────────────────
 
 
 def test_cell_presentation_survives_the_round_trip() -> None:
@@ -255,7 +247,7 @@ def test_column_widths_and_merges_and_a_frozen_header_survive() -> None:
 
     back = _lap(model).sheets[0]
 
-    assert back.column_widths == [0.0, 22.5]  # dense and index-aligned; 0 = default
+    assert back.column_widths == [0.0, 22.5]
     assert back.merges == ["A3:B3"]
     assert back.frozen_header is True
 
@@ -314,14 +306,18 @@ def test_sheet_order_is_preserved() -> None:
 
 def test_parse_write_parse_is_stable() -> None:
     """A second lap must change nothing. An unstable round trip means every save mutates
-    the document a little, which is the silent corruption this plan exists to prevent."""
+    the document a little, which is the silent corruption this plan exists to prevent.
+    """
     first = _lap(
         SheetModel(
             sheets=[
                 Sheet(
                     name="Books",
                     cells=[
-                        [SheetCell(value="Item", bold=True), SheetCell(value="Qty", bold=True)],
+                        [
+                            SheetCell(value="Item", bold=True),
+                            SheetCell(value="Qty", bold=True),
+                        ],
                         [SheetCell(value="Pens"), SheetCell(value=12)],
                         [SheetCell(value="Total"), SheetCell(formula="=SUM(B2:B2)")],
                     ],
@@ -346,9 +342,6 @@ def test_rows_is_derived_and_shows_the_formula_not_a_stale_value() -> None:
     assert sheet.rows == [["x", "=A1"]]
 
 
-# ── the loss report ──────────────────────────────────────────────────────────
-
-
 def test_a_formula_reports_that_its_cached_result_is_not_carried() -> None:
     """Honest, not silent: the parse keeps formulas rather than cached values, so the last
     computed result is genuinely gone until a reader recalculates."""
@@ -356,7 +349,6 @@ def test_a_formula_reports_that_its_cached_result_is_not_carried() -> None:
 
     assert loss.lossless is False
     assert [item.kind for item in loss.items] == ["formula_cached_value"]
-    # Located in the SHEET's own terms. "block 0" would be a lie about a spreadsheet.
     assert loss.items[0].where == "S!A1"
 
 
@@ -378,14 +370,19 @@ def test_a_sheet_feature_the_model_cannot_hold_is_reported_not_dropped() -> None
     ws = wb.active
     ws.title = "S"
     ws["A1"] = 5
-    ws.conditional_formatting.add("A1:A9", CellIsRule(operator="lessThan", formula=["3"]))
+    ws.conditional_formatting.add(
+        "A1:A9", CellIsRule(operator="lessThan", formula=["3"])
+    )
     buf = io.BytesIO()
     wb.save(buf)
 
     _, loss = parse_xlsx(buf.getvalue())
 
     assert "sheet_feature" in loss.kinds()
-    assert any("conditional formatting" in item.detail for item in loss.of_kind("sheet_feature"))
+    assert any(
+        "conditional formatting" in item.detail
+        for item in loss.of_kind("sheet_feature")
+    )
 
 
 def test_a_cell_style_with_no_model_field_is_reported() -> None:
@@ -430,7 +427,6 @@ def test_an_explicit_row_height_is_reported_per_row_and_located_at_that_row() ->
     _, loss = parse_xlsx(buf.getvalue())
 
     heights = loss.of_kind("row_height")
-    # Located in the SHEET's own terms, one item, for the ONE row that set a height.
     assert [item.where for item in heights] == ["S!1"]
     assert "42" in heights[0].detail
 
@@ -442,9 +438,6 @@ def test_a_sheet_whose_rows_were_never_resized_reports_no_row_height() -> None:
     _, loss = parse_xlsx(render_xlsx(SheetModel.from_rows({"S": [["a", 1], ["b", 2]]})))
 
     assert "row_height" not in loss.kinds()
-
-
-# ── the JSON boundary ────────────────────────────────────────────────────────
 
 
 def test_the_json_codec_round_trips_the_model_unchanged() -> None:
@@ -492,9 +485,6 @@ def test_a_composite_cell_value_is_refused() -> None:
         sheet_from_dict(payload)
 
 
-# ── the codec table ──────────────────────────────────────────────────────────
-
-
 def test_every_declared_model_kind_resolves_to_a_codec() -> None:
     """``MODEL_KINDS`` is declared rather than computed, so this is what stops it naming a
     kind with no runtime behind it — the route answers a capability question with it."""
@@ -512,7 +502,8 @@ def test_a_kind_with_no_codec_resolves_to_none() -> None:
     ``pdf`` is the discriminating case rather than a made-up kind: it SHIPS A WRITER
     (`writers/pdf_writer.py`), so a table that answered "editable" from the writer
     registry would say yes here. There is no pdf parser and no pdf model, so the route
-    must refuse it. (``pptx`` was this test's example until `DFE-8` gave it a parser.)"""
+    must refuse it. (``pptx`` was this test's example until `DFE-8` gave it a parser.)
+    """
     assert get_codec("pdf") is None
     assert get_codec("png") is None
     assert "pdf" not in MODEL_KINDS

@@ -8,10 +8,10 @@ import os
 
 import pytest
 
-from gideon.loop import files as loop_files
-from gideon.loop import manager, store
-from gideon.loop import watchdog as W
-from gideon.loop.loop import Loop, LoopStatus
+from gideon.automation.loop import files as loop_files
+from gideon.automation.loop import manager, store
+from gideon.automation.loop import watchdog as W
+from gideon.automation.loop.loop import Loop, LoopStatus
 
 
 def _run(coro):
@@ -20,14 +20,9 @@ def _run(coro):
 
 @pytest.fixture(autouse=True)
 def _tmp_config(monkeypatch, tmp_path):
-    monkeypatch.setattr("gideon.loop.files.config_dir", lambda: tmp_path)
-    # manager.start → tasks_link.provision writes a Tasks Project + lists via the
-    # Tasks hierarchy store (which projects.py also backs). Isolate it per-test too,
-    # else every test that starts a loop leaks a Project into the shared/real config
-    # dir — across a serial run the auto-named projects pile up and collide
-    # ('G (142)' already exists). Was previously only wired on TestTaskWorker.
-    monkeypatch.setattr("gideon.tasks.hierarchy.config_dir", lambda: tmp_path)
-    import gideon.tasks.native as nat
+    monkeypatch.setattr("gideon.automation.loop.files.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.engine.tasks.hierarchy.config_dir", lambda: tmp_path)
+    import gideon.engine.tasks.native as nat
 
     monkeypatch.setattr(nat, "config_dir", lambda: tmp_path, raising=False)
     return tmp_path
@@ -52,12 +47,14 @@ class _FakeState:
     def __init__(self):
         self._sessions = {}
 
-    def get_or_create_session(self, *, name, agent, model, workspace_dir, app, project_id=""):
+    def get_or_create_session(
+        self, *, name, agent, model, workspace_dir, app, project_id=""
+    ):
         s = self._sessions.get(name) or _FakeSession(name)
         s.agent = agent
         s.workspace_dir = workspace_dir
         s.app = app
-        s.project_id = project_id  # S5: worker artifacts scope to the loop's Project
+        s.project_id = project_id
         self._sessions[name] = s
         return s
 
@@ -76,11 +73,18 @@ class _FakeSvc:
         self._n = 0
 
     async def add(
-        self, *, session_name, message, idle_secs, max_cycles, stop_sentinel_path, first_idle_secs=0
+        self,
+        *,
+        session_name,
+        message,
+        idle_secs,
+        max_cycles,
+        stop_sentinel_path,
+        first_idle_secs=0,
     ):
-        # Model real autonudge: ONE loop per session — adding replaces any existing
-        # loop on the same session (else get_by_session returns a stale earlier one).
-        for lid in [lid for lid, lp in self._loops.items() if lp.session_name == session_name]:
+        for lid in [
+            lid for lid, lp in self._loops.items() if lp.session_name == session_name
+        ]:
             del self._loops[lid]
         self._n += 1
         lp = _FakeNudge(f"N{self._n}", session_name)
@@ -89,11 +93,11 @@ class _FakeSvc:
         return lp
 
     def get_by_session(self, session_name):
-        return next((lp for lp in self._loops.values() if lp.session_name == session_name), None)
+        return next(
+            (lp for lp in self._loops.values() if lp.session_name == session_name), None
+        )
 
     def list_all(self):
-        # The public surface `manager.pause` scans since WF2AUT-11 (the real service keeps its
-        # rows in the trigger store, not an in-memory dict).
         return list(self._loops.values())
 
     async def update(self, loop_id, **kw):
@@ -136,12 +140,14 @@ class TestStopFromAPreLaunchState:
         assert store.get(g.id).status == status.value
         state, svc = _FakeState(), _FakeSvc()
         out = _run(manager.stop(state, svc, g.id))
-        assert out.status == LoopStatus.STOPPED.value, f"stop from {status.value} did not terminate"
+        assert (
+            out.status == LoopStatus.STOPPED.value
+        ), f"stop from {status.value} did not terminate"
         assert store.get(g.id).status == LoopStatus.STOPPED.value
 
     @pytest.mark.parametrize("status", [LoopStatus.INTAKE, LoopStatus.PLANNING])
     def test_the_guard_admits_stop_from_it(self, status):
-        from gideon.loop.loop import ACTION_SOURCE_STATES
+        from gideon.automation.loop.loop import ACTION_SOURCE_STATES
 
         assert status in ACTION_SOURCE_STATES["stop"], (
             f"{status.value} is not a source state for stop, so loop_routes answers 409 and the "
@@ -155,14 +161,13 @@ class TestStartArmsWorker:
         state, svc = _FakeState(), _FakeSvc()
         out = _run(manager.start(state, svc, g.id))
         assert out.status == "running"
-        # brief written + status mirrored
         d = loop_files.safe_loop_dir(g.id)
-        assert (d / "brief.md").exists() and "# Goal Loop Brief" in (d / "brief.md").read_text()
-        # session armed with trust + the kind's default agent + recorded session_key
+        assert (d / "brief.md").exists() and "# Goal Loop Brief" in (
+            d / "brief.md"
+        ).read_text()
         sess = state._sessions[manager.session_key(g.id)]
         assert sess._trust is True and sess.agent == "gideon-loop"
         assert store.get(g.id).session_key == manager.session_key(g.id)
-        # autonudge armed with the goal cycle nudge (unattended → autonomous-framed)
         nl = svc.get_by_session(manager.session_key(g.id))
         assert nl is not None and "findings/cycle_NNN.json" in nl.message
 
@@ -181,12 +186,10 @@ class TestStartArmsWorker:
         assert state._sessions[manager.session_key(c.id)].agent == "gideon-coder"
 
     def test_goal_start_does_not_provision_tasks_project(self):
-        # goal is NOT task-driven — starting it must NOT auto-create a Tasks Project
-        # (legacy goal behavior: sub-goals become Tasks only via explicit decompose).
         g = _goal(plan=[{"title": "sub-goal one"}, {"title": "sub-goal two"}])
         state, svc = _FakeState(), _FakeSvc()
         _run(manager.start(state, svc, g.id))
-        assert store.get(g.id).tasks_project_id == ""  # no Project provisioned
+        assert store.get(g.id).tasks_project_id == ""
 
     def test_code_start_provisions_tasks_project(self):
         c = store.create(
@@ -201,11 +204,9 @@ class TestStartArmsWorker:
         )
         state, svc = _FakeState(), _FakeSvc()
         _run(manager.start(state, svc, c.id))
-        assert store.get(c.id).tasks_project_id != ""  # task-driven → Project provisioned
+        assert store.get(c.id).tasks_project_id != ""
 
     def test_rearm_nudge_message_refreshes_to_current_stage(self):
-        # When a code stage advances, the live worker's autonudge message must be
-        # rebuilt from the loop's CURRENT state — not stay stale on the old stage.
         c = store.create(
             Loop(
                 id="",
@@ -222,8 +223,7 @@ class TestStartArmsWorker:
         state, svc = _FakeState(), _FakeSvc()
         _run(manager.start(state, svc, c.id))
         nl = svc.get_by_session(manager.session_key(c.id))
-        assert "stage 1/2" in nl.message  # armed on the design stage
-        # advance the stage on disk, then re-arm
+        assert "stage 1/2" in nl.message
         store.set_phase_status(c.id, "design", "done")
         store.set_phase_status(c.id, "implementation", "active")
         _run(manager.rearm_nudge_message(svc, c.id))
@@ -239,21 +239,20 @@ class TestStartArmsWorker:
                 kind_config={"entry_stage": "design"},
             )
         )
-        # no worker armed → no-op, never raises
         _run(manager.rearm_nudge_message(_FakeSvc(), c.id))
 
     def test_design_start_does_not_provision_empty_project(self):
-        # design has no plan yet (its step walkthrough is the deferred Design slice), so
-        # provisioning would spawn a Tasks Project with ZERO lists — empty clutter. It
-        # free-runs off its brief until the slice lands (provisions_tasks=False).
         d = store.create(
             Loop(
-                id="", name="D", kind="design", task="Build a design system for the marketing site"
+                id="",
+                name="D",
+                kind="design",
+                task="Build a design system for the marketing site",
             )
         )
         state, svc = _FakeState(), _FakeSvc()
         _run(manager.start(state, svc, d.id))
-        assert store.get(d.id).tasks_project_id == ""  # no empty Project spawned
+        assert store.get(d.id).tasks_project_id == ""
 
 
 class TestPauseStopResume:
@@ -263,13 +262,10 @@ class TestPauseStopResume:
         _run(manager.start(state, svc, g.id))
         _run(manager.pause(state, svc, g.id))
         assert store.get(g.id).status == "paused"
-        _run(manager.start(state, svc, g.id))  # resume
+        _run(manager.start(state, svc, g.id))
         assert store.get(g.id).status == "running"
 
     def test_resume_rearms_with_current_stage_not_original(self):
-        # A code loop paused on stage 1, then advanced to stage 2 (e.g. via the
-        # cockpit) before resume, must re-arm targeting the CURRENT stage — start()
-        # rebuilds the nudge from current state, not a captured-at-original message.
         c = store.create(
             Loop(
                 id="",
@@ -289,14 +285,18 @@ class TestPauseStopResume:
         _run(manager.pause(state, svc, c.id))
         store.set_phase_status(c.id, "design", "done")
         store.set_phase_status(c.id, "implementation", "active")
-        _run(manager.start(state, svc, c.id))  # resume
+        _run(manager.start(state, svc, c.id))
         assert "stage 2/2" in svc.get_by_session(manager.session_key(c.id)).message
 
     def test_pause_deactivates_main_and_task_workers(self):
-        # A parallel loop's task-workers must also be deactivated on pause (not left
-        # burning cycles). Deactivate, not remove — so resume can re-arm them.
         c = store.create(
-            Loop(id="", name="C", kind="code", task="add oauth login here", kind_config={})
+            Loop(
+                id="",
+                name="C",
+                kind="code",
+                task="add oauth login here",
+                kind_config={},
+            )
         )
         state, svc = _FakeState(), _FakeSvc()
         _run(
@@ -320,8 +320,8 @@ class TestPauseStopResume:
         _run(manager.pause(state, svc, c.id))
         main = svc.get_by_session(manager.session_key(c.id))
         worker = svc.get_by_session(manager.task_session_key(c.id, "t-1"))
-        assert main is not None and main.active is False  # still registered, deactivated
-        assert worker is not None and worker.active is False  # task-worker too
+        assert main is not None and main.active is False
+        assert worker is not None and worker.active is False
 
     def test_stop_is_terminal_and_drops_sentinel(self):
         g = _goal()
@@ -329,7 +329,9 @@ class TestPauseStopResume:
         _run(manager.start(state, svc, g.id))
         _run(manager.stop(state, svc, g.id))
         assert store.get(g.id).status == "stopped"
-        assert manager.session_key(g.id) not in {lp.session_name for lp in svc._loops.values()}
+        assert manager.session_key(g.id) not in {
+            lp.session_name for lp in svc._loops.values()
+        }
         assert loop_files.stop_sentinel_path(g.id).exists()
 
 
@@ -349,12 +351,10 @@ class TestNudge:
         store.update_status(g.id, LoopStatus.NEEDS_INPUT)
         loop_files.write_question(g.id, "which db?")
         _run(manager.nudge(state, svc, g.id, "use postgres"))
-        assert store.get(g.id).status == "running"  # re-armed
-        assert loop_files.pending_question(g.id) is None  # question cleared
+        assert store.get(g.id).status == "running"
+        assert loop_files.pending_question(g.id) is None
 
     def test_nudge_on_needs_input_brownfield_missing_workspace_stays_paused(self):
-        # User typed an answer instead of re-picking a gone brownfield folder — the
-        # re-arm must NOT resurrect an empty codebase; keep them on NEEDS_INPUT.
         c = store.create(
             Loop(
                 id="",
@@ -369,8 +369,11 @@ class TestNudge:
         state, svc = _FakeState(), _FakeSvc()
         _run(manager.nudge(state, svc, c.id, "just an answer, not a re-pick"))
         assert store.get(c.id).status == LoopStatus.NEEDS_INPUT.value
-        assert svc.get_by_session(manager.session_key(c.id)) is None  # NOT re-armed
-        assert "missing" in (loop_files.pending_question(c.id) or {}).get("question", "").lower()
+        assert svc.get_by_session(manager.session_key(c.id)) is None
+        assert (
+            "missing"
+            in (loop_files.pending_question(c.id) or {}).get("question", "").lower()
+        )
 
 
 class TestTaskWorker:
@@ -381,7 +384,7 @@ class TestTaskWorker:
     def test_spawn_and_teardown_task_worker(self):
         from types import SimpleNamespace
 
-        from gideon.loop import tasks_link
+        from gideon.automation.loop import tasks_link
 
         c = store.create(
             Loop(
@@ -394,25 +397,29 @@ class TestTaskWorker:
             )
         )
         tasks_link.provision(c.id)
-        ids = _run(tasks_link.decompose_phase(c.id, "implementation", [{"title": "Build it"}]))
+        ids = _run(
+            tasks_link.decompose_phase(c.id, "implementation", [{"title": "Build it"}])
+        )
         tid = ids[0]
         task = SimpleNamespace(
             id=tid, title="Build it", description="", action_plan=[], exit_criteria=[]
         )
         state, svc = _FakeState(), _FakeSvc()
-        skey = _run(manager.spawn_task_worker(state, svc, store.get(c.id), task, "/ws/.wt/t"))
+        skey = _run(
+            manager.spawn_task_worker(state, svc, store.get(c.id), task, "/ws/.wt/t")
+        )
         assert skey == manager.task_session_key(c.id, tid) == f"loop-{c.id}-{tid}"
         assert svc.get_by_session(skey) is not None
         assert state._sessions[skey]._trust is True
-        # steer reaches the per-task channel; teardown clears it + removes the loop
         loop_files.write_task_guidance(c.id, tid, "prefer pure fns")
         _run(manager.teardown_task_worker(svc, c.id, tid))
         assert svc.get_by_session(skey) is None
         assert loop_files.read_task_guidance(c.id, tid) == ""
 
     def test_teardown_reaps_task_workers_with_main(self):
-        # _teardown removes the main worker AND any loop-<id>-* task-workers.
-        c = store.create(Loop(id="", name="C", kind="code", task="t" * 12, kind_config={}))
+        c = store.create(
+            Loop(id="", name="C", kind="code", task="t" * 12, kind_config={})
+        )
         svc = _FakeSvc()
         _run(
             svc.add(
@@ -437,15 +444,17 @@ class TestTaskWorker:
         assert svc.get_by_session(manager.task_session_key(c.id, "t-1")) is None
 
     def test_teardown_for_delete_cleans_up_worktrees(self, tmp_path):
-        # A parallel code loop's git worktrees + branches must be cleaned on teardown,
-        # else every deleted loop leaks .worktrees/<id> dirs + pclaw/task-* branches.
         import subprocess
 
-        from gideon.loop import worktree
+        from gideon.automation.loop import worktree
 
         ws = tmp_path / "repo"
         ws.mkdir()
-        for args in (["init", "-q"], ["config", "user.email", "t@t"], ["config", "user.name", "t"]):
+        for args in (
+            ["init", "-q"],
+            ["config", "user.email", "t@t"],
+            ["config", "user.name", "t"],
+        ):
             subprocess.run(["git", *args], cwd=ws, check=True)
         (ws / "f.txt").write_text("x")
         subprocess.run(["git", "add", "-A"], cwd=ws, check=True)
@@ -464,7 +473,7 @@ class TestTaskWorker:
         wt = worktree.add_worktree(str(ws), "t-1", c.tasks_project_id)
         assert wt and os.path.isdir(wt)
         _run(manager.teardown_for_delete(_FakeSvc(), c.id))
-        assert not os.path.isdir(wt)  # worktree removed
+        assert not os.path.isdir(wt)
 
 
 class TestBootSweep:
@@ -483,10 +492,10 @@ class TestBootSweep:
     def test_reaps_running_orphan_with_no_live_session(self):
         g = _goal()
         store.update_status(g.id, LoopStatus.RUNNING)
-        state, svc = _FakeState(), _FakeSvc()  # no live session
+        state, svc = _FakeState(), _FakeSvc()
         decided = _run(W.LoopWatchdog(state, svc)._boot_sweep())
         assert decided == {g.id}
-        assert svc.get_by_session(manager.session_key(g.id)) is not None  # re-armed
+        assert svc.get_by_session(manager.session_key(g.id)) is not None
 
     def test_skips_paused_and_live(self):
         paused = _goal()
@@ -503,10 +512,12 @@ class TestBootSweep:
         g = _goal()
         store.update_status(g.id, LoopStatus.RUNNING)
         state, svc = _FakeState(), _FakeSvc()
-        state._sessions[manager.session_key(g.id)] = _FakeSession(manager.session_key(g.id))
-        assert state._sessions[manager.session_key(g.id)].running is False  # idle, not dead
+        state._sessions[manager.session_key(g.id)] = _FakeSession(
+            manager.session_key(g.id)
+        )
+        assert state._sessions[manager.session_key(g.id)].running is False
         assert _run(W.LoopWatchdog(state, svc)._boot_sweep()) == set()
-        assert svc.get_by_session(manager.session_key(g.id)) is None  # NOT re-armed
+        assert svc.get_by_session(manager.session_key(g.id)) is None
 
     def test_rekicks_planning_orphan(self, monkeypatch):
         g = _goal()
@@ -517,13 +528,13 @@ class TestBootSweep:
             kicked.append(lid)
             return "gated"
 
-        monkeypatch.setattr("gideon.loop.plan_walkthrough.advance_plan", _fake_advance)
+        monkeypatch.setattr(
+            "gideon.automation.loop.plan_walkthrough.advance_plan", _fake_advance
+        )
         decided = _run(W.LoopWatchdog(_FakeState(), _FakeSvc())._boot_sweep())
         assert decided == {g.id} and kicked == [g.id]
 
     def test_brownfield_orphan_with_missing_workspace_pauses_not_rearms(self):
-        # workspace_dir set to a non-existent path → launch_blocker fires → NEEDS_INPUT,
-        # not a silent re-arm against a gone codebase.
         c = store.create(
             Loop(
                 id="",
@@ -538,4 +549,4 @@ class TestBootSweep:
         state, svc = _FakeState(), _FakeSvc()
         _run(W.LoopWatchdog(state, svc)._boot_sweep())
         assert store.get(c.id).status == LoopStatus.NEEDS_INPUT.value
-        assert svc.get_by_session(manager.session_key(c.id)) is None  # NOT re-armed
+        assert svc.get_by_session(manager.session_key(c.id)) is None

@@ -1,6 +1,6 @@
 """Tests for ACP types."""
 
-from gideon.acp.types import AcpPromptStats, JsonRpcMessage, JsonRpcRequest
+from gideon.integrations.acp.types import AcpPromptStats, JsonRpcMessage, JsonRpcRequest
 
 
 class TestJsonRpcRequest:
@@ -41,7 +41,18 @@ class TestAcpPromptStats:
         assert stats.event_count == 0
         assert stats.text_chunks == 0
         assert stats.tool_calls == []
-        # ``None``, not 0.0 — see AcpPromptStats.context_pct: an adapter that never
-        # sends contextUsagePercentage leaves this UNKNOWN, and a fabricated 0%
-        # printed on every turn is the G8 defect.
         assert stats.context_pct is None
+
+
+def test_request_projection_preserves_parameters_without_copying_or_extra_fields():
+    params = {"nested": [1, 2]}
+    request = JsonRpcRequest("session/prompt", params, 7)
+    wire = request.to_dict()
+    assert list(wire) == ["jsonrpc", "id", "method", "params"]
+    assert wire["params"] is params
+    assert wire == {
+        "jsonrpc": "2.0",
+        "id": 7,
+        "method": "session/prompt",
+        "params": params,
+    }

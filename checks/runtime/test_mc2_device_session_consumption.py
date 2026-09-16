@@ -24,7 +24,7 @@ inheriting a cookie from an earlier one.
 
 The clauses that are already met on ``main`` are deliberately NOT re-asserted here: the Settings →
 Devices columns (name/kind/minted/last-seen/issuer + Revoke) are covered by
-``web/src/pages/settings/devicesPanel.test.tsx`` and ``test_device_pairing.py``'s registry tests.
+``apps/console/src/pages/settings/devicesPanel.test.tsx`` and ``test_device_pairing.py``'s registry tests.
 """
 
 from __future__ import annotations
@@ -38,17 +38,15 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.auth import pairing
-from gideon.dashboard import session_store as ss
-from gideon.dashboard import token_auth
-from gideon.dashboard.handlers import auth as auth_h
-from gideon.dashboard.handlers import devices as devices_h
+from gideon.interfaces.dashboard import session_store as ss
+from gideon.interfaces.dashboard import token_auth
+from gideon.interfaces.dashboard.handlers import auth as auth_h
+from gideon.interfaces.dashboard.handlers import devices as devices_h
+from gideon.security.auth import pairing
 
 PORT = 10000
-COOKIE = f"pc_token_{PORT}"
+COOKIE = f"gideon_token_{PORT}"
 
-# Two addresses a roaming phone plausibly holds in one afternoon: RFC 5737 documentation
-# ranges, so neither can collide with a real interface on the machine running this.
 IP_HOME = "203.0.113.7"
 IP_ROAMED = "198.51.100.22"
 
@@ -56,17 +54,18 @@ IP_ROAMED = "198.51.100.22"
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
     """Every store this surface touches points at *tmp_path*, never the real home."""
-    import gideon.config.loader as loader
+    import gideon.core.config.loader as loader
 
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(pairing, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(ss, "config_dir", lambda: tmp_path, raising=False)
     (tmp_path / "config.json").write_text(json.dumps({"auth": {}}), encoding="utf-8")
-    # The redirect is ASSERTED, not assumed: patching `loader.config_dir` alone misses a store
-    # that bound the symbol at import time, and a leaked write would land in the real home.
-    assert ss.sessions_path().is_relative_to(tmp_path), "the session store escaped tmp_path"
-    assert pairing.codes_path().is_relative_to(tmp_path), "the code store escaped tmp_path"
-    # 🪤 Either of these turns every authorization leg below into a no-op that reads as a pass.
+    assert ss.sessions_path().is_relative_to(
+        tmp_path
+    ), "the session store escaped tmp_path"
+    assert pairing.codes_path().is_relative_to(
+        tmp_path
+    ), "the code store escaped tmp_path"
     for var in ("GIDEON_DEV_NO_AUTH", "GIDEON_BYPASS_LOCAL_NETWORKS"):
         monkeypatch.delenv(var, raising=False)
     assert os.environ.get("GIDEON_DEV_NO_AUTH") != "1"
@@ -101,17 +100,20 @@ def _client(server: TestServer) -> TestClient:
     return TestClient(server, cookie_jar=aiohttp.DummyCookieJar())
 
 
-async def _pair_a_device(owner: TestClient, device: TestClient, ip: str) -> tuple[str, str]:
+async def _pair_a_device(
+    owner: TestClient, device: TestClient, ip: str
+) -> tuple[str, str]:
     """Mint a code as the owner, redeem it as the device. Returns (device cookie, device id)."""
     owner_token = token_auth.generate_token("owner", ttl_seconds=3600)
     started = await owner.post(
-        "/api/devices/pair/start", json={}, cookies={COOKIE: owner_token}, headers={"X-Real-IP": ip}
+        "/api/devices/pair/start",
+        json={},
+        cookies={COOKIE: owner_token},
+        headers={"X-Real-IP": ip},
     )
     assert started.status == 200, await started.text()
     code = (await started.json())["code"]
 
-    # No cookie: a device redeeming a code has no session yet — that is the point, and why
-    # `pair/complete` is in the middleware's bypass list.
     done = await device.post(
         "/api/devices/pair/complete",
         json={"code": code, "device_name": "Pixel", "kind": "mobile"},
@@ -120,9 +122,6 @@ async def _pair_a_device(owner: TestClient, device: TestClient, ip: str) -> tupl
     assert done.status == 200, await done.text()
     assert done.cookies[COOKIE], "pairing must hand back the ordinary session cookie"
     return done.cookies[COOKIE].value, (await done.json())["device_id"]
-
-
-# ── Clause: "a roaming-IP phone keeps its device session valid" ──────────
 
 
 @pytest.mark.asyncio
@@ -137,13 +136,11 @@ async def test_the_ip_check_is_live_on_the_query_param_exchange(_isolated) -> No
     async with _client(server) as owner, _client(server) as device:
         token, _device_id = await _pair_a_device(owner, device, IP_HOME)
 
-        # First query-param use binds the token to the address it arrived from.
         bound = await device.get(
             "/api/mc2/probe", params={"token": token}, headers={"X-Real-IP": IP_HOME}
         )
         assert bound.status == 200, await bound.text()
 
-        # The SAME credential, the same route, one different address.
         moved = await device.get(
             "/api/mc2/probe", params={"token": token}, headers={"X-Real-IP": IP_ROAMED}
         )
@@ -169,9 +166,6 @@ async def test_a_device_session_roams_between_client_ips(_isolated) -> None:
         assert first.status == 200, await first.text()
         assert (await first.json())["user"] == devices_h.PAIRED_DEVICE_USER
 
-        # Bind the token to IP_HOME through the query path, so the roam below is denied for the
-        # ?token= exchange at the very moment the cookie is accepted. The contrast is the point:
-        # a build that bound cookie sessions too would fail HERE, not in some future refactor.
         primed = await device.get(
             "/api/mc2/probe", params={"token": token}, headers={"X-Real-IP": IP_HOME}
         )
@@ -180,11 +174,11 @@ async def test_a_device_session_roams_between_client_ips(_isolated) -> None:
         roamed = await device.get(
             "/api/mc2/probe", cookies={COOKIE: token}, headers={"X-Real-IP": IP_ROAMED}
         )
-        assert roamed.status == 200, "a device session must ride the cookie, not the address"
+        assert (
+            roamed.status == 200
+        ), "a device session must ride the cookie, not the address"
         assert (await roamed.json())["user"] == devices_h.PAIRED_DEVICE_USER
 
-        # And it is still the same session, not a silently re-minted one: same nonce, and the
-        # registry still lists exactly one device.
         assert (await roamed.json())["nonce"] == (await first.json())["nonce"]
         assert len(ss.device_sessions()) == 1
 
@@ -208,19 +202,21 @@ async def test_a_roam_does_not_need_a_token_auth_change(_isolated) -> None:
         token, device_id = await _pair_a_device(owner, device, IP_HOME)
 
     payload = json.loads(token_auth._b64url_decode(token.split(".")[0]))
-    # Exactly the claim set an owner-token carries — `nonce` is the store handle every session
-    # has, not a device claim. An extra key here IS the second credential type §C1 forbids.
-    assert set(payload) == {"sub", "exp", "session_exp", "iat", "nonce"}, "a claim was added"
+    assert set(payload) == {
+        "sub",
+        "exp",
+        "session_exp",
+        "iat",
+        "nonce",
+    }, "a claim was added"
     assert payload["sub"] == devices_h.PAIRED_DEVICE_USER
-    assert device_id not in json.dumps(payload), "the device id must live in the store, not here"
+    assert device_id not in json.dumps(
+        payload
+    ), "the device id must live in the store, not here"
 
-    # …and the store is where it does live, so nothing was lost by keeping it out of the token.
     record = next(iter(ss.device_sessions().values()))
     assert record.device is not None and record.device.id == device_id
     assert record.issuer == ss.ISSUER_PAIR
-
-
-# ── Clause: "revoking kills the device session on the next request" ─────
 
 
 @pytest.mark.asyncio
@@ -236,7 +232,9 @@ async def test_revoke_refuses_the_devices_next_http_request(_isolated) -> None:
         token, device_id = await _pair_a_device(owner, device, IP_HOME)
 
         before = await device.get("/api/mc2/probe", cookies={COOKIE: token})
-        assert before.status == 200, "the vacuity floor: the device must be in before it is out"
+        assert (
+            before.status == 200
+        ), "the vacuity floor: the device must be in before it is out"
 
         owner_token = token_auth.generate_token("owner", ttl_seconds=3600)
         revoked = await owner.post(
@@ -248,7 +246,6 @@ async def test_revoke_refuses_the_devices_next_http_request(_isolated) -> None:
         after = await device.get("/api/mc2/probe", cookies={COOKIE: token})
         assert after.status == 403, "the very next request must be refused"
 
-        # And the panel the owner is looking at agrees, from the same read the UI performs.
         listed = await owner.get("/api/devices", cookies={COOKIE: owner_token})
         assert listed.status == 200
         assert (await listed.json())["devices"] == []
@@ -268,11 +265,12 @@ async def test_a_revoked_device_stays_refused_across_a_restart(_isolated) -> Non
         owner_token = token_auth.generate_token("owner", ttl_seconds=3600)
         assert (
             await owner.post(
-                f"/api/devices/{device_id}/revoke", json={}, cookies={COOKIE: owner_token}
+                f"/api/devices/{device_id}/revoke",
+                json={},
+                cookies={COOKIE: owner_token},
             )
         ).status == 200
 
-        # The in-memory half of a restart, with the durable store left exactly as it is.
         token_auth._state.clear_all()
         token_auth.reset_secret_cache()
 

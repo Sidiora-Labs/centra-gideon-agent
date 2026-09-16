@@ -26,7 +26,9 @@ from chat_test_helpers import _make_app, _make_state
 
 def _visible(session) -> list[str]:
     """The session's transcript as the fork endpoint sees it (chat_fork.py:119)."""
-    return [m["content"] for m in session.messages if m["role"] in ("user", "assistant")]
+    return [
+        m["content"] for m in session.messages if m["role"] in ("user", "assistant")
+    ]
 
 
 def _seed(state, name: str, title: str = "") -> object:
@@ -54,12 +56,12 @@ class TestBranchAtEitherRole:
         _seed(state, "src")
         app = _make_app(state)
         async with TestClient(TestServer(app)) as client:
-            r = await client.post("/api/chat/sessions/src/fork", json={"at_message_index": 2})
+            r = await client.post(
+                "/api/chat/sessions/src/fork", json={"at_message_index": 2}
+            )
             assert r.status == 200
             data = await r.json()
         child = state._sessions.get(data["key"])
-        # Inclusive of the clicked USER message, and it is the LAST message — the branch
-        # opens with the question unanswered, ready to take a different direction.
         assert _visible(child) == ["u1", "a1", "u2"], _visible(child)
         assert data["messages"] == 3
 
@@ -69,18 +71,19 @@ class TestBranchAtEitherRole:
         _seed(state, "src")
         app = _make_app(state)
         async with TestClient(TestServer(app)) as client:
-            r = await client.post("/api/chat/sessions/src/fork", json={"at_message_index": 1})
+            r = await client.post(
+                "/api/chat/sessions/src/fork", json={"at_message_index": 1}
+            )
             assert r.status == 200
             data = await r.json()
         child = state._sessions.get(data["key"])
-        # The common case ("take this analysis in two directions"): the branch must
-        # INCLUDE the answer being branched from. Off by one the other way would cut it
-        # off and hand the user a branch that never saw the analysis.
         assert _visible(child) == ["u1", "a1"], _visible(child)
         assert _visible(child)[-1] == "a1"
 
     @pytest.mark.asyncio
-    async def test_the_two_roles_at_adjacent_indices_differ_by_exactly_one_message(self, tmp_path):
+    async def test_the_two_roles_at_adjacent_indices_differ_by_exactly_one_message(
+        self, tmp_path
+    ):
         """The off-by-one guard: index 1 (assistant) and index 2 (user) must produce
         transcripts differing by exactly the user message between them. If either side
         silently shifted, this equality breaks while both branches still 'work'."""
@@ -89,10 +92,14 @@ class TestBranchAtEitherRole:
         app = _make_app(state)
         async with TestClient(TestServer(app)) as client:
             at_assistant = await (
-                await client.post("/api/chat/sessions/src/fork", json={"at_message_index": 1})
+                await client.post(
+                    "/api/chat/sessions/src/fork", json={"at_message_index": 1}
+                )
             ).json()
             at_user = await (
-                await client.post("/api/chat/sessions/src/fork", json={"at_message_index": 2})
+                await client.post(
+                    "/api/chat/sessions/src/fork", json={"at_message_index": 2}
+                )
             ).json()
         a = _visible(state._sessions.get(at_assistant["key"]))
         u = _visible(state._sessions.get(at_user["key"]))
@@ -101,23 +108,27 @@ class TestBranchAtEitherRole:
 
 class TestBranchTheSameMessageRepeatedly:
     @pytest.mark.asyncio
-    async def test_same_message_branches_twice_into_two_independent_children(self, tmp_path):
+    async def test_same_message_branches_twice_into_two_independent_children(
+        self, tmp_path
+    ):
         state = _make_state(tmp_path)
         _seed(state, "src", title="Original")
         app = _make_app(state)
         async with TestClient(TestServer(app)) as client:
             first = await (
-                await client.post("/api/chat/sessions/src/fork", json={"at_message_index": 1})
+                await client.post(
+                    "/api/chat/sessions/src/fork", json={"at_message_index": 1}
+                )
             ).json()
             second = await (
-                await client.post("/api/chat/sessions/src/fork", json={"at_message_index": 1})
+                await client.post(
+                    "/api/chat/sessions/src/fork", json={"at_message_index": 1}
+                )
             ).json()
 
-        # Distinct slots — a repeat branch must not collide with, or overwrite, the first.
         assert first["key"] != second["key"]
         c1, c2 = state._sessions.get(first["key"]), state._sessions.get(second["key"])
         assert _visible(c1) == _visible(c2) == ["u1", "a1"]
-        # Both point at the same origin, and the origin is untouched by either.
         assert c1.forked_from == c2.forked_from == "dashboard:src"
         assert _visible(state._sessions.get("src")) == ["u1", "a1", "u2", "a2"]
 
@@ -130,10 +141,14 @@ class TestBranchTheSameMessageRepeatedly:
         app = _make_app(state)
         async with TestClient(TestServer(app)) as client:
             a = await (
-                await client.post("/api/chat/sessions/src/fork", json={"at_message_index": 1})
+                await client.post(
+                    "/api/chat/sessions/src/fork", json={"at_message_index": 1}
+                )
             ).json()
             b = await (
-                await client.post("/api/chat/sessions/src/fork", json={"at_message_index": 1})
+                await client.post(
+                    "/api/chat/sessions/src/fork", json={"at_message_index": 1}
+                )
             ).json()
         left, right = state._sessions.get(a["key"]), state._sessions.get(b["key"])
         left.append("user", "left direction", "msg msg-u")
@@ -153,7 +168,9 @@ class TestBranchOfABranch:
         app = _make_app(state)
         async with TestClient(TestServer(app)) as client:
             mid = await (
-                await client.post("/api/chat/sessions/root/fork", json={"at_message_index": 1})
+                await client.post(
+                    "/api/chat/sessions/root/fork", json={"at_message_index": 1}
+                )
             ).json()
             mid_session = state._sessions.get(mid["key"])
             mid_session.append("user", "u3", "msg msg-u")
@@ -161,17 +178,14 @@ class TestBranchOfABranch:
             mid_session.drain()
             leaf = await (
                 await client.post(
-                    f"/api/chat/sessions/{mid['key']}/fork", json={"at_message_index": 2}
+                    f"/api/chat/sessions/{mid['key']}/fork",
+                    json={"at_message_index": 2},
                 )
             ).json()
 
         leaf_session = state._sessions.get(leaf["key"])
-        # The breadcrumb walks ONE hop: a leaf must name the intermediate branch, not the
-        # root, or "Branched from" sends the user to a conversation they never branched.
         assert leaf_session.forked_from == f"dashboard:{mid['key']}"
         assert leaf_session.forked_from != "dashboard:root"
-        # …and the leaf carries the intermediate's own added history, indexed against the
-        # INTERMEDIATE's visible list (u1 a1 u3) — not the root's.
         assert _visible(leaf_session) == ["u1", "a1", "u3"], _visible(leaf_session)
 
     @pytest.mark.asyncio
@@ -196,16 +210,21 @@ class TestBreadcrumbSurvivesAReload:
     navigation created the branch — and vanishes on the first refresh."""
 
     @pytest.mark.asyncio
-    async def test_detail_endpoint_serves_forked_from_and_the_parents_title(self, tmp_path):
+    async def test_detail_endpoint_serves_forked_from_and_the_parents_title(
+        self, tmp_path
+    ):
         state = _make_state(tmp_path)
         _seed(state, "src", title="Q3 planning thread")
         app = _make_app(state)
         async with TestClient(TestServer(app)) as client:
             child = await (
-                await client.post("/api/chat/sessions/src/fork", json={"at_message_index": 1})
+                await client.post(
+                    "/api/chat/sessions/src/fork", json={"at_message_index": 1}
+                )
             ).json()
-            # Exactly the request a browser reload of #/chat/<key> makes.
-            detail = await (await client.get(f"/api/chat/sessions/{child['key']}")).json()
+            detail = await (
+                await client.get(f"/api/chat/sessions/{child['key']}")
+            ).json()
 
         assert detail["forked_from"] == "dashboard:src"
         assert detail["forked_from_title"] == "Q3 planning thread"
@@ -217,29 +236,38 @@ class TestBreadcrumbSurvivesAReload:
         app = _make_app(state)
         async with TestClient(TestServer(app)) as client:
             detail = await (await client.get("/api/chat/sessions/plain")).json()
-        # Empty, not absent-and-undefined-shaped: the field is always present so the
-        # frontend branches on one value rather than on presence.
         assert detail["forked_from"] == ""
         assert detail["forked_from_title"] == ""
 
     @pytest.mark.asyncio
-    async def test_title_is_resolved_at_read_time_so_renaming_the_parent_follows(self, tmp_path):
+    async def test_title_is_resolved_at_read_time_so_renaming_the_parent_follows(
+        self, tmp_path
+    ):
         """The child's own title ("Fork of X") is a copy frozen at branch time. The
-        breadcrumb must NOT be that copy — rename the parent and the breadcrumb follows."""
+        breadcrumb must NOT be that copy — rename the parent and the breadcrumb follows.
+        """
         state = _make_state(tmp_path)
         parent = _seed(state, "src", title="Old name")
         app = _make_app(state)
         async with TestClient(TestServer(app)) as client:
-            child = await (await client.post("/api/chat/sessions/src/fork", json={})).json()
-            assert child["title"] == "Fork of Old name"  # the frozen copy
+            child = await (
+                await client.post("/api/chat/sessions/src/fork", json={})
+            ).json()
+            assert child["title"] == "Fork of Old name"
             parent.title = "New name"
-            detail = await (await client.get(f"/api/chat/sessions/{child['key']}")).json()
+            detail = await (
+                await client.get(f"/api/chat/sessions/{child['key']}")
+            ).json()
 
         assert detail["forked_from_title"] == "New name"
-        assert detail["title"] == "Fork of Old name", "the child's own title is untouched"
+        assert (
+            detail["title"] == "Fork of Old name"
+        ), "the child's own title is untouched"
 
     @pytest.mark.asyncio
-    async def test_a_deleted_origin_reports_an_empty_title_not_a_dead_link(self, tmp_path):
+    async def test_a_deleted_origin_reports_an_empty_title_not_a_dead_link(
+        self, tmp_path
+    ):
         """ "" means the origin no longer resolves, which is what lets the frontend render
         unlinked text instead of a link into nothing. `forked_from` still says the session
         WAS branched — that history is not rewritten."""
@@ -247,14 +275,18 @@ class TestBreadcrumbSurvivesAReload:
         _seed(state, "src", title="Doomed")
         app = _make_app(state)
         async with TestClient(TestServer(app)) as client:
-            child = await (await client.post("/api/chat/sessions/src/fork", json={})).json()
+            child = await (
+                await client.post("/api/chat/sessions/src/fork", json={})
+            ).json()
             state._sessions.pop("src", None)
             if state.conversation_log:
                 path = state.conversation_log._path("dashboard:src")
                 if path.exists():
                     path.unlink()
                 state.conversation_log._meta_cache.pop("dashboard:src", None)
-            detail = await (await client.get(f"/api/chat/sessions/{child['key']}")).json()
+            detail = await (
+                await client.get(f"/api/chat/sessions/{child['key']}")
+            ).json()
 
         assert detail["forked_from"] == "dashboard:src"
         assert detail["forked_from_title"] == ""
@@ -267,11 +299,13 @@ class TestBreadcrumbSurvivesAReload:
         _seed(state, "src", title="Long-running record")
         app = _make_app(state)
         async with TestClient(TestServer(app)) as client:
-            child = await (await client.post("/api/chat/sessions/src/fork", json={})).json()
-            # Drop the live parent, keeping its persisted history — the fork endpoint
-            # already flushed it to disk.
+            child = await (
+                await client.post("/api/chat/sessions/src/fork", json={})
+            ).json()
             state._sessions.pop("src", None)
-            detail = await (await client.get(f"/api/chat/sessions/{child['key']}")).json()
+            detail = await (
+                await client.get(f"/api/chat/sessions/{child['key']}")
+            ).json()
 
         assert detail["forked_from"] == "dashboard:src"
         assert detail["forked_from_title"] == "Long-running record"
@@ -279,7 +313,9 @@ class TestBreadcrumbSurvivesAReload:
 
 class TestExistingRefusalsAreReusedNotReinvented:
     @pytest.mark.asyncio
-    async def test_a_non_persistent_session_refuses_rather_than_branching(self, tmp_path):
+    async def test_a_non_persistent_session_refuses_rather_than_branching(
+        self, tmp_path
+    ):
         """The frontend hides the affordance on temporary/incognito (canFork reads the
         session's memory_mode); this pins the refusal the hiding is derived FROM, so the
         two can't drift into a visible button that errors."""
@@ -288,17 +324,19 @@ class TestExistingRefusalsAreReusedNotReinvented:
         s.memory_mode = "temporary"
         app = _make_app(state)
         async with TestClient(TestServer(app)) as client:
-            r = await client.post("/api/chat/sessions/temp/fork", json={"at_message_index": 1})
+            r = await client.post(
+                "/api/chat/sessions/temp/fork", json={"at_message_index": 1}
+            )
             body = await r.json()
         assert r.status == 400
         assert body["error"] == "cannot fork a non-persistent session"
 
     @pytest.mark.asyncio
     async def test_the_fork_cap_429_carries_a_readable_sentence(self, tmp_path):
-        """errText() (web/src/lib/errText.ts) surfaces a JSON body's `error` string
+        """errText() (apps/console/src/lib/errText.ts) surfaces a JSON body's `error` string
         verbatim, so this text is literally what the user reads. A bare status or a
         serialized object would reach them as "HTTP 429"."""
-        import gideon.dashboard.chat_fork as chat_fork
+        import gideon.interfaces.dashboard.chat_fork as chat_fork
 
         state = _make_state(tmp_path)
         _seed(state, "src")
@@ -323,7 +361,9 @@ class TestExistingRefusalsAreReusedNotReinvented:
         _seed(state, "src")
         app = _make_app(state)
         async with TestClient(TestServer(app)) as client:
-            r = await client.post("/api/chat/sessions/src/fork", json={"at_message_index": 9})
+            r = await client.post(
+                "/api/chat/sessions/src/fork", json={"at_message_index": 9}
+            )
             body = await r.json()
         assert r.status == 400
         assert "out of range" in body["error"]

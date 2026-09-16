@@ -6,7 +6,7 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.dashboard.handlers import api_browse_dirs, api_create_dir
+from gideon.interfaces.dashboard.handlers import api_browse_dirs, api_create_dir
 
 
 def _make_app() -> web.Application:
@@ -18,7 +18,7 @@ def _make_app() -> web.Application:
 
 @pytest.fixture()
 def mock_sel():
-    with patch("gideon.dashboard.handlers.sel") as m:
+    with patch("gideon.interfaces.dashboard.handlers.sel") as m:
         m.return_value = MagicMock()
         yield m.return_value
 
@@ -27,7 +27,9 @@ class TestBrowseDirs:
     @pytest.mark.asyncio
     async def test_default_path_is_home(self, tmp_path, mock_sel):
         (tmp_path / "projects").mkdir()
-        with patch("os.path.expanduser", side_effect=lambda p: p.replace("~", str(tmp_path))):
+        with patch(
+            "os.path.expanduser", side_effect=lambda p: p.replace("~", str(tmp_path))
+        ):
             async with TestClient(TestServer(_make_app())) as client:
                 resp = await client.get("/api/browse-dirs")
                 data = await resp.json()
@@ -46,7 +48,7 @@ class TestBrowseDirs:
             names = [d["name"] for d in data["dirs"]]
             assert "alpha" in names
             assert "beta" in names
-            assert "file.txt" not in names  # files excluded
+            assert "file.txt" not in names
 
     @pytest.mark.asyncio
     async def test_sorted_alphabetically(self, tmp_path, mock_sel):
@@ -72,8 +74,6 @@ class TestBrowseDirs:
 
     @pytest.mark.asyncio
     async def test_flags_git_repos(self, tmp_path, mock_sel):
-        # A child dir that is a git repo gets is_repo=True; a plain one False, so
-        # the brownfield workspace picker can mark which folders are codebases.
         repo = tmp_path / "myrepo"
         repo.mkdir()
         (repo / ".git").mkdir()
@@ -95,16 +95,12 @@ class TestBrowseDirs:
 
     @pytest.mark.asyncio
     async def test_invalid_path_returns_404(self, mock_sel):
-        # A path that isn't a browsable directory (missing/typo) is 404 Not Found —
-        # matches api_file_list's contract; only an unreadable (permission) path 400s.
         async with TestClient(TestServer(_make_app())) as client:
             resp = await client.get("/api/browse-dirs?path=/nonexistent_xyz_123")
             assert resp.status == 404
 
     @pytest.mark.asyncio
     async def test_missing_path_says_no_such_directory(self, tmp_path, mock_sel):
-        # A path-bar user who mistypes/pastes a stale path gets a clear "No such
-        # directory", not a confusing blanket "Not a directory".
         async with TestClient(TestServer(_make_app())) as client:
             resp = await client.get(f"/api/browse-dirs?path={tmp_path}/does_not_exist")
             assert resp.status == 404
@@ -146,33 +142,31 @@ class TestCreateDir:
     async def test_existing_dir_409(self, tmp_path, mock_sel):
         (tmp_path / "exists").mkdir()
         async with TestClient(TestServer(_make_app())) as client:
-            resp = await client.post("/api/create-dir", json={"path": str(tmp_path / "exists")})
+            resp = await client.post(
+                "/api/create-dir", json={"path": str(tmp_path / "exists")}
+            )
             assert resp.status == 409
 
     @pytest.mark.asyncio
     async def test_missing_parent_400_no_chain_created(self, tmp_path, mock_sel):
-        # create-dir makes ONE leaf inside an existing parent — it must NOT silently
-        # materialize a whole chain (the old makedirs bug: "foo/bar/baz" built a nested
-        # tree + buried the workspace at the deepest level).
         target = tmp_path / "foo" / "bar" / "baz"
         async with TestClient(TestServer(_make_app())) as client:
             resp = await client.post("/api/create-dir", json={"path": str(target)})
             assert resp.status == 400
             assert "parent" in (await resp.json())["error"].lower()
-        assert not (tmp_path / "foo").exists()  # nothing created
+        assert not (tmp_path / "foo").exists()
 
     @pytest.mark.asyncio
     async def test_system_root_denied_403(self, mock_sel):
-        # browse-dirs refuses to navigate system roots; create-dir must refuse to
-        # create under them too (consistency + a dir there would be unreachable in
-        # the picker, and is_sensitive_path doesn't cover /etc & friends).
         import os
 
         async with TestClient(TestServer(_make_app())) as client:
-            # _SYSTEM_ROOTS now matches the Code engine's validation list, so creating
-            # under any OS-managed tree (not just /etc) is refused — so a stray folder
-            # can't be materialized in a location a workspace bind would then reject.
-            for p in ("/etc/pclaw-x", "/usr/pclaw-x", "/System/pclaw-x", "/Library/pclaw-x"):
+            for p in (
+                "/etc/gideon-x",
+                "/usr/gideon-x",
+                "/System/gideon-x",
+                "/Library/gideon-x",
+            ):
                 resp = await client.post("/api/create-dir", json={"path": p})
                 assert resp.status == 403, p
                 assert not os.path.exists(p), p

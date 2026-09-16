@@ -29,20 +29,20 @@ import json
 
 import pytest
 
-from gideon.workflows import store
-from gideon.workflows.bindings import BindingContext
-from gideon.workflows.bundled_defs import read_template
-from gideon.workflows.controller import EngineServices, RunController
-from gideon.workflows.engine import GuardOutcome, dispatch, dispatch_action
-from gideon.workflows.execution_hints import from_runtime_hints
-from gideon.workflows.models import (
+from gideon.automation.workflows import store
+from gideon.automation.workflows.bindings import BindingContext
+from gideon.automation.workflows.bundled_defs import read_template
+from gideon.automation.workflows.controller import EngineServices, RunController
+from gideon.automation.workflows.engine import GuardOutcome, dispatch, dispatch_action
+from gideon.automation.workflows.execution_hints import from_runtime_hints
+from gideon.automation.workflows.models import (
     InstanceState,
     Node,
     RunStatus,
     WorkflowRun,
     walk,
 )
-from gideon.workflows.tick import frontier
+from gideon.automation.workflows.tick import frontier
 
 pytestmark = pytest.mark.anyio
 
@@ -56,7 +56,9 @@ def anyio_backend() -> str:
 def _builtin_action_providers():
     """The bash provider, which `gateway` registers at boot and a bare test process does
     not — the baseline node below runs a real command through it."""
-    from gideon.action_providers.registry import _ensure_default_providers_registered
+    from gideon.integrations.action_providers.registry import (
+        _ensure_default_providers_registered,
+    )
 
     _ensure_default_providers_registered()
 
@@ -67,11 +69,8 @@ def _isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(home))
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
     return home
-
-
-# ── the shipped spec ─────────────────────────────────────────────────────────
 
 
 def _spec() -> dict:
@@ -91,13 +90,12 @@ def _node(node_id: str) -> Node:
     raise AssertionError(f"code-project has no node {node_id!r}")
 
 
-#: The four conditions R5a's initializer must establish before any code is written.
 CHECKLIST = ("can_start", "can_test", "can_see_progress", "can_pick_next")
 
 INPUTS = {
     "task": "add a --dry-run flag",
     "cwd": ".",
-    "verify_command": "pytest tests/test_flag.py",
+    "verify_command": "pytest checks/runtime/test_flag.py",
     "guard_command": "pytest",
     "bug_flavored": False,
 }
@@ -119,9 +117,6 @@ def _ctx(**outputs) -> BindingContext:
     return BindingContext(inputs=dict(INPUTS), node_outputs=dict(outputs))
 
 
-# ── R5a: the gated initializer ───────────────────────────────────────────────
-
-
 class TestTheInitGate:
     async def test_it_passes_when_all_four_conditions_hold(self) -> None:
         result = await dispatch(_node("init_gate"), _ctx(init=_init_output()))
@@ -129,15 +124,18 @@ class TestTheInitGate:
         assert result.output["passed"] is True
 
     @pytest.mark.parametrize("missing", CHECKLIST)
-    async def test_it_blocks_when_any_single_condition_is_false(self, missing: str) -> None:
+    async def test_it_blocks_when_any_single_condition_is_false(
+        self, missing: str
+    ) -> None:
         """Exhaustive over the closed checklist. Three-of-four is the interesting case: an
         environment that builds and tests but cannot show progress is exactly the one a run
         would happily start in and then have no way to know it was going wrong."""
-        result = await dispatch(_node("init_gate"), _ctx(init=_init_output(**{missing: False})))
+        result = await dispatch(
+            _node("init_gate"), _ctx(init=_init_output(**{missing: False}))
+        )
         assert result.state == InstanceState.FAILED
         assert result.output["passed"] is False
         assert result.failure is not None
-        # The reason names the condition it tested, so the run log says what to fix.
         assert missing in result.failure.cause_plain
 
     async def test_the_gate_tests_all_four_and_nothing_else(self) -> None:
@@ -154,11 +152,6 @@ class TestTheInitGate:
         assert result.state == InstanceState.FAILED
 
 
-# ── R5b: WIP=1, engine-enforced ──────────────────────────────────────────────
-
-
-#: Child indices in the shipped root sequence, resolved by id so a reordering does not
-#: silently move the assertions to a different node.
 def _child_index(node_id: str) -> int:
     for i, child in enumerate(_root().children):
         if child.id == node_id:
@@ -200,14 +193,16 @@ def _frontier(*, wip: bool, extra_states: dict[str, InstanceState] | None = None
 class TestWipOne:
     def test_the_template_declares_the_invariant(self) -> None:
         hints = from_runtime_hints(_spec().get("runtime_hints"))
-        assert hints.single_active_feature is True, "nothing would enforce WIP=1 without this"
+        assert (
+            hints.single_active_feature is True
+        ), "nothing would enforce WIP=1 without this"
 
     def test_only_one_feature_starts(self) -> None:
         fr = _frontier(wip=True)
         item_prefix = f"root.children[{_child_index('implement')}].body#"
-        assert _items_started(fr, item_prefix) == {f"{item_prefix}0"}, [r.path for r in fr.ready]
-        # The refusal is RECORDED, not silent — a held item and a forgotten one must not look
-        # the same from the ledger.
+        assert _items_started(fr, item_prefix) == {f"{item_prefix}0"}, [
+            r.path for r in fr.ready
+        ]
         assert fr.wip_held == [f"{item_prefix}1", f"{item_prefix}2"]
 
     def test_without_the_hint_the_same_tree_fans_out(self) -> None:
@@ -249,7 +244,7 @@ class TestWipOne:
     def test_a_spec_that_contradicts_the_invariant_is_refused(self) -> None:
         """The authoring half of the refusal. A template declaring WIP=1 while also declaring
         a three-at-a-time fan-out would read one way and run the other."""
-        from gideon.workflows.validator import validate_spec
+        from gideon.automation.workflows.validator import validate_spec
 
         spec = _spec()
         for child in spec["root"]["children"]:
@@ -259,12 +254,9 @@ class TestWipOne:
         assert "WF_WIP_CONTRADICTION" in codes
 
     def test_the_shipped_template_declares_no_contradicting_cap(self) -> None:
-        from gideon.workflows.validator import validate_spec
+        from gideon.automation.workflows.validator import validate_spec
 
         assert validate_spec(_spec(), strict=True).issues == []
-
-
-# ── R5d: the baseline capture, really run ────────────────────────────────────
 
 
 async def _run_baseline(cwd, verify_cmd: str, guard_cmd: str) -> dict:
@@ -283,14 +275,18 @@ async def _run_baseline(cwd, verify_cmd: str, guard_cmd: str) -> dict:
 
 
 class TestTheBaselineCapture:
-    async def test_it_records_both_commands_as_machine_readable_booleans(self, tmp_path) -> None:
+    async def test_it_records_both_commands_as_machine_readable_booleans(
+        self, tmp_path
+    ) -> None:
         got = await _run_baseline(tmp_path, "true", "false")
         assert got["state"] == InstanceState.DONE, got
         assert got["output"]["verify_passed"] is True
         assert got["output"]["guard_passed"] is False
         assert got["output"]["guard_exit"] != 0
 
-    async def test_a_failing_baseline_command_does_not_fail_the_node(self, tmp_path) -> None:
+    async def test_a_failing_baseline_command_does_not_fail_the_node(
+        self, tmp_path
+    ) -> None:
         """🔴 The reason the node's command ends in a `printf` instead of just running the
         commands: a FAILED node's output is deliberately NOT published to `_outputs`
         (`controller._apply`), so a baseline that exited non-zero would leave every downstream
@@ -310,13 +306,12 @@ class TestTheBaselineCapture:
     async def test_a_quoted_command_survives_intact(self, tmp_path) -> None:
         """The commands travel as ENV, not as text spliced into the shell — so a command with
         quotes in it runs rather than breaking the script that runs it."""
-        got = await _run_baseline(tmp_path, "sh -c 'exit 0'", "grep -q 'nothing here' /dev/null")
+        got = await _run_baseline(
+            tmp_path, "sh -c 'exit 0'", "grep -q 'nothing here' /dev/null"
+        )
         assert got["state"] == InstanceState.DONE
         assert got["output"]["verify_passed"] is True
         assert got["output"]["guard_passed"] is False
-
-
-# ── R5e + criterion 6: the dual gate's classification ────────────────────────
 
 
 def _verifier(*, metric: bool | None, guard: bool | None):
@@ -333,7 +328,9 @@ def _verifier(*, metric: bool | None, guard: bool | None):
     return verify
 
 
-async def _verify_gate(*, guard_passed_at_baseline: bool, metric: bool | None, guard: bool | None):
+async def _verify_gate(
+    *, guard_passed_at_baseline: bool, metric: bool | None, guard: bool | None
+):
     node = _node("verify")
     ctx = _ctx(
         baseline={
@@ -349,7 +346,9 @@ async def _verify_gate(*, guard_passed_at_baseline: bool, metric: bool | None, g
 
 class TestTheDualGate:
     async def test_it_runs_both_commands(self) -> None:
-        result, fake = await _verify_gate(guard_passed_at_baseline=True, metric=True, guard=True)
+        result, fake = await _verify_gate(
+            guard_passed_at_baseline=True, metric=True, guard=True
+        )
         assert result.state == InstanceState.DONE
         assert result.output["guard"] == GuardOutcome.CLEAN.value
         assert [c["command"] for c in fake.calls] == [
@@ -360,13 +359,17 @@ class TestTheDualGate:
     async def test_a_failing_metric_never_reaches_the_guard(self) -> None:
         """The deliverable is not done, so whether anything else regressed is a later
         question — and running the suite to find out costs minutes."""
-        result, fake = await _verify_gate(guard_passed_at_baseline=True, metric=False, guard=True)
+        result, fake = await _verify_gate(
+            guard_passed_at_baseline=True, metric=False, guard=True
+        )
         assert result.state == InstanceState.FAILED
         assert len(fake.calls) == 1
 
     async def test_a_seeded_regression_fails_the_gate(self) -> None:
         """The guard PASSED at baseline and fails now: this change broke it (criterion 6)."""
-        result, _fake = await _verify_gate(guard_passed_at_baseline=True, metric=True, guard=False)
+        result, _fake = await _verify_gate(
+            guard_passed_at_baseline=True, metric=True, guard=False
+        )
         assert result.state == InstanceState.FAILED
         assert result.output["guard"] == GuardOutcome.REGRESSION.value
         assert "regression" in result.failure.cause_plain
@@ -375,7 +378,9 @@ class TestTheDualGate:
         """Same guard failure, different baseline — and therefore a different verdict. Blaming
         a pre-existing failure on this change is how a correct change gets rejected and
         someone debugs the wrong commit."""
-        result, _fake = await _verify_gate(guard_passed_at_baseline=False, metric=True, guard=False)
+        result, _fake = await _verify_gate(
+            guard_passed_at_baseline=False, metric=True, guard=False
+        )
         assert result.state == InstanceState.DEGRADED
         assert result.output["guard"] == GuardOutcome.PRE_EXISTING.value
         assert "pre-existing" in result.degraded_reason
@@ -383,7 +388,9 @@ class TestTheDualGate:
     async def test_the_two_verdicts_differ_only_by_the_baseline(self) -> None:
         """The whole point of capturing a baseline, stated as one assertion: identical
         commands, identical results, opposite verdicts."""
-        regression, _a = await _verify_gate(guard_passed_at_baseline=True, metric=True, guard=False)
+        regression, _a = await _verify_gate(
+            guard_passed_at_baseline=True, metric=True, guard=False
+        )
         pre_existing, _b = await _verify_gate(
             guard_passed_at_baseline=False, metric=True, guard=False
         )
@@ -393,7 +400,9 @@ class TestTheDualGate:
     async def test_an_unrunnable_guard_is_not_a_pass(self) -> None:
         """The tristate rule the metric half already applies: a check that could not run has
         certified nothing, so there is no regression verdict to give."""
-        result, _fake = await _verify_gate(guard_passed_at_baseline=True, metric=True, guard=None)
+        result, _fake = await _verify_gate(
+            guard_passed_at_baseline=True, metric=True, guard=None
+        )
         assert result.state == InstanceState.FAILED
         assert result.output["guard"] == GuardOutcome.UNDETERMINED.value
 
@@ -418,21 +427,18 @@ class TestTheDualGate:
 class TestCriterionSixEndToEnd:
     """The criterion as one story, with the baseline REALLY captured by the shipped node."""
 
-    async def test_a_build_a_feature_run_tells_the_two_failures_apart(self, tmp_path) -> None:
-        # 1. The initializer's four conditions hold, so the gate opens.
+    async def test_a_build_a_feature_run_tells_the_two_failures_apart(
+        self, tmp_path
+    ) -> None:
         gate = await dispatch(_node("init_gate"), _ctx(init=_init_output()))
         assert gate.state == InstanceState.DONE
 
-        # 2. WIP=1 holds over the real fan-out: one feature open, the rest refused on record.
         fr = _frontier(wip=True)
         assert len(fr.wip_held) == 2
 
-        # 3. The baseline is captured for real, in a tree where the guard is ALREADY red.
         already_red = await _run_baseline(tmp_path, "true", "false")
         assert already_red["output"]["guard_passed"] is False
 
-        # 4. The guard fails after the change too — and because it was already failing, the
-        #    gate does NOT call it a regression.
         node = _node("verify")
         pre_existing = await dispatch(
             node,
@@ -442,8 +448,6 @@ class TestCriterionSixEndToEnd:
         assert pre_existing.state == InstanceState.DEGRADED
         assert pre_existing.output["guard"] == GuardOutcome.PRE_EXISTING.value
 
-        # 5. Now a tree whose guard was GREEN at baseline. Same failing guard afterwards,
-        #    and this time the gate blocks the run.
         was_green = await _run_baseline(tmp_path, "true", "true")
         assert was_green["output"]["guard_passed"] is True
         regression = await dispatch(
@@ -455,12 +459,11 @@ class TestCriterionSixEndToEnd:
         assert regression.output["guard"] == GuardOutcome.REGRESSION.value
 
 
-# ── R5c/R5f: reproduction before edit, via inverted success_when ──────────────
-
-
 def _repro_success_when() -> str:
     expr = str((_node("repro").config or {}).get("success_when", ""))
-    assert expr, "the repro stage declares no success_when — R5c would be advice, not a gate"
+    assert (
+        expr
+    ), "the repro stage declares no success_when — R5c would be advice, not a gate"
     return expr
 
 
@@ -585,13 +588,11 @@ class TestReproductionBeforeEdit:
         assert await controller.run_to_completion(timeout=20) == RunStatus.FAILED
 
 
-# ── the WIP refusal reaches the ledger ───────────────────────────────────────
-
-
 class TestTheWipRefusalIsObservable:
     async def test_a_held_item_is_journaled_once(self) -> None:
         """A refusal nobody can read back is indistinguishable from a scheduler that lost the
-        item — "why has feature 2 not started?" has to be answerable from the run's record."""
+        item — "why has feature 2 not started?" has to be answerable from the run's record.
+        """
         spec = {
             "name": "wip-ledger",
             "runtime_hints": {"execution": {"single_active_feature": True}},
@@ -616,8 +617,6 @@ class TestTheWipRefusalIsObservable:
         ]
         held = [r for r in records if r.get("decision") == "wip_limit_held"]
         assert held, "the WIP refusal never reached the ledger"
-        # Once per item, not once per tick: the frontier re-derives every tick, and a record
-        # per tick would bury the run's real events under its own bookkeeping.
         assert len(held) == len({r["instance_path"] for r in held})
 
     async def test_a_run_without_the_hint_journals_nothing(self) -> None:
@@ -638,21 +637,18 @@ class TestTheWipRefusalIsObservable:
         assert "wip_limit_held" not in text
 
 
-# ── the retired template ─────────────────────────────────────────────────────
-
-
 class TestTheRetiredTemplate:
     def test_code_implementation_is_gone(self) -> None:
         """A clean break: `code-project` REPLACED it rather than shipping beside it, so two
         near-identical code templates never exist for a picker to arbitrate between."""
-        from gideon.workflows.bundled_defs import template_names
+        from gideon.automation.workflows.bundled_defs import template_names
 
         assert "code-implementation" not in template_names()
 
     def test_the_legacy_code_kind_still_resolves(self) -> None:
         """The alias layer is why the replacement needed no migration: a stored `kind: code`
         and a months-old `loop_create_code` transcript both resolve at READ time."""
-        from gideon.workflows.loop_aliases import resolve_kind, resolve_tool
+        from gideon.automation.workflows.loop_aliases import resolve_kind, resolve_tool
 
         assert resolve_kind("code") == "code-project"
         assert resolve_tool("loop_create_code") == "code-project"

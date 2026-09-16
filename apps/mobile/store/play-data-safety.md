@@ -28,11 +28,11 @@ checklist to re-run whenever the shell gains a capability.
 ## Why "No" is truthful, edge case by edge case
 
 **The gateway address the user types in** is saved on the device, in the
-WebView's `localStorage`, in the registry format `web/src/lib/endpoints.ts`
+WebView's `localStorage`, in the registry format `apps/console/src/shared/data/endpoints.ts`
 owns. It is sent only *to that gateway itself* as ordinary HTTP requests. It
 never leaves for any server the developer operates — none exists.
 
-**The device session** is an httponly cookie (`pc_token_{port}`) set by the
+**The device session** is an httponly cookie (`gideon_token_{port}`) set by the
 user's own gateway during QR pairing and held in the WebView's cookie jar. The
 shell stores no credential at all (`mobile/README.md`, "The two things it
 configures"). First-party traffic between the user and the user's own server is
@@ -40,7 +40,7 @@ not collection by this app's developer under Play's definition.
 
 **The push token** (FCM registration token, when the user enables push) is
 delivered to the user's own gateway via `POST /api/push/relay-register` — a
-same-origin call the served companion makes (`web/src/app/nativePush.ts`) — and
+same-origin call the served companion makes (`apps/console/src/app/shell/nativePush.ts`) — and
 pings are forwarded through whatever relay the *user* configured
 (`mobile.relay_url` — their own deployment of the open-source relay, or none). What transits the relay is a
 routing envelope around two identifiers — `{kind, item_id}` — and no message

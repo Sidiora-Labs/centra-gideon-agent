@@ -34,13 +34,15 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import make_mocked_request
 
-from gideon.dashboard import model_downloads as M
-from gideon.dashboard.handlers import model_downloads as H
-from gideon.local_models import residency, sidecar
-from gideon.local_models.provider import LocalModel, LocalModelProvider
-from gideon.local_models.sidecar import SidecarCrashed, SidecarRunner, SidecarWorkerError
-
-# ── the fixture worker: real app-side code, loaded by path into the child ──
+from gideon.integrations.local_models import residency, sidecar
+from gideon.integrations.local_models.provider import LocalModel, LocalModelProvider
+from gideon.integrations.local_models.sidecar import (
+    SidecarCrashed,
+    SidecarRunner,
+    SidecarWorkerError,
+)
+from gideon.interfaces.dashboard import model_downloads as M
+from gideon.interfaces.dashboard.handlers import model_downloads as H
 
 _WORKER = '''
 """A fixture sidecar worker. Stdlib only, exactly like a real app's worker."""
@@ -133,7 +135,7 @@ def _kill_soon(pid: int, delay: float = 0.4) -> threading.Timer:
         try:
             os.kill(pid, signal.SIGKILL)
         except ProcessLookupError:
-            pass  # already gone — the kill it was arming for happened another way
+            pass
 
     timer = threading.Timer(delay, _kill)
     timer.daemon = True
@@ -170,30 +172,27 @@ def _kill_when(pid: int, ready, *, timeout: float = 20.0) -> threading.Thread:
     return thread
 
 
-# ── the protocol: five verbs against a real child ──
-
-
 def test_the_five_verbs_round_trip_against_a_real_child(runner):
     assert runner.call("ping")["pong"] is True
     assert runner.call("load", {"model": "L6-v2"})["loaded"] == "L6-v2"
     assert runner.call("call", {"method": "encode"})["vector"] == [0.1, 0.2, 0.3]
     stat = runner.stat()
-    assert stat["rss_mb"] > 0  # a live python process always has resident pages
+    assert stat["rss_mb"] > 0
     assert runner.call("unload")["unloaded"] is True
-    assert runner.generation == 1  # one child served all five
+    assert runner.generation == 1
 
 
 def test_an_unknown_verb_is_refused_rather_than_guessed(runner):
     with pytest.raises(SidecarWorkerError) as caught:
         runner.call("teleport")
     assert caught.value.reason == "bad_request"
-    assert runner.is_alive()  # a bad request is not a crash
+    assert runner.is_alive()
 
 
 def test_a_stray_print_from_a_native_lib_does_not_corrupt_the_protocol(runner):
     """The loky-style progress print goes to stderr, and the frame still parses."""
     assert runner.call("call", {"method": "chatty"})["ok"] is True
-    assert runner.call("ping")["pong"] is True  # the stream is still in sync
+    assert runner.call("ping")["pong"] is True
 
 
 def test_a_worker_exception_is_typed_and_does_not_burn_a_restart(runner):
@@ -204,9 +203,6 @@ def test_a_worker_exception_is_typed_and_does_not_burn_a_restart(runner):
     assert runner.is_alive()
     assert runner.health()["consecutive_failures"] == 0
     assert runner.restarts == 0
-
-
-# ── Success Criterion 1: killed mid-encode ──
 
 
 def test_killed_mid_encode_raises_typed_crash_and_recovers_without_a_restart(runner):
@@ -226,9 +222,8 @@ def test_killed_mid_encode_raises_typed_crash_and_recovers_without_a_restart(run
     assert caught.value.reason == f"signal_{int(signal.SIGKILL)}"
     assert caught.value.typed_reason == "sidecar_crashed:signal_9"
     assert caught.value.generation == 1
-    assert os.getpid() != pid  # the child died; we are still here
+    assert os.getpid() != pid
 
-    # Recovery: no restart, no re-registration, just the next call.
     assert runner.call("call", {"method": "encode"})["vector"] == [0.1, 0.2, 0.3]
     assert runner.generation == 2
     assert runner.restarts == 1
@@ -272,23 +267,20 @@ def test_a_valid_frame_with_no_terminating_newline_is_still_refused(runner):
         raise AssertionError(f"a half-written frame was believed: {result!r}")
 
     assert caught.value.reason == f"signal_{int(signal.SIGKILL)}"
-    # Without this the test passes vacuously when the kill beats the write: assert the
-    # unterminated frame really reached the runner and really was thrown away.
     assert any("truncated frame discarded" in line for line in runner.log_tail)
 
 
 def test_a_timeout_is_typed_and_reaps_the_hung_child(tmp_path, worker):
-    r = SidecarRunner(app="slow", worker=worker, venv=tmp_path / "venv", call_timeout=0.5)
+    r = SidecarRunner(
+        app="slow", worker=worker, venv=tmp_path / "venv", call_timeout=0.5
+    )
     try:
         with pytest.raises(SidecarCrashed) as caught:
             r.call("call", {"method": "encode", "payload": {"hang": True}})
         assert caught.value.reason == "timeout"
-        _wait_dead(r)  # a hung child is not left behind
+        _wait_dead(r)
     finally:
         r.stop()
-
-
-# ── the generation fence ──
 
 
 def test_a_reply_from_the_previous_generation_is_discarded(runner):
@@ -306,12 +298,11 @@ def test_a_reply_from_the_previous_generation_is_discarded(runner):
     runner.ensure_started()
     assert runner.generation == old_generation + 1
 
-    live_id = f"{runner.generation}:1"  # what the live child's first reply will be
+    live_id = f"{runner.generation}:1"
     zombie = {"id": live_id, "ok": True, "result": {"vector": ["ZOMBIE"]}}
     assert runner.deliver(old_generation, zombie) is False
     assert runner.stale_replies == 1
 
-    # The caller gets the LIVE child's answer, not the dead one's.
     assert runner.call("call", {"method": "encode"})["vector"] == [0.1, 0.2, 0.3]
 
 
@@ -321,21 +312,19 @@ def test_request_ids_carry_their_generation(runner):
     runner.call("ping")
     os.kill(runner.health()["pid"], signal.SIGKILL)
     _wait_dead(runner)
-    runner.call("ping")  # respawns as generation 2, sequence restarts at 1
+    runner.call("ping")
     assert runner.generation == 2
-    # Same sequence number, different generation → different id namespace.
     assert runner.deliver(1, {"id": "1:1", "ok": True, "result": "stale"}) is False
 
 
 def test_a_stat_frame_is_recorded_not_queued_as_a_reply(runner):
     """A stat frame answers no request; delivering one must not satisfy a pending call."""
     runner.ensure_started()
-    assert runner.deliver(runner.generation, {"stat": {"rss_mb": 512.5, "pid": 1}}) is True
+    assert (
+        runner.deliver(runner.generation, {"stat": {"rss_mb": 512.5, "pid": 1}}) is True
+    )
     assert runner.last_stat["rss_mb"] == 512.5
-    assert runner.call("ping")["pong"] is True  # the stat frame did not answer this
-
-
-# ── the watchdog, as data ──
+    assert runner.call("ping")["pong"] is True
 
 
 def test_watchdog_decisions_are_inspectable(runner):
@@ -357,7 +346,9 @@ def test_watchdog_decisions_are_inspectable(runner):
 
 def test_the_restart_budget_stops_an_endless_respawn_loop(tmp_path, worker):
     """A genuinely broken child must produce one honest error, not a busy-loop."""
-    r = SidecarRunner(app="brittle", worker=worker, venv=tmp_path / "venv", restart_max=0)
+    r = SidecarRunner(
+        app="brittle", worker=worker, venv=tmp_path / "venv", restart_max=0
+    )
     try:
         r.ensure_started()
         _kill_soon(r.health()["pid"], delay=0.3)
@@ -380,9 +371,11 @@ def test_restart_max_defaults_to_the_config_value(monkeypatch):
 
 
 def test_the_config_default_reads_the_local_models_section():
-    from gideon.config.loader import AppConfig
+    from gideon.core.config.loader import AppConfig
 
-    assert AppConfig().local_models.sidecar_restart_max == sidecar._restart_max_default()
+    assert (
+        AppConfig().local_models.sidecar_restart_max == sidecar._restart_max_default()
+    )
 
 
 @pytest.mark.asyncio
@@ -397,22 +390,19 @@ def test_stopping_is_idempotent_and_leaves_no_child(runner):
     assert runner.is_alive() is False
 
 
-# ── execution mode: the default must stay in-process ──
-
-
 def test_execution_defaults_to_in_process():
     """A sidecar default would silently change the runtime of every installed provider."""
-    from gideon.apps.manifest import EXECUTION_IN_PROCESS, ProviderConfig
+    from gideon.extensions.apps.manifest import EXECUTION_IN_PROCESS, ProviderConfig
 
     assert EXECUTION_IN_PROCESS == "in-process"
     assert ProviderConfig().execution == "in-process"
-    assert ProviderConfig.from_dict({"type": "model", "implementation": "p:make"}).execution == (
-        "in-process"
-    )
+    assert ProviderConfig.from_dict(
+        {"type": "model", "implementation": "p:make"}
+    ).execution == ("in-process")
 
 
 def test_execution_round_trips_and_an_in_process_manifest_grows_no_key():
-    from gideon.apps.manifest import ProviderConfig
+    from gideon.extensions.apps.manifest import ProviderConfig
 
     plain = ProviderConfig(type="model", implementation="p:make")
     assert "execution" not in plain.to_dict()
@@ -425,21 +415,20 @@ def test_execution_round_trips_and_an_in_process_manifest_grows_no_key():
 
 
 def test_an_unknown_execution_mode_is_a_validation_error():
-    from gideon.apps.manifest import ProviderConfig
+    from gideon.extensions.apps.manifest import ProviderConfig
 
-    errors = ProviderConfig(type="model", implementation="p:make", execution="docker").validate()
+    errors = ProviderConfig(
+        type="model", implementation="p:make", execution="docker"
+    ).validate()
     assert any("provider.execution must be one of" in e for e in errors)
 
 
 def test_provider_types_and_the_handler_set_are_untouched():
     """§9: execution is a FIELD on the model type, never a new provider type."""
-    from gideon.apps.manifest import PROVIDER_TYPES
+    from gideon.extensions.apps.manifest import PROVIDER_TYPES
 
     assert "sidecar" not in PROVIDER_TYPES
     assert "in-process" not in PROVIDER_TYPES
-
-
-# ── every spawn in the module carries a ceiling (AST, not a description) ──
 
 
 def test_every_spawn_in_sidecar_py_is_ceiling_wrapped():
@@ -480,9 +469,6 @@ def test_the_child_harness_imports_no_core_package():
     assert not [name for name in imported if name.startswith("gideon")]
 
 
-# ── resumable install jobs (§3.2) ──
-
-
 def _fake_venv(root: Path, *, exit_code: int = 0, marker: bool = True) -> Path:
     """A venv whose ``bin/python`` is a stub script, so no real pip ever runs."""
     venv = root / "venv"
@@ -508,7 +494,7 @@ def test_install_steps_skip_the_work_that_is_already_done(tmp_path):
 def test_an_install_is_idempotent_across_runs(tmp_path):
     venv = _fake_venv(tmp_path)
     install = sidecar.SidecarInstall("fixture-embed", requirements=["numpy"], venv=venv)
-    assert install.run() is True  # the stub python exits 0 → receipt written
+    assert install.run() is True
     assert json.loads((venv / ".gideon-deps.json").read_text()) == ["numpy"]
     again = sidecar.SidecarInstall("fixture-embed", requirements=["numpy"], venv=venv)
     assert again.run() is True
@@ -522,7 +508,7 @@ def test_a_killed_pip_leaves_no_receipt_so_the_step_re_runs(tmp_path):
     assert install.run() is False
     assert not (venv / ".gideon-deps.json").exists()
     assert install.reason == "pip_failed"
-    assert install.remediation  # the actionable next step, distinct from `error`
+    assert install.remediation
     assert install.installed is False
     assert install.log_tail == [] or isinstance(install.log_tail, list)
 
@@ -554,7 +540,9 @@ def test_the_weights_step_reads_the_shared_layout_probe(tmp_path):
 
 def test_a_real_venv_is_created_and_marked_managed(tmp_path):
     """One end-to-end venv creation — the step that a stub can't prove."""
-    install = sidecar.SidecarInstall("fixture-embed", requirements=[], venv=tmp_path / "venv")
+    install = sidecar.SidecarInstall(
+        "fixture-embed", requirements=[], venv=tmp_path / "venv"
+    )
     assert install.run_one("venv") is True
     assert sidecar.venv_python(tmp_path / "venv").is_file()
     assert install.managed is True
@@ -576,7 +564,7 @@ def test_a_managed_venv_is_deleted(tmp_path):
 
 
 def test_for_app_ignores_an_in_process_provider(tmp_path, monkeypatch):
-    from gideon.apps import manager as app_manager
+    from gideon.extensions.apps import manager as app_manager
 
     app_root = tmp_path / "apps"
     monkeypatch.setattr(app_manager, "apps_dir", lambda: app_root)
@@ -618,15 +606,16 @@ def test_for_app_ignores_an_in_process_provider(tmp_path, monkeypatch):
     assert found.requirements == ["sentence-transformers>=3"]
 
 
-# ── the install job rides the existing download registry ──
-
-
 @pytest.fixture
 def install_registry(tmp_path, monkeypatch):
     """A download registry whose sidecar install is a stubbed, instant one."""
     reg = M.ModelDownloadRegistry()
-    install = sidecar.SidecarInstall("fixture-embed", requirements=[], venv=_fake_venv(tmp_path))
-    monkeypatch.setattr(M.ModelDownloadRegistry, "install", lambda self, provider: install)
+    install = sidecar.SidecarInstall(
+        "fixture-embed", requirements=[], venv=_fake_venv(tmp_path)
+    )
+    monkeypatch.setattr(
+        M.ModelDownloadRegistry, "install", lambda self, provider: install
+    )
     return reg, install
 
 
@@ -652,7 +641,9 @@ async def _settle(pred=None, *, timeout=10.0):
 
 
 @pytest.mark.asyncio
-async def test_the_install_job_is_a_sidecar_install_kind_on_the_one_registry(install_registry):
+async def test_the_install_job_is_a_sidecar_install_kind_on_the_one_registry(
+    install_registry,
+):
     reg, _ = install_registry
     job, err = reg.start_install("fixture-embed")
     assert err is None and job is not None
@@ -672,12 +663,16 @@ async def test_a_second_start_returns_the_in_flight_job(install_registry):
 
 
 @pytest.mark.asyncio
-async def test_a_failed_install_reports_the_typed_reason_on_the_job(tmp_path, monkeypatch):
+async def test_a_failed_install_reports_the_typed_reason_on_the_job(
+    tmp_path, monkeypatch
+):
     reg = M.ModelDownloadRegistry()
     install = sidecar.SidecarInstall(
         "fixture-embed", requirements=["numpy"], venv=_fake_venv(tmp_path, exit_code=1)
     )
-    monkeypatch.setattr(M.ModelDownloadRegistry, "install", lambda self, provider: install)
+    monkeypatch.setattr(
+        M.ModelDownloadRegistry, "install", lambda self, provider: install
+    )
     job, err = reg.start_install("fixture-embed")
     assert err is None
     await _settle(lambda: reg.install_job("fixture-embed").state == "error")
@@ -690,9 +685,6 @@ def test_starting_an_install_for_an_in_process_provider_is_refused():
     job, err = reg.start_install("not-a-sidecar-app")
     assert job is None
     assert "no sidecar provider" in err
-
-
-# ── HTTP surface ──
 
 
 def _req(method, path, reg, *, body=None, match_info=None):
@@ -745,7 +737,14 @@ async def test_install_status_carries_steps_log_tail_and_remediation(install_reg
     job = body["job"]
     assert job["state"] == "done"
     assert [s["name"] for s in job["steps"]] == ["venv", "deps", "weights"]
-    assert set(job) >= {"state", "steps", "log_tail", "error", "remediation", "weights_progress"}
+    assert set(job) >= {
+        "state",
+        "steps",
+        "log_tail",
+        "error",
+        "remediation",
+        "weights_progress",
+    }
 
 
 @pytest.mark.asyncio
@@ -761,8 +760,12 @@ async def test_install_status_404s_for_a_provider_with_no_sidecar():
 async def test_delete_refuses_with_409_while_the_install_runs(tmp_path, monkeypatch):
     """Deleting the tree under a live pip is how a half-installed venv is born."""
     reg = M.ModelDownloadRegistry()
-    install = sidecar.SidecarInstall("fixture-embed", requirements=[], venv=_fake_venv(tmp_path))
-    monkeypatch.setattr(M.ModelDownloadRegistry, "install", lambda self, provider: install)
+    install = sidecar.SidecarInstall(
+        "fixture-embed", requirements=[], venv=_fake_venv(tmp_path)
+    )
+    monkeypatch.setattr(
+        M.ModelDownloadRegistry, "install", lambda self, provider: install
+    )
 
     started = threading.Event()
     release = threading.Event()
@@ -791,8 +794,12 @@ async def test_delete_refuses_with_409_while_the_install_runs(tmp_path, monkeypa
 @pytest.mark.asyncio
 async def test_delete_refuses_an_unmanaged_venv(tmp_path, monkeypatch):
     reg = M.ModelDownloadRegistry()
-    install = sidecar.SidecarInstall("fixture-embed", venv=_fake_venv(tmp_path, marker=False))
-    monkeypatch.setattr(M.ModelDownloadRegistry, "install", lambda self, provider: install)
+    install = sidecar.SidecarInstall(
+        "fixture-embed", venv=_fake_venv(tmp_path, marker=False)
+    )
+    monkeypatch.setattr(
+        M.ModelDownloadRegistry, "install", lambda self, provider: install
+    )
     resp = await H.api_sidecar_install_delete(
         _req("DELETE", "/x", reg, match_info={"provider": "fixture-embed"})
     )
@@ -805,15 +812,14 @@ async def test_delete_removes_a_managed_venv(tmp_path, monkeypatch):
     reg = M.ModelDownloadRegistry()
     venv = _fake_venv(tmp_path)
     install = sidecar.SidecarInstall("fixture-embed", venv=venv)
-    monkeypatch.setattr(M.ModelDownloadRegistry, "install", lambda self, provider: install)
+    monkeypatch.setattr(
+        M.ModelDownloadRegistry, "install", lambda self, provider: install
+    )
     resp = await H.api_sidecar_install_delete(
         _req("DELETE", "/x", reg, match_info={"provider": "fixture-embed"})
     )
     assert resp.status == 200
     assert not venv.exists()
-
-
-# ── residency: loaded models, pressure, unload ──
 
 
 class _FakeEmbedder(LocalModelProvider):
@@ -852,7 +858,7 @@ class _Loaded:
 @pytest.fixture
 def registered_fake(monkeypatch):
     """Register a fake provider under an APP name, and clean the global registry up."""
-    from gideon.local_models import registry as reg_mod
+    from gideon.integrations.local_models import registry as reg_mod
 
     provider = _FakeEmbedder()
     reg_mod.register_provider(provider, capabilities=["embedding"], name="fake-embed")
@@ -869,7 +875,7 @@ def test_the_abc_default_reports_declared_attributes_as_resident():
 
 def test_unload_is_idempotent_and_honest_about_freeing_nothing():
     provider = _FakeEmbedder()
-    assert provider.unload() is False  # nothing was resident; don't pretend
+    assert provider.unload() is False
     provider._model = _Loaded()
     assert provider.unload() is True
     assert provider.loaded_models() == []
@@ -894,7 +900,9 @@ async def test_ensure_ready_separates_ready_from_unavailable():
     assert await _Broken().ensure_ready() == (False, "unavailable")
 
 
-def test_a_model_resident_after_a_binding_switch_shows_inactive(registered_fake, monkeypatch):
+def test_a_model_resident_after_a_binding_switch_shows_inactive(
+    registered_fake, monkeypatch
+):
     """Success Criterion 8's attribution half — the reclaimable case."""
     registered_fake._model = _Loaded()
 
@@ -910,12 +918,13 @@ def test_a_model_resident_after_a_binding_switch_shows_inactive(registered_fake,
         }
     ]
 
-    # The user binds a different model. The old one is still in RAM.
     monkeypatch.setattr(residency, "_bound_refs", lambda: {"fake-embed:bge-large"})
     assert residency.loaded_occupants()[0]["is_active"] is False
 
 
-def test_attribution_accepts_either_spelling_of_the_provider_name(registered_fake, monkeypatch):
+def test_attribution_accepts_either_spelling_of_the_provider_name(
+    registered_fake, monkeypatch
+):
     """The registry keys on the APP name while a ref may carry the provider's own name."""
     registered_fake._model = _Loaded()
     monkeypatch.setattr(residency, "_bound_refs", lambda: {"native:L6-v2"})
@@ -940,12 +949,12 @@ def test_pressure_never_warns_on_unknown_memory(monkeypatch):
     monkeypatch.setattr(
         residency, "_linux_memory", lambda: (_ for _ in ()).throw(OSError("no meminfo"))
     )
-    # warn_pct=0 is the case that actually exercises the guard: `0 >= 0` is True, so
-    # without the "did we measure anything" clause an unreadable host would warn forever.
     for threshold in (0, 1, 85):
         snapshot = residency.memory_pressure(warn_pct=threshold)
         assert snapshot["source"] == "unavailable"
-        assert snapshot["warn"] is False, f"warned on unmeasured memory at warn_pct={threshold}"
+        assert (
+            snapshot["warn"] is False
+        ), f"warned on unmeasured memory at warn_pct={threshold}"
         assert snapshot["total_mb"] == 0
 
 
@@ -957,13 +966,15 @@ def test_pressure_warns_at_the_threshold(monkeypatch):
 
 
 def test_the_pressure_threshold_comes_from_config(monkeypatch):
-    from gideon.config.loader import AppConfig
+    from gideon.core.config.loader import AppConfig
 
     assert AppConfig().local_models.pressure_warn_pct == residency._warn_pct_default()
 
 
 @pytest.mark.asyncio
-async def test_unload_frees_the_model_and_returns_a_fresh_pressure_snapshot(registered_fake):
+async def test_unload_frees_the_model_and_returns_a_fresh_pressure_snapshot(
+    registered_fake,
+):
     registered_fake._model = _Loaded()
     result = await residency.unload_provider("fake-embed")
     assert result["ok"] is True
@@ -971,7 +982,6 @@ async def test_unload_frees_the_model_and_returns_a_fresh_pressure_snapshot(regi
     assert result["kind"] == "in-process"
     assert "used_pct" in result["pressure"]
     assert residency.loaded_occupants() == []
-    # Idempotent: a second unload frees nothing and says so.
     assert (await residency.unload_provider("fake-embed"))["freed"] is False
 
 
@@ -983,15 +993,17 @@ async def test_unloading_an_unknown_provider_is_a_404_shaped_result():
 
 
 @pytest.mark.asyncio
-async def test_a_sidecar_row_carries_child_reported_rss(registered_fake, worker, tmp_path):
+async def test_a_sidecar_row_carries_child_reported_rss(
+    registered_fake, worker, tmp_path
+):
     """The widget's RSS number comes from the CHILD, not a guess about the gateway."""
-    from gideon.local_models import sidecar as S
+    from gideon.integrations.local_models import sidecar as S
 
     runner = SidecarRunner(app="fake-embed", worker=worker, venv=tmp_path / "venv")
     S.register_runner(runner)
     try:
         registered_fake._model = _Loaded()
-        runner.stat()  # a real stat frame from a real child
+        runner.stat()
         rows = residency.loaded_occupants()
         assert rows[0]["kind"] == "sidecar"
         assert rows[0]["rss_mb"] > 0
@@ -1003,7 +1015,7 @@ async def test_a_sidecar_row_carries_child_reported_rss(registered_fake, worker,
 
 @pytest.mark.asyncio
 async def test_a_dead_sidecar_holds_nothing(registered_fake, worker, tmp_path):
-    from gideon.local_models import sidecar as S
+    from gideon.integrations.local_models import sidecar as S
 
     runner = SidecarRunner(app="fake-embed", worker=worker, venv=tmp_path / "venv")
     S.register_runner(runner)
@@ -1011,7 +1023,7 @@ async def test_a_dead_sidecar_holds_nothing(registered_fake, worker, tmp_path):
         registered_fake._model = _Loaded()
         runner.ensure_started()
         runner.stop()
-        assert residency.loaded_occupants() == []  # no stale row from a dead generation
+        assert residency.loaded_occupants() == []
     finally:
         S.unregister_runner("fake-embed")
 
@@ -1033,15 +1045,17 @@ async def test_the_residency_snapshot_reports_readiness_per_provider(registered_
 
 @pytest.mark.asyncio
 async def test_a_broken_provider_does_not_blank_the_widget(monkeypatch):
-    from gideon.local_models import registry as reg_mod
+    from gideon.integrations.local_models import registry as reg_mod
 
     class _Exploding(_FakeEmbedder):
         def loaded_models(self):
             raise RuntimeError("reflection failed")
 
-    reg_mod.register_provider(_Exploding(), capabilities=["embedding"], name="broken-embed")
+    reg_mod.register_provider(
+        _Exploding(), capabilities=["embedding"], name="broken-embed"
+    )
     try:
-        assert residency.loaded_occupants() == []  # skipped, not raised
+        assert residency.loaded_occupants() == []
     finally:
         reg_mod.unregister_provider("broken-embed")
 
@@ -1067,9 +1081,6 @@ async def test_the_loaded_and_unload_endpoints(registered_fake):
         _req("POST", "/api/models/unload", reg, body={"provider": "ghost"})
     )
     assert resp.status == 404
-
-
-# ── the fixture worker is real app-side code; keep it honest ──
 
 
 def test_the_fixture_worker_is_valid_python():

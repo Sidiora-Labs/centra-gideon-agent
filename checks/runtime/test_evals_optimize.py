@@ -24,7 +24,7 @@ satisfied while being quietly false, so each is railed with its own negative:
   test would stay green.
 
 The last group is the call-site half: the bundled template's ``bash`` nodes name subcommands
-and ``PC_OPT_*`` env keys, and those names are asserted against the module's own tables. The
+and ``GIDEON_OPT_*`` env keys, and those names are asserted against the module's own tables. The
 decisive question for those — would deleting the caller be caught — is yes in both directions:
 renaming a subcommand fails the template's test, and dropping the template's env key fails the
 coverage test.
@@ -38,14 +38,11 @@ from pathlib import Path
 
 import pytest
 
-from gideon.evals import optimize
-from gideon.guardrails.budgets import SpendMeter
-from gideon.workflows import scope as scope_mod
+from gideon.assurance.evals import optimize
+from gideon.automation.workflows import scope as scope_mod
+from gideon.security.guardrails.budgets import SpendMeter
 
 TEMPLATE = "optimize-harness"
-
-
-# ── fixtures + independent observation helpers ───────────────────────────────
 
 
 def _digest(root: Path) -> dict[str, str]:
@@ -67,7 +64,9 @@ def live(tmp_path: Path) -> Path:
     """A live artifact directory with content and a lock file — the frozen region."""
     root = tmp_path / "live" / "code-project"
     root.mkdir(parents=True)
-    (root / "workflow.json").write_text(json.dumps({"name": "code-project"}), encoding="utf-8")
+    (root / "workflow.json").write_text(
+        json.dumps({"name": "code-project"}), encoding="utf-8"
+    )
     (root / optimize.LOCK_NAME).write_text(json.dumps({"hashes": {}}), encoding="utf-8")
     return root
 
@@ -99,7 +98,7 @@ def isolated_home(tmp_path, monkeypatch) -> Path:
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(home))
-    from gideon.evals import store
+    from gideon.assurance.evals import store
 
     assert store.evals_root().is_relative_to(home), store.evals_root()
     return home
@@ -146,13 +145,12 @@ def _run(live: Path, sandbox: Path, meter: SpendMeter, **kw):
         "suite_threshold": 0.5,
         "stops": _stops(),
         "meter": meter,
-        "best_ever": optimize.BestEver(value=0.0, rows_considered=0, subject="code-project"),
+        "best_ever": optimize.BestEver(
+            value=0.0, rows_considered=0, subject="code-project"
+        ),
     }
     defaults.update(kw)
     return optimize.run_search(**defaults)  # type: ignore[arg-type]
-
-
-# ── "nothing live mutates during the search" ─────────────────────────────────
 
 
 class TestNothingLiveMutates:
@@ -233,9 +231,6 @@ class TestNothingLiveMutates:
         assert "frozen region" in str(exc.value)
 
 
-# ── the frozen region refuses rather than records ────────────────────────────
-
-
 class TestFrozenRegion:
     def test_frozen_BEATS_allowed(self, tmp_path: Path) -> None:
         """A frozen path nested inside an allowed root is still a violation.
@@ -252,9 +247,13 @@ class TestFrozenRegion:
         after = scope_mod.snapshot([str(root)])
 
         allowed_only = scope_mod.diff(before, after, [str(root)])
-        assert allowed_only.clean, "precondition: plain allowed-scope diff sees no violation"
+        assert (
+            allowed_only.clean
+        ), "precondition: plain allowed-scope diff sees no violation"
 
-        verdict = optimize.scope_check(before, after, allowed=[str(root)], frozen=[str(nested)])
+        verdict = optimize.scope_check(
+            before, after, allowed=[str(root)], frozen=[str(nested)]
+        )
         assert verdict.violation
         assert verdict.outcome is optimize.CandidateOutcome.SCOPE_VIOLATION
         assert verdict.frozen_touched
@@ -276,10 +275,6 @@ class TestFrozenRegion:
             if iteration > 2:
                 return None
             if iteration == 1:
-                # Touch the live artifact and put its bytes back. The touch is the violation;
-                # restoring keeps the SEARCH legal so the run reaches its end and the winner
-                # can be inspected — a persisted change would (correctly) raise instead, which
-                # is what `test_a_scorer_that_MUTATES_...` covers.
                 path = live / "workflow.json"
                 keep = path.read_text(encoding="utf-8")
                 path.write_text("smuggled", encoding="utf-8")
@@ -297,19 +292,19 @@ class TestFrozenRegion:
         outcome = _run(live, sandbox, meter, propose=propose, score=score)
         rows = {r.iteration: r for r in outcome.rows}
         assert rows[1].outcome == "scope_violation"
-        assert rows[1].score == 0.0, "a violator is never scored — that is what makes it cheap"
+        assert (
+            rows[1].score == 0.0
+        ), "a violator is never scored — that is what makes it cheap"
         assert outcome.winner is not None and outcome.winner.iteration == 2
         assert outcome.winner_score == 0.6
-
-
-# ── the dual gate, one half at a time ────────────────────────────────────────
 
 
 class TestDualGate:
     def test_half_A_alone_cannot_admit(self) -> None:
         """Beats the best-ever, fails the suite threshold → discarded."""
         gate = optimize.DualGate(
-            suite_threshold=0.8, best_ever=optimize.BestEver(value=0.1, rows_considered=3)
+            suite_threshold=0.8,
+            best_ever=optimize.BestEver(value=0.1, rows_considered=3),
         )
         assert gate.beats_best_ever(0.5), "precondition: half B is satisfied"
         assert not gate.clears_suite_threshold(0.5)
@@ -318,7 +313,8 @@ class TestDualGate:
     def test_half_B_alone_cannot_admit(self) -> None:
         """Clears the suite threshold, does not beat the best-ever → discarded."""
         gate = optimize.DualGate(
-            suite_threshold=0.5, best_ever=optimize.BestEver(value=0.9, rows_considered=3)
+            suite_threshold=0.5,
+            best_ever=optimize.BestEver(value=0.9, rows_considered=3),
         )
         assert gate.clears_suite_threshold(0.7), "precondition: half A is satisfied"
         assert not gate.beats_best_ever(0.7)
@@ -326,7 +322,8 @@ class TestDualGate:
 
     def test_both_halves_admit(self) -> None:
         gate = optimize.DualGate(
-            suite_threshold=0.5, best_ever=optimize.BestEver(value=0.6, rows_considered=1)
+            suite_threshold=0.5,
+            best_ever=optimize.BestEver(value=0.6, rows_considered=1),
         )
         assert gate.decide(0.7) is optimize.CandidateOutcome.ADMITTED
 
@@ -334,13 +331,15 @@ class TestDualGate:
         """Ties lose: hill-climbing on equal scores is how a search spends a budget wandering
         a plateau and then calls its last step a win."""
         gate = optimize.DualGate(
-            suite_threshold=0.5, best_ever=optimize.BestEver(value=0.7, rows_considered=1)
+            suite_threshold=0.5,
+            best_ever=optimize.BestEver(value=0.7, rows_considered=1),
         )
         assert gate.decide(0.7) is optimize.CandidateOutcome.NOT_BEST_EVER
 
     def test_the_threshold_itself_passes(self) -> None:
         gate = optimize.DualGate(
-            suite_threshold=0.5, best_ever=optimize.BestEver(value=0.0, rows_considered=0)
+            suite_threshold=0.5,
+            best_ever=optimize.BestEver(value=0.0, rows_considered=0),
         )
         assert gate.clears_suite_threshold(0.5)
 
@@ -363,7 +362,9 @@ class TestDualGate:
 
         monkeypatch.setattr(optimize, "capture_best_ever", counting)
         propose, score = _proposer([0.6, 0.7, 0.8])
-        outcome = _run(live, sandbox, meter, propose=propose, score=score, best_ever=None)
+        outcome = _run(
+            live, sandbox, meter, propose=propose, score=score, best_ever=None
+        )
 
         assert calls == ["code-project"]
         assert outcome.gate["best_ever"] == 0.0
@@ -371,7 +372,11 @@ class TestDualGate:
 
     def test_capture_best_ever_ignores_rows_of_another_kind_or_subject(self) -> None:
         rows = [
-            {"kind": optimize.SEARCH_KIND, "study_id": "code-project", "score_new": "0.4"},
+            {
+                "kind": optimize.SEARCH_KIND,
+                "study_id": "code-project",
+                "score_new": "0.4",
+            },
             {"kind": optimize.SEARCH_KIND, "study_id": "other", "score_new": "0.99"},
             {"kind": "template_study", "study_id": "code-project", "score_new": "0.98"},
         ]
@@ -383,15 +388,19 @@ class TestDualGate:
         ``rows_considered`` exists to say."""
         empty = optimize.capture_best_ever("s", rows=[])
         zeroed = optimize.capture_best_ever(
-            "s", rows=[{"kind": optimize.SEARCH_KIND, "study_id": "s", "score_new": "0"}]
+            "s",
+            rows=[{"kind": optimize.SEARCH_KIND, "study_id": "s", "score_new": "0"}],
         )
         assert empty.value == zeroed.value == 0.0
         assert (empty.rows_considered, zeroed.rows_considered) == (0, 1)
 
-    def test_capture_reads_the_REAL_ledger_through_the_store(self, isolated_home: Path) -> None:
+    def test_capture_reads_the_REAL_ledger_through_the_store(
+        self, isolated_home: Path
+    ) -> None:
         """The default path (``rows=None``) goes through ``store.read_results``, against an
-        isolated home. Without this the ledger read is only ever exercised with injected rows."""
-        from gideon.evals import store
+        isolated home. Without this the ledger read is only ever exercised with injected rows.
+        """
+        from gideon.assurance.evals import store
 
         path = store.results_path()
         path.write_text(
@@ -411,9 +420,6 @@ class TestDualGate:
         assert optimize.capture_best_ever("code-project").value == 0.75
 
 
-# ── the three declared halts, each firing and each not ───────────────────────
-
-
 class TestHalts:
     def test_hypothesis_abandon_after_HALTS(
         self, live: Path, sandbox: Path, meter: SpendMeter
@@ -422,7 +428,12 @@ class TestHalts:
             [0.1, 0.1, 0.1, 0.1], fingerprints=["same", "same", "same", "same"]
         )
         outcome = _run(
-            live, sandbox, meter, propose=propose, score=score, stops=_stops(no_improvement_halt=99)
+            live,
+            sandbox,
+            meter,
+            propose=propose,
+            score=score,
+            stops=_stops(no_improvement_halt=99),
         )
         assert outcome.halt_reason is optimize.HaltReason.HYPOTHESIS_ABANDONED
         assert outcome.iterations == 3
@@ -432,17 +443,28 @@ class TestHalts:
         self, live: Path, sandbox: Path, meter: SpendMeter
     ) -> None:
         """A proposer trying two fixes in turn is exploring. Abandoning it would be abandoning
-        the search, not the hypothesis — so the detector must not fire on any repetition."""
-        propose, score = _proposer([0.1] * 6, fingerprints=["a", "b", "a", "b", "a", "b"])
+        the search, not the hypothesis — so the detector must not fire on any repetition.
+        """
+        propose, score = _proposer(
+            [0.1] * 6, fingerprints=["a", "b", "a", "b", "a", "b"]
+        )
         outcome = _run(
-            live, sandbox, meter, propose=propose, score=score, stops=_stops(no_improvement_halt=99)
+            live,
+            sandbox,
+            meter,
+            propose=propose,
+            score=score,
+            stops=_stops(no_improvement_halt=99),
         )
         assert outcome.halt_reason is not optimize.HaltReason.HYPOTHESIS_ABANDONED
 
-    def test_no_improvement_halt_HALTS(self, live: Path, sandbox: Path, meter: SpendMeter) -> None:
+    def test_no_improvement_halt_HALTS(
+        self, live: Path, sandbox: Path, meter: SpendMeter
+    ) -> None:
         """The clause the census found ABSENT from the tree. Its call site is
         ``run_search``'s third halt check; deleting it leaves this search running to
-        ``max_iterations`` with a different halt reason, which is what this asserts against."""
+        ``max_iterations`` with a different halt reason, which is what this asserts against.
+        """
         propose, score = _proposer([0.1] * 8, fingerprints=[f"f{i}" for i in range(8)])
         outcome = _run(
             live,
@@ -450,7 +472,9 @@ class TestHalts:
             meter,
             propose=propose,
             score=score,
-            stops=_stops(no_improvement_halt=3, hypothesis_abandon_after=99, max_iterations=8),
+            stops=_stops(
+                no_improvement_halt=3, hypothesis_abandon_after=99, max_iterations=8
+            ),
         )
         assert outcome.halt_reason is optimize.HaltReason.NO_IMPROVEMENT
         assert outcome.iterations == 3
@@ -472,7 +496,9 @@ class TestHalts:
         assert outcome.halt_reason is optimize.HaltReason.PROPOSER_EXHAUSTED
         assert outcome.winner_score == 0.9
 
-    def test_budget_usd_HALTS(self, live: Path, sandbox: Path, meter: SpendMeter) -> None:
+    def test_budget_usd_HALTS(
+        self, live: Path, sandbox: Path, meter: SpendMeter
+    ) -> None:
         propose, score = _proposer([0.6] * 8)
 
         def charging(candidate: optimize.Candidate, cand_dir: Path):
@@ -485,7 +511,9 @@ class TestHalts:
             meter,
             propose=propose,
             score=charging,
-            stops=_stops(budget_usd=1.0, no_improvement_halt=99, hypothesis_abandon_after=99),
+            stops=_stops(
+                budget_usd=1.0, no_improvement_halt=99, hypothesis_abandon_after=99
+            ),
         )
         assert outcome.halt_reason is optimize.HaltReason.BUDGET_EXHAUSTED
         assert "budget exceeded" in outcome.halt_detail
@@ -501,7 +529,12 @@ class TestHalts:
             return (0.6 if candidate.iteration == 1 else 0.7), {}
 
         outcome = _run(
-            live, sandbox, meter, propose=propose, score=charging, stops=_stops(budget_usd=1.0)
+            live,
+            sandbox,
+            meter,
+            propose=propose,
+            score=charging,
+            stops=_stops(budget_usd=1.0),
         )
         assert outcome.halt_reason is not optimize.HaltReason.BUDGET_EXHAUSTED
 
@@ -514,27 +547,39 @@ class TestHalts:
     def test_max_iterations_is_the_floor_under_the_other_three(
         self, live: Path, sandbox: Path, meter: SpendMeter
     ) -> None:
-        propose, score = _proposer([0.1] * 20, fingerprints=[f"f{i}" for i in range(20)])
+        propose, score = _proposer(
+            [0.1] * 20, fingerprints=[f"f{i}" for i in range(20)]
+        )
         outcome = _run(
             live,
             sandbox,
             meter,
             propose=propose,
             score=score,
-            stops=_stops(max_iterations=4, no_improvement_halt=99, hypothesis_abandon_after=99),
+            stops=_stops(
+                max_iterations=4, no_improvement_halt=99, hypothesis_abandon_after=99
+            ),
         )
         assert outcome.halt_reason is optimize.HaltReason.ITERATIONS_EXHAUSTED
         assert outcome.iterations == 4
-        assert not outcome.needs_from_human, "a too-small envelope is not a question for a human"
+        assert (
+            not outcome.needs_from_human
+        ), "a too-small envelope is not a question for a human"
 
     def test_a_zero_window_falls_back_rather_than_disabling_its_halt(self) -> None:
         """A declared halt with a window of 0 would be a halt that never fires. A template that
         named the halt asked for it, so the default wins over the disabling value."""
         stops = optimize.StopConditions.from_config(
-            {"budget_usd": 1.0, "no_improvement_halt": 0, "hypothesis_abandon_after": -2}
+            {
+                "budget_usd": 1.0,
+                "no_improvement_halt": 0,
+                "hypothesis_abandon_after": -2,
+            }
         )
         assert stops.no_improvement_halt == optimize.DEFAULT_NO_IMPROVEMENT_HALT
-        assert stops.hypothesis_abandon_after == optimize.DEFAULT_HYPOTHESIS_ABANDON_AFTER
+        assert (
+            stops.hypothesis_abandon_after == optimize.DEFAULT_HYPOTHESIS_ABANDON_AFTER
+        )
 
     def test_the_detectors_never_fire_on_a_window_they_have_not_filled(self) -> None:
         assert not optimize.hypothesis_abandoned(["a", "a"], 3)
@@ -544,15 +589,13 @@ class TestHalts:
         assert not optimize.no_improvement([0.5, 0.5, 0.6], 3)
 
 
-# ── no_change inherits, and the experience directory ─────────────────────────
-
-
 class TestCheapPaths:
     def test_a_no_change_candidate_is_NOT_scored(
         self, live: Path, sandbox: Path, meter: SpendMeter
     ) -> None:
         """MetaHarness's ordering: the cheap validation runs before any LLM spend. Asserted by
-        counting scorer calls, because "we did not pay for it" is a claim about the caller."""
+        counting scorer calls, because "we did not pay for it" is a claim about the caller.
+        """
         scored: list[int] = []
 
         def propose(iteration: int, sb: Path, experience: list[dict]):
@@ -584,12 +627,19 @@ class TestCheapPaths:
             return propose(iteration, sb, experience)
 
         _run(live, sandbox, meter, propose=watching, score=score)
-        # Four calls for three candidates: the fourth is the one that returns None and ends the
-        # search, and it still sees the full ledger the third wrote.
-        assert seen == [0, 1, 2, 3], "each iteration reads the ledger the previous one wrote"
+        assert seen == [
+            0,
+            1,
+            2,
+            3,
+        ], "each iteration reads the ledger the previous one wrote"
         exp = sandbox / optimize.EXPERIENCE_DIR
         assert (exp / "index.json").is_file()
-        assert sorted(p.name for p in exp.glob("*.diff")) == ["001.diff", "002.diff", "003.diff"]
+        assert sorted(p.name for p in exp.glob("*.diff")) == [
+            "001.diff",
+            "002.diff",
+            "003.diff",
+        ]
         index = json.loads((exp / "index.json").read_text(encoding="utf-8"))
         assert all(row["diff_ref"].endswith(".diff") for row in index)
 
@@ -605,23 +655,30 @@ class TestCheapPaths:
             "below_suite_threshold",
             "admitted",
         ]
-        assert json.loads((sandbox / "search.json").read_text(encoding="utf-8"))["iterations"] == 3
-
-
-# ── the winner is a PROPOSAL a human installs ────────────────────────────────
+        assert (
+            json.loads((sandbox / "search.json").read_text(encoding="utf-8"))[
+                "iterations"
+            ]
+            == 3
+        )
 
 
 class TestProposalNotInstall:
-    def test_the_winner_is_filed_through_the_ONE_human_gated_queue(self, monkeypatch) -> None:
+    def test_the_winner_is_filed_through_the_ONE_human_gated_queue(
+        self, monkeypatch
+    ) -> None:
         seen: dict = {}
 
         def fake_file(workflow_name, *, ops, rationale, run_ids, predicted_fixes):
             seen.update(
-                workflow_name=workflow_name, ops=ops, rationale=rationale, fixes=predicted_fixes
+                workflow_name=workflow_name,
+                ops=ops,
+                rationale=rationale,
+                fixes=predicted_fixes,
             )
             return {"filed": True, "proposal_id": "p-1"}
 
-        from gideon.learning import refiner_tools
+        from gideon.cognition.learning import refiner_tools
 
         monkeypatch.setattr(refiner_tools, "file_template_diff", fake_file)
         outcome = optimize.SearchOutcome(
@@ -629,7 +686,9 @@ class TestProposalNotInstall:
             halt_detail="plateau",
             iterations=4,
             winner=optimize.Candidate(
-                iteration=3, fix_fingerprint="fp", ops=({"op": "update_node", "id": "a"},)
+                iteration=3,
+                fix_fingerprint="fp",
+                ops=({"op": "update_node", "id": "a"},),
             ),
             winner_score=0.82,
             gate={"suite_threshold": 0.5, "best_ever": 0.7},
@@ -642,7 +701,7 @@ class TestProposalNotInstall:
         assert "0.5" in seen["rationale"] and "0.7" in seen["rationale"]
 
     def test_a_search_that_admitted_NOTHING_files_nothing(self, monkeypatch) -> None:
-        from gideon.learning import refiner_tools
+        from gideon.cognition.learning import refiner_tools
 
         def explode(*a, **k):  # pragma: no cover - must never run
             raise AssertionError("filed a proposal for a search with no winner")
@@ -662,17 +721,21 @@ class TestProposalNotInstall:
         adds a convenience "just apply it" call to this module — which is the whole risk.
         """
         source = Path(optimize.__file__).read_text(encoding="utf-8")
-        for forbidden in ("save_def", "install_skill", "proposals.accept", "template_store"):
+        for forbidden in (
+            "save_def",
+            "install_skill",
+            "proposals.accept",
+            "template_store",
+        ):
             assert forbidden not in source, forbidden
 
 
-# ── the CLI the bundled template shells into ─────────────────────────────────
-
-
 def _template_spec() -> dict:
-    from gideon.workflows.bundled_defs import bundled_root
+    from gideon.automation.workflows.bundled_defs import bundled_root
 
-    return json.loads((bundled_root() / TEMPLATE / "workflow.json").read_text(encoding="utf-8"))
+    return json.loads(
+        (bundled_root() / TEMPLATE / "workflow.json").read_text(encoding="utf-8")
+    )
 
 
 def _nodes(node: dict) -> list[dict]:
@@ -687,10 +750,11 @@ def _nodes(node: dict) -> list[dict]:
 
 class TestTemplateCallSites:
     """The template ↔ module seam. Every assertion here answers "would deleting the caller be
-    caught?" — because the template is the caller and the module's tables are the callee."""
+    caught?" — because the template is the caller and the module's tables are the callee.
+    """
 
     def test_the_template_ships(self) -> None:
-        from gideon.workflows.bundled_defs import template_names
+        from gideon.automation.workflows.bundled_defs import template_names
 
         assert TEMPLATE in template_names()
 
@@ -700,12 +764,14 @@ class TestTemplateCallSites:
             for n in _nodes(_template_spec()["root"])
             if (n.get("config") or {}).get("provider") == "bash"
         ]
-        assert commands, "no bash nodes found — the extraction is broken, not the template"
+        assert (
+            commands
+        ), "no bash nodes found — the extraction is broken, not the template"
         invoked = set()
         for command in commands:
-            assert "gideon.evals.optimize" in command, command
+            assert "gideon.assurance.evals.optimize" in command, command
             parts = command.split()
-            invoked.add(parts[parts.index("gideon.evals.optimize") + 1])
+            invoked.add(parts[parts.index("gideon.assurance.evals.optimize") + 1])
         assert invoked, "extracted no subcommand names"
         assert invoked <= set(optimize.COMMANDS), invoked - set(optimize.COMMANDS)
         assert {"preflight", "scope-check", "adjudicate"} <= invoked
@@ -716,8 +782,8 @@ class TestTemplateCallSites:
         declared: set[str] = set()
         for node in _nodes(_template_spec()["root"]):
             payload = (node.get("config") or {}).get("payload") or {}
-            declared |= {k for k in payload if k.startswith("PC_OPT_")}
-        assert declared, "no PC_OPT_* keys found — the extraction is broken"
+            declared |= {k for k in payload if k.startswith("GIDEON_OPT_")}
+        assert declared, "no GIDEON_OPT_* keys found — the extraction is broken"
         known = (
             set(optimize.ENV_PAYLOAD_KEYS)
             | set(optimize.ENV_STOP_KEYS)
@@ -731,9 +797,9 @@ class TestTemplateCallSites:
         for node in _nodes(spec["root"]):
             payloads.update((node.get("config") or {}).get("payload") or {})
         for key in (
-            "PC_OPT_BUDGET_USD",
-            "PC_OPT_ABANDON_AFTER",
-            "PC_OPT_NO_IMPROVEMENT_HALT",
+            "GIDEON_OPT_BUDGET_USD",
+            "GIDEON_OPT_ABANDON_AFTER",
+            "GIDEON_OPT_NO_IMPROVEMENT_HALT",
         ):
             assert key in payloads, key
         assert set(spec["inputs"]) >= {
@@ -751,7 +817,8 @@ class TestTemplateCallSites:
         gates = [
             n
             for n in _nodes(_template_spec()["root"])
-            if n.get("kind") == "gate" and (n.get("config") or {}).get("kind") == "expression"
+            if n.get("kind") == "gate"
+            and (n.get("config") or {}).get("kind") == "expression"
         ]
         assert gates, "the loop body has no refusal gate"
         exprs = [str((g.get("config") or {}).get("expr", "")) for g in gates]
@@ -759,15 +826,12 @@ class TestTemplateCallSites:
 
     def test_the_agent_and_the_action_provider_are_both_REGISTERED(self) -> None:
         """A provider in one set but not the others saves and then fails to run."""
-        from gideon.action_providers.registry import (
+        from gideon.assurance.validation import ALLOWED_HOOK_PROVIDERS
+        from gideon.integrations.action_providers.registry import (
             _ensure_default_providers_registered,
             get_action_provider,
         )
-        from gideon.validation import ALLOWED_HOOK_PROVIDERS
 
-        # The registry is populated lazily on first action dispatch (`gideon.hooks`), so a
-        # bare unit test sees it empty. Bootstrapping is what makes the assertion below about
-        # registration rather than about import order.
         _ensure_default_providers_registered()
 
         agents: set[str] = set()
@@ -782,12 +846,15 @@ class TestTemplateCallSites:
 
         for name in providers:
             assert get_action_provider(name) is not None, f"{name} is not registered"
-            assert name in ALLOWED_HOOK_PROVIDERS, f"{name} is not in ALLOWED_HOOK_PROVIDERS"
+            assert (
+                name in ALLOWED_HOOK_PROVIDERS
+            ), f"{name} is not in ALLOWED_HOOK_PROVIDERS"
 
-        from gideon.agents.defaults import TEMPLATE_REFINER_AGENT_NAME, is_reserved_agent
+        from gideon.engine.agents.defaults import (
+            TEMPLATE_REFINER_AGENT_NAME,
+            is_reserved_agent,
+        )
 
-        # RESERVED is the stronger claim than "exists in some list": a reserved name is one the
-        # gateway provisions itself, so a template naming it cannot resolve to nothing.
         for agent in agents:
             assert is_reserved_agent(agent), f"{agent} is not a reserved built-in agent"
         assert agents == {TEMPLATE_REFINER_AGENT_NAME}, (
@@ -797,10 +864,14 @@ class TestTemplateCallSites:
 
     def test_the_proposing_agent_gets_PROPOSE_ONLY_tools(self) -> None:
         """§8.3's refiner tool-scoping, carried over verbatim rather than re-derived."""
-        from gideon.learning.refiner_tools import REFINER_TOOL_NAMES
+        from gideon.cognition.learning.refiner_tools import REFINER_TOOL_NAMES
 
-        assert all(name.startswith(("refiner_", "propose_")) for name in REFINER_TOOL_NAMES)
-        assert not any("apply" in name or "install" in name for name in REFINER_TOOL_NAMES)
+        assert all(
+            name.startswith(("refiner_", "propose_")) for name in REFINER_TOOL_NAMES
+        )
+        assert not any(
+            "apply" in name or "install" in name for name in REFINER_TOOL_NAMES
+        )
 
 
 class TestCli:
@@ -870,10 +941,10 @@ class TestCli:
 
     def test_payload_from_env_maps_every_declared_key(self) -> None:
         env = {
-            "PC_OPT_SUBJECT": "s",
-            "PC_OPT_BUDGET_USD": "3",
-            "PC_OPT_NO_IMPROVEMENT_HALT": "4",
-            "PC_OPT_FIX_FINGERPRINTS": "a, b ,c",
+            "GIDEON_OPT_SUBJECT": "s",
+            "GIDEON_OPT_BUDGET_USD": "3",
+            "GIDEON_OPT_NO_IMPROVEMENT_HALT": "4",
+            "GIDEON_OPT_FIX_FINGERPRINTS": "a, b ,c",
         }
         payload = optimize.payload_from_env(env)
         assert payload["subject"] == "s"
@@ -883,16 +954,20 @@ class TestCli:
     def test_an_empty_list_env_value_becomes_an_empty_window(self) -> None:
         """``[""]`` would be a one-element window of the empty string, which makes
         ``hypothesis_abandoned`` fire on the very first iteration."""
-        assert optimize.payload_from_env({"PC_OPT_MARKS": ""})["marks"] == []
+        assert optimize.payload_from_env({"GIDEON_OPT_MARKS": ""})["marks"] == []
 
     def test_main_reports_an_unknown_subcommand_as_JSON(self, capsys) -> None:
         import io
 
         assert optimize.main(["nope"], stdin=io.StringIO("")) == 2
         payload = json.loads(capsys.readouterr().out)
-        assert payload["ok"] is False and sorted(optimize.COMMANDS) == payload["commands"]
+        assert (
+            payload["ok"] is False and sorted(optimize.COMMANDS) == payload["commands"]
+        )
 
-    def test_main_reports_a_refusal_as_JSON_rather_than_a_traceback(self, capsys) -> None:
+    def test_main_reports_a_refusal_as_JSON_rather_than_a_traceback(
+        self, capsys
+    ) -> None:
         import io
 
         code = optimize.main(
@@ -901,9 +976,6 @@ class TestCli:
         assert code == 1
         payload = json.loads(capsys.readouterr().out)
         assert payload["ok"] is False and "budget_usd" in payload["error"]
-
-
-# ── the unscored candidate is LEGIBLE, not a zero ─────────────────────────────
 
 
 def _violator_only(live: Path, sandbox: Path, meter: SpendMeter):
@@ -920,7 +992,9 @@ def _violator_only(live: Path, sandbox: Path, meter: SpendMeter):
         keep = path.read_text(encoding="utf-8")
         path.write_text("smuggled", encoding="utf-8")
         path.write_text(keep, encoding="utf-8")
-        return optimize.Candidate(iteration=iteration, fix_fingerprint="fix-1", diff_text="diff 1")
+        return optimize.Candidate(
+            iteration=iteration, fix_fingerprint="fix-1", diff_text="diff 1"
+        )
 
     return _run(live, sandbox, meter, propose=propose, score=lambda *a: (1.0, {}))
 
@@ -970,11 +1044,15 @@ class TestUnscoredIsLegible:
         outcome = _one_unscored_one_scored(live, sandbox, meter)
 
         index = json.loads(
-            (sandbox / optimize.EXPERIENCE_DIR / "index.json").read_text(encoding="utf-8")
+            (sandbox / optimize.EXPERIENCE_DIR / "index.json").read_text(
+                encoding="utf-8"
+            )
         )
         rows = {row["iteration"]: row for row in index}
         assert rows[1]["outcome"] == "scope_violation"
-        assert rows[1]["score"] is None, "a 0.0 here reads as a measurement that came up empty"
+        assert (
+            rows[1]["score"] is None
+        ), "a 0.0 here reads as a measurement that came up empty"
         assert rows[1]["score_state"] == optimize.SCORE_UNSCORED
 
         search = json.loads((sandbox / "search.json").read_text(encoding="utf-8"))
@@ -984,19 +1062,19 @@ class TestUnscoredIsLegible:
             optimize.SCORE_SCORED,
         ]
 
-        # The absence the rendering stands in for is real: no `results.tsv` row exists for that
-        # candidate. If a fingerprint were ever invented to force one, the reader above would be
-        # describing a state the ledger no longer has.
-        from gideon.evals import store
+        from gideon.assurance.evals import store
 
-        assert [r for r in store.read_results() if r.get("kind") == optimize.SEARCH_KIND] == []
+        assert [
+            r for r in store.read_results() if r.get("kind") == optimize.SEARCH_KIND
+        ] == []
         assert outcome.results_state == optimize.SCORE_SCORED
 
     def test_a_SCORED_candidate_is_never_labelled_unscored(
         self, live: Path, sandbox: Path, meter: SpendMeter
     ) -> None:
         """The other side of the discrimination. Every outcome the dual gate itself reaches was
-        scored by definition, and a label that is always on is the same as no label at all."""
+        scored by definition, and a label that is always on is the same as no label at all.
+        """
         propose, score = _proposer([0.9, 0.2, 0.95])
         outcome = _run(live, sandbox, meter, propose=propose, score=score)
         assert [r.outcome for r in outcome.rows] == [
@@ -1014,12 +1092,17 @@ class TestUnscoredIsLegible:
         """A search that never got a candidate must not borrow the ``unscored`` label: it did not
         fail to measure anything, it had nothing to measure, and only one of those is a proposer
         problem."""
-        outcome = _run(live, sandbox, meter, propose=lambda *a: None, score=lambda *a: (0.0, {}))
+        outcome = _run(
+            live, sandbox, meter, propose=lambda *a: None, score=lambda *a: (0.0, {})
+        )
         assert outcome.rows == []
         search = json.loads((sandbox / "search.json").read_text(encoding="utf-8"))
         assert search["candidates"] == 0
         assert search["results_state"] == optimize.SCORE_NO_CANDIDATES
-        assert search["results_state"] not in {optimize.SCORE_SCORED, optimize.SCORE_UNSCORED}
+        assert search["results_state"] not in {
+            optimize.SCORE_SCORED,
+            optimize.SCORE_UNSCORED,
+        }
 
     def test_the_three_states_are_THREE_different_renderings(
         self, tmp_path: Path, live: Path, meter: SpendMeter
@@ -1032,7 +1115,9 @@ class TestUnscoredIsLegible:
         single-state tests would stay green.
         """
         propose, score = _proposer([0.9])
-        boxes = {name: tmp_path / f"sb-{name}" for name in ("scored", "unscored", "none")}
+        boxes = {
+            name: tmp_path / f"sb-{name}" for name in ("scored", "unscored", "none")
+        }
         for box in boxes.values():
             box.mkdir()
 
@@ -1042,7 +1127,11 @@ class TestUnscoredIsLegible:
             ).results_state,
             "unscored": _violator_only(live, boxes["unscored"], meter).results_state,
             "none": _run(
-                live, boxes["none"], meter, propose=lambda *a: None, score=lambda *a: (0.0, {})
+                live,
+                boxes["none"],
+                meter,
+                propose=lambda *a: None,
+                score=lambda *a: (0.0, {}),
             ).results_state,
         }
         assert len(set(states.values())) == 3, states
@@ -1060,8 +1149,6 @@ class TestUnscoredIsLegible:
         values = {o.value for o in optimize.CandidateOutcome}
         assert optimize.UNSCORED_OUTCOMES < values, optimize.UNSCORED_OUTCOMES - values
         assert values - optimize.UNSCORED_OUTCOMES
-        # The membership itself, stated once: moving a gate-decided outcome in here would hide a
-        # real measurement, which is the mirror of the defect this whole class is about.
         assert optimize.UNSCORED_OUTCOMES == {"scope_violation", "no_change"}
 
     def test_an_unscored_row_stays_unscored_through_the_index_ROUND_TRIP(
@@ -1083,20 +1170,37 @@ class TestUnscoredIsLegible:
         keep = path.read_text(encoding="utf-8")
         path.write_text("smuggled", encoding="utf-8")
         first = optimize._cmd_adjudicate(
-            {**payload, "suite_threshold": "0.5", "score": "1.0", "fix_fingerprint": "fix-1"}
+            {
+                **payload,
+                "suite_threshold": "0.5",
+                "score": "1.0",
+                "fix_fingerprint": "fix-1",
+            }
         )
         assert first["outcome"] == "scope_violation"
-        assert first["score"] is None and first["score_state"] == optimize.SCORE_UNSCORED
+        assert (
+            first["score"] is None and first["score_state"] == optimize.SCORE_UNSCORED
+        )
 
         path.write_text(keep, encoding="utf-8")
         second = optimize._cmd_adjudicate(
-            {**payload, "suite_threshold": "0.5", "score": "0.9", "fix_fingerprint": "fix-2"}
+            {
+                **payload,
+                "suite_threshold": "0.5",
+                "score": "0.9",
+                "fix_fingerprint": "fix-2",
+            }
         )
         assert second["score"] == 0.9 and second["score_state"] == optimize.SCORE_SCORED
 
         index = json.loads(
-            (sandbox / optimize.EXPERIENCE_DIR / "index.json").read_text(encoding="utf-8")
+            (sandbox / optimize.EXPERIENCE_DIR / "index.json").read_text(
+                encoding="utf-8"
+            )
         )
         rows = {row["iteration"]: row for row in index}
-        assert rows[1]["score"] is None and rows[1]["score_state"] == optimize.SCORE_UNSCORED
+        assert (
+            rows[1]["score"] is None
+            and rows[1]["score_state"] == optimize.SCORE_UNSCORED
+        )
         assert rows[2]["score_state"] == optimize.SCORE_SCORED

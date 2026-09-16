@@ -1,19 +1,21 @@
 {
-  "name": "gideon",
+  "name": "gideon-agent-harness",
   "private": true,
-  "workspaces": ["web", "desktop", "mobile"],
+  "workspaces": [
+    "apps/console",
+    "apps/desktop",
+    "apps/mobile"
+  ],
   "scripts": {
-    "dev": "npm run dev --workspace=web",
-    "build": "npm run build --workspace=web",
-    "typecheck:web": "npm run typecheck --workspace=web",
-    "test:web": "npm run test --workspace=web",
-    "audit:consistency": "npm run audit:consistency --workspace=web",
-    "test:desktop": "npm run test --workspace=desktop",
-    "test:mobile": "npm run test --workspace=mobile",
-    "smoke:render": "node scripts/render_smoke.mjs",
-    "validate:apps": "node scripts/app_ui_validate.mjs",
-    "hooks:install": "sh scripts/install_git_hooks.sh",
-    "postinstall": "sh scripts/install_git_hooks.sh"
+    "dev": "npm run dev --workspace=apps/console",
+    "build": "npm run build --workspace=apps/console",
+    "typecheck:web": "npm run typecheck --workspace=apps/console",
+    "test:web": "npm run test --workspace=apps/console",
+    "audit:consistency": "npm run audit:consistency --workspace=apps/console",
+    "test:desktop": "npm run test --workspace=apps/desktop",
+    "test:mobile": "npm run test --workspace=apps/mobile",
+    "smoke:render": "node tooling/scripts/render_smoke.mjs",
+    "validate:apps": "node tooling/scripts/app_ui_validate.mjs"
   },
   "devDependencies": {
     "playwright": "^1.63.0"

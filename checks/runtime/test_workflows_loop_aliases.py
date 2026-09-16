@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from gideon.workflows.bundled_defs import template_names
-from gideon.workflows.loop_aliases import (
+from gideon.automation.workflows.bundled_defs import template_names
+from gideon.automation.workflows.loop_aliases import (
     KIND_TO_TEMPLATE,
     TOOL_TO_TEMPLATE,
     VARIANT_HINTS,
@@ -25,10 +25,10 @@ from gideon.workflows.loop_aliases import (
     resolve_tool,
 )
 
-FE_MODULE = Path(__file__).resolve().parents[1] / "web/src/pages/workflows/containerKey.ts"
-
-
-# ── every alias points somewhere real ──
+FE_MODULE = (
+    Path(__file__).resolve().parents[2]
+    / "apps/console/src/pages/workflows/containerKey.ts"
+)
 
 
 @pytest.mark.parametrize("kind", sorted(KIND_TO_TEMPLATE))
@@ -50,12 +50,9 @@ def test_every_variant_hint_resolves_to_a_shipped_template(hint):
 
 def test_every_loop_kind_that_exists_has_an_alias():
     """A kind with no alias is a legacy reference that silently stops working."""
-    from gideon.loop.loop import KINDS
+    from gideon.automation.loop.loop import KINDS
 
     assert set(KINDS) <= set(KIND_TO_TEMPLATE), set(KINDS) - set(KIND_TO_TEMPLATE)
-
-
-# ── resolution ──
 
 
 def test_a_bare_goal_resolves_to_the_open_ended_variant():
@@ -109,7 +106,7 @@ def test_the_alias_layer_is_one_way():
     """A template must not resolve BACK to a loop kind: reverse lookup would invite
     writing new references in the legacy vocabulary, and an alias layer that accepts new
     writes is a second API rather than a bridge."""
-    import gideon.workflows.loop_aliases as aliases
+    import gideon.automation.workflows.loop_aliases as aliases
 
     exported = {name for name in dir(aliases) if not name.startswith("_")}
     assert not any("template_to" in name or "to_kind" in name for name in exported)
@@ -122,9 +119,6 @@ def test_the_manifest_lists_what_still_needs_retiring():
     assert set(manifest["kinds"]) == set(KIND_TO_TEMPLATE)
     assert manifest["tools"]
     assert aliased_kinds() == sorted(KIND_TO_TEMPLATE)
-
-
-# ── cockpit key equivalence ──
 
 
 @pytest.mark.parametrize(
@@ -144,7 +138,12 @@ def test_keys_for_the_same_container_are_equivalent(left, right):
 
 @pytest.mark.parametrize(
     "left,right",
-    [("loop:abc", "loop:xyz"), ("workflow:run:abc", "run:xyz"), ("", ""), ("loop:", "run:")],
+    [
+        ("loop:abc", "loop:xyz"),
+        ("workflow:run:abc", "run:xyz"),
+        ("", ""),
+        ("loop:", "run:"),
+    ],
 )
 def test_different_or_empty_keys_are_not_equivalent(left, right):
     """Two blanks matching would route every unkeyed event to every open cockpit."""
@@ -165,10 +164,9 @@ def test_an_unprefixed_key_is_already_a_base():
 
 
 def test_equivalence_is_symmetric():
-    assert keys_equivalent("loop:abc", "run:abc") == keys_equivalent("run:abc", "loop:abc")
-
-
-# ── the backend↔frontend coupling ──
+    assert keys_equivalent("loop:abc", "run:abc") == keys_equivalent(
+        "run:abc", "loop:abc"
+    )
 
 
 def _fe_table() -> dict[str, str]:
@@ -193,7 +191,7 @@ def test_the_frontend_module_exists_where_the_test_expects_it():
 def test_the_frontend_key_prefixes_match_the_backend():
     """A divergence here reintroduces exactly the silent event-drop the equivalence
     function closes."""
-    from gideon.workflows.loop_aliases import _KEY_PREFIXES
+    from gideon.automation.workflows.loop_aliases import _KEY_PREFIXES
 
     text = FE_MODULE.read_text(encoding="utf-8")
     block = text.split("const KEY_PREFIXES = [", 1)[1].split("]", 1)[0]
@@ -211,14 +209,11 @@ def test_the_alias_manifest_is_json_serializable():
     assert json.loads(json.dumps(alias_manifest()))
 
 
-# ── mid-run steering (R14) ──
-
-
 @pytest.fixture
 def run_store(tmp_path, monkeypatch):
     """A real run in an isolated store — never the developer's own home.
 
-    `store.py` does `from gideon.config.loader import config_dir`, a MODULE-LEVEL
+    `store.py` does `from gideon.core.config.loader import config_dir`, a MODULE-LEVEL
     bind, so patching the loader attribute does not reach it: the name in `store` still
     points at the original function. Patching `store.config_dir` directly is the only
     thing that isolates it.
@@ -228,19 +223,21 @@ def run_store(tmp_path, monkeypatch):
     `test_custom_agent_gets_hook_transform` failing, because a live run makes
     `build_message` prepend an `[ACTIVE WORKFLOWS]` block to EVERY message.
     """
-    from gideon.workflows import service, store
+    from gideon.automation.workflows import service, store
 
     monkeypatch.setattr(store, "config_dir", lambda: tmp_path)
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     return service, store
 
 
 def _make_run(service, store):
     """A RUNNING run. Field names read from the dataclass rather than guessed: `id` and
     `workflow_name`, not `run_id`/`def_name`."""
-    from gideon.workflows.models import RunStatus, WorkflowRun
+    from gideon.automation.workflows.models import RunStatus, WorkflowRun
 
-    run = WorkflowRun(id="r-steer", workflow_name="general-project", status=RunStatus.RUNNING)
+    run = WorkflowRun(
+        id="r-steer", workflow_name="general-project", status=RunStatus.RUNNING
+    )
     store.save(run)
     return run
 
@@ -279,7 +276,7 @@ def test_steering_a_terminal_run_is_refused(run_store):
     """A terminal run cannot act on an instruction, and silently accepting one would leave
     the user believing they had changed something."""
     service, store = run_store
-    from gideon.workflows.models import RunStatus
+    from gideon.automation.workflows.models import RunStatus
 
     run = _make_run(service, store)
     run.status = RunStatus.COMPLETE
@@ -309,7 +306,7 @@ def test_a_long_instruction_is_bounded(run_store):
 
 def test_the_steering_routes_are_registered():
     """A service function with no route is a feature the UI cannot reach."""
-    import gideon.workflows.handlers as handlers
+    import gideon.automation.workflows.handlers as handlers
 
     assert hasattr(handlers, "api_run_steer")
     assert hasattr(handlers, "api_run_steering")
@@ -317,21 +314,25 @@ def test_the_steering_routes_are_registered():
 
 def test_the_steering_routes_are_documented():
     """The routes reference is CI-gated; an undocumented route is one nobody discovers."""
-    doc = (Path(__file__).resolve().parents[1] / "src/gideon/reference/routes.md").read_text()
+    doc = (
+        Path(__file__).resolve().parents[2] / "runtime/gideon/reference/routes.md"
+    ).read_text()
     assert "/steer`" in doc
     assert "/steering`" in doc
 
 
 def test_the_frontend_can_reach_the_steering_endpoints():
     """A backend endpoint with no client method is unreachable from the UI."""
-    api = (Path(__file__).resolve().parents[1] / "web/src/lib/api.ts").read_text()
+    api = (
+        Path(__file__).resolve().parents[2] / "apps/console/src/lib/api.ts"
+    ).read_text()
     assert "steerWorkflowRun" in api
     assert "workflowSteering" in api
 
 
 def test_the_manifest_advertises_the_loop_aliases():
     """The picker and any authoring model both need to know `kind: goal` still resolves."""
-    from gideon.workflows.service import manifest
+    from gideon.automation.workflows.service import manifest
 
     aliases = manifest().get("loop_aliases") or {}
     assert set(aliases.get("kinds") or {}) == set(KIND_TO_TEMPLATE)

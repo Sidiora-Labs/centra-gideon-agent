@@ -1,6 +1,6 @@
 """SDK: the knowledge-provider ABC + data types.
 
-Stable re-export of ``gideon.knowledge_providers.base`` — an app imports these, not the
+Stable re-export of ``gideon.integrations.knowledge_providers.base`` — an app imports these, not the
 core module directly, so the core path can move without breaking installed apps.
 
 Includes the poll contract (WATCHED-SOURCES §1.1): an app that watches an external
@@ -15,7 +15,7 @@ core cannot express as a URL template — an OAuth'd API, say — and route its 
 ``sdk.net``.
 """
 
-from gideon.knowledge_providers.base import (  # noqa: F401
+from gideon.integrations.knowledge_providers.base import (
     KnowledgeItem,
     KnowledgeProvider,
     KnowledgeSource,
@@ -23,7 +23,7 @@ from gideon.knowledge_providers.base import (  # noqa: F401
     SourceItem,
     SourcePollResult,
 )
-from gideon.knowledge_providers.connector_pack import (  # noqa: F401
+from gideon.integrations.knowledge_providers.connector_pack import (
     connector_pack_provider,
 )
 

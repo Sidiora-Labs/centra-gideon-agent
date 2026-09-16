@@ -3,7 +3,7 @@
 Measured before the fix: neither `/capture/v1/chat/completions` nor `/capture/v1/messages`
 was on `_BYPASS_EXACT` or `_BYPASS_PREFIXES`, while `/mcp` was. So the dashboard's
 `token_auth` middleware ran first and denied every request carrying no `?token=` query
-param and no `pc_token_<port>` cookie — which is exactly the shape an external coding agent
+param and no `gideon_token_<port>` cookie — which is exactly the shape an external coding agent
 sends: it points `OPENAI_BASE_URL` at the proxy and presents the capture bearer in
 `Authorization`, a header the dashboard middleware never reads. Both routes shipped
 UNREACHABLE. Nothing was wrong with either half on its own; the defect only exists in the
@@ -29,16 +29,13 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.auth.modes import AuthConfig, AuthMode
-from gideon.dashboard import token_auth
-from gideon.inbound import auth
-from gideon.inbound import capture_proxy as proxy
+from gideon.integrations.inbound import auth
+from gideon.integrations.inbound import capture_proxy as proxy
+from gideon.interfaces.dashboard import token_auth
+from gideon.security.auth.modes import AuthConfig, AuthMode
 
 PORT = 10000
 CAPTURE_PATHS = (proxy.ROUTE_OPENAI, proxy.ROUTE_ANTHROPIC)
-# The modes `token_auth.py` actually implements a bypass list for. AuthMode.NONE is
-# deliberately absent: it is a passthrough by construction, so it can neither exempt nor
-# deny anything and a "bypass" assertion under it would be vacuous.
 GATED_MODES = (AuthMode.LOCAL_TOKEN, AuthMode.API_KEY, AuthMode.OAUTH2)
 _SURFACES = ("OPENAI", "MCP", "A2A", "CAPTURE", "BRIDGE")
 
@@ -87,9 +84,13 @@ def _request(path: str):
 
 def _enable_capture(monkeypatch, *, enabled=True, allow_remote=False, allowlist=()):
     """Point `AppConfig.load()` at an external-access config without writing config.json."""
-    from gideon.config.external_access import ExternalAccessConfig
-    from gideon.config.external_access import ExternalAccessSurfaceConfig as Surface
-    from gideon.config.loader import AppConfig
+    from gideon.core.config.external_access import (
+        ExternalAccessConfig,
+    )
+    from gideon.core.config.external_access import (
+        ExternalAccessSurfaceConfig as Surface,
+    )
+    from gideon.core.config.loader import AppConfig
 
     cfg = AppConfig()
     surface = Surface(enabled=enabled, allow_remote=allow_remote)
@@ -108,13 +109,12 @@ async def _gated_capture_client(mode: AuthMode = AuthMode.LOCAL_TOKEN) -> TestCl
     return client
 
 
-# ── 1. The exemption exists, in every gated mode, for both routes ─────────────
-
-
 @pytest.mark.parametrize("mode", GATED_MODES, ids=lambda m: m.value)
 @pytest.mark.parametrize("path", CAPTURE_PATHS)
 @pytest.mark.asyncio
-async def test_a_capture_path_reaches_the_handler_without_a_dashboard_credential(mode, path):
+async def test_a_capture_path_reaches_the_handler_without_a_dashboard_credential(
+    mode, path
+):
     reached: list[str] = []
 
     async def _handler(request):  # noqa: ANN001
@@ -157,11 +157,7 @@ def test_the_capture_routes_are_exempted_EXACTLY_not_by_prefix():
     assert not any(
         p.startswith("/capture") for p in token_auth._BYPASS_PREFIXES
     ), "the capture surface must not be prefix-exempt"
-    # Beside the OTHER self-authenticating surface, which is the precedent it follows.
     assert "/mcp" in token_auth._BYPASS_EXACT
-
-
-# ── 2. Exempting them opens nothing: _admit still refuses ─────────────────────
 
 
 @pytest.mark.asyncio
@@ -177,7 +173,6 @@ async def test_a_bypassed_request_is_404_when_the_surface_is_disabled(monkeypatc
                 headers={"Authorization": f"Bearer {token}"},
             )
             assert resp.status == 404, path
-            # 404 is the handler's own refusal, not a middleware denial (403/401).
             assert (await resp.json())["error"]["code"] == "service_unavailable"
     finally:
         await client.close()
@@ -187,7 +182,9 @@ async def test_a_bypassed_request_is_404_when_the_surface_is_disabled(monkeypatc
 async def test_a_bypassed_request_is_403_when_the_peer_is_remote(monkeypatch):
     """`allow_remote=True` on purpose: capture is loopback-only by construction, and the
     dashboard bypass must not have moved that decision anywhere."""
-    _enable_capture(monkeypatch, enabled=True, allow_remote=True, allowlist=("example.invalid",))
+    _enable_capture(
+        monkeypatch, enabled=True, allow_remote=True, allowlist=("example.invalid",)
+    )
     token = auth.create_surface_token(proxy.CAPTURE_SURFACE)
     monkeypatch.setattr(auth, "_peer_host", lambda request: "203.0.113.9")
     client = await _gated_capture_client()
@@ -207,7 +204,7 @@ async def test_a_bypassed_request_is_403_when_the_peer_is_remote(monkeypatch):
 @pytest.mark.asyncio
 async def test_a_bypassed_request_is_401_when_the_bearer_is_wrong(monkeypatch):
     _enable_capture(monkeypatch, enabled=True, allowlist=("example.invalid",))
-    auth.create_surface_token(proxy.CAPTURE_SURFACE)  # a valid token EXISTS
+    auth.create_surface_token(proxy.CAPTURE_SURFACE)
     client = await _gated_capture_client()
     try:
         for path in CAPTURE_PATHS:

@@ -36,14 +36,22 @@ import asyncio
 
 import pytest
 
-from gideon.schedule_history import ScheduleRun, ScheduleRunStore, _redact_stored
+from gideon.automation.schedule_history import (
+    ExecutionJournal,
+    ExecutionRecord,
+    _redact_stored,
+)
 
 SECRET = "sk-ant-api03-REALTOKEN123456789"
 
 
-def _write(tmp_path, **kw) -> ScheduleRunStore:
-    store = ScheduleRunStore(tmp_path)
-    asyncio.run(store.append(ScheduleRun(run_id="r1", job_id="clock:a", status="success", **kw)))
+def _write(tmp_path, **kw) -> ExecutionJournal:
+    store = ExecutionJournal(tmp_path)
+    asyncio.run(
+        store.append(
+            ExecutionRecord(run_id="r1", job_id="clock:a", status="success", **kw)
+        )
+    )
     return store
 
 
@@ -53,9 +61,6 @@ def _disk_hits(tmp_path, needle: str) -> list[str]:
         for f in tmp_path.rglob("*")
         if f.is_file() and needle in f.read_text(errors="replace")
     ]
-
-
-# ── the defect ──
 
 
 def test_a_credential_in_SUMMARY_is_not_written_to_disk(tmp_path):
@@ -84,9 +89,6 @@ def test_BOTH_ledger_files_are_clean(tmp_path):
     assert not any("cron-history" in p for p in _disk_hits(tmp_path, SECRET))
 
 
-# ── the row stays USEFUL ──
-
-
 def test_the_row_is_still_READABLE(tmp_path):
     """A redaction that ate the whole summary would trade a leak for an unusable history."""
     store = _write(tmp_path, summary=f"indexed 42 notes with tok={SECRET}")
@@ -101,9 +103,6 @@ def test_the_row_still_round_trips(tmp_path):
     assert total == 1
     assert runs[0]["summary"] == "clean run"
     assert runs[0]["status"] == "success"
-
-
-# ── no false positives ──
 
 
 @pytest.mark.parametrize(
@@ -129,14 +128,11 @@ def test_empty_fields_are_survived():
     assert _redact_stored(None) == ""
 
 
-# ── the discipline ──
-
-
 def test_a_REDACTION_FAILURE_withholds_rather_than_stores_raw(monkeypatch):
     """🔴 The safe direction. Losing a summary is recoverable; writing a credential to disk
     is not."""
     monkeypatch.setattr(
-        "gideon.security.redact_credentials",
+        "gideon.security.security.redact_credentials",
         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")),
     )
     out = _redact_stored(f"tok={SECRET}")
@@ -148,7 +144,7 @@ def test_a_redaction_failure_does_NOT_lose_the_run_record(tmp_path, monkeypatch)
     """The record must still be written — a bookkeeping failure that dropped the row would hide the
     run entirely, which is the silent drop criterion 8 bans."""
     monkeypatch.setattr(
-        "gideon.security.redact_credentials",
+        "gideon.security.security.redact_credentials",
         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")),
     )
     store = _write(tmp_path, summary=f"tok={SECRET}")
@@ -156,23 +152,29 @@ def test_a_redaction_failure_does_NOT_lose_the_run_record(tmp_path, monkeypatch)
     assert total == 1
 
 
-def test_the_redaction_is_at_the_SINGLE_write_point():
-    """One funnel, so a future caller cannot forget it — the per-call-site alternative is how the
-    injection-screen (S134) and capability-fence (S116) gaps happened."""
-    import inspect
-
-    from gideon.schedule_history import ScheduleRunStore as Store
-
-    src = inspect.getsource(Store._append_sync)
-    assert "_redact_stored(run.summary)" in src
-    assert "_redact_stored(run.trace)" in src
-    assert "_redact_stored(run.error)" in src
+def test_every_stored_text_field_is_redacted(tmp_path):
+    store = _write(
+        tmp_path,
+        **{
+            field: f"retained context {SECRET}"
+            for field in ("summary", "trace", "error")
+        },
+    )
+    records, total = asyncio.run(store.list_for_job("clock:a", 0, 5))
+    assert total == 1
+    assert _disk_hits(tmp_path, SECRET) == []
+    record = asyncio.run(store.get_run("clock:a", "r1"))
+    assert record is not None
+    for field in ("summary", "trace", "error"):
+        assert "retained context" in record[field]
+        assert "REDACTED" in record[field]
 
 
 def test_it_reuses_the_SHARED_matcher():
     """Not a second regex set. A credential pattern added to `security` must cover this
     automatically
-    — a private copy would drift, which is the lesson S115 recorded for the workflow lint."""
+    — a private copy would drift, which is the lesson S115 recorded for the workflow lint.
+    """
     import inspect
 
     src = inspect.getsource(_redact_stored)
@@ -180,14 +182,11 @@ def test_it_reuses_the_SHARED_matcher():
     assert "redact_exfiltration_urls" in src
 
 
-# ── the dispatch half, verified rather than assumed ──
-
-
 def test_the_STORED_TRIGGER_keeps_the_placeholder(tmp_path):
     """S115's contract, re-asserted here because criterion 11 covers `triggers.json` too: resolution
     happens at DISPATCH, so the row on disk never holds a value."""
-    from gideon.triggers.models import Trigger
-    from gideon.triggers.store import TriggerStore
+    from gideon.automation.triggers.models import Trigger
+    from gideon.automation.triggers.store import TriggerStore
 
     store = TriggerStore(base_dir=tmp_path)
     store.upsert(
@@ -196,7 +195,12 @@ def test_the_STORED_TRIGGER_keeps_the_placeholder(tmp_path):
             name="auth",
             kind="clock",
             spec={"kind": "interval", "interval_secs": 3600},
-            workflow={"inline": {"provider": "bash", "config": {"command": "tok={{secret:K}}"}}},
+            workflow={
+                "inline": {
+                    "provider": "bash",
+                    "config": {"command": "tok={{secret:K}}"},
+                }
+            },
         )
     )
     disk = (tmp_path / "triggers.json").read_text()

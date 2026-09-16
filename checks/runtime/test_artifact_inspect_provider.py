@@ -12,20 +12,20 @@ import json
 
 import pytest
 
-from gideon.action_providers.artifact_inspect_provider import (
+from gideon.automation.workflows import store
+from gideon.automation.workflows.journal import MAX_INLINE_OUTPUT_BYTES, Journal
+from gideon.automation.workflows.models import WorkflowRun
+from gideon.integrations.action_providers.artifact_inspect_provider import (
     ArtifactInspectActionProvider,
 )
-from gideon.action_providers.base import ActionContext
-from gideon.workflows import store
-from gideon.workflows.journal import MAX_INLINE_OUTPUT_BYTES, Journal
-from gideon.workflows.models import WorkflowRun
+from gideon.integrations.action_providers.base import ActionContext
 
 
 @pytest.fixture(autouse=True)
 def _isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
     return home
 
 
@@ -53,11 +53,11 @@ def _offloaded_run(output) -> tuple[str, str]:
 
 class TestRegistration:
     def test_registered_and_allowlisted(self) -> None:
-        from gideon.action_providers.registry import (
+        from gideon.assurance.validation import ALLOWED_HOOK_PROVIDERS
+        from gideon.integrations.action_providers.registry import (
             _ensure_default_providers_registered,
             get_action_provider,
         )
-        from gideon.validation import ALLOWED_HOOK_PROVIDERS
 
         _ensure_default_providers_registered()
         assert get_action_provider("artifact_inspect") is not None
@@ -72,7 +72,9 @@ class TestRoundTrip:
     def test_reads_back_an_offloaded_body(self, provider) -> None:
         big = "x" * (MAX_INLINE_OUTPUT_BYTES + 500)
         run_id, ref = _offloaded_run(big)
-        ctx = ActionContext(event="workflow_node", payload={"run_id": run_id, "node_id": "n"})
+        ctx = ActionContext(
+            event="workflow_node", payload={"run_id": run_id, "node_id": "n"}
+        )
         result = run(provider.execute({"ref": ref}, ctx))
         assert result.success
         body = _body(result)

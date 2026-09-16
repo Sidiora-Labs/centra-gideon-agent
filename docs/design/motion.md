@@ -1,7 +1,7 @@
 # Motion — the author's guide
 
 Everything animated in the dashboard comes from one module,
-[`web/src/design/motion.ts`](../../web/src/design/motion.ts). This page is what you need to
+[`apps/console/src/design/motion.ts`](../../apps/console/src/design/motion.ts). This page is what you need to
 pick a transition and know what it is allowed to do. If you finish it and still don't know
 which preset to use, that is a bug in this page — fix the page.
 
@@ -346,7 +346,7 @@ tests will catch:
 3. **`runtime.ts`** — a `runtimeKey`, when JS reads the value per frame or per gesture.
    `motion.ts` reads `runtime`, never `getComputedStyle`.
 
-`web/src/design/motion.test.ts` pins the round trip, both dials per preset, and the gesture
+`apps/console/src/design/motion.test.ts` pins the round trip, both dials per preset, and the gesture
 thresholds. It is the rail to extend when you add to the system — and the first place to look
 when a slider stops doing anything.
 
@@ -360,12 +360,12 @@ the easiest one in this file to fake.
 
 **Why it cannot live in the unit tier.** `requestAnimationFrame` under jsdom is a `setTimeout`
 shim with no frame clock — it will report whatever rate you ask it for. So the measurement is a
-real browser driven by `scripts/motion_frame_budget.mjs`, next to `render_smoke.mjs` for the
+real browser driven by `tooling/scripts/motion_frame_budget.mjs`, next to `render_smoke.mjs` for the
 same reason that one is a standalone driver: it loads the built artifact and needs a live
-gateway. Deliberately **not** a spec in `web/e2e/`, which is the zero-diff gate tier — a
+gateway. Deliberately **not** a spec in `apps/console/e2e/`, which is the zero-diff gate tier — a
 frame-time distribution has no committed baseline and no machine-independent threshold, so a
 red/green there would be a claim about hardware. Nothing in CI runs it (`ci.yml` runs exactly
-one file out of `web/e2e/`, `a11y.spec.ts`, by explicit path); it is a driver you point at a
+one file out of `apps/console/e2e/`, `a11y.spec.ts`, by explicit path); it is a driver you point at a
 gateway and read.
 
 **Why the unit of the report is a distribution.** A mean hides a stall: 60fps with one 400ms
@@ -505,12 +505,12 @@ make web-build
 GIDEON_HOME="$PWD/.dev-home" GIDEON_AUTH_MODE=none \
   .venv/bin/gideon gateway --seed demo-home --seed-replace --no-open --port 10473
 # 3. confirm it is serving YOUR bundle, not a stale one — these two must match
-curl -s http://127.0.0.1:10473/ | grep -o 'assets/index-[^"]*\.js'; ls web/dist/assets/index-*.js
+curl -s http://127.0.0.1:10473/ | grep -o 'assets/index-[^"]*\.js'; ls apps/console/dist/assets/index-*.js
 # 4. measure
-node scripts/motion_frame_budget.mjs --url http://127.0.0.1:10473
-node scripts/motion_frame_budget.mjs --url http://127.0.0.1:10473 --inject-stall 200
-node scripts/motion_frame_budget.mjs --url http://127.0.0.1:10473 --cpu-throttle 4
-node scripts/motion_frame_budget.mjs --url http://127.0.0.1:10473 --headed
+node tooling/scripts/motion_frame_budget.mjs --url http://127.0.0.1:10473
+node tooling/scripts/motion_frame_budget.mjs --url http://127.0.0.1:10473 --inject-stall 200
+node tooling/scripts/motion_frame_budget.mjs --url http://127.0.0.1:10473 --cpu-throttle 4
+node tooling/scripts/motion_frame_budget.mjs --url http://127.0.0.1:10473 --headed
 ```
 
 **`--inject-stall` is the reason to believe any of the above.** It blocks the page's main

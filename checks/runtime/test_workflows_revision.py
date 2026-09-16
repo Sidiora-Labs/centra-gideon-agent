@@ -12,11 +12,11 @@ import json
 
 import pytest
 
-from gideon.workflows.contracts import derive_contracts, type_decisions
-from gideon.workflows.intent import classify
-from gideon.workflows.matcher import MatchResult
-from gideon.workflows.models import Node
-from gideon.workflows.revision import (
+from gideon.automation.workflows.contracts import derive_contracts, type_decisions
+from gideon.automation.workflows.intent import classify
+from gideon.automation.workflows.matcher import MatchResult
+from gideon.automation.workflows.models import Node
+from gideon.automation.workflows.revision import (
     MAX_SKETCHES,
     NO_UPDATE,
     Patch,
@@ -28,13 +28,16 @@ from gideon.workflows.revision import (
     parse_revision,
     plan_markdown,
 )
-from gideon.workflows.validator import validate_node_tree
+from gideon.automation.workflows.validator import validate_node_tree
 
 
 def spec() -> dict:
     return {
         "name": "p",
-        "inputs": {"topic": {"default": "cold starts"}, "depth": {"default": "exhaustive"}},
+        "inputs": {
+            "topic": {"default": "cold starts"},
+            "depth": {"default": "exhaustive"},
+        },
         "root": {
             "kind": "sequence",
             "id": "root",
@@ -42,14 +45,21 @@ def spec() -> dict:
                 {
                     "kind": "stage",
                     "id": "research",
-                    "config": {"prompt": "research {{inputs.topic}}", "model_tier": "standard"},
+                    "config": {
+                        "prompt": "research {{inputs.topic}}",
+                        "model_tier": "standard",
+                    },
                 },
                 {
                     "kind": "stage",
                     "id": "write",
                     "config": {"prompt": "write it", "model_tier": "standard"},
                 },
-                {"kind": "gate", "id": "check", "config": {"kind": "judge", "prompt": "good?"}},
+                {
+                    "kind": "gate",
+                    "id": "check",
+                    "config": {"kind": "judge", "prompt": "good?"},
+                },
             ],
         },
     }
@@ -57,9 +67,6 @@ def spec() -> dict:
 
 def kids(merged: dict) -> dict:
     return {c["id"]: c for c in merged["root"]["children"]}
-
-
-# ── the NO_UPDATE fast path ──
 
 
 @pytest.mark.parametrize(
@@ -84,9 +91,6 @@ def test_garbage_is_not_mistaken_for_the_sentinel():
     patches, no_update = parse_revision("some prose the model wrote instead")
     assert not no_update
     assert patches == []
-
-
-# ── merge by id ──
 
 
 def test_a_replace_changes_only_its_own_node():
@@ -126,7 +130,8 @@ def test_a_replace_naming_a_ghost_is_rejected_not_added():
     """A patch naming a node that does not exist is a MODEL error. Applying it as an add would put
     a stage in the plan the user never asked for."""
     result = merge_patches(
-        spec(), [Patch(op="replace", node_id="ghost", node={"kind": "stage", "id": "ghost"})]
+        spec(),
+        [Patch(op="replace", node_id="ghost", node={"kind": "stage", "id": "ghost"})],
     )
     assert result.applied == []
     assert any("does not exist" in r for r in result.rejected)
@@ -136,14 +141,16 @@ def test_a_replace_naming_a_ghost_is_rejected_not_added():
 def test_a_rejection_lists_the_ids_that_do_exist():
     """A repair note that names the available ids is actionable; one that says "not found" is no"""
     result = merge_patches(
-        spec(), [Patch(op="replace", node_id="ghost", node={"kind": "stage", "id": "g"})]
+        spec(),
+        [Patch(op="replace", node_id="ghost", node={"kind": "stage", "id": "g"})],
     )
     assert "research" in result.rejected[0]
 
 
 def test_a_duplicate_add_is_rejected():
     result = merge_patches(
-        spec(), [Patch(op="add", node_id="write", node={"kind": "stage", "id": "write"})]
+        spec(),
+        [Patch(op="add", node_id="write", node={"kind": "stage", "id": "write"})],
     )
     assert any("use replace" in r for r in result.rejected)
 
@@ -158,7 +165,11 @@ def test_an_add_with_an_anchor_lands_after_it():
                 op="add",
                 node_id="verify",
                 after="research",
-                node={"kind": "stage", "id": "verify", "config": {"prompt": "check sources"}},
+                node={
+                    "kind": "stage",
+                    "id": "verify",
+                    "config": {"prompt": "check sources"},
+                },
             )
         ],
     )
@@ -174,7 +185,15 @@ def test_an_add_naming_a_missing_anchor_is_rejected():
     """Appending it instead would put the step somewhere the user did not ask for, which is the
     kind of silent relocation nobody reviews."""
     result = merge_patches(
-        spec(), [Patch(op="add", node_id="x", after="nowhere", node={"kind": "stage", "id": "x"})]
+        spec(),
+        [
+            Patch(
+                op="add",
+                node_id="x",
+                after="nowhere",
+                node={"kind": "stage", "id": "x"},
+            )
+        ],
     )
     assert result.applied == []
     assert any("nowhere" in r for r in result.rejected)
@@ -187,7 +206,9 @@ def test_a_replace_cannot_rename_its_node():
         spec(),
         [
             Patch(
-                op="replace", node_id="write", node={"kind": "stage", "id": "RENAMED", "config": {}}
+                op="replace",
+                node_id="write",
+                node={"kind": "stage", "id": "RENAMED", "config": {}},
             )
         ],
     )
@@ -218,7 +239,9 @@ def test_a_revision_carries_its_provenance():
 def test_an_annotation_records_a_comment_without_changing_the_spec():
     """ "I do not like stage 3" is useful even when the user has not said what to do about it."""
     original = spec()
-    result = merge_patches(original, [Patch(op="annotate", node_id="write", reason="too vague")])
+    result = merge_patches(
+        original, [Patch(op="annotate", node_id="write", reason="too vague")]
+    )
     merged = kids(result.spec)
     assert merged["write"]["config"] == original["root"]["children"][1]["config"]
     assert merged["write"]["extra"]["review_notes"][0]["comment"] == "too vague"
@@ -265,7 +288,9 @@ def test_an_invalid_op_is_dropped_at_parse_time():
 
 
 def test_a_patch_with_no_node_id_is_dropped():
-    patches, _ = parse_revision({"patches": [{"op": "replace", "node": {"kind": "stage"}}]})
+    patches, _ = parse_revision(
+        {"patches": [{"op": "replace", "node": {"kind": "stage"}}]}
+    )
     assert patches == []
 
 
@@ -288,9 +313,6 @@ def test_a_merged_spec_still_validates():
         if i.severity == "error"
     ]
     assert errors == []
-
-
-# ── TTL'd sketches ──
 
 
 def test_a_fresh_sketch_is_readable():
@@ -366,12 +388,11 @@ def test_a_rejected_revision_does_not_bump_the_counter():
     store = SketchStore(ttl=10_000)
     store.put("a", spec(), now=1.0)
     store.revise(
-        "a", [Patch(op="replace", node_id="ghost", node={"kind": "stage", "id": "g"})], now=2.0
+        "a",
+        [Patch(op="replace", node_id="ghost", node={"kind": "stage", "id": "g"})],
+        now=2.0,
     )
     assert store.get("a", now=3.0)[0].revisions == 0
-
-
-# ── the cost estimate ──
 
 
 def test_the_estimate_counts_model_calls_not_nodes():
@@ -419,9 +440,6 @@ def test_a_malformed_spec_estimates_nothing_rather_than_raising():
     assert estimate_cost({"root": "junk"}) == {}
 
 
-# ── the announce block ──
-
-
 def test_risk_comes_before_the_pipeline():
     """Putting the pipeline first would bury "this touches payments" under twelve stage names."""
     intent = classify("delete every production customer record")
@@ -435,7 +453,9 @@ def test_an_irreversible_intent_says_so_in_the_header():
 
 
 def test_a_matched_template_is_named_with_its_confidence():
-    match = MatchResult(primary="audit-sweep", confidence=0.79, reason="T1: keywords[audit]")
+    match = MatchResult(
+        primary="audit-sweep", confidence=0.79, reason="T1: keywords[audit]"
+    )
     header = announce_block(match=match)
     assert "audit-sweep" in header
     assert "79%" in header
@@ -468,8 +488,16 @@ def test_the_header_agrees_with_the_contract_lint_about_what_is_unchecked():
                     "id": "revise",
                     "config": {"prompt": "fix {{nodes.review.output}}"},
                 },
-                {"kind": "gate", "id": "g", "config": {"kind": "judge", "prompt": "ok?"}},
-                {"kind": "action", "id": "save", "config": {"provider": "knowledge-persist"}},
+                {
+                    "kind": "gate",
+                    "id": "g",
+                    "config": {"kind": "judge", "prompt": "ok?"},
+                },
+                {
+                    "kind": "action",
+                    "id": "save",
+                    "config": {"provider": "knowledge-persist"},
+                },
             ],
         }
     }
@@ -483,14 +511,13 @@ def test_an_empty_header_is_empty_rather_than_a_shell():
     assert announce_block() == ""
 
 
-# ── the markdown artifact ──
-
-
 def test_the_markdown_lists_the_steps_in_order():
-    # The goal string must not contain a step id: `.index()` would match the title line instead of
-    # the step, which is a test that passes for the wrong reason as easily as it fails.
     text = plan_markdown(spec(), goal="an article about latency")
-    steps = [line for line in text.splitlines() if line.strip().startswith(("1.", "2.", "3."))]
+    steps = [
+        line
+        for line in text.splitlines()
+        if line.strip().startswith(("1.", "2.", "3."))
+    ]
     assert [s.split("**")[1] for s in steps] == ["research", "write", "check"]
 
 
@@ -517,9 +544,6 @@ def test_the_markdown_omits_containers():
     assert "**root**" not in text
 
 
-# ── inferred chips ──
-
-
 def test_a_value_the_user_said_is_marked_stated():
     chips = {c["name"]: c for c in inferred_chips(spec(), "look into cold starts")}
     assert chips["topic"]["source"] == "stated"
@@ -538,16 +562,13 @@ def test_a_spec_with_no_inputs_has_no_chips():
     assert inferred_chips({"root": {}}, "anything") == []
 
 
-# ── the wired plan tool ──
-
-
 def test_the_plan_tool_ships_the_review_surface():
     """The end-to-end claim: a plan arrives with its header, its cost shape, its markdown, and the
     revision grammar a caller needs to patch it."""
-    from gideon.workflows import bundled_defs
+    from gideon.automation.workflows import bundled_defs
 
     bundled_defs.register_bundled_provider()
-    from gideon.mcp_workflows import _plan
+    from gideon.integrations.mcp_workflows import _plan
 
     out = _plan({"goal": "publish an article about cold starts"})
     body = json.loads(out[out.find("{") :])

@@ -29,8 +29,8 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon import feedback as fb
-from gideon.dashboard.handlers.feedback import api_feedback_producers
+from gideon.cognition import feedback as fb
+from gideon.interfaces.dashboard.handlers.feedback import api_feedback_producers
 
 SRC = pathlib.Path(fb.__file__).resolve().parent
 
@@ -40,8 +40,12 @@ class TestTheConstantMatchesTheCode:
         """A typo here would silently enforce nothing: the handler's membership test would never
         match, so every below-threshold producer would fall through to ``proposal_only`` and the one
         kind that IS withheld would stop being reported as withheld."""
-        assert fb.ENFORCED_SUPPRESSION_KINDS, "the enforced set is empty — nothing claims an effect"
-        unknown = [k for k in fb.ENFORCED_SUPPRESSION_KINDS if k not in fb.PRODUCER_KINDS]
+        assert (
+            fb.ENFORCED_SUPPRESSION_KINDS
+        ), "the enforced set is empty — nothing claims an effect"
+        unknown = [
+            k for k in fb.ENFORCED_SUPPRESSION_KINDS if k not in fb.PRODUCER_KINDS
+        ]
         assert unknown == [], (
             f"ENFORCED_SUPPRESSION_KINDS names {unknown}, which is not in PRODUCER_KINDS "
             f"{list(fb.PRODUCER_KINDS)}. A kind that cannot be recorded cannot be suppressed."
@@ -69,7 +73,6 @@ class TestTheConstantMatchesTheCode:
                     continue
                 fn = node.func
                 name = fn.id if isinstance(fn, ast.Name) else getattr(fn, "attr", "")
-                # the module-local fail-open wrapper is the same consumption
                 if name in ("suppressed_producers", "_suppressed_producers"):
                     consumers.add(rel)
         assert consumers, (
@@ -84,8 +87,6 @@ class TestTheConstantMatchesTheCode:
             f"{sorted(consumers)}), but ENFORCED_SUPPRESSION_KINDS still claims "
             f"{list(fb.ENFORCED_SUPPRESSION_KINDS)} is withheld. The API now over-claims."
         )
-        # These two READ the set — one to report it, one to simulate surfacing in Doctor. Neither
-        # is a gate, so neither earns a kind in ENFORCED_SUPPRESSION_KINDS.
         allowed_readers = {
             "dashboard/handlers/feedback.py",
             "dashboard/handlers/doctor.py",
@@ -99,7 +100,8 @@ class TestTheConstantMatchesTheCode:
 
     def test_the_skills_gate_still_keys_on_the_enforced_kind(self):
         """``skills/surfacing.py`` withholds on the literal ``("skill_synthesis", key)``. If that
-        literal changes, the constant is stale even though every other assertion still passes."""
+        literal changes, the constant is stale even though every other assertion still passes.
+        """
         text = (SRC / "skills" / "surfacing.py").read_text()
         for kind in fb.ENFORCED_SUPPRESSION_KINDS:
             assert kind in text, (
@@ -135,7 +137,9 @@ class TestTheRouteDoesNotClaimAnUnenforcedEffect:
     """
 
     @pytest.mark.asyncio
-    async def test_an_unenforced_kind_below_threshold_is_proposal_only(self, monkeypatch):
+    async def test_an_unenforced_kind_below_threshold_is_proposal_only(
+        self, monkeypatch
+    ):
         pid = "task-inbox-classify"
         stats = {("prompt", pid): {"n": 6, "accuracy": 0.33, "ups": 2, "downs": 4}}
         (row,) = await _rows(stats, {("prompt", pid)}, monkeypatch)
@@ -143,16 +147,24 @@ class TestTheRouteDoesNotClaimAnUnenforcedEffect:
             "a `prompt` producer was reported as suppressed. Nothing withholds prompts — the panel "
             "renders that as a pill titled 'Stopped surfacing', which is false."
         )
-        assert row.get("proposal_only") is True, "the honest state (retire proposed) is missing"
+        assert (
+            row.get("proposal_only") is True
+        ), "the honest state (retire proposed) is missing"
 
     @pytest.mark.asyncio
-    async def test_the_enforced_kind_below_threshold_is_reported_suppressed(self, monkeypatch):
+    async def test_the_enforced_kind_below_threshold_is_reported_suppressed(
+        self, monkeypatch
+    ):
         """The other direction, and the more dangerous one: under-reporting a real withholding
         leaves the user unable to explain why a skill stopped appearing."""
-        stats = {("skill_synthesis", "s"): {"n": 6, "accuracy": 0.2, "ups": 1, "downs": 5}}
+        stats = {
+            ("skill_synthesis", "s"): {"n": 6, "accuracy": 0.2, "ups": 1, "downs": 5}
+        }
         (row,) = await _rows(stats, {("skill_synthesis", "s")}, monkeypatch)
         assert row.get("suppressed") is True
-        assert "proposal_only" not in row, "a withheld producer must not ALSO read proposal-only"
+        assert (
+            "proposal_only" not in row
+        ), "a withheld producer must not ALSO read proposal-only"
 
     @pytest.mark.asyncio
     async def test_a_producer_above_threshold_claims_neither(self, monkeypatch):
@@ -166,7 +178,6 @@ class TestTheRouteDoesNotClaimAnUnenforcedEffect:
         stats = {("prompt", "new"): {"n": 1, "accuracy": 0.0, "ups": 0, "downs": 1}}
         (row,) = await _rows(stats, {("prompt", "new")}, monkeypatch)
         assert row.get("collecting") is True
-        # A threshold verdict over n=1 is noise, and "collecting" is the word for that.
         assert "suppressed" not in row
         assert "proposal_only" not in row
 
@@ -178,4 +189,6 @@ class TestTheRouteDoesNotClaimAnUnenforcedEffect:
         stats = {(kind, "x"): {"n": 6, "accuracy": 0.1, "ups": 1, "downs": 5}}
         (row,) = await _rows(stats, {(kind, "x")}, monkeypatch)
         claimed = [k for k in ("suppressed", "proposal_only") if row.get(k) is True]
-        assert len(claimed) == 1, f"{kind} claimed {claimed} — expected exactly one state"
+        assert (
+            len(claimed) == 1
+        ), f"{kind} claimed {claimed} — expected exactly one state"

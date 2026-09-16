@@ -13,8 +13,8 @@ import logging
 
 import pytest
 
-from gideon.auth import credentials as creds
-from gideon.config import credentials as cred_store
+from gideon.core.config import credentials as cred_store
+from gideon.security.auth import credentials as creds
 
 GOOD_PASSWORD = "correct-horse-battery-staple"
 
@@ -24,9 +24,6 @@ def _isolated_home(tmp_path, monkeypatch):
     """Point the credential module at a throwaway dir. NEVER the developer's real home."""
     monkeypatch.setattr(creds, "config_dir", lambda: tmp_path)
     return tmp_path
-
-
-# ── The round trip ────────────────────────────────────────────────────────
 
 
 def test_set_then_verify_round_trip() -> None:
@@ -59,9 +56,6 @@ def test_setting_a_password_replaces_the_previous_one() -> None:
     assert creds.verify_password("jordan", "a-completely-different-one") is True
 
 
-# ── Fail-closed posture ───────────────────────────────────────────────────
-
-
 def test_no_credential_means_no_login() -> None:
     """The default state must reject, not allow."""
     assert creds.has_credentials() is False
@@ -89,13 +83,12 @@ def test_non_dict_credential_file_reads_as_unconfigured(_isolated_home) -> None:
 def test_a_record_with_no_hash_cannot_authenticate(_isolated_home) -> None:
     """A hand-edited file that dropped the hash must not become a passwordless login."""
     creds.auth_dir().mkdir(parents=True, exist_ok=True)
-    creds.credentials_path().write_text(json.dumps({"username": "jordan"}), encoding="utf-8")
+    creds.credentials_path().write_text(
+        json.dumps({"username": "jordan"}), encoding="utf-8"
+    )
     assert creds.has_credentials() is False
     assert creds.verify_password("jordan", "") is False
     assert creds.verify_password("jordan", GOOD_PASSWORD) is False
-
-
-# ── What is on disk, and what must not be ─────────────────────────────────
 
 
 def test_credential_file_is_0600() -> None:
@@ -107,7 +100,7 @@ def test_plaintext_is_never_written_to_disk() -> None:
     creds.set_password("jordan", GOOD_PASSWORD)
     on_disk = creds.credentials_path().read_text(encoding="utf-8")
     assert GOOD_PASSWORD not in on_disk
-    assert on_disk.count("argon2") >= 1  # the hash is there, in argon2 encoded form
+    assert on_disk.count("argon2") >= 1
 
 
 def test_stored_hash_is_argon2id() -> None:
@@ -131,7 +124,7 @@ def test_status_never_exposes_the_hash_or_the_plaintext() -> None:
     blob = json.dumps(st)
     assert "password_hash" not in st
     assert GOOD_PASSWORD not in blob
-    assert "argon2id$" not in blob  # the tag is fine; an encoded hash is not
+    assert "argon2id$" not in blob
     assert st["configured"] is True and st["username"] == "jordan"
 
 
@@ -143,9 +136,6 @@ def test_neither_plaintext_nor_hash_reaches_the_logs(caplog) -> None:
     assert GOOD_PASSWORD not in text
     assert "a-wrong-guess-entirely" not in text
     assert "$argon2id$" not in text
-
-
-# ── The password floor ────────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize("bad", ["", "x", "short", "elevenchars"])
@@ -166,9 +156,6 @@ def test_a_password_exactly_at_the_floor_is_accepted() -> None:
 def test_empty_username_is_refused(bad: str) -> None:
     with pytest.raises(ValueError, match="username"):
         creds.set_password(bad, GOOD_PASSWORD)
-
-
-# ── Timing equalization ───────────────────────────────────────────────────
 
 
 class _VerifySpy:
@@ -206,7 +193,9 @@ def test_verify_does_the_hash_work_even_with_no_stored_credential(monkeypatch) -
     """
     spy = _spy_on_verify(monkeypatch)
     assert creds.verify_password("nobody", "some-guess-here") is False
-    assert len(spy.calls) == 1, "no argon2 verify ran — the unknown-user path returned early"
+    assert (
+        len(spy.calls) == 1
+    ), "no argon2 verify ran — the unknown-user path returned early"
     assert spy.calls[0] == creds._DUMMY_HASH
 
 
@@ -222,10 +211,9 @@ def test_wrong_user_still_verifies_against_the_stored_hash(monkeypatch) -> None:
     spy = _spy_on_verify(monkeypatch)
     assert creds.verify_password("someone-else", GOOD_PASSWORD) is False
     assert len(spy.calls) == 1
-    assert spy.calls[0] == stored, "verified against the dummy — that is a different timing"
-
-
-# ── Clearing ──────────────────────────────────────────────────────────────
+    assert (
+        spy.calls[0] == stored
+    ), "verified against the dummy — that is a different timing"
 
 
 def test_clear_removes_the_credential() -> None:
@@ -240,13 +228,12 @@ def test_clear_when_nothing_is_stored_is_not_an_error() -> None:
     assert creds.clear_credentials() is False
 
 
-# ── TOTP flags (the secret lives in the credential store, not here) ───────
-
-
 def test_totp_secret_never_lands_in_the_credential_json(monkeypatch) -> None:
     saved: dict[str, str] = {}
 
-    monkeypatch.setattr(cred_store, "save_credential", lambda k, v: saved.update({k: v}))
+    monkeypatch.setattr(
+        cred_store, "save_credential", lambda k, v: saved.update({k: v})
+    )
     creds.set_password("jordan", GOOD_PASSWORD)
     creds.set_totp_secret("JBSWY3DPEHPK3PXP")
 
@@ -259,7 +246,9 @@ def test_totp_secret_never_lands_in_the_credential_json(monkeypatch) -> None:
 def test_disable_totp_clears_the_flag_but_keeps_the_secret(monkeypatch) -> None:
     saved: dict[str, str] = {}
 
-    monkeypatch.setattr(cred_store, "save_credential", lambda k, v: saved.update({k: v}))
+    monkeypatch.setattr(
+        cred_store, "save_credential", lambda k, v: saved.update({k: v})
+    )
     creds.set_password("jordan", GOOD_PASSWORD)
     creds.set_totp_secret("JBSWY3DPEHPK3PXP")
     creds.disable_totp()
@@ -280,9 +269,6 @@ def test_setting_a_new_password_preserves_the_totp_flag(monkeypatch) -> None:
 def test_set_flag_on_an_unconfigured_store_is_a_noop() -> None:
     creds.disable_totp()
     assert creds.load_credentials() == {}
-
-
-# ── Unattended bootstrap (T2.4) ───────────────────────────────────────────
 
 
 def test_bootstrap_enrolls_from_the_environment(monkeypatch) -> None:
@@ -310,7 +296,9 @@ def test_bootstrap_never_overwrites_an_existing_credential(monkeypatch) -> None:
     assert creds.verify_password("deploy", "the-deploy-time-password") is False
 
 
-def test_bootstrap_with_a_short_password_fails_without_raising(monkeypatch, caplog) -> None:
+def test_bootstrap_with_a_short_password_fails_without_raising(
+    monkeypatch, caplog
+) -> None:
     """Startup must survive a bad deploy variable, and must not echo it."""
     monkeypatch.setenv("GIDEON_LOGIN_USER", "deploy")
     monkeypatch.setenv("GIDEON_LOGIN_PASSWORD", "tiny")

@@ -18,7 +18,7 @@ import sqlite3
 
 import pytest
 
-from gideon.durability import shards
+from gideon.operations.durability import shards
 
 
 def _home(tmp_path):
@@ -34,7 +34,6 @@ def _home(tmp_path):
         '{"role": "no-timestamp"}\n'
     )
     (home / "config.json").write_text('{"agent": {"bot_name": "PC"}}')
-    # A database, with content in a non-alphabetical insert order.
     conn = sqlite3.connect(str(home / "memory.db"))
     conn.execute("CREATE TABLE semantic_memory(key TEXT PRIMARY KEY, value_json TEXT)")
     conn.executemany(
@@ -43,7 +42,6 @@ def _home(tmp_path):
     )
     conn.commit()
     conn.close()
-    # Secrets, which must never appear in an export.
     (home / ".env").write_text("OPENAI_API_KEY=sk-secret")
     (home / "sel_hmac.key").write_text("hmac-secret")
     return home
@@ -75,9 +73,14 @@ class TestDeterminism:
         home = _home(tmp_path)
         out = tmp_path / "s"
         shards.export_shards(home, out)
-        lines = (out / "memory_db" / "semantic_memory.jsonl").read_text().strip().splitlines()
+        lines = (
+            (out / "memory_db" / "semantic_memory.jsonl")
+            .read_text()
+            .strip()
+            .splitlines()
+        )
         keys = [json.loads(ln)["key"] for ln in lines]
-        assert keys == ["pref.a", "pref.z"]  # ordered by key, not insert order
+        assert keys == ["pref.a", "pref.z"]
 
 
 class TestSecretsNeverShard:
@@ -85,7 +88,9 @@ class TestSecretsNeverShard:
         home = _home(tmp_path)
         out = tmp_path / "s"
         shards.export_shards(home, out)
-        blob = "\n".join(p.read_text(errors="replace") for p in out.rglob("*") if p.is_file())
+        blob = "\n".join(
+            p.read_text(errors="replace") for p in out.rglob("*") if p.is_file()
+        )
         assert "sk-secret" not in blob
         assert "hmac-secret" not in blob
         assert not list(out.glob("env/**"))
@@ -186,8 +191,8 @@ class TestIncremental:
         home = _home(tmp_path)
         state = tmp_path / "state.json"
         first = shards.dirty_entries(home, state)
-        assert "tasks" in first  # everything is dirty on the first pass
-        assert shards.dirty_entries(home, state) == []  # nothing changed
+        assert "tasks" in first
+        assert shards.dirty_entries(home, state) == []
         (home / "tasks" / "t-3.json").write_text('{"id": "t-3"}')
         assert shards.dirty_entries(home, state) == ["tasks"]
 
@@ -199,13 +204,12 @@ class TestIncremental:
         out = tmp_path / "s"
         state = tmp_path / "state.json"
         shards.export_shards(home, out)
-        shards.dirty_entries(home, state)  # prime the fingerprint
+        shards.dirty_entries(home, state)
         (home / "tasks" / "t-9.json").write_text('{"id": "t-9"}')
         changed = shards.dirty_entries(home, state)
         shards.export_shards(home, out, entries=changed)
         result = shards.validate(out)
         assert result.ok, result.problems
-        # The untouched entries are still declared AND the change landed.
         manifest = json.loads((out / "manifest.json").read_text())
         paths = {s["path"] for s in manifest["shards"]}
         assert "config/value.jsonl" in paths and "sessions/2026.jsonl" in paths
@@ -236,11 +240,16 @@ class TestSqliteHandling:
             [(f"pref.k{i}", f'"{i}"') for i in range(300)],
         )
         conn.commit()
-        try:  # keep the handle OPEN with un-checkpointed WAL content
+        try:
             out = tmp_path / "s"
             shards.export_shards(home, out)
-            lines = (out / "memory_db" / "semantic_memory.jsonl").read_text().strip().splitlines()
-            assert len(lines) == 302  # 2 seeded + 300
+            lines = (
+                (out / "memory_db" / "semantic_memory.jsonl")
+                .read_text()
+                .strip()
+                .splitlines()
+            )
+            assert len(lines) == 302
         finally:
             conn.close()
 
@@ -271,10 +280,11 @@ class TestPartSplit:
         shards.export_shards(home, second)
         parts = sorted(p.name for p in (first / "tasks").glob("*.jsonl"))
         assert len(parts) > 1 and all("part-" in n for n in parts)
-        # Same split points, same bytes — the split is a function of the content.
         assert parts == sorted(p.name for p in (second / "tasks").glob("*.jsonl"))
         for name in parts:
-            assert (first / "tasks" / name).read_bytes() == (second / "tasks" / name).read_bytes()
+            assert (first / "tasks" / name).read_bytes() == (
+                second / "tasks" / name
+            ).read_bytes()
         assert shards.validate(first).ok
 
 
@@ -298,7 +308,9 @@ class TestCli:
         assert shards.backup_cmd(_Validate()) == 0
         assert "valid" in capsys.readouterr().out
 
-    def test_validate_returns_nonzero_on_corruption(self, tmp_path, monkeypatch, capsys):
+    def test_validate_returns_nonzero_on_corruption(
+        self, tmp_path, monkeypatch, capsys
+    ):
         """Non-zero exit is what makes this usable from cron/CI."""
         home = _home(tmp_path)
         monkeypatch.setenv("GIDEON_HOME", str(home))
@@ -314,7 +326,9 @@ class TestCli:
         assert shards.backup_cmd(_Validate()) == 1
         assert "INVALID" in capsys.readouterr().out
 
-    def test_validate_with_no_export_is_a_clear_error(self, tmp_path, monkeypatch, capsys):
+    def test_validate_with_no_export_is_a_clear_error(
+        self, tmp_path, monkeypatch, capsys
+    ):
         monkeypatch.setenv("GIDEON_HOME", str(_home(tmp_path)))
 
         class _Validate:
@@ -322,7 +336,7 @@ class TestCli:
             shard_dir = None
 
         assert shards.backup_cmd(_Validate()) == 1
-        assert "backup export" in capsys.readouterr().out  # tells you what to run
+        assert "backup export" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("missing", ["tasks", "memory.db", "sessions"])
@@ -341,19 +355,12 @@ def test_absent_store_is_skipped_not_fatal(tmp_path, missing):
     assert shards.validate(tmp_path / "s").ok
 
 
-# ── import (the read side; DAS-6) ───────────────────────────────────────────
-# The property that carries the read half: an export→import round-trip returns
-# every exported row unchanged, reassembled per inventory entry.
-
-
 class TestImport:
     def test_round_trip_returns_every_exported_row(self, tmp_path):
         home = _home(tmp_path)
         out = tmp_path / "s"
         exported = shards.export_shards(home, out)
         imported = shards.import_shards(out)
-        # Same total row count as was written (ExportResult.rows is the count), and
-        # one bucket per exported entry.
         assert imported.total_rows == exported.rows
         assert imported.entries == exported.entries
         assert imported.machine_id == shards.machine_id(home)
@@ -363,7 +370,6 @@ class TestImport:
         out = tmp_path / "s"
         shards.export_shards(home, out)
         imported = shards.import_shards(out)
-        # entity-dir rows are {"id": <filename stem>, "data": <the json>}.
         tasks = {r["id"]: r["data"] for r in imported.rows["tasks"]}
         assert set(tasks) == {"t-1", "t-2"}
         assert tasks["t-1"]["title"] == "first" and tasks["t-2"]["title"] == "second"
@@ -373,7 +379,6 @@ class TestImport:
         out = tmp_path / "s"
         shards.export_shards(home, out)
         imported = shards.import_shards(out)
-        # memory_db's semantic_memory table rows come back under the entry id.
         rows = {r["key"]: r["value_json"] for r in imported.rows["memory_db"]}
         assert rows == {"pref.a": '"first"', "pref.z": '"last"'}
 
@@ -382,7 +387,6 @@ class TestImport:
         out = tmp_path / "s"
         shards.export_shards(home, out)
         imported = shards.import_shards(out)
-        # sessions had rows across 2025/2026 + one undated → all three reassemble.
         assert len(imported.rows["sessions"]) == 3
 
     def test_secret_entries_are_absent_from_import(self, tmp_path):
@@ -404,11 +408,11 @@ class TestImport:
         home = _home(tmp_path)
         out = tmp_path / "s"
         shards.export_shards(home, out)
-        # Corrupt a shard so validate() fails; import must refuse rather than
-        # hand a merge/restore silently-wrong data.
         victim = next(out.rglob("*.jsonl"))
         victim.write_text(victim.read_text() + '{"injected": "row"}\n')
-        with pytest.raises(ValueError, match="refusing to import an invalid shard export"):
+        with pytest.raises(
+            ValueError, match="refusing to import an invalid shard export"
+        ):
             shards.import_shards(out)
 
     def test_round_trip_after_part_split(self, tmp_path, monkeypatch):
@@ -420,8 +424,7 @@ class TestImport:
         (home / "sessions" / "s.jsonl").write_text("\n".join(rows) + "\n")
         out = tmp_path / "s"
         exported = shards.export_shards(home, out)
-        # It actually split (more than one shard file for the one entry+year).
         assert len([s for s in exported.shards if s.path.startswith("sessions/")]) > 1
         imported = shards.import_shards(out)
         ns = [r["n"] for r in imported.rows["sessions"]]
-        assert ns == list(range(20))  # every row, in write order
+        assert ns == list(range(20))

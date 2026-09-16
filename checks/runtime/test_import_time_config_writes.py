@@ -1,6 +1,6 @@
 """Importing a module must never WRITE the config — the leak no fixture can reach.
 
-`tests/conftest.py::_isolate_real_home_writers` redirects the two home-resolution seams and
+`checks/runtime/conftest.py::_isolate_real_home_writers` redirects the two home-resolution seams and
 re-points every module-level binding of `config_dir` it can find in `sys.modules`. Its own
 docstring names the shape it cannot cover: *"a home resolved into a module-level constant at
 import time … If a new leak appears here, check for that shape first."*
@@ -8,8 +8,8 @@ import time … If a new leak appears here, check for that shape first."*
 This is that check, promoted from a docstring warning to an executable rail, after a **fourth**
 instance of the shape reached the real home on CI:
 
-    tests/test_aap9_project_stamping.py:27  import gideon.mcp_artifacts
-      → mcp_artifacts.py:14                 from gideon.mcp_core import ...
+    checks/runtime/test_aap9_project_stamping.py:27  import gideon.integrations.mcp_artifacts
+      → mcp_artifacts.py:14                 from gideon.integrations.mcp_core import ...
         → mcp_core.py:111                   _API = _resolve_api_base()      # module level
           → mcp_core.py:106                 cfg = AppConfig.load()
             → config/loader.py:~5657        cfg.save()                      # migration write-back
@@ -46,22 +46,20 @@ from pathlib import Path
 
 import pytest
 
-#: Modules whose import must not write the config. `mcp_core` is the one that regressed;
-#: `mcp_artifacts` is the importer that dragged it in during collection, so it pins the real
-#: entry path rather than only the module that happened to own the constant.
-_IMPORT_MUST_NOT_WRITE = ("gideon.mcp_core", "gideon.mcp_artifacts")
+_IMPORT_MUST_NOT_WRITE = (
+    "gideon.integrations.mcp_core",
+    "gideon.integrations.mcp_artifacts",
+)
 
-#: A config.json that is genuinely PRE-migration, so `AppConfig.load()` has a reason to
-#: write. `default_agent` missing from `agents` is one of the conditions `load()` repairs
-#: (`loader.py`: "if not cfg.default_agent or cfg.default_agent not in cfg.agents").
-#: A test seeded with an already-migrated config would pass while the defect was present.
 _PRE_MIGRATION_CONFIG = {"default_agent": "a-name-no-agent-has", "agents": {}}
 
 
 def _seed_home(tmp_path: Path) -> Path:
-    home = tmp_path / "pclaw-home"
+    home = tmp_path / "gideon-home"
     home.mkdir()
-    (home / "config.json").write_text(json.dumps(_PRE_MIGRATION_CONFIG), encoding="utf-8")
+    (home / "config.json").write_text(
+        json.dumps(_PRE_MIGRATION_CONFIG), encoding="utf-8"
+    )
     return home
 
 
@@ -79,7 +77,7 @@ def _run_snippet(home: Path, snippet: str) -> subprocess.CompletedProcess:
         env={
             "GIDEON_HOME": str(home),
             "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
-            "PYTHONPATH": str(Path(__file__).resolve().parent.parent / "src"),
+            "PYTHONPATH": str(Path(__file__).resolve().parent.parent.parent / "src"),
             "HOME": str(home.parent),
         },
     )
@@ -93,7 +91,9 @@ def _config_state(home: Path) -> tuple[int, str]:
 
 
 @pytest.mark.parametrize("module", _IMPORT_MUST_NOT_WRITE)
-def test_importing_a_module_does_not_write_the_config(tmp_path: Path, module: str) -> None:
+def test_importing_a_module_does_not_write_the_config(
+    tmp_path: Path, module: str
+) -> None:
     """The rail. Importing `module` in a fresh interpreter must leave config.json untouched."""
     home = _seed_home(tmp_path)
     before = _config_state(home)
@@ -129,10 +129,12 @@ def test_the_probe_can_see_a_write(tmp_path: Path) -> None:
     before = _config_state(home)
     proc = _run_snippet(
         home,
-        "from gideon.config.migrations import load_and_persist_migrations; "
+        "from gideon.core.config.migrations import load_and_persist_migrations; "
         "load_and_persist_migrations()",
     )
-    assert proc.returncode == 0, f"the positive control itself failed:\n{proc.stderr[-3000:]}"
+    assert (
+        proc.returncode == 0
+    ), f"the positive control itself failed:\n{proc.stderr[-3000:]}"
     after = _config_state(home)
     assert after != before, (
         "load_and_persist_migrations() on a PRE-MIGRATION config did NOT rewrite "
@@ -148,7 +150,11 @@ def test_the_module_level_constant_stays_retired() -> None:
     regressed must not come back. The subprocess tests catch ANY import-time writer; this one
     names the shape, so a reviewer reintroducing `_API = ...` sees why it is refused."""
     body = (
-        Path(__file__).resolve().parent.parent / "src" / "gideon" / "mcp_core.py"
+        Path(__file__).resolve().parent.parent.parent
+        / "runtime"
+        / "gideon"
+        / "integrations"
+        / "mcp_core.py"
     ).read_text(encoding="utf-8")
     assert body.strip(), "mcp_core.py is empty — this scan would pass by being blind"
     assert (

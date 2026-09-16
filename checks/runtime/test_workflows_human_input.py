@@ -24,11 +24,11 @@ import time
 
 import pytest
 
-from gideon.workflows import human_input as HI
-from gideon.workflows import journal as J
-from gideon.workflows import store
-from gideon.workflows.controller import EngineServices, RunController
-from gideon.workflows.models import InstanceState, RunStatus, WorkflowRun
+from gideon.automation.workflows import human_input as HI
+from gideon.automation.workflows import journal as J
+from gideon.automation.workflows import store
+from gideon.automation.workflows.controller import EngineServices, RunController
+from gideon.automation.workflows.models import InstanceState, RunStatus, WorkflowRun
 
 pytestmark = pytest.mark.anyio
 
@@ -42,7 +42,7 @@ def anyio_backend() -> str:
 def _isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
     return home
 
 
@@ -81,9 +81,6 @@ async def _blocked(config: dict | None = None, mode: str = "background"):
     c = RunController(run, spec, services=EngineServices())
     status = await c.run_to_completion(timeout=20)
     return c, status
-
-
-# ── the typed ask ────────────────────────────────────────────────────────────
 
 
 class TestAskPayload:
@@ -155,7 +152,10 @@ class TestGateTimeouts:
 
     def test_blocking_gates_wait_long(self) -> None:
         """A human is right there; timing out under them would discard an answer."""
-        assert HI.gate_timeout_secs({}, mode="blocking") == HI.DEFAULT_BLOCKING_GATE_TIMEOUT_SECS
+        assert (
+            HI.gate_timeout_secs({}, mode="blocking")
+            == HI.DEFAULT_BLOCKING_GATE_TIMEOUT_SECS
+        )
 
     def test_an_explicit_timeout_always_wins(self) -> None:
         for mode in ("background", "blocking"):
@@ -163,9 +163,6 @@ class TestGateTimeouts:
 
     def test_zero_means_wait_indefinitely(self) -> None:
         assert HI.gate_timeout_secs({"timeout_secs": 0}, mode="background") == 0
-
-
-# ── continuations ────────────────────────────────────────────────────────────
 
 
 class TestContinuations:
@@ -206,13 +203,20 @@ class TestContinuations:
     def test_expiry_is_detected(self) -> None:
         run = store.create(WorkflowRun(id="", workflow_name="c"))
         cont = HI.create_continuation(
-            run.id, node_id="g", instance_path="p", epoch=0, ttl_secs=1, now=time.time() - 100
+            run.id,
+            node_id="g",
+            instance_path="p",
+            epoch=0,
+            ttl_secs=1,
+            now=time.time() - 100,
         )
         assert HI.load_continuation(run.id, cont.token).expired
 
     def test_a_zero_ttl_never_expires(self) -> None:
         run = store.create(WorkflowRun(id="", workflow_name="c"))
-        cont = HI.create_continuation(run.id, node_id="g", instance_path="p", epoch=0, ttl_secs=0)
+        cont = HI.create_continuation(
+            run.id, node_id="g", instance_path="p", epoch=0, ttl_secs=0
+        )
         assert not HI.load_continuation(run.id, cont.token).expired
 
     @pytest.mark.parametrize("bad", ["../escape", "a/b", "a\\b", ""])
@@ -224,7 +228,9 @@ class TestContinuations:
 
     def test_dropping_by_prefix_only_removes_matching_tokens(self) -> None:
         run = store.create(WorkflowRun(id="", workflow_name="c"))
-        HI.create_continuation(run.id, node_id="a", instance_path="root.children[0]", epoch=0)
+        HI.create_continuation(
+            run.id, node_id="a", instance_path="root.children[0]", epoch=0
+        )
         keep = HI.create_continuation(
             run.id, node_id="b", instance_path="root.children[9]", epoch=0
         )
@@ -233,7 +239,9 @@ class TestContinuations:
 
     def test_the_expired_item_offers_a_concrete_next_move(self) -> None:
         """A dead token that does nothing is indistinguishable from a bug."""
-        cont = HI.Continuation(token="t", run_id="r", node_id="approve", instance_path="p")
+        cont = HI.Continuation(
+            token="t", run_id="r", node_id="approve", instance_path="p"
+        )
         item = HI.expired_item(cont)
         assert item["kind"] == "resume_expired"
         assert "re-run" in item["remediation"]
@@ -248,9 +256,6 @@ class TestContinuations:
             "next_steps",
             "risks",
         }
-
-
-# ── controller integration ───────────────────────────────────────────────────
 
 
 class TestBlockedRun:
@@ -274,7 +279,8 @@ class TestBlockedRun:
 
     async def test_only_one_continuation_per_epoch(self) -> None:
         """A run passes through needs_input repeatedly as the watchdog polls; a token per
-        poll would leave a pile of individually-valid approval links for one question."""
+        poll would leave a pile of individually-valid approval links for one question.
+        """
         c, _status = await _blocked({"timeout_secs": 0})
         c._ensure_continuation("root.children[1]")
         c._ensure_continuation("root.children[1]")
@@ -300,7 +306,10 @@ class TestSurfaceAndTimeoutCoexist:
         store.write_spec(run.id, spec)
         c = RunController(run, spec, services=EngineServices())
         assert await c.run_to_completion(timeout=20) == RunStatus.FAILED
-        assert c.instances["root.children[1]"].failure.terminal_reason == "timed_out_unattended"
+        assert (
+            c.instances["root.children[1]"].failure.terminal_reason
+            == "timed_out_unattended"
+        )
 
     async def test_a_plain_wait_is_not_surfaced_as_needs_input(self) -> None:
         """A `wait` is parked on the CLOCK and resolves itself; asking a human to answer it
@@ -323,10 +332,8 @@ class TestResume:
         result = c.resume(token, True)
         assert result["ok"] and result["approved"]
         assert c.instances["root.children[1]"].state == InstanceState.DONE
-        # The run can now finish, and the downstream node reads the answer.
         c.run.status = RunStatus.RUNNING
         assert await c.run_to_completion(timeout=20) == RunStatus.COMPLETE
-        # Interpolated into a string, so JSON-ish lowercase — the answer reached the node.
         assert c._outputs["after"] == "went true"
 
     async def test_denying_fails_the_gate_with_a_typed_reason(self) -> None:
@@ -353,7 +360,6 @@ class TestResume:
         token = HI.list_continuations(c.run.id)[0].token
         bad = c.resume(token, "yes please")
         assert not bad["ok"] and bad["code"] == "WF_RESUME_INVALID_ANSWER"
-        # The token survives, so the user can correct their answer.
         assert c.resume(token, True)["ok"]
 
     async def test_an_unknown_token_is_refused(self) -> None:
@@ -368,7 +374,6 @@ class TestResume:
         result = c.resume(cont.token, True)
         assert not result["ok"] and result["code"] == "WF_RESUME_EXPIRED"
         assert result["item"]["kind"] == "resume_expired"
-        # Consumed, so the dead token cannot be retried forever.
         assert HI.load_continuation(c.run.id, cont.token) is None
 
     async def test_the_resolution_is_journaled_with_the_answer(self) -> None:
@@ -419,7 +424,6 @@ class TestAnsweringRestartsTheRun:
         assert status == RunStatus.NEEDS_INPUT
         token = HI.list_continuations(c.run.id)[0].token
 
-        # Answer, then WAIT — no manual run_to_completion. The run must drive itself.
         assert c.resume(token, True)["ok"]
         for _ in range(100):
             if c.run.status == RunStatus.COMPLETE:
@@ -429,7 +433,6 @@ class TestAnsweringRestartsTheRun:
         assert (
             c.run.status == RunStatus.COMPLETE
         ), f"run stalled at {c.run.status.value} — the tick loop did not restart"
-        # And the downstream node actually ran, reading the gate's answer.
         assert c.instances["root.children[2]"].state == InstanceState.DONE
         assert c._outputs["after"] == "went true"
 

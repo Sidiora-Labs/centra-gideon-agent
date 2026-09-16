@@ -13,7 +13,7 @@ from chat_test_helpers import _make_state
 
 
 def _make_voice_app(state):
-    from gideon.dashboard.chat_voice import api_voice_synthesize
+    from gideon.interfaces.dashboard.chat_voice import api_voice_synthesize
 
     app = web.Application()
     app["state"] = state
@@ -24,18 +24,24 @@ def _make_voice_app(state):
 class TestVoiceSynthesize:
     @pytest.mark.asyncio
     async def test_synthesize_empty_text_rejected(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         async with TestClient(TestServer(_make_voice_app(state))) as client:
-            resp = await client.post("/api/voice/synthesize", json={"text": "", "session": "s1"})
+            resp = await client.post(
+                "/api/voice/synthesize", json={"text": "", "session": "s1"}
+            )
             assert resp.status == 400
 
     @pytest.mark.asyncio
     async def test_synthesize_no_voice_selected(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        # MI-1: the resolver takes surface/profile_id keywords now (§3.2).
         monkeypatch.setattr(
-            "gideon.dashboard.chat_voice.active_voice_params", lambda **_kw: None
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.chat_voice.active_voice_params",
+            lambda **_kw: None,
         )
         state = _make_state(tmp_path)
         async with TestClient(TestServer(_make_voice_app(state))) as client:
@@ -49,9 +55,11 @@ class TestVoiceSynthesize:
     async def test_synthesize_success(self, tmp_path, monkeypatch):
         from unittest.mock import MagicMock as _MM
 
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
         monkeypatch.setattr(
-            "gideon.dashboard.chat_voice.active_voice_params",
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.chat_voice.active_voice_params",
             lambda **_kw: {
                 "provider": _MM(),
                 "voice": "en_US-lessac-medium",
@@ -65,9 +73,12 @@ class TestVoiceSynthesize:
         async def mock_stream(*a, **kw):
             yield 0, "Hello", b"\x00\x01\x02"
 
-        monkeypatch.setattr("gideon.dashboard.chat_voice.streaming_voice_reply", mock_stream)
         monkeypatch.setattr(
-            "gideon.dashboard.chat_voice.stitch_wavs", AsyncMock(return_value=None)
+            "gideon.interfaces.dashboard.chat_voice.streaming_voice_reply", mock_stream
+        )
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.chat_voice.stitch_wavs",
+            AsyncMock(return_value=None),
         )
 
         state = _make_state(tmp_path)
@@ -93,11 +104,15 @@ class TestTheEnabledToggleIsHonored:
     """
 
     @pytest.mark.asyncio
-    async def test_synthesis_is_refused_when_the_toggle_is_off(self, tmp_path, monkeypatch):
+    async def test_synthesis_is_refused_when_the_toggle_is_off(
+        self, tmp_path, monkeypatch
+    ):
         provider = MagicMock()
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
         monkeypatch.setattr(
-            "gideon.dashboard.chat_voice.active_voice_params",
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.chat_voice.active_voice_params",
             lambda **_kw: {
                 "provider": provider,
                 "voice": "en_US-lessac-medium",
@@ -116,8 +131,6 @@ class TestTheEnabledToggleIsHonored:
             assert resp.status == 503
             body = await resp.json()
             assert body["error"]["code"] == "tts_disabled"
-            # The message names the switch — an unavailability the user cannot act on is
-            # barely better than synthesizing anyway.
             assert "Speak replies aloud" in body["error"]["message"]
         provider.assert_not_called()
 
@@ -125,9 +138,11 @@ class TestTheEnabledToggleIsHonored:
     async def test_a_missing_enabled_key_is_treated_as_off(self, tmp_path, monkeypatch):
         """Fail closed on a params dict that predates the key. A default of True would make
         the guard vacuous for exactly the callers that never set it."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
         monkeypatch.setattr(
-            "gideon.dashboard.chat_voice.active_voice_params",
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.chat_voice.active_voice_params",
             lambda **_kw: {
                 "provider": MagicMock(),
                 "voice": "v",
@@ -149,10 +164,13 @@ class TestTheEnabledToggleIsHonored:
     ):
         """`record_spoken` marks text as ours so a hands-free transcription can recognise
         speaker bleed. Adding a refusal made the pre-existing order wrong: text we decline to
-        speak must not be marked as ours, or the echo filter drops a phrase the USER said."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        speak must not be marked as ours, or the echo filter drops a phrase the USER said.
+        """
         monkeypatch.setattr(
-            "gideon.dashboard.chat_voice.active_voice_params",
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.chat_voice.active_voice_params",
             lambda **_kw: {
                 "provider": MagicMock(),
                 "voice": "v",

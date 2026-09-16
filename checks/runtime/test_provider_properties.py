@@ -19,17 +19,11 @@ from hypothesis import (  # noqa: E402
 )
 from hypothesis import strategies as st  # noqa: E402
 
-from gideon.llm.capabilities import (  # noqa: E402
-    Capability,
-    ProviderCapability,
-)
-from gideon.llm.registry import ProviderEntry, ProviderRegistry  # noqa: E402
-
-# ── Shared helpers ────────────────────────────────────────────────────────────
+from gideon.integrations.llm.capabilities import Capability, ProviderCapability
+from gideon.integrations.llm.registry import ProviderRegistry  # noqa: E402
+from gideon.integrations.llm.registry import ProviderEntry
 
 _ALL_CAPS = list(Capability)
-# The capabilities meaningful to bind a provider entry to (was the deleted
-# router's _BINDABLE_USE_CASES; inlined here for the property strategies).
 _BINDABLE_USE_CASES = frozenset(
     {
         Capability.CHAT,
@@ -94,9 +88,6 @@ def _unique_entries(draw, min_size=1, max_size=5):
     return unique
 
 
-# ── Registry closure ──────────────────────────────────────────────────────
-
-
 @given(entries=_unique_entries())
 @settings(max_examples=50)
 def test_registry_closure(entries):
@@ -109,11 +100,8 @@ def test_registry_closure(entries):
         ), f"closure violated for {e.name}: {e.declared_capabilities} ⊄ {type_caps}"
 
 
-# ── Credential non-leakage ────────────────────────────────────────────────
-
-
 def _make_store_with_secret(tmp_dir: str, name: str, value: str):
-    from gideon.llm.credentials import CredentialStore
+    from gideon.integrations.llm.credentials import CredentialStore
 
     store = CredentialStore(Path(tmp_dir) / "creds.json")
     store.save({name: {"value": value}})
@@ -142,17 +130,14 @@ def test_list_never_leaks_secret(secret):
             assert cred.secret is None
 
 
-# ── Lazy SDK imports ─────────────────────────────────────────────────────
-
-
 def test_providers_import_no_sdk_leakage():
-    """Importing gideon.providers does not trigger anthropic/openai/httpx."""
+    """Importing gideon.extensions.providers does not trigger anthropic/openai/httpx."""
     import os as _os
     import subprocess
     import sys as _sys
     from pathlib import Path as _Path
 
-    repo_src = str(_Path(__file__).resolve().parent.parent / "src")
+    repo_src = str(_Path(__file__).resolve().parent.parent.parent / "src")
     env = {**_os.environ, "PYTHONPATH": repo_src}
     result = subprocess.run(
         [
@@ -160,7 +145,7 @@ def test_providers_import_no_sdk_leakage():
             "-c",
             (
                 "import sys; "
-                "import gideon.llm; "
+                "import gideon.integrations.llm; "
                 "leaked = [m for m in sys.modules if m in "
                 "('anthropic','openai','httpx')]; "
                 "print(leaked); "

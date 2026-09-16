@@ -12,12 +12,11 @@ import ast
 import importlib
 from pathlib import Path
 
-import gideon.dashboard.server as server_mod
+import gideon.interfaces.dashboard.server as server_mod
 
-# Module aliases as imported at the top of server.py (verified by the test below).
 _ALIAS_TO_MODULE = {
-    "chat": "gideon.dashboard.chat",
-    "handlers": "gideon.dashboard.handlers",
+    "chat": "gideon.interfaces.dashboard.chat",
+    "handlers": "gideon.interfaces.dashboard.handlers",
 }
 
 
@@ -31,11 +30,9 @@ def _route_handler_refs() -> list[tuple[str, str, int]]:
         if not isinstance(node, ast.Call):
             continue
         fn = node.func
-        # match app.router.add_get / add_post / add_put / add_delete / add_patch
         if not (isinstance(fn, ast.Attribute) and fn.attr.startswith("add_")):
             continue
         for arg in node.args:
-            # handler is an attribute access like `chat.api_chat_session_resume`
             if isinstance(arg, ast.Attribute) and isinstance(arg.value, ast.Name):
                 alias = arg.value.id
                 if alias in _ALIAS_TO_MODULE:
@@ -51,6 +48,6 @@ def test_all_route_handlers_resolve():
         mod = importlib.import_module(_ALIAS_TO_MODULE[alias])
         if not hasattr(mod, attr):
             missing.append(f"server.py:{lineno} → {alias}.{attr} does not exist")
-    assert not missing, "Route handlers referenced in server.py but not defined:\n" + "\n".join(
-        missing
-    )
+    assert (
+        not missing
+    ), "Route handlers referenced in server.py but not defined:\n" + "\n".join(missing)

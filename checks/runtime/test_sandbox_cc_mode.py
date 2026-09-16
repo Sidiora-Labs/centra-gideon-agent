@@ -3,7 +3,7 @@
 import os
 from unittest.mock import patch
 
-from gideon.sandbox import (
+from gideon.security.sandbox import (
     _AGENT_DENIED_ENV_KEYS,
     _CC_DIRS,
     _CC_EXPOSE_FILES,
@@ -137,7 +137,7 @@ class TestBuildSeatbeltProfileCcMode:
 
 
 class TestWrapArgvCcMode:
-    @patch("gideon.sandbox.detect_backend", return_value="sandbox-exec")
+    @patch("gideon.security.sandbox.detect_backend", return_value="sandbox-exec")
     def test_cc_mode_routes_to_sandbox(self, _mock_backend):
         wrapped, cleanup = wrap_argv(["echo", "hi"], mode="cc")
         assert len(wrapped) > 2
@@ -149,7 +149,7 @@ class TestWrapArgvCcMode:
         assert wrapped == ["echo", "hi"]
         assert cleanup is None
 
-    @patch("gideon.sandbox.detect_backend", return_value="sandbox-exec")
+    @patch("gideon.security.sandbox.detect_backend", return_value="sandbox-exec")
     def test_cc_seatbelt_does_not_deny_aws(self, _mock_backend):
         """CC seatbelt does NOT deny .aws on macOS — full access needed."""
         wrapped, cleanup = wrap_argv(["echo", "hi"], mode="cc")
@@ -160,7 +160,7 @@ class TestWrapArgvCcMode:
         finally:
             os.unlink(cleanup)
 
-    @patch("gideon.sandbox.detect_backend", return_value="sandbox-exec")
+    @patch("gideon.security.sandbox.detect_backend", return_value="sandbox-exec")
     def test_cc_seatbelt_profile_does_not_deny_ssh(self, _mock_backend):
         """CC profile should not contain ssh deny rules."""
         wrapped, cleanup = wrap_argv(["echo", "hi"], mode="cc")
@@ -199,11 +199,9 @@ class TestAgentDeniedEnvKeys:
         kubectl). They legitimately need Slack tokens for things like cron
         scripts. Only cc/strict (LLM-controlled agents) scrub them."""
         script = _build_launcher_script("standard")
-        # Tokens should NOT appear in the standard launcher's ENV_PREFIXES.
-        # We check by looking for the key inside the JSON-encoded list right
-        # after "ENV_PREFIXES = " — substring on the whole script would also
-        # match comments, so be precise.
-        line = next(ln for ln in script.splitlines() if ln.startswith("ENV_PREFIXES = "))
+        line = next(
+            ln for ln in script.splitlines() if ln.startswith("ENV_PREFIXES = ")
+        )
         for key in _AGENT_DENIED_ENV_KEYS:
             assert key not in line, f"{key} should NOT be in standard ENV_PREFIXES"
 
@@ -228,7 +226,7 @@ class TestAgentDeniedEnvKeys:
             if cleanup:
                 os.unlink(cleanup)
 
-    @patch("gideon.sandbox.detect_backend", return_value="namespace")
+    @patch("gideon.security.sandbox.detect_backend", return_value="namespace")
     def test_cc_namespace_launcher_hides_aws_exposes_config(self, _mock_backend):
         wrapped, cleanup = wrap_argv(["echo", "hi"], mode="cc")
         assert cleanup is not None

@@ -24,9 +24,9 @@ import types
 
 import pytest
 
-from gideon.triggers import web_poll
-from gideon.triggers.models import Trigger
-from gideon.triggers.store import TriggerStore
+from gideon.automation.triggers import web_poll
+from gideon.automation.triggers.models import Trigger
+from gideon.automation.triggers.store import TriggerStore
 
 NOW = 1_800_000_000.0
 
@@ -48,11 +48,13 @@ def _isolate_knowledge(tmp_path_factory, monkeypatch):
     knowledge.db (config_dir() resolves there when GIDEON_HOME is unset). Same real-home
     hazard and remedy as conftest's trigger-store fixture. Returned so a test can assert on it; a
     test that passes its own `knowledge_store` is unaffected."""
-    from gideon.knowledge.store import KnowledgeStore
+    from gideon.cognition.knowledge.store import KnowledgeStore
 
-    kdb = tmp_path_factory.mktemp("pclaw-knowledge") / "k.db"
+    kdb = tmp_path_factory.mktemp("gideon-knowledge") / "k.db"
     kstore = KnowledgeStore(str(kdb))
-    monkeypatch.setattr("gideon.knowledge.get_knowledge_store", lambda: kstore)
+    monkeypatch.setattr(
+        "gideon.cognition.knowledge.get_knowledge_store", lambda: kstore
+    )
     return kstore
 
 
@@ -83,16 +85,20 @@ def _shell_fetcher():
     return fetch
 
 
-def _renderer(html: str, *, ok: bool = True, unavailable: bool = False, error: str = ""):
+def _renderer(
+    html: str, *, ok: bool = True, unavailable: bool = False, error: str = ""
+):
     """A sync fake standing in for `web.render.render_url` — returns a `RenderResult` directly, so
     `_render_headless` never touches the event loop. `calls` counts invocations."""
-    from gideon.web.render import RenderResult
+    from gideon.integrations.web.render import RenderResult
 
     calls = {"n": 0}
 
     def render(url, *, policy=None):
         calls["n"] += 1
-        return RenderResult(ok=ok, url=url, html=html, unavailable=unavailable, error=error)
+        return RenderResult(
+            ok=ok, url=url, html=html, unavailable=unavailable, error=error
+        )
 
     render.calls = calls  # type: ignore[attr-defined]
     return render
@@ -125,7 +131,7 @@ def _fetcher(pages):
 
 
 def _async_fetcher(pages):
-    """An ASYNC fetcher matching the real `gideon.net.fetch` (a coroutine).
+    """An ASYNC fetcher matching the real `gideon.security.net.fetch` (a coroutine).
 
     The production default path fetches through the async `net.fetch`; this fake exercises that
     exact shape so the coroutine-bridge (`_await_maybe`) is under test. Before the bridge, `_fetch`
@@ -143,13 +149,12 @@ def _async_fetcher(pages):
 def test_an_ASYNC_fetcher_is_awaited_not_left_a_coroutine(store, tmp_path):
     """🔴 Regression for the missing-await bug: the real `net.fetch` is a coroutine, and `_fetch`
     called it without awaiting — so the default path saw `status=0`/empty and every web_watch
-    silently no-oped. With the `_await_maybe` bridge, an async fetcher's items reach the seed."""
+    silently no-oped. With the `_await_maybe` bridge, an async fetcher's items reach the seed.
+    """
     trigger = _watch(store)
     outcome = web_poll.poll_one(
         trigger, now=NOW, base_dir=tmp_path, fetcher=_async_fetcher({"v": FEED_TWO})
     )
-    # The seed pass never fires, but it must have SEEN the items — an un-awaited coroutine would
-    # have extracted nothing and seeded zero.
     assert "seeded" in outcome.reason
     state = web_poll.load_state(trigger.id, base_dir=tmp_path)
     assert len(state.seen) >= 1, "async fetch body was not awaited — seed saw no items"
@@ -161,11 +166,8 @@ def test_await_maybe_passes_through_a_sync_value_and_resolves_a_coroutine():
     async def _coro():
         return 42
 
-    assert web_poll._await_maybe(7) == 7  # sync value untouched
-    assert web_poll._await_maybe(_coro()) == 42  # coroutine resolved on a no-loop thread
-
-
-# ── the gap itself ──
+    assert web_poll._await_maybe(7) == 7
+    assert web_poll._await_maybe(_coro()) == 42
 
 
 def test_a_web_watch_trigger_is_ENUMERATED(store):
@@ -206,12 +208,10 @@ def test_other_kinds_are_not_polled_by_this_runtime(store):
     assert [t.id for t in web_poll.web_watch_triggers(store)] == ["web_watch:w"]
 
 
-# ── seeding: the first poll never fires ──
-
-
 def test_the_FIRST_poll_seeds_without_firing(store, tmp_path):
     """🔴 Firing here would deliver the entire current front page as "new" — the behaviour that
-    makes someone delete the automation on day one. Mirrors `file_poll`'s seeding pass."""
+    makes someone delete the automation on day one. Mirrors `file_poll`'s seeding pass.
+    """
     trigger = _watch(store)
     outcome = web_poll.poll_one(
         trigger, now=NOW, base_dir=tmp_path, fetcher=_fetcher({"v": FEED_TWO})
@@ -223,18 +223,19 @@ def test_the_FIRST_poll_seeds_without_firing(store, tmp_path):
 def test_the_seed_SURVIVES_a_restart(store, tmp_path):
     """Persisted, so a gateway restart does not re-seed and then re-deliver the whole page."""
     trigger = _watch(store)
-    web_poll.poll_one(trigger, now=NOW, base_dir=tmp_path, fetcher=_fetcher({"v": FEED_TWO}))
+    web_poll.poll_one(
+        trigger, now=NOW, base_dir=tmp_path, fetcher=_fetcher({"v": FEED_TWO})
+    )
     assert web_poll.load_state(trigger.id, base_dir=tmp_path).seeded is True
-
-
-# ── novelty: the seen-set IS the storm guard ──
 
 
 def test_an_UNCHANGED_page_does_not_fire(store, tmp_path):
     trigger = _watch(store)
     pages = {"v": FEED_TWO}
     web_poll.poll_one(trigger, now=NOW, base_dir=tmp_path, fetcher=_fetcher(pages))
-    outcome = web_poll.poll_one(trigger, now=NOW + 400, base_dir=tmp_path, fetcher=_fetcher(pages))
+    outcome = web_poll.poll_one(
+        trigger, now=NOW + 400, base_dir=tmp_path, fetcher=_fetcher(pages)
+    )
     assert outcome.payload is None
     assert outcome.reason == "no new items"
 
@@ -244,12 +245,11 @@ def test_a_NEW_item_fires_and_names_it(store, tmp_path):
     pages = {"v": FEED_TWO}
     web_poll.poll_one(trigger, now=NOW, base_dir=tmp_path, fetcher=_fetcher(pages))
     pages["v"] = FEED_THREE
-    outcome = web_poll.poll_one(trigger, now=NOW + 400, base_dir=tmp_path, fetcher=_fetcher(pages))
+    outcome = web_poll.poll_one(
+        trigger, now=NOW + 400, base_dir=tmp_path, fetcher=_fetcher(pages)
+    )
     assert outcome.payload is not None
     assert outcome.payload["new_count"] == 1
-    # FENCED with provenance since S127: the item text came off a third-party page, so the payload
-    # carries the marker AND the origin rather than a bare string a later consumer must know to
-    # distrust. The item itself is still legible inside the fence.
     (item,) = outcome.payload["new_items"]
     assert "post-3" in item
     assert "untrusted_content" in item
@@ -289,7 +289,9 @@ def test_THE_STORM_GUARD_a_page_that_changes_every_fetch_never_fires(store, tmp_
         )
 
     fires = [
-        web_poll.poll_one(trigger, now=NOW + i * 400, base_dir=tmp_path, fetcher=noisy).payload
+        web_poll.poll_one(
+            trigger, now=NOW + i * 400, base_dir=tmp_path, fetcher=noisy
+        ).payload
         for i in range(6)
     ]
     assert [f for f in fires if f] == [], "a page changing every fetch must never fire"
@@ -298,9 +300,7 @@ def test_THE_STORM_GUARD_a_page_that_changes_every_fetch_never_fires(store, tmp_
 def test_extraction_prefers_FEED_IDS_over_every_link(store):
     """An RSS feed keyed by every href in its own description HTML would treat a described link as
     an item. The first matching strategy wins, so a feed is keyed by guid."""
-    body = (
-        '<rss><item><guid>real-1</guid><description><a href="/x">x</a></description></item></rss>'
-    )
+    body = '<rss><item><guid>real-1</guid><description><a href="/x">x</a></description></item></rss>'
     assert web_poll.extract_items(body) == ["real-1"]
 
 
@@ -310,16 +310,15 @@ def test_a_page_with_NO_items_is_not_everything_is_new(store, tmp_path):
     trigger = _watch(store)
     pages = {"v": "<html><p>no links, no feed</p></html>"}
     web_poll.poll_one(trigger, now=NOW, base_dir=tmp_path, fetcher=_fetcher(pages))
-    outcome = web_poll.poll_one(trigger, now=NOW + 400, base_dir=tmp_path, fetcher=_fetcher(pages))
+    outcome = web_poll.poll_one(
+        trigger, now=NOW + 400, base_dir=tmp_path, fetcher=_fetcher(pages)
+    )
     assert outcome.payload is None
 
 
 def test_an_INVALID_novelty_key_falls_back_rather_than_breaking_the_watch(store):
     """A bad author-supplied regex must not take the automation offline."""
     assert web_poll.extract_items(FEED_TWO, novelty_key="((((") == ["post-1", "post-2"]
-
-
-# ── the rate floor and the daily budget ──
 
 
 def test_the_poll_interval_is_CLAMPED_to_the_floor(store):
@@ -341,7 +340,9 @@ def test_a_watch_polled_TOO_SOON_is_not_fetched(store, tmp_path):
     trigger = _watch(store)
     pages = {"v": FEED_TWO}
     web_poll.poll_one(trigger, now=NOW, base_dir=tmp_path, fetcher=_fetcher(pages))
-    outcome = web_poll.poll_one(trigger, now=NOW + 10, base_dir=tmp_path, fetcher=_fetcher(pages))
+    outcome = web_poll.poll_one(
+        trigger, now=NOW + 10, base_dir=tmp_path, fetcher=_fetcher(pages)
+    )
     assert outcome.reason == "not due"
     assert outcome.fetched is False, "a not-due watch must not spend a request"
 
@@ -351,7 +352,9 @@ def test_the_DAILY_BUDGET_refuses_with_a_visible_reason(store, tmp_path):
     indistinguishable from a broken one."""
     trigger = _watch(store)
     state = web_poll.WatchState(
-        seeded=True, day=web_poll._day_of(NOW), requests_today=web_poll.MAX_REQUESTS_PER_DAY
+        seeded=True,
+        day=web_poll._day_of(NOW),
+        requests_today=web_poll.MAX_REQUESTS_PER_DAY,
     )
     web_poll.save_state(trigger.id, state, base_dir=tmp_path)
     outcome = web_poll.poll_one(
@@ -383,9 +386,6 @@ def test_a_FAILED_fetch_still_SPENDS_its_request(store, tmp_path):
     assert web_poll.load_state(trigger.id, base_dir=tmp_path).requests_today == 1
 
 
-# ── failure isolation ──
-
-
 def test_an_UNREACHABLE_page_is_a_reason_not_a_crash(store, tmp_path):
     trigger = _watch(store)
 
@@ -402,7 +402,9 @@ def test_an_HTTP_ERROR_is_reported_not_treated_as_an_empty_page(store, tmp_path)
     trigger = _watch(store)
 
     def gone(url):
-        return types.SimpleNamespace(status=404, body=b"", url=url, headers={}, truncated=False)
+        return types.SimpleNamespace(
+            status=404, body=b"", url=url, headers={}, truncated=False
+        )
 
     outcome = web_poll.poll_one(trigger, now=NOW, base_dir=tmp_path, fetcher=gone)
     assert "404" in outcome.reason
@@ -419,7 +421,9 @@ def test_ONE_bad_watch_does_not_strand_the_others(store, tmp_path):
             raise OSError("unreachable")
         return _fetcher(pages)(url)
 
-    payloads, skipped = web_poll.poll_all(store, now=NOW, base_dir=tmp_path, fetcher=mixed)
+    payloads, skipped = web_poll.poll_all(
+        store, now=NOW, base_dir=tmp_path, fetcher=mixed
+    )
     assert {row["trigger_id"] for row in skipped} == {"web_watch:bad", "web_watch:good"}
     assert payloads == [], "both are seeding/failing on this pass, neither fires"
 
@@ -441,9 +445,6 @@ def test_a_CORRUPT_sidecar_reads_as_unseeded_rather_than_raising(tmp_path):
     assert web_poll.load_state("web_watch:w", base_dir=tmp_path).seeded is False
 
 
-# ── the egress chokepoint + privacy ──
-
-
 def test_the_DEFAULT_fetcher_is_the_EGRESS_CHOKEPOINT():
     """🔴 A watch pointed at `http://169.254.169.254/` is an SSRF against the machine's own metadata
     service. `net.fetch` is where host classification, private-IP denial, redirect-hop re-checks,
@@ -455,11 +456,8 @@ def test_the_DEFAULT_fetcher_is_the_EGRESS_CHOKEPOINT():
     import inspect
 
     src = inspect.getsource(web_poll._fetch)
-    assert "from gideon.net import fetch" in src
+    assert "from gideon.security.net import fetch" in src
 
-    # Parsed rather than grepped: the docstring NAMES `urllib`/`httpx` as the layers this must not
-    # use, so a substring check trips on its own prose. The property is which modules the code
-    # imports, which is a question about the AST.
     tree = ast.parse(inspect.getsource(web_poll))
     imported = {
         node.module.split(".")[0]
@@ -480,7 +478,9 @@ def test_the_seen_set_stores_HASHES_not_urls(store, tmp_path):
     """A seen-set of raw urls is a browsing history in a plaintext sidecar that snapshots (S113)
     carry off the machine. The control needs identity, not the value."""
     trigger = _watch(store)
-    web_poll.poll_one(trigger, now=NOW, base_dir=tmp_path, fetcher=_fetcher({"v": FEED_TWO}))
+    web_poll.poll_one(
+        trigger, now=NOW, base_dir=tmp_path, fetcher=_fetcher({"v": FEED_TWO})
+    )
     seen = web_poll.load_state(trigger.id, base_dir=tmp_path).seen
     assert seen and all("post-" not in key for key in seen)
 
@@ -488,27 +488,39 @@ def test_the_seen_set_stores_HASHES_not_urls(store, tmp_path):
 def test_the_seen_set_is_BOUNDED(store, tmp_path):
     """Unbounded, it grows forever on a busy feed."""
     trigger = _watch(store)
-    many = "".join(f"<item><guid>p{i}</guid></item>" for i in range(web_poll.MAX_SEEN_KEYS + 50))
-    web_poll.poll_one(
-        trigger, now=NOW, base_dir=tmp_path, fetcher=_fetcher({"v": f"<rss>{many}</rss>"})
+    many = "".join(
+        f"<item><guid>p{i}</guid></item>" for i in range(web_poll.MAX_SEEN_KEYS + 50)
     )
-    assert len(web_poll.load_state(trigger.id, base_dir=tmp_path).seen) == web_poll.MAX_SEEN_KEYS
+    web_poll.poll_one(
+        trigger,
+        now=NOW,
+        base_dir=tmp_path,
+        fetcher=_fetcher({"v": f"<rss>{many}</rss>"}),
+    )
+    assert (
+        len(web_poll.load_state(trigger.id, base_dir=tmp_path).seen)
+        == web_poll.MAX_SEEN_KEYS
+    )
 
 
 def test_the_payload_item_list_is_CAPPED(store, tmp_path):
     """A payload carrying 400 urls is a prompt nobody can afford."""
     trigger = _watch(store)
-    web_poll.poll_one(trigger, now=NOW, base_dir=tmp_path, fetcher=_fetcher({"v": FEED_TWO}))
+    web_poll.poll_one(
+        trigger, now=NOW, base_dir=tmp_path, fetcher=_fetcher({"v": FEED_TWO})
+    )
     many = "".join(f"<item><guid>n{i}</guid></item>" for i in range(200))
     outcome = web_poll.poll_one(
-        trigger, now=NOW + 400, base_dir=tmp_path, fetcher=_fetcher({"v": f"<rss>{many}</rss>"})
+        trigger,
+        now=NOW + 400,
+        base_dir=tmp_path,
+        fetcher=_fetcher({"v": f"<rss>{many}</rss>"}),
     )
     assert outcome.payload is not None
     assert len(outcome.payload["new_items"]) == 20
-    assert outcome.payload["new_count"] == 200, "the COUNT is honest even when the list is capped"
-
-
-# ── the boot wiring ──
+    assert (
+        outcome.payload["new_count"] == 200
+    ), "the COUNT is honest even when the list is capped"
 
 
 def test_the_gateway_RUNS_the_poll_loop():
@@ -516,51 +528,68 @@ def test_the_gateway_RUNS_the_poll_loop():
     session exists to close — the very state `web_watch` was in before it."""
     import inspect
 
-    from gideon.gateway import GatewayOrchestrator
+    from gideon.engine.automation_boot import AutomationBoot
+    from gideon.engine.gateway import RuntimeCoordinator
 
-    boot = inspect.getsource(GatewayOrchestrator)
+    assert "AutomationBoot" in inspect.getsource(RuntimeCoordinator._init_cron)
+    boot = inspect.getsource(AutomationBoot.start)
     assert "_web_watch_poll_loop" in boot
-    assert "self._web_watch_task = asyncio.create_task" in boot
+    assert "self.runtime._web_watch_task = asyncio.create_task" in boot
 
 
 def test_the_loop_HONOURS_incident_mode():
     """An unattended fire is an unattended fire regardless of what triggered it (S117)."""
     import inspect
 
-    from gideon.gateway import GatewayOrchestrator
+    from gideon.engine.background_passes import WatchPoll
+    from gideon.engine.gateway import RuntimeCoordinator
 
-    src = inspect.getsource(GatewayOrchestrator._web_watch_poll_loop)
+    assert "WatchPoll(self, web=True" in inspect.getsource(
+        RuntimeCoordinator._web_watch_poll_loop
+    )
+    src = inspect.getsource(WatchPoll.cycle)
     assert "incident_active" in src
 
 
 def test_the_loop_is_CANCELLED_on_shutdown():
     """A task nobody cancels keeps polling a third party after the user stopped the gateway."""
+    import ast
     import inspect
 
-    from gideon.gateway import GatewayOrchestrator
+    from gideon.engine.gateway import RuntimeCoordinator
+    from gideon.engine.lifecycle import retire
 
-    src = inspect.getsource(GatewayOrchestrator)
-    shutdown = src[src.index("# Stop services") :]
-    assert "self._web_watch_task" in shutdown
+    assert "await retire(self)" in inspect.getsource(RuntimeCoordinator._shutdown)
+    cancellations = [
+        node
+        for node in ast.walk(ast.parse(inspect.getsource(retire)))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "cancel_tasks"
+    ]
+    assert any(
+        isinstance(node, ast.Attribute) and node.attr == "_web_watch_task"
+        for call in cancellations
+        for argument in call.args
+        for node in ast.walk(argument)
+    )
 
 
-# ── the headless escalation tier (WF2AUT-7) ──
-
-# A shell page that, once JS runs, exposes a feed the plain fetch never saw.
 RENDERED_FEED = "<rss><item><guid>js-post-1</guid></item></rss>"
 
 
 def test_escalation_is_OFF_by_default_a_shell_page_does_not_escalate(store, tmp_path):
     """Default OFF: a watch that never set `escalate_headless` polls byte-for-byte as before — a
     shell page seeds, the renderer is never touched."""
-    trigger = _watch(store)  # no escalate_headless key
+    trigger = _watch(store)
     render = _renderer(RENDERED_FEED)
     outcome = web_poll.poll_one(
         trigger, now=NOW, base_dir=tmp_path, fetcher=_shell_fetcher(), renderer=render
     )
-    assert render.calls["n"] == 0, "escalation must not run when the watch didn't opt in"
+    assert (
+        render.calls["n"] == 0
+    ), "escalation must not run when the watch didn't opt in"
     assert outcome.escalation == ""
-    # seeded on an empty shell (no items), and the renderer stayed idle
     assert "seeded 0 item" in outcome.reason
 
 
@@ -569,17 +598,19 @@ def test_escalation_ON_a_shell_page_renders_and_extracts(store, tmp_path):
     HTML, and mark the escalation so it reaches the ledger/payload."""
     trigger = _watch(store, tid="web_watch:js", escalate_headless=True)
     render = _renderer(RENDERED_FEED)
-    # first poll seeds (the rendered item is recorded without firing)
     seed = web_poll.poll_one(
         trigger, now=NOW, base_dir=tmp_path, fetcher=_shell_fetcher(), renderer=render
     )
     assert render.calls["n"] == 1
     assert "escalated to headless; extracted 1 item(s)" in seed.escalation
-    assert "seeded 1 item" in seed.reason  # the rendered item WAS seen via the headless tier
-    # a NEW rendered item now fires, carrying the escalation marker in the payload
+    assert "seeded 1 item" in seed.reason
     render2 = _renderer(RENDERED_FEED.replace("js-post-1", "js-post-2"))
     fire = web_poll.poll_one(
-        trigger, now=NOW + 400, base_dir=tmp_path, fetcher=_shell_fetcher(), renderer=render2
+        trigger,
+        now=NOW + 400,
+        base_dir=tmp_path,
+        fetcher=_shell_fetcher(),
+        renderer=render2,
     )
     assert fire.payload is not None
     assert fire.payload["new_count"] == 1
@@ -589,17 +620,22 @@ def test_escalation_ON_a_shell_page_renders_and_extracts(store, tmp_path):
 
 def test_escalation_budget_EXHAUSTED_stops_with_a_visible_reason(store, tmp_path):
     """A render is the expensive tier. When its own daily budget is spent, escalation stops and says
-    so (a ledger-visible reason) rather than launching a browser it has no budget for."""
-    trigger = _watch(store, tid="web_watch:cap", escalate_headless=True, max_headless_requests=1)
+    so (a ledger-visible reason) rather than launching a browser it has no budget for.
+    """
+    trigger = _watch(
+        store, tid="web_watch:cap", escalate_headless=True, max_headless_requests=1
+    )
     render = _renderer(RENDERED_FEED)
-    # poll 1: seeds, spends the single headless render
     web_poll.poll_one(
         trigger, now=NOW, base_dir=tmp_path, fetcher=_shell_fetcher(), renderer=render
     )
     assert render.calls["n"] == 1
-    # poll 2: budget spent → refused, visibly, and the renderer is NOT called again
     outcome = web_poll.poll_one(
-        trigger, now=NOW + 400, base_dir=tmp_path, fetcher=_shell_fetcher(), renderer=render
+        trigger,
+        now=NOW + 400,
+        base_dir=tmp_path,
+        fetcher=_shell_fetcher(),
+        renderer=render,
     )
     assert render.calls["n"] == 1, "a spent budget must not launch another render"
     assert "headless escalation budget spent" in outcome.escalation
@@ -610,9 +646,12 @@ def test_a_FAILED_render_still_SPENDS_its_budget(store, tmp_path):
     """Charged win-or-lose: a failed render that did not count would retry every interval forever —
     the runaway the plain budget also guards."""
     trigger = _watch(
-        store, tid="web_watch:failrender", escalate_headless=True, max_headless_requests=5
+        store,
+        tid="web_watch:failrender",
+        escalate_headless=True,
+        max_headless_requests=5,
     )
-    web_poll.poll_one(  # seed
+    web_poll.poll_one(
         trigger,
         now=NOW,
         base_dir=tmp_path,
@@ -639,14 +678,13 @@ def test_PLAYWRIGHT_UNAVAILABLE_does_not_escalate_or_crash(store, tmp_path):
     outcome = web_poll.poll_one(
         trigger, now=NOW, base_dir=tmp_path, fetcher=_shell_fetcher(), renderer=render
     )
-    assert outcome.payload is None  # plain shell seeds, no crash
+    assert outcome.payload is None
     assert "headless tier unavailable" in outcome.escalation
     assert "install gideon[js-render]" in outcome.escalation
     st = web_poll.load_state(trigger.id, base_dir=tmp_path)
-    assert st.headless_today == 0, "an unavailable tier is never charged — it can't succeed yet"
-
-
-# ── digest routing → the KNOWLEDGE store, never memory ──
+    assert (
+        st.headless_today == 0
+    ), "an unavailable tier is never charged — it can't succeed yet"
 
 
 def test_a_new_item_ROUTES_to_the_knowledge_store(store, tmp_path):
@@ -656,12 +694,20 @@ def test_a_new_item_ROUTES_to_the_knowledge_store(store, tmp_path):
     spy = _SpyKnowledge()
     pages = {"v": FEED_TWO}
     web_poll.poll_one(
-        trigger, now=NOW, base_dir=tmp_path, fetcher=_fetcher(pages), knowledge_store=spy
-    )  # seed — nothing fires, nothing written
+        trigger,
+        now=NOW,
+        base_dir=tmp_path,
+        fetcher=_fetcher(pages),
+        knowledge_store=spy,
+    )
     assert spy.items == []
     pages["v"] = FEED_THREE
     fire = web_poll.poll_one(
-        trigger, now=NOW + 400, base_dir=tmp_path, fetcher=_fetcher(pages), knowledge_store=spy
+        trigger,
+        now=NOW + 400,
+        base_dir=tmp_path,
+        fetcher=_fetcher(pages),
+        knowledge_store=spy,
     )
     assert fire.payload is not None
     assert len(spy.items) == 1, "only the ONE genuinely-new item is written"
@@ -676,42 +722,61 @@ def test_only_GENUINELY_NEW_items_are_written_not_the_whole_page(store, tmp_path
     trigger = _watch(store)
     spy = _SpyKnowledge()
     pages = {"v": FEED_TWO}
-    web_poll.poll_one(  # seed
-        trigger, now=NOW, base_dir=tmp_path, fetcher=_fetcher(pages), knowledge_store=spy
+    web_poll.poll_one(
+        trigger,
+        now=NOW,
+        base_dir=tmp_path,
+        fetcher=_fetcher(pages),
+        knowledge_store=spy,
     )
     pages["v"] = FEED_THREE
-    web_poll.poll_one(  # fires: 1 new
-        trigger, now=NOW + 400, base_dir=tmp_path, fetcher=_fetcher(pages), knowledge_store=spy
+    web_poll.poll_one(
+        trigger,
+        now=NOW + 400,
+        base_dir=tmp_path,
+        fetcher=_fetcher(pages),
+        knowledge_store=spy,
     )
-    web_poll.poll_one(  # unchanged: writes nothing
-        trigger, now=NOW + 800, base_dir=tmp_path, fetcher=_fetcher(pages), knowledge_store=spy
+    web_poll.poll_one(
+        trigger,
+        now=NOW + 800,
+        base_dir=tmp_path,
+        fetcher=_fetcher(pages),
+        knowledge_store=spy,
     )
     assert len(spy.items) == 1
 
 
 def test_the_digest_does_NOT_touch_the_memory_subsystem(store, tmp_path):
     """🔴 The routing contract: web_watch output is KNOWLEDGE (searchable user items), not memory.
-    A real KnowledgeStore gains the item; a MemoryStore over the same tmp home stays empty."""
-    from gideon.knowledge.store import KnowledgeStore
-    from gideon.memory import MemoryStore
+    A real KnowledgeStore gains the item; a MemoryJournal over the same tmp home stays empty.
+    """
+    from gideon.cognition.knowledge.store import KnowledgeStore
+    from gideon.cognition.memory import MemoryJournal
 
     kstore = KnowledgeStore(str(tmp_path / "k.db"))
-    memory = MemoryStore(workspace=tmp_path / "ws")
+    memory = MemoryJournal(workspace=tmp_path / "ws")
     memory.init()
 
     trigger = _watch(store)
     pages = {"v": FEED_TWO}
     web_poll.poll_one(
-        trigger, now=NOW, base_dir=tmp_path, fetcher=_fetcher(pages), knowledge_store=kstore
+        trigger,
+        now=NOW,
+        base_dir=tmp_path,
+        fetcher=_fetcher(pages),
+        knowledge_store=kstore,
     )
     pages["v"] = FEED_THREE
     web_poll.poll_one(
-        trigger, now=NOW + 400, base_dir=tmp_path, fetcher=_fetcher(pages), knowledge_store=kstore
+        trigger,
+        now=NOW + 400,
+        base_dir=tmp_path,
+        fetcher=_fetcher(pages),
+        knowledge_store=kstore,
     )
 
-    # KNOWLEDGE gained the item …
     assert kstore.search_items_fts_count("post-3") >= 1
-    # … and MEMORY was never touched: no history/preferences/projects writes beyond init defaults.
     assert "post-3" not in memory.read_preferences()
     assert "post-3" not in memory.read_projects()
     hist = list((tmp_path / "ws" / "memory" / "history").glob("*.md"))
@@ -721,10 +786,14 @@ def test_the_digest_does_NOT_touch_the_memory_subsystem(store, tmp_path):
 def test_the_new_spec_keys_are_ACCEPTED_by_validation():
     """`escalate_headless` / `max_headless_requests` must be in `SPEC_KEYS['web_watch']`, or an
     opted-in watch validates with an 'unknown key' warning."""
-    from gideon.triggers.models import validate_spec
+    from gideon.automation.triggers.models import validate_spec
 
     issues = validate_spec(
         "web_watch",
-        {"url": "https://x.example", "escalate_headless": True, "max_headless_requests": 3},
+        {
+            "url": "https://x.example",
+            "escalate_headless": True,
+            "max_headless_requests": 3,
+        },
     )
     assert issues == [], f"new headless keys must be recognised; got {issues}"

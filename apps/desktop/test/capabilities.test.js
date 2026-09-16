@@ -10,13 +10,10 @@ const {
   IPC_PREFIX,
   makeCapabilities,
   registerCapabilityIpc,
-} = require("../capabilities");
+} = require("../src/native/capabilities");
 
 const ROOT = path.resolve(__dirname, "..");
 
-/** A systemPreferences stub. `status` is what getMediaAccessStatus returns for the
- * requested media type; `ask` is what askForMediaAccess resolves. Both record calls
- * so a test can assert the OS prompt fired exactly once — or not at all. */
 function sysPrefsStub({ status = {}, ask = true } = {}) {
   const calls = { get: [], ask: [] };
   return {
@@ -29,8 +26,6 @@ function sysPrefsStub({ status = {}, ask = true } = {}) {
     async askForMediaAccess(type) {
       calls.ask.push(type);
       const granted = typeof ask === "function" ? ask(type) : ask;
-      // Mirror macOS: once the user answers, the TCC state stops being
-      // not-determined, which is what makes the second request() a no-op.
       if (typeof status === "object") status[type] = granted ? "granted" : "denied";
       return granted;
     },
@@ -53,8 +48,6 @@ describe("capability vocabulary", () => {
       "login_item",
       "native_notifications",
       "screen_capture",
-      // DC-3 T3.3 — in the vocabulary precisely so the answer "no, and here is why"
-      // is a state the panel and the gateway can both read, rather than a silence.
       "system_audio",
       "tray",
     ]);
@@ -69,11 +62,6 @@ describe("capability vocabulary", () => {
 describe("probe", () => {
   it("reports every capability unavailable off the implemented platform", () => {
     const caps = makeCapabilities({ platform: "linux", systemPreferences: sysPrefsStub() });
-    // `system_audio` is excluded from the REASON assertion only, and deliberately: it is
-    // unavailable on macOS too, so "not implemented on linux" would be the wrong
-    // sentence — it is a refusal no platform lifts. Its own reason is pinned in
-    // `pushToTalk.test.js`, across every platform. The three state assertions below
-    // still cover it.
     for (const cap of CAPABILITIES) {
       const s = caps.probe(cap);
       assert.strictEqual(s.available, false, cap);
@@ -90,7 +78,6 @@ describe("probe", () => {
       const s = caps.probe("audio_capture");
       assert.strictEqual(s.granted, state);
       assert.strictEqual(s.available, true);
-      // Only not-determined is actionable from inside the app.
       assert.strictEqual(s.requestable, state === "not-determined");
     }
   });
@@ -243,7 +230,7 @@ describe("request — the state machine", () => {
       systemPreferences: sysPrefsStub({ status: { microphone: "granted" } }),
       onChange,
     });
-    await granting.request("audio_capture"); // already granted → no OS transition
+    await granting.request("audio_capture");
     assert.deepStrictEqual(seen, []);
 
     const prompting = makeCapabilities({
@@ -254,7 +241,6 @@ describe("request — the state machine", () => {
     await prompting.request("audio_capture");
     assert.deepStrictEqual(seen, [["audio_capture", "granted"]]);
 
-    // And a second request() after the grant does not prompt again.
     const again = await prompting.request("audio_capture");
     assert.deepStrictEqual(again, { granted: true, state: "granted", prompted: false, reason: "" });
     assert.strictEqual(seen.length, 1);
@@ -273,7 +259,7 @@ describe("IPC surface — the renderer reaches nothing outside the namespace", (
     return { handlers, handle: (ch, fn) => handlers.set(ch, fn) };
   }
 
-  it("registers only the pclaw-desktop channels", () => {
+  it("registers only the gideon-desktop channels", () => {
     const ipc = ipcStub();
     registerCapabilityIpc(ipc, mac());
     const channels = [...ipc.handlers.keys()].sort();
@@ -290,8 +276,6 @@ describe("IPC surface — the renderer reaches nothing outside the namespace", (
       snapshot: () => caps.snapshot(),
       request: (c) => caps.request(c),
     });
-    // A compromised renderer can invoke with any string. The closed vocabulary is
-    // checked before the OS handle is touched.
     const s = await ipc.handlers.get(IPC_CHANNELS.probe)(null, "../../etc/passwd");
     assert.strictEqual(s.granted, "unavailable");
     assert.strictEqual(probed, 0);
@@ -300,40 +284,33 @@ describe("IPC surface — the renderer reaches nothing outside the namespace", (
   });
 
   it("preload exposes exactly one namespace and no raw electron handles", () => {
-    const src = fs.readFileSync(path.join(ROOT, "preload.js"), "utf8");
+    const src = fs.readFileSync(path.join(ROOT, "src/bridge/dashboard-preload.js"), "utf8");
     const exposed = [...src.matchAll(/exposeInMainWorld\(\s*"([^"]+)"/g)].map((m) => m[1]);
-    // ONE bridge story: the old `electronAPI` namespace was retired, not kept
-    // alongside `pclawDesktop` (DC-2 namespace decision).
-    assert.deepStrictEqual(exposed, ["pclawDesktop"]);
+    assert.deepStrictEqual(exposed, ["gideonDesktop"]);
     assert.ok(!/exposeInMainWorld\(\s*"electronAPI"/.test(src));
     assert.ok(!/ipcRenderer:\s*ipcRenderer/.test(src), "ipcRenderer must not be handed to the page");
     assert.ok(!/require:/.test(src), "require must not be handed to the page");
   });
 
   it("preload uses no ipc channel outside IPC_CHANNELS (plus the status feed)", () => {
-    const src = fs.readFileSync(path.join(ROOT, "preload.js"), "utf8");
+    const src = fs.readFileSync(path.join(ROOT, "src/bridge/dashboard-preload.js"), "utf8");
     const allowed = new Set([...Object.values(IPC_CHANNELS), "status"]);
-    // Literal channel strings: ipcRenderer.on("x") / .invoke("x") / .send("x").
     const literals = [...src.matchAll(/ipcRenderer\.\w+\(\s*"([^"]+)"/g)].map((m) => m[1]);
     for (const ch of literals) assert.ok(allowed.has(ch), `unexpected channel: ${ch}`);
-    // Everything else must go through the IPC_CHANNELS map, never a raw string.
     const viaMap = [...src.matchAll(/ipcRenderer\.\w+\(\s*IPC_CHANNELS\.(\w+)/g)].map((m) => m[1]);
     for (const key of viaMap) assert.ok(key in IPC_CHANNELS, `unknown IPC_CHANNELS.${key}`);
     assert.ok(viaMap.length >= 3, "the capability methods must route through IPC_CHANNELS");
   });
 
   it("the loading screen reads the same single namespace", () => {
-    const html = fs.readFileSync(path.join(ROOT, "loading.html"), "utf8");
-    assert.match(html, /window\.pclawDesktop\?\.onStatus/);
+    const html = fs.readFileSync(path.join(ROOT, "views/loading.html"), "utf8");
+    assert.match(html, /window\.gideonDesktop\?\.onStatus/);
     assert.ok(!html.includes("electronAPI"), "loading.html must not use the retired namespace");
   });
 });
 
 describe("contextIsolation stays on", () => {
-  // The bridge is only a boundary while contextIsolation is true and
-  // nodeIntegration false. Nothing in the runtime would fail loudly if someone
-  // flipped either, so this rail fails the build instead.
-  const src = fs.readFileSync(path.join(ROOT, "main.js"), "utf8");
+  const src = fs.readFileSync(path.join(ROOT, "src/application/window-workspace.js"), "utf8");
 
   it("every window sets contextIsolation: true", () => {
     const flags = [...src.matchAll(/contextIsolation:\s*(\w+)/g)].map((m) => m[1]);
@@ -355,7 +332,7 @@ describe("contextIsolation stays on", () => {
 });
 
 describe("gateway registration keeps the shell token out of reach", () => {
-  const src = fs.readFileSync(path.join(ROOT, "main.js"), "utf8");
+  const src = fs.readFileSync(path.join(ROOT, "src/application/local-gateway.js"), "utf8");
 
   it("never writes the token to disk", () => {
     assert.ok(!/writeFileSync\([^)]*shellToken/.test(src));
@@ -363,7 +340,7 @@ describe("gateway registration keeps the shell token out of reach", () => {
   });
 
   it("never logs the token", () => {
-    const logged = [...src.matchAll(/console\.\w+\(([^;]*)\)/g)].map((m) => m[1]);
+    const logged = [...src.matchAll(/(?:console|this\.log)\.\w+\(([^;]*)\)/g)].map((m) => m[1]);
     for (const line of logged) {
       assert.ok(!line.includes("shellToken"), `token reaches a log line: ${line}`);
       assert.ok(!line.includes("localSecret"), `secret reaches a log line: ${line}`);
@@ -378,6 +355,6 @@ describe("gateway registration keeps the shell token out of reach", () => {
   it("presents the token only as a request header", () => {
     const uses = [...src.matchAll(/shellToken/g)];
     assert.ok(uses.length >= 4, "expected the token to be declared, set, checked and sent");
-    assert.match(src, /"X-Shell-Token": (shellToken|token)/);
+    assert.match(src, /"X-Shell-Token": (this\.#shellToken|token)/);
   });
 });

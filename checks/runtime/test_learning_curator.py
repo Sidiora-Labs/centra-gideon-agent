@@ -9,12 +9,10 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from gideon.learning import curator as C
-from gideon.learning.curator import Candidate, MutationLog
+from gideon.cognition.learning import curator as C
+from gideon.cognition.learning.curator import Candidate, MutationLog
 
 NOW = datetime(2026, 8, 1, tzinfo=timezone.utc)
-#: A user who worked every day for the last 120 — so active days == wall-clock days
-#: and the decay curve is exercised rather than the vacation guard.
 ACTIVE = [(NOW - timedelta(days=i)).date().isoformat() for i in range(121)]
 
 
@@ -35,9 +33,6 @@ def log(tmp_path):
     journal.close()
 
 
-# ── the aging ladder ──
-
-
 def test_a_fresh_entity_is_left_alone(log):
     report = C.run_aging([cand("fresh", 1)], active_dates=ACTIVE, now=NOW, log=log)
     assert report.changed == 0
@@ -50,7 +45,9 @@ def test_an_aging_entity_goes_stale(log):
 
 def test_a_cold_entity_is_archived_not_deleted(log):
     """Archive is the maximum destructive action."""
-    report = C.run_aging([cand("cold", 110, kind="failure")], active_dates=ACTIVE, now=NOW, log=log)
+    report = C.run_aging(
+        [cand("cold", 110, kind="failure")], active_dates=ACTIVE, now=NOW, log=log
+    )
     assert report.to_archived == ["cold"]
 
 
@@ -60,7 +57,7 @@ def test_the_ladder_and_the_curve_cannot_disagree():
     The code this replaces had a day-threshold ladder and no curve at all, so
     "stale" and "decayed" were unrelated notions.
     """
-    from gideon.learning.decay import evaluate
+    from gideon.cognition.learning.decay import evaluate
 
     healthy = evaluate(kind="skill", active_days_since_use=1)
     assert C.target_state(healthy, C.STATE_ACTIVE) == C.STATE_ACTIVE
@@ -69,14 +66,11 @@ def test_the_ladder_and_the_curve_cannot_disagree():
 
 
 def test_a_review_verdict_does_not_change_state():
-    from gideon.learning.decay import evaluate
+    from gideon.cognition.learning.decay import evaluate
 
     review = evaluate(kind="skill", active_days_since_use=200, stability=0.8)
     assert review.review
     assert C.target_state(review, C.STATE_STALE) == C.STATE_STALE
-
-
-# ── provenance scoping ──
 
 
 def test_user_authored_entities_are_skipped(log):
@@ -94,13 +88,13 @@ def test_user_authored_entities_are_skipped(log):
 
 def test_pinned_entities_bypass_aging_entirely(log):
     report = C.run_aging(
-        [cand("pinned", 900, kind="failure", pinned=True)], active_dates=ACTIVE, now=NOW, log=log
+        [cand("pinned", 900, kind="failure", pinned=True)],
+        active_dates=ACTIVE,
+        now=NOW,
+        log=log,
     )
     assert report.skipped_pinned == ["pinned"]
     assert report.changed == 0
-
-
-# ── over-deletion refusal ──
 
 
 def test_a_pass_cutting_most_of_the_library_is_refused():
@@ -131,9 +125,11 @@ def test_refusal_counts_only_eligible_entities():
     """
     entities = [cand(f"c{i}", 300, kind="failure") for i in range(10)]
     entities += [cand(f"p{i}", 300, kind="failure", pinned=True) for i in range(20)]
-    report = C.run_aging(entities, active_dates=ACTIVE, now=NOW, dry_run=True, batch_size=40)
+    report = C.run_aging(
+        entities, active_dates=ACTIVE, now=NOW, dry_run=True, batch_size=40
+    )
     assert report.refused
-    assert "of 10" in report.refused  # the denominator excluded the pinned rows
+    assert "of 10" in report.refused
 
 
 def test_a_set_below_the_refusal_floor_is_allowed_to_be_cut_entirely():
@@ -152,9 +148,6 @@ def test_refusal_reports_what_it_would_have_done():
     assert "REFUSED" in report.summary()
 
 
-# ── bounded batches ──
-
-
 def test_the_batch_is_bounded(log):
     """An unbounded tick is a latency spike attached to whatever cadence hosts it,
     and janitorial work is never urgent enough to justify one."""
@@ -171,23 +164,25 @@ def test_oldest_audited_is_examined_first():
         Candidate(kind="skill", entity="ancient", audited_at="2026-01-01"),
         Candidate(kind="skill", entity="never", audited_at=""),
     ]
-    report = C.run_aging(entities, active_dates=ACTIVE, now=NOW, dry_run=True, batch_size=1)
+    report = C.run_aging(
+        entities, active_dates=ACTIVE, now=NOW, dry_run=True, batch_size=1
+    )
     assert report.scanned == 1
-    # "never audited" sorts first — it is the one with no evidence at all.
     assert report.skipped_pinned == [] and report.skipped_user == []
 
 
 def test_the_batch_size_floor_is_one():
-    report = C.run_aging([cand("a", 1)], active_dates=ACTIVE, now=NOW, dry_run=True, batch_size=0)
+    report = C.run_aging(
+        [cand("a", 1)], active_dates=ACTIVE, now=NOW, dry_run=True, batch_size=0
+    )
     assert report.scanned == 1
-
-
-# ── mode scoping ──
 
 
 def test_a_sweep_can_be_scoped_to_one_kind():
     mixed = [cand("s1", 45), cand("t1", 45, kind="template")]
-    report = C.run_aging(mixed, active_dates=ACTIVE, now=NOW, dry_run=True, mode="template")
+    report = C.run_aging(
+        mixed, active_dates=ACTIVE, now=NOW, dry_run=True, mode="template"
+    )
     assert report.scanned == 1
     assert report.to_stale == ["t1"]
 
@@ -196,9 +191,6 @@ def test_an_unscoped_sweep_covers_every_kind():
     mixed = [cand("s1", 45), cand("t1", 45, kind="template")]
     report = C.run_aging(mixed, active_dates=ACTIVE, now=NOW, dry_run=True)
     assert report.scanned == 2
-
-
-# ── the undo journal ──
 
 
 def test_every_mutation_is_journaled_with_before_and_after(log):
@@ -220,7 +212,9 @@ def test_an_archival_journals_its_evidence(log):
     this healthy?" when the question was "did I get a verdict?" — losing the evidence
     for exactly the mutations most likely to need undoing.
     """
-    C.run_aging([cand("cold", 200, kind="failure")], active_dates=ACTIVE, now=NOW, log=log)
+    C.run_aging(
+        [cand("cold", 200, kind="failure")], active_dates=ACTIVE, now=NOW, log=log
+    )
     _, mutation = log.pending_undo()[0]
     assert mutation.after["strength"] is not None
     assert mutation.after["strength"] < 0.2
@@ -228,7 +222,9 @@ def test_an_archival_journals_its_evidence(log):
 
 
 def test_a_dry_run_journals_nothing(log):
-    C.run_aging([cand("aging", 45)], active_dates=ACTIVE, now=NOW, dry_run=True, log=log)
+    C.run_aging(
+        [cand("aging", 45)], active_dates=ACTIVE, now=NOW, dry_run=True, log=log
+    )
     assert log.pending_undo() == []
 
 
@@ -236,7 +232,7 @@ def test_a_mutation_can_be_marked_undone_once(log):
     C.run_aging([cand("aging", 45)], active_dates=ACTIVE, now=NOW, log=log)
     mutation_id = log.pending_undo()[0][0]
     assert log.mark_undone(mutation_id) is True
-    assert log.mark_undone(mutation_id) is False  # idempotent
+    assert log.mark_undone(mutation_id) is False
     assert log.pending_undo() == []
 
 
@@ -260,9 +256,6 @@ def test_the_journal_survives_a_reopen(tmp_path):
         second.close()
 
 
-# ── the vacation guard ──
-
-
 def test_nothing_ages_across_days_the_user_was_absent():
     """Wall-clock decay punishes a single user for taking a holiday: come back after
     three weeks and the library has gone stale with no decision made about it."""
@@ -272,23 +265,20 @@ def test_nothing_ages_across_days_the_user_was_absent():
     assert report.to_archived == [] and report.to_stale == []
 
 
-# ── review proposals ──
-
-
 def test_decayed_but_stable_is_reported_for_review(log):
     report = C.run_aging(
         [cand("confident", 200, stability=0.85)], active_dates=ACTIVE, now=NOW, log=log
     )
     assert report.review_proposals == ["confident"]
-    assert report.to_archived == []  # NOT silently archived
+    assert report.to_archived == []
 
 
 def test_review_findings_are_filed_through_the_shared_queue(tmp_path, monkeypatch):
     """Routed through the queue rather than acted on: "confident about something
     nobody uses" is a user decision, not a curator one."""
-    from gideon.learning import proposals as P
+    from gideon.cognition.learning import proposals as P
 
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     monkeypatch.setattr(P, "_surface_in_inbox", lambda prop: None)
     monkeypatch.setattr(P, "_audit", lambda op, prop, outcome: None)
 
@@ -306,9 +296,6 @@ def test_a_dry_run_files_no_proposals():
 
 def test_no_findings_files_nothing():
     assert C.file_review_proposals(C.CuratorReport()) == 0
-
-
-# ── the optimizer battery ──
 
 
 def test_a_large_entity_is_flagged_for_compression():
@@ -335,9 +322,6 @@ def test_detection_changes_nothing():
     assert candidates[0].state == C.STATE_ACTIVE
 
 
-# ── the report ──
-
-
 def test_the_summary_names_what_happened(log):
     report = C.run_aging(
         [cand("aging", 45), cand("cold", 300, kind="failure")],
@@ -351,7 +335,9 @@ def test_the_summary_names_what_happened(log):
 
 
 def test_a_dry_run_says_so():
-    report = C.run_aging([cand("aging", 45)], active_dates=ACTIVE, now=NOW, dry_run=True)
+    report = C.run_aging(
+        [cand("aging", 45)], active_dates=ACTIVE, now=NOW, dry_run=True
+    )
     assert "dry run" in report.summary()
 
 

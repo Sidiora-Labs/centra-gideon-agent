@@ -8,13 +8,13 @@ import json
 
 import pytest
 
-from gideon.artifacts.folders import (
+from gideon.workspace.artifacts.folders import (
     MAX_FOLDERS,
     ArtifactFolder,
     ArtifactFolderStore,
     delete_folder,
 )
-from gideon.artifacts.native import NativeArtifactProvider
+from gideon.workspace.artifacts.native import NativeArtifactProvider
 
 
 @pytest.fixture
@@ -24,7 +24,6 @@ def prov(tmp_path):
 
 @pytest.fixture
 def store(prov):
-    # Same root as the provider: folders.json lives inside the artifacts tree.
     return ArtifactFolderStore(prov.root)
 
 
@@ -32,12 +31,9 @@ def _make(prov, name):
     return prov.create(name=name, content="<p>x</p>", kind="html")
 
 
-# ── CRUD ──
-
-
 def test_folder_crud_round_trip(store):
     created = store.create("Reports", icon="📊")
-    assert len(created.id) == 12 and int(created.id, 16) >= 0  # opaque 12-char hex
+    assert len(created.id) == 12 and int(created.id, 16) >= 0
     assert created.name == "Reports"
     assert created.parent_id == ""
     assert created.icon == "📊"
@@ -67,21 +63,17 @@ def test_folder_name_required(store):
     folder = store.create("Keep")
     with pytest.raises(ValueError, match="folder name required"):
         store.update(folder.id, name="")
-    # The failed rename persisted nothing.
     assert store.get(folder.id).name == "Keep"
 
 
 def test_folder_limit_is_bounded(store, monkeypatch):
-    monkeypatch.setattr("gideon.artifacts.folders.MAX_FOLDERS", 2)
+    monkeypatch.setattr("gideon.workspace.artifacts.folders.MAX_FOLDERS", 2)
     store.create("a")
     store.create("b")
     with pytest.raises(ValueError, match="folder limit reached"):
         store.create("c")
     assert len(store.list()) == 2
-    assert MAX_FOLDERS >= 2  # the shipped cap is a real number, not a stub
-
-
-# ── filing is metadata-only ──
+    assert MAX_FOLDERS >= 2
 
 
 def test_filing_does_not_bump_updated_at(prov, store):
@@ -90,7 +82,7 @@ def test_filing_does_not_bump_updated_at(prov, store):
     art = _make(prov, "Budget")
     folder = store.create("Finance")
     before = prov.get(art.slug)
-    assert before.updated_at  # a real timestamp exists to be (not) bumped
+    assert before.updated_at
 
     filed = prov.set_folder(art.slug, folder.id)
 
@@ -99,7 +91,6 @@ def test_filing_does_not_bump_updated_at(prov, store):
     assert filed.created_at == before.created_at
     assert filed.version == before.version
     assert prov.get(art.slug).updated_at == before.updated_at
-    # And unfiling is equally free.
     assert prov.set_folder(art.slug, "").updated_at == before.updated_at
 
 
@@ -111,7 +102,7 @@ def test_filing_does_not_snapshot_or_touch_content(prov, store):
     assert after.content == "<p>x</p>"
     assert after.version == 1
     assert prov.list_versions(art.slug) == [1]
-    assert [e.type for e in after.events] == ["created"]  # filing logs no event
+    assert [e.type for e in after.events] == ["created"]
 
 
 def test_filing_a_readonly_artifact_is_allowed(prov, store):
@@ -134,9 +125,6 @@ def test_set_folder_unknown_slug_returns_none(prov):
     assert prov.set_folder("no-such-artifact", "") is None
 
 
-# ── rename leaves artifacts untouched ──
-
-
 def test_rename_folder_leaves_artifact_records_untouched(prov, store):
     art = _make(prov, "Q3")
     folder = store.create("Finance")
@@ -149,11 +137,7 @@ def test_rename_folder_leaves_artifact_records_untouched(prov, store):
     assert store.get(folder.id).name == "Finance (2026)"
     assert prov.get(art.slug).to_dict(persist=True) == before
     assert (prov.root / art.slug / "meta.json").read_text() == raw_before
-    # Membership is by opaque id, so the rename cannot break the link.
     assert [a.slug for a in prov.list(folder=folder.id)] == [art.slug]
-
-
-# ── delete falls members back to unfiled ──
 
 
 def test_delete_folder_unfiles_members_and_destroys_nothing(prov, store):
@@ -169,7 +153,6 @@ def test_delete_folder_unfiles_members_and_destroys_nothing(prov, store):
 
     assert (deleted, unfiled) == (True, 1)
     assert store.get(folder.id) is None
-    # The artifact survives, is unfiled, and did not get a recency bump on the way.
     surviving = prov.get(kept.slug)
     assert surviving is not None
     assert surviving.content == "<p>x</p>"
@@ -177,7 +160,6 @@ def test_delete_folder_unfiles_members_and_destroys_nothing(prov, store):
     assert surviving.updated_at == kept_before
     assert {a.slug for a in prov.list()} == {kept.slug, other.slug}
     assert [a.slug for a in prov.list(folder="")] == [kept.slug]
-    # An unrelated folder's membership is undisturbed.
     assert [a.slug for a in prov.list(folder=keeper.id)] == [other.slug]
 
 
@@ -189,7 +171,6 @@ def test_delete_folder_reparents_child_folders_to_root(prov, store):
     assert delete_folder(store, prov, parent.id) == (True, 0)
 
     assert store.get(child.id).parent_id == ""
-    # Only direct children are reparented; deeper links are untouched.
     assert store.get(grandchild.id).parent_id == child.id
 
 
@@ -199,14 +180,11 @@ def test_delete_unknown_folder_is_a_miss(prov, store):
     assert prov.get(art.slug) is not None
 
 
-# ── nested folders validated ──
-
-
 def test_create_with_missing_parent_is_refused(store):
     with pytest.raises(ValueError, match="parent folder not found"):
         store.create("Orphan", parent_id="deadbeefcafe")
     assert store.list() == []
-    assert not store.path.exists()  # refusal persisted nothing
+    assert not store.path.exists()
 
 
 def test_reparent_to_missing_parent_is_refused(store):
@@ -231,7 +209,6 @@ def test_cycle_through_a_descendant_is_refused(store):
     with pytest.raises(ValueError, match="own descendant"):
         store.update(a.id, parent_id=c.id)
 
-    # Nothing moved: the tree is still A > B > C.
     assert store.get(a.id).parent_id == ""
     assert store.get(b.id).parent_id == a.id
     assert store.get(c.id).parent_id == b.id
@@ -248,12 +225,10 @@ def test_nesting_round_trips_and_moves(store):
     assert moved.parent_id == b.id
     assert store.descendants(a.id) == []
     assert store.descendants(b.id) == [child.id]
-    # And back to the root.
     assert store.update(child.id, parent_id="").parent_id == ""
-    assert store.children("") == sorted(store.list(), key=lambda f: (f.order, f.name.lower()))
-
-
-# ── persistence across reload ──
+    assert store.children("") == sorted(
+        store.list(), key=lambda f: (f.order, f.name.lower())
+    )
 
 
 def test_membership_and_tree_persist_across_reload(tmp_path):
@@ -266,7 +241,6 @@ def test_membership_and_tree_persist_across_reload(tmp_path):
     prov.set_folder(art.slug, child.id)
     updated_at = prov.get(art.slug).updated_at
 
-    # Fresh instances over the same path — no shared in-process state.
     prov2 = NativeArtifactProvider(root=root)
     store2 = ArtifactFolderStore(root)
 
@@ -298,11 +272,7 @@ def test_corrupt_folders_file_reads_as_empty(tmp_path):
 def test_folders_file_does_not_confuse_the_artifact_listing(prov, store):
     art = _make(prov, "Real")
     store.create("A folder")
-    # provider.list enumerates DIRECTORIES, so folders.json is not read as an artifact.
     assert [a.slug for a in prov.list()] == [art.slug]
-
-
-# ── list filter semantics ──
 
 
 def test_folder_filter_is_present_vs_absent(prov, store):
@@ -331,7 +301,8 @@ def test_folder_id_tolerant_load_defaults_to_unfiled(prov):
 
 
 def test_folder_dataclass_round_trip():
-    folder = ArtifactFolder(id="abc123abc123", name="N", parent_id="p", order=3, icon="📁")
+    folder = ArtifactFolder(
+        id="abc123abc123", name="N", parent_id="p", order=3, icon="📁"
+    )
     assert ArtifactFolder.from_dict(folder.to_dict()) == folder
-    # Tolerant of a record missing every optional key.
     assert ArtifactFolder.from_dict({"id": "x"}) == ArtifactFolder(id="x", name="")

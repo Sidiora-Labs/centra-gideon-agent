@@ -1,3 +1,5 @@
+> Ported upstream reference. Dated release, audit, and publication claims describe the donor project and do not certify this Gideon implementation.
+
 # Learning Benchmark Protocol — does an approved skill make the next run better?
 
 **Status:** PROTOCOL v1 — FROZEN 2026-08-16 (LEARNING-VISIBILITY T4.1, atom LV-6). Owner-signed; see §8.
@@ -14,7 +16,7 @@ The claim is narrow on purpose: **a skill the user approved improves the next ma
 Three failure modes are more likely than a wrong answer, so each gets a mechanical guard rather than a reader's caution:
 
 1. **The arms were never actually different.** A comparison that labels two identical runs "skills-on" and "skills-off" produces a delta of pure noise and reports it as a finding. Guard: §3's arm-integrity check — every run must carry positive evidence of what it injected, and a run whose evidence contradicts its label is discarded, not averaged.
-2. **The budget explains the delta, and the topology gets the credit.** This repo already refuses that shape once: [`harness/fanout_measure.py`](../../harness/fanout_measure.py) will not name a winner unless both arms spent within `TOKEN_MATCH_TOLERANCE` of each other. The same rule binds here (§5).
+2. **The budget explains the delta, and the topology gets the credit.** This repo already refuses that shape once: [`checks/harness/fanout_measure.py`](../../checks/harness/fanout_measure.py) will not name a winner unless both arms spent within `TOKEN_MATCH_TOLERANCE` of each other. The same rule binds here (§5).
 3. **The delta is smaller than the noise.** Run-to-run variance on this kind of task set exceeds most architecture deltas in the literature. `INCONCLUSIVE_BAND_POINTS = 5.0` is not a tunable (§5).
 
 The honesty rule that follows from all three, and the reason this doc exists before the runs: **the result is published at whatever magnitude it lands, including `inconclusive` and including a skills-off win.** A protocol that only ever reports wins is not measuring.
@@ -34,7 +36,7 @@ Every benchmark task declares `"dimensions": ["skill_impact"]` so `gideon/eval/r
 
 ### 2.2 The frozen register
 
-Ten tasks, one per bundled skill family that admits a deterministic assertion. Selection rule, stated so it can be checked rather than trusted: **one task per skill under `src/gideon/skills/bundled/` whose procedure has an observable, non-judged outcome.** The 14 bundled skills were enumerated from a fresh home (§9, probe 2); four are excluded and named below, which leaves exactly ten. No task was chosen after seeing a result, because no result exists yet.
+Ten tasks, one per bundled skill family that admits a deterministic assertion. Selection rule, stated so it can be checked rather than trusted: **one task per skill under `runtime/gideon/skills/bundled/` whose procedure has an observable, non-judged outcome.** The 14 bundled skills were enumerated from a fresh home (§9, probe 2); four are excluded and named below, which leaves exactly ten. No task was chosen after seeing a result, because no result exists yet.
 
 | Task id | Skill under test | What the task asks | Assertion shape |
 |---|---|---|---|
@@ -49,7 +51,7 @@ Ten tasks, one per bundled skill family that admits a deterministic assertion. S
 | `sk_best_of_n` | `best-of-n` | Generate candidates, then select with a stated criterion | `regex` on candidate count + `contains` on the criterion |
 | `sk_visual_output` | `visual-output` | Render structured output in the declared visual syntax | `regex` on the syntax envelope |
 
-**Excluded, with reasons:** `loop-worker` (fires only inside a loop, not a chat scenario — a chat-shaped task would measure nothing); `pclaw-api` and `pclaw-features` (self-referential documentation skills — the assertion would test doc recall, not a procedure); `infographic-syntax` (same observable surface as `visual-output`; two tasks over one surface would double-weight it).
+**Excluded, with reasons:** `loop-worker` (fires only inside a loop, not a chat scenario — a chat-shaped task would measure nothing); `gideon-api` and `gideon-features` (self-referential documentation skills — the assertion would test doc recall, not a procedure); `infographic-syntax` (same observable surface as `visual-output`; two tasks over one surface would double-weight it).
 
 ### 2.3 Freeze rule
 
@@ -88,9 +90,9 @@ Two properties of this table are load-bearing and easy to misread:
 
 ## 5. The verdict rule
 
-The thresholds are not re-derived here. They are the constants in [`harness/fanout_measure.py`](../../harness/fanout_measure.py), imported rather than copied:
+The thresholds are not re-derived here. They are the constants in [`checks/harness/fanout_measure.py`](../../checks/harness/fanout_measure.py), imported rather than copied:
 
-- `INCONCLUSIVE_BAND_POINTS = 5.0` (`harness/fanout_measure.py:42`) — a sub-5-point mean delta is reported as `inconclusive`, including in our favour.
+- `INCONCLUSIVE_BAND_POINTS = 5.0` (`checks/harness/fanout_measure.py:42`) — a sub-5-point mean delta is reported as `inconclusive`, including in our favour.
 - `TOKEN_MATCH_TOLERANCE = 0.05` (`:48`) — arms whose total spend differs by more than 5% yield `not_token_matched`, which is the measurement declining a question it did not ask.
 - `MIN_TRIALS_PER_ARM = 3` (`:54`) — fewer trials yields `insufficient_trials`. No verdict is offered.
 - **Within-arm spread beats the delta.** A delta above the band is still `inconclusive` when one arm's own max-minus-min reaches the band. Published output always shows spread beside delta.
@@ -114,10 +116,10 @@ This protocol is executable in its *design*: every surface it names exists and w
 **G1 — There is no way to run a skills-off arm. This is the blocking gap.** Three candidate levers were probed and all three fail:
 
 - `skills.max_triggered` cannot be zeroed. `SkillsConfig.__post_init__` clamps any value below 1 to 1 with a warning (`gideon/config/loader.py:1817-1819`), verified at runtime (§9, probe 1).
-- An empty fixture home is not a skills-off home. Constructing `SkillsLoader` calls `_ensure_builtin_skills(self._dir)` (`gideon/skills/loader.py:293`), which syncs `src/gideon/skills/bundled/` (`skills/loader.py:41`) into the home. A brand-new empty home holds **14 skills** immediately afterwards (§9, probe 2).
+- An empty fixture home is not a skills-off home. Constructing `ProcedureLibrary` calls `_ensure_builtin_skills(self._dir)` (`gideon/skills/loader.py:293`), which syncs `runtime/gideon/skills/bundled/` (`skills/loader.py:41`) into the home. A brand-new empty home holds **14 skills** immediately afterwards (§9, probe 2).
 - `feedback.suppressed_producers` is not a switch. It is derived from measured producer accuracy (`gideon/feedback.py::suppressed_producers`) and reaches surfacing only as `("skill_synthesis", key)` pairs (`gideon/skills/surfacing.py:304`), so it cannot suppress a bundled skill on request.
 
-No env override exists either. **The lever is already designed and already owned elsewhere:** EVALUATION-SUBSTRATE §3.3 (atom ES-7) specifies replaying runs "with the skill surfaced vs suppressed (`arm_mask`)". `arm_mask` appears nowhere in `src/`, `harness/` or `tests/` — it is unbuilt. `LV-7` must **consume** `ES-7`'s `arm_mask`, not grow a second toggle beside it (one owner per mechanism, [AGENTS.md](../../AGENTS.md) §"Shared conventions"). `LV-7`'s atom row currently declares `EXT:EVALUATION-SUBSTRATE:S1-2` only; §3 is a later ES session, so that dependency is understated. Recorded as a DISCOVERY in the LEARNING-VISIBILITY execution log rather than edited here — the roadmap is owner-maintained.
+No env override exists either. **The lever is already designed and already owned elsewhere:** EVALUATION-SUBSTRATE §3.3 (atom ES-7) specifies replaying runs "with the skill surfaced vs suppressed (`arm_mask`)". `arm_mask` appears nowhere in `src/`, `checks/harness/` or `checks/runtime/` — it is unbuilt. `LV-7` must **consume** `ES-7`'s `arm_mask`, not grow a second toggle beside it (one owner per mechanism, [AGENTS.md](../../AGENTS.md) §"Shared conventions"). `LV-7`'s atom row currently declares `EXT:EVALUATION-SUBSTRATE:S1-2` only; §3 is a later ES session, so that dependency is understated. Recorded as a DISCOVERY in the LEARNING-VISIBILITY execution log rather than edited here — the roadmap is owner-maintained.
 
 **G2 — A declared arm axis changes nothing.** `MatrixSpec(axes={"arm": [...]})` expands correctly: an `arm` axis with two values at `trial_count=3` yields six cells carrying distinct `arm` coords (§9, probe 7). But `evals/child.py` reads exactly one coordinate — `coords.get("model")` at `evals/child.py:162`, the only `coords.get` call in the file. Every other axis value is recorded in the cell coords and honoured by nothing. Declaring an `arm` axis today produces six identical runs labelled two ways: a fabricated comparison that would look like a real one in every artifact. `LV-7` must make the child honour the arm coordinate, or the axis must not be used.
 
@@ -125,7 +127,7 @@ No env override exists either. **The lever is already designed and already owned
 
 **G4 — Per-cell evidence dies with the cell's home.** The cell *artifact* directory lives under the real home (`evals/matrices/<id>/cell-NNNN/`) and survives. The cell's `GIDEON_HOME` is a `tempfile.TemporaryDirectory` and does not. Three things the protocol depends on are written into that doomed home: the SEL log (arm integrity, §3; tool-call fallback, §4) and `model_calls.jsonl` (the token denominator, §5). The good news is that the token accounting the honest verdict requires **already exists per-cell** — `AttemptRecord` carries `tokens_in`, `tokens_out`, `dollars_est`, `latency_ms` — it is merely thrown away. `LV-7` must fold both files into the cell result payload or the cell artifact before the child exits.
 
-**G5 — `run_matrix` has no production caller.** Its only callers in the tree are `tests/test_evals_pinning.py` and `tests/test_evals_matrix_runner.py`. There is no CLI, no handler, no script. `gideon eval` does not reach it (and must not be used for benchmark runs — §3). A one-command reproduction is `LV-7`'s `done_when`; today there is no command. Relatedly, `evals.enabled` and `evals.study_default_k` appear in the PATCH allowlist (`dashboard/handlers/core.py:643-644`) and are read by nothing under `gideon/evals/` — `LV-7` should read `study_default_k` rather than hardcode `k`, and should not instruct an operator to flip a switch that currently changes nothing.
+**G5 — `run_matrix` has no production caller.** Its only callers in the tree are `checks/runtime/test_evals_pinning.py` and `checks/runtime/test_evals_matrix_runner.py`. There is no CLI, no handler, no script. `gideon eval` does not reach it (and must not be used for benchmark runs — §3). A one-command reproduction is `LV-7`'s `done_when`; today there is no command. Relatedly, `evals.enabled` and `evals.study_default_k` appear in the PATCH allowlist (`dashboard/handlers/core.py:643-644`) and are read by nothing under `gideon/evals/` — `LV-7` should read `study_default_k` rather than hardcode `k`, and should not instruct an operator to flip a switch that currently changes nothing.
 
 **Consequence, stated plainly:** until G1 and G2 close, no skills-on/off number exists to publish, and a number produced without them would be a labelling artifact. G3–G5 bound what can be *reported* rather than whether a run happens.
 
@@ -143,7 +145,7 @@ No env override exists either. **The lever is already designed and already owned
 Each measurement the protocol prescribes was exercised once against the code on `main`, in throwaway homes. Full outputs are in the `LV-6` execution-log entry in LEARNING-VISIBILITY; summarised here so a reviewer knows which claims are measured and which are read.
 
 1. `SkillsConfig(max_triggered=0)` → `1`, with a warning. Also `-5` → `1`. (G1)
-2. Fresh empty `GIDEON_HOME` + `SkillsLoader()` → 14 skills in `skills/`. (G1)
+2. Fresh empty `GIDEON_HOME` + `ProcedureLibrary()` → 14 skills in `skills/`. (G1)
 3. `install_library()` → 4 shipped scenarios, all `origin: "shipped"`, all `fixture_home: "empty"`. (§2.3)
 4. `compute_pin("lesson_application")` → complete except `model_fingerprint`; `is_complete() == False` in an unbound home. (§3)
 5. `harness fanout-measure` on arms named `skills_on`/`skills_off` → refused, exit 2. (§5)

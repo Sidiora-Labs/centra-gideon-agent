@@ -5,8 +5,8 @@
 trip, but it cannot see DRIFT: a renamed key, a silently dropped ``_meta``, or a
 field that stopped being written all still round-trip. This generator closes that
 gap. It walks the SAME source of truth — the ``AppConfig`` dataclass hierarchy and
-its ``_meta`` field metadata — and emits a flat, sorted ``config-baseline.json``
-committed to the repo root. A companion test (``tests/test_config_baseline.py``)
+its ``_meta`` field metadata — and emits a flat, sorted ``checks/catalogs/configuration.json``
+committed to the repo root. A companion test (``checks/runtime/test_config_baseline.py``)
 regenerates in-memory and byte-compares, so any schema change not regenerated
 reddens CI. Same source, strictly more coverage.
 
@@ -22,7 +22,7 @@ dict/list leaf records the declared field itself, never its runtime contents.
 
 Regenerate in place with::
 
-    python scripts/generate_config_baseline.py
+    python tooling/scripts/generate_config_baseline.py
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ import json
 from pathlib import Path
 from typing import Any, get_args, get_origin
 
-from gideon.config.loader import AppConfig
+from gideon.core.config.loader import AppConfig
 
 
 def _type_str(tp: Any) -> str:
@@ -99,21 +99,39 @@ def _walk(cls: type, prefix: str, out: list[dict[str, Any]]) -> None:
         )
 
 
+def encode_catalog(entries: list[dict[str, Any]]) -> dict[str, Any]:
+    fields = {
+        entry["path"]: {key: entry[key] for key in ("type", "default", "sensitive")}
+        for entry in sorted(entries, key=lambda row: row["path"])
+    }
+    if len(fields) != len(entries):
+        raise ValueError("configuration catalog contains duplicate field paths")
+    return {"version": 1, "kind": "gideon.configuration", "data": {"fields": fields}}
+
+
+def decode_catalog(document: dict[str, Any]) -> list[dict[str, Any]]:
+    if document.get("version") != 1 or document.get("kind") != "gideon.configuration":
+        raise ValueError("unsupported Gideon configuration catalog")
+    return [
+        {"path": path, **details}
+        for path, details in sorted(document["data"]["fields"].items())
+    ]
+
+
 def build_baseline() -> str:
-    """Render the full config-schema baseline as a deterministic JSON string."""
     entries: list[dict[str, Any]] = []
     _walk(AppConfig, "", entries)
-    entries.sort(key=lambda e: e["path"])
-    return json.dumps(entries, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+    return json.dumps(encode_catalog(entries), indent=2, sort_keys=True, ensure_ascii=False) + "\n"
 
 
 def baseline_path() -> Path:
-    """Repo-root location of the committed ``config-baseline.json``."""
-    return Path(__file__).resolve().parents[1] / "config-baseline.json"
+    """Repo-root location of the committed ``checks/catalogs/configuration.json``."""
+    return Path(__file__).resolve().parents[2] / "checks/catalogs/configuration.json"
 
 
 def main() -> None:
     path = baseline_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(build_baseline(), encoding="utf-8")
     print(f"wrote {path}")
 

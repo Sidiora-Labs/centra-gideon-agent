@@ -1,3 +1,5 @@
+> Ported upstream reference. Dated release, audit, and publication claims describe the donor project and do not certify this Gideon implementation.
+
 # Usability kit — stranger validation
 
 **Status:** the kit is ready to run. The three sessions themselves are the owner's
@@ -390,6 +392,6 @@ reproduces one, note it and move on rather than re-filing):
 
 ---
 
-Related: [release runbook](./release-runbook.md) for how a fix reaches users;
+Related: [release runbook](release-runbook.md) for how a fix reaches users;
 [configuration reference](../reference/configuration.md) if a participant asks what can
 be changed.

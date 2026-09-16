@@ -20,8 +20,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from gideon.routing import feedback
-from gideon.routing.stats import _score, ref_of
+from gideon.engine.routing import feedback
+from gideon.engine.routing.stats import _score, ref_of
 
 _UC = "reasoning"
 _QC = "summarize"
@@ -59,7 +59,9 @@ def _verdict(
     return rec
 
 
-def _write_ledger(home: Path, run_id: str, records: list[dict], *, tail: str = "") -> Path:
+def _write_ledger(
+    home: Path, run_id: str, records: list[dict], *, tail: str = ""
+) -> Path:
     """Write ``<home>/workflows/runs/<run_id>/events.jsonl``.
 
     ``tail`` is appended verbatim with NO trailing newline, which is how a process killed
@@ -95,11 +97,7 @@ class TestNoSignal:
         the fallback would be the second renormalisation the fold has one answer for.
         """
         fb, n = feedback.feedback_for(_UC, _QC, _REF, home=tmp_path)
-        # Asserted through `_score` FIRST, deliberately: a mutation that made this module hand back
-        # a fabricated observation instead of `feedback_n: 0` must fail HERE, on the collapse, not
-        # on a tuple comparison that never reached the arithmetic under test.
-        assert _score(0.8, fb, n) == 0.8  # pure success_rate, NOT 0.60 * 0.8
-        # Not vacuous: with a real observation the same call weights the feedback instead.
+        assert _score(0.8, fb, n) == 0.8
         assert _score(0.8, 1.0, 3) == round(0.6 * 0.8 + 0.4 * 1.0, 4) != 0.8
         assert (fb, n) == (0.0, 0)
 
@@ -134,7 +132,9 @@ class TestVerdictsFold:
                 )
             ],
         )
-        assert feedback.feedback_for(_UC, _QC, "ollama-models:gpt-oss:20b", home=tmp_path) == (
+        assert feedback.feedback_for(
+            _UC, _QC, "ollama-models:gpt-oss:20b", home=tmp_path
+        ) == (
             1.0,
             1,
         )
@@ -168,17 +168,21 @@ class TestBrokenLines:
         run_dir.mkdir(parents=True)
         good_one = json.dumps(_verdict(event_id="bbbb1111-evt-1", verdict="PASS"))
         good_two = json.dumps(_verdict(event_id="bbbb1111-evt-3", verdict="REJECT"))
-        truncated = '{"kind": "judge_verdict", "event_id": "bbbb1111-evt-4", "verdict": "PA'
+        truncated = (
+            '{"kind": "judge_verdict", "event_id": "bbbb1111-evt-4", "verdict": "PA'
+        )
         (run_dir / "events.jsonl").write_text(
             good_one + "\n" + "{not json at all\n" + good_two + "\n" + truncated,
             encoding="utf-8",
         )
-        # The two valid records still count: (1 + 0) / 2.
         assert feedback.feedback_for(_UC, _QC, _REF, home=tmp_path) == (0.5, 2)
 
     def test_a_json_scalar_line_is_not_a_record(self, tmp_path):
         _write_ledger(
-            tmp_path, "bbbb2222", [_verdict(event_id="bbbb2222-evt-1")], tail='"a bare string"\n7\n'
+            tmp_path,
+            "bbbb2222",
+            [_verdict(event_id="bbbb2222-evt-1")],
+            tail='"a bare string"\n7\n',
         )
         assert feedback.feedback_for(_UC, _QC, _REF, home=tmp_path) == (1.0, 1)
 
@@ -205,7 +209,7 @@ class TestAttribution:
             "cccc2222",
             [
                 _verdict(event_id="cccc2222-evt-1", provider=None, model=None),
-                _verdict(event_id="cccc2222-evt-2", model=None),  # half a ref is not a ref
+                _verdict(event_id="cccc2222-evt-2", model=None),
                 _verdict(event_id="cccc2222-evt-3", provider=None),
             ],
         )
@@ -224,7 +228,6 @@ class TestAttribution:
                 _verdict(event_id="cccc3333-evt-4", verdict="REJECT", model=None),
             ],
         )
-        # n=1, and feedback stays 1.0: three REJECTs were dropped, not averaged in.
         assert feedback.feedback_for(_UC, _QC, _REF, home=tmp_path) == (1.0, 1)
 
 
@@ -246,7 +249,6 @@ class TestVerdictVocabulary:
                 _verdict(event_id="dddd1111-evt-3", verdict=""),
             ],
         )
-        # Only the PASS counted: neither an unknown label nor a blank moved n or the mean.
         assert feedback.feedback_for(_UC, _QC, _REF, home=tmp_path) == (1.0, 1)
 
     def test_control_flow_verdicts_are_dropped(self, tmp_path):
@@ -273,7 +275,9 @@ class TestVerdictVocabulary:
             "dddd3333",
             [
                 _verdict(event_id="dddd3333-evt-1", verdict="PASS"),
-                _verdict(event_id="dddd3333-evt-2", verdict="REJECT", cannot_judge=True),
+                _verdict(
+                    event_id="dddd3333-evt-2", verdict="REJECT", cannot_judge=True
+                ),
             ],
         )
         assert feedback.feedback_for(_UC, _QC, _REF, home=tmp_path) == (1.0, 1)
@@ -282,7 +286,7 @@ class TestVerdictVocabulary:
         """The restated set is a cycle workaround, so it needs a drift ratchet: ``workflows``
         reaches ``routing`` through ``provider_bridge``, so ``feedback`` cannot import
         ``judge_contract`` at module level. A test can."""
-        from gideon.workflows.judge_contract import Verdict
+        from gideon.automation.workflows.judge_contract import Verdict
 
         assert feedback._KNOWN_VERDICTS == {v.value for v in Verdict}
         assert set(feedback._QUALITY_FEEDBACK) <= feedback._KNOWN_VERDICTS
@@ -290,10 +294,12 @@ class TestVerdictVocabulary:
     def test_runs_root_matches_the_workflows_store_layout(self):
         """The other cycle workaround: ``_RUNS_SUBPATH`` must stay the store's own layout. Pure
         path arithmetic — no filesystem read, so the real home is never touched."""
-        from gideon.config.loader import config_dir
-        from gideon.workflows import store as wf_store
+        from gideon.automation.workflows import store as wf_store
+        from gideon.core.config.loader import config_dir
 
-        assert wf_store.runs_root() == Path(config_dir()).joinpath(*feedback._RUNS_SUBPATH)
+        assert wf_store.runs_root() == Path(config_dir()).joinpath(
+            *feedback._RUNS_SUBPATH
+        )
 
 
 class TestCountingIsPrecise:
@@ -319,7 +325,9 @@ class TestCountingIsPrecise:
 
 
 class TestIndexAgreesWithPerCell:
-    def _many_cell_home(self, tmp_path: Path) -> dict[tuple[str, str, str], tuple[float, int]]:
+    def _many_cell_home(
+        self, tmp_path: Path
+    ) -> dict[tuple[str, str, str], tuple[float, int]]:
         """Two runs, five cells, hand-computed expectations."""
         other_ref = ref_of("openai", "gpt-4o-mini")
         _write_ledger(
@@ -335,7 +343,9 @@ class TestIndexAgreesWithPerCell:
                     model="gpt-4o-mini",
                 ),
                 _verdict(event_id="ffff1111-evt-4", verdict="PASS", query_class="code"),
-                _verdict(event_id="ffff1111-evt-5", verdict="RETRY", query_class="code"),
+                _verdict(
+                    event_id="ffff1111-evt-5", verdict="RETRY", query_class="code"
+                ),
             ],
         )
         _write_ledger(
@@ -343,15 +353,27 @@ class TestIndexAgreesWithPerCell:
             "ffff2222",
             [
                 _verdict(event_id="ffff2222-evt-1", verdict="PASS"),
-                _verdict(event_id="ffff2222-evt-2", verdict="REJECT", use_case="background"),
-                _verdict(event_id="ffff2222-evt-3", verdict="PASS", use_case="background"),
-                _verdict(event_id="ffff2222-evt-4", verdict="PASS", use_case="loops", model=None),
+                _verdict(
+                    event_id="ffff2222-evt-2", verdict="REJECT", use_case="background"
+                ),
+                _verdict(
+                    event_id="ffff2222-evt-3", verdict="PASS", use_case="background"
+                ),
+                _verdict(
+                    event_id="ffff2222-evt-4",
+                    verdict="PASS",
+                    use_case="loops",
+                    model=None,
+                ),
             ],
         )
         return {
-            (_UC, _QC, _REF): (round(2 / 3, 4), 3),  # PASS, REJECT, PASS across two runs
+            (_UC, _QC, _REF): (
+                round(2 / 3, 4),
+                3,
+            ),
             (_UC, _QC, other_ref): (1.0, 1),
-            (_UC, "code", _REF): (1.0, 1),  # the RETRY beside it dropped
+            (_UC, "code", _REF): (1.0, 1),
             ("background", _QC, _REF): (0.5, 2),
         }
 
@@ -369,12 +391,12 @@ class TestIndexAgreesWithPerCell:
             assert feedback.feedback_for(*cell, home=tmp_path) == value
         for cell in expected:
             assert feedback.feedback_for(*cell, home=tmp_path) == expected[cell]
-        # The `loops` record had no model, so it is not a cell — and reads as no signal.
         assert feedback.feedback_for("loops", _QC, _REF, home=tmp_path) == (0.0, 0)
 
     def test_the_fixture_is_actually_read(self, tmp_path):
         """VACUITY FLOOR. An unreadable fixture and an empty ledger are indistinguishable, so
-        every "no signal" assertion above would pass for the wrong reason without this."""
+        every "no signal" assertion above would pass for the wrong reason without this.
+        """
         self._many_cell_home(tmp_path)
         index = feedback.feedback_index(home=tmp_path)
         assert any(n > 0 for _fb, n in index.values())
@@ -402,7 +424,9 @@ class TestWritesNothing:
         before = _all_paths(tmp_path)
         assert feedback.feedback_index(home=tmp_path) == {_CELL: (1.0, 1)}
         assert feedback.feedback_for(_UC, _QC, _REF, home=tmp_path) == (1.0, 1)
-        assert feedback.feedback_for("nope", "nope", "nope:nope", home=tmp_path) == (0.0, 0)
+        assert feedback.feedback_for("nope", "nope", "nope:nope", home=tmp_path) == (
+            0.0,
+            0,
+        )
         assert _all_paths(tmp_path) == before
-        # No stats fold was written either — this module is not a second writer of it.
         assert not (tmp_path / "routing_stats.json").exists()

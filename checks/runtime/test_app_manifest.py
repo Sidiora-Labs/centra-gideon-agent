@@ -1,4 +1,4 @@
-"""Tests for gideon.apps.manifest — AppManifest parser and validator."""
+"""Tests for gideon.extensions.apps.manifest — AppManifest parser and validator."""
 
 import json
 
@@ -6,7 +6,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from gideon.apps.manifest import (
+from gideon.extensions.apps.manifest import (
     AppManifest,
     CliConfig,
     Dependencies,
@@ -15,17 +15,13 @@ from gideon.apps.manifest import (
     version_tuple,
 )
 
-# ---------------------------------------------------------------------------
-# version_tuple — the single app-version comparator (APE-7)
-# ---------------------------------------------------------------------------
-
 
 @pytest.mark.parametrize(
     "a,b",
     [
         ("1.2.0", "1.0.0"),
         ("2.0.0", "1.9.9"),
-        ("1.0.10", "1.0.9"),  # numeric, not lexical
+        ("1.0.10", "1.0.9"),
         ("1.1.0", "1.0.5"),
     ],
 )
@@ -44,15 +40,9 @@ def test_version_tuple_tolerates_v_prefix_and_suffix():
 
 
 def test_version_tuple_bad_value_sorts_lowest():
-    # A malformed version must never read as a newer release.
     assert version_tuple("not-a-version") == (0,)
     assert version_tuple("") == (0,)
     assert version_tuple("1.2.0") > version_tuple("garbage")
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _valid_manifest(**overrides) -> dict:
@@ -66,11 +56,6 @@ def _valid_manifest(**overrides) -> dict:
     }
     base.update(overrides)
     return base
-
-
-# ---------------------------------------------------------------------------
-# Validation tests
-# ---------------------------------------------------------------------------
 
 
 class TestValidation:
@@ -110,7 +95,9 @@ class TestValidation:
 
     def test_legacy_agents_skills_sops_silently_ignored(self):
         m = AppManifest.from_dict(
-            _valid_manifest(agents=["../evil.json"], skills=["../../etc"], sops=["x.md"])
+            _valid_manifest(
+                agents=["../evil.json"], skills=["../../etc"], sops=["x.md"]
+            )
         )
         errors = m.validate()
         assert not any("agents" in e or "skills" in e or "sops" in e for e in errors)
@@ -125,7 +112,9 @@ class TestValidation:
         assert any("path traversal" in e for e in errors)
 
     def test_cron_missing_name(self):
-        m = AppManifest.from_dict(_valid_manifest(crons=[{"every": 60, "message": "hi"}]))
+        m = AppManifest.from_dict(
+            _valid_manifest(crons=[{"every": 60, "message": "hi"}])
+        )
         errors = m.validate()
         assert any("cron" in e and "name" in e for e in errors)
 
@@ -154,10 +143,20 @@ class TestValidation:
                 "author": "tester",
                 "license": "MIT",
                 "minGideonVersion": "1.3.0",
-                "mcpServers": {"example-mcp": {"command": "example-mcp", "args": ["serve"]}},
-                "crons": [{"name": "refresh", "every": 3600, "message": "refresh data"}],
+                "mcpServers": {
+                    "example-mcp": {"command": "example-mcp", "args": ["serve"]}
+                },
+                "crons": [
+                    {"name": "refresh", "every": 3600, "message": "refresh data"}
+                ],
                 "ui": {
-                    "pages": [{"route": "/apps/sample", "label": "Dashboard", "icon": "Shield"}]
+                    "pages": [
+                        {
+                            "route": "/apps/sample",
+                            "label": "Dashboard",
+                            "icon": "Shield",
+                        }
+                    ]
                 },
                 "backend": {"entryPoint": "backend/app.py"},
                 "permissions": {"mcpTools": ["example_tool"], "storage": True},
@@ -170,11 +169,6 @@ class TestValidation:
         assert len(m.crons) == 1
         assert len(m.ui.pages) == 1
         assert m.permissions.storage is True
-
-
-# ---------------------------------------------------------------------------
-# Serialization round-trip tests
-# ---------------------------------------------------------------------------
 
 
 class TestRoundTrip:
@@ -208,7 +202,11 @@ class TestRoundTrip:
                 ],
                 "sidebar": {"section": "Tools", "order": 5},
             },
-            "backend": {"entryPoint": "backend/app.py", "port": "9000", "healthCheck": "/ping"},
+            "backend": {
+                "entryPoint": "backend/app.py",
+                "port": "9000",
+                "healthCheck": "/ping",
+            },
             "permissions": {
                 "mcpTools": ["ToolA"],
                 "storage": True,
@@ -218,7 +216,10 @@ class TestRoundTrip:
             },
             "setup": {
                 "onInstall": "setup.py:init",
-                "configSchema": {"type": "object", "properties": {"key": {"type": "string"}}},
+                "configSchema": {
+                    "type": "object",
+                    "properties": {"key": {"type": "string"}},
+                },
             },
             "tags": ["dev", "tools"],
         }
@@ -234,18 +235,11 @@ class TestRoundTrip:
         serialized = m.to_dict()
         assert serialized["customField"] == "hello"
         assert serialized["anotherOne"] == 42
-        # Round-trip preserves extra
         m2 = AppManifest.from_dict(serialized)
         assert m2.extra == m.extra
 
 
-# ---------------------------------------------------------------------------
-# CLI seams + loggerRoots (Plan 32 — cli.setup / cli.doctor / loggerRoots)
-# ---------------------------------------------------------------------------
-
-
 class TestCliAndLoggerRoots:
-    # --- P1: round-trip for cli + loggerRoots ---
     def test_cli_and_logger_roots_round_trip(self):
         original = _valid_manifest(
             cli={"setup": "cli_setup:run", "doctor": "cli_doctor:probe"},
@@ -256,7 +250,10 @@ class TestCliAndLoggerRoots:
         assert m.cli.doctor == "cli_doctor:probe"
         assert m.loggerRoots == ["slack_runtime", "slack_events"]
         serialized = m.to_dict()
-        assert serialized["cli"] == {"setup": "cli_setup:run", "doctor": "cli_doctor:probe"}
+        assert serialized["cli"] == {
+            "setup": "cli_setup:run",
+            "doctor": "cli_doctor:probe",
+        }
         assert serialized["loggerRoots"] == ["slack_runtime", "slack_events"]
         m2 = AppManifest.from_dict(serialized)
         assert m2.to_dict() == serialized
@@ -265,7 +262,6 @@ class TestCliAndLoggerRoots:
         cfg = CliConfig(setup="mod:fn", doctor="d:probe")
         assert CliConfig.from_dict(cfg.to_dict()).to_dict() == cfg.to_dict()
 
-    # --- P2: absent fields default empty and are omitted from output ---
     def test_cli_and_logger_roots_default_empty(self):
         m = AppManifest.from_dict(_valid_manifest())
         assert m.cli.setup == ""
@@ -276,7 +272,6 @@ class TestCliAndLoggerRoots:
         assert "loggerRoots" not in serialized
 
     def test_partial_cli_config(self):
-        # Only setup declared → doctor stays empty, only setup serialized.
         m = AppManifest.from_dict(_valid_manifest(cli={"setup": "cli_setup:run"}))
         assert m.cli.setup == "cli_setup:run"
         assert m.cli.doctor == ""
@@ -291,7 +286,6 @@ class TestCliAndLoggerRoots:
         m = AppManifest.from_dict(_valid_manifest(loggerRoots=["ok", "", None, "two"]))
         assert m.loggerRoots == ["ok", "two"]
 
-    # --- P3: unknown-field preservation still works alongside the new fields ---
     def test_unknown_fields_preserved_with_cli(self):
         data = _valid_manifest(
             cli={"setup": "cli_setup:run"},
@@ -300,10 +294,8 @@ class TestCliAndLoggerRoots:
             anotherUnknown="x",
         )
         m = AppManifest.from_dict(data)
-        # cli + loggerRoots are typed, NOT in extra
         assert "cli" not in m.extra
         assert "loggerRoots" not in m.extra
-        # genuinely-unknown fields land in extra and survive a round-trip
         assert m.extra == {"futureField": {"nested": [1, 2]}, "anotherUnknown": "x"}
         serialized = m.to_dict()
         assert serialized["futureField"] == {"nested": [1, 2]}
@@ -312,7 +304,6 @@ class TestCliAndLoggerRoots:
         assert m2.extra == m.extra
         assert m2.to_dict() == serialized
 
-    # --- P4: existing manifests without the new fields still parse cleanly ---
     def test_existing_manifest_still_parses(self):
         m = AppManifest.from_dict(
             _valid_manifest(
@@ -324,7 +315,6 @@ class TestCliAndLoggerRoots:
         assert m.cli.to_dict() == {}
         assert m.loggerRoots == []
 
-    # --- APE-1: the new permission grants do not disturb unknown-field preservation ---
     def test_unknown_fields_preserved_alongside_new_permission_grants(self):
         """The manifest deliberately carries fields it does not know (so an app built for
         a newer core still round-trips through an older one). Adding
@@ -350,7 +340,7 @@ class TestCliAndLoggerRoots:
         assert serialized["permissions"]["eventSubscriptions"] == ["session.created"]
         m2 = AppManifest.from_dict(serialized)
         assert m2.extra == m.extra
-        assert m2.to_dict() == serialized  # whole-manifest fixed point
+        assert m2.to_dict() == serialized
 
     def test_unrecognised_manifest_key_round_trips_with_the_new_grants_absent(self):
         """The same guarantee for an app that declares NEITHER new grant — the case every
@@ -364,18 +354,13 @@ class TestCliAndLoggerRoots:
         assert AppManifest.from_dict(serialized).to_dict() == serialized
 
 
-# ---------------------------------------------------------------------------
-# Parsing edge cases
-# ---------------------------------------------------------------------------
-
-
 class TestParsing:
     def test_from_empty_dict(self):
         m = AppManifest.from_dict({})
         assert m.name == ""
         assert m.version == ""
         errors = m.validate()
-        assert len(errors) >= 4  # all 4 required fields missing
+        assert len(errors) >= 4
 
     def test_crons_non_dict_entries_skipped(self):
         m = AppManifest.from_dict(
@@ -407,21 +392,14 @@ class TestParsing:
             AppManifest.from_json_file(p)
 
 
-# ---------------------------------------------------------------------------
-# Property-based tests (hypothesis)
-# ---------------------------------------------------------------------------
-
-# Strategy for valid kebab-case names
 _kebab_name = st.from_regex(r"[a-z][a-z0-9]*(-[a-z0-9]+)*", fullmatch=True).filter(
     lambda s: 1 <= len(s) <= 60
 )
 
-# Strategy for semver strings
 _semver = st.tuples(st.integers(0, 99), st.integers(0, 99), st.integers(0, 99)).map(
     lambda t: f"{t[0]}.{t[1]}.{t[2]}"
 )
 
-# Strategy for simple JSON-safe extra values
 _extra_value = st.one_of(
     st.text(max_size=20),
     st.integers(-1000, 1000),
@@ -521,11 +499,6 @@ class TestPropertyBased:
         assert m2.to_dict() == m1.to_dict()
 
 
-# ---------------------------------------------------------------------------
-# SetupConfig lifecycle hooks tests
-# ---------------------------------------------------------------------------
-
-
 class TestSetupConfigHooks:
     def test_new_hooks_round_trip(self):
         cfg = SetupConfig(
@@ -552,7 +525,9 @@ class TestSetupConfigHooks:
         assert "onDisable" not in d
 
     def test_configurable_timeouts(self):
-        cfg = SetupConfig(onEnable="bash e.sh", onEnableTimeout=120, onDisableTimeout=60)
+        cfg = SetupConfig(
+            onEnable="bash e.sh", onEnableTimeout=120, onDisableTimeout=60
+        )
         d = cfg.to_dict()
         assert d["onEnableTimeout"] == 120
         assert d["onDisableTimeout"] == 60
@@ -581,11 +556,6 @@ class TestSetupConfigHooks:
         assert m.setup.onUpdate == "bash update.sh"
         assert m.setup.onEnable == "bash enable.sh"
         assert m.setup.onEnableTimeout == 90
-
-
-# ---------------------------------------------------------------------------
-# Dependencies tests
-# ---------------------------------------------------------------------------
 
 
 class TestDependencies:
@@ -618,7 +588,7 @@ class TestDependencies:
     def test_default_managed_by_omitted(self):
         deps = Dependencies(marketplace=MarketplaceDependencies(mcp=["x"]))
         d = deps.to_dict()
-        assert "managedBy" not in d  # default "gateway" omitted
+        assert "managedBy" not in d
 
     def test_mixed_string_and_object_entries(self):
         deps = Dependencies.from_dict(
@@ -648,20 +618,13 @@ class TestDependencies:
         assert m.dependencies.managedBy == "gateway"
         assert m.dependencies.marketplace.mcp == ["aws-docs"]
         assert m.dependencies.commands == ["node"]
-        # Round-trip through manifest
         d = m.to_dict()
         assert "dependencies" in d
         m2 = AppManifest.from_dict(d)
         assert m2.dependencies.marketplace.mcp == ["aws-docs"]
 
 
-# ---------------------------------------------------------------------------
-# Property tests for new dataclasses
-# ---------------------------------------------------------------------------
-
-
 class TestManifestNewProperties:
-    # Feature: app-classification-redesign, Property 3: Manifest 数据类序列化往返一致性
     @given(
         on_install=st.text(max_size=30),
         on_update=st.text(max_size=30),
@@ -702,17 +665,22 @@ class TestManifestNewProperties:
         assert restored.onEnableTimeout == cfg.onEnableTimeout
         assert restored.onDisableTimeout == cfg.onDisableTimeout
 
-    # Feature: app-classification-redesign, Property 3: Dependencies 序列化往返一致性
     @given(
         managed_by=st.sampled_from(["gateway", "app"]),
-        mcp_deps=st.lists(st.from_regex(r"[a-z][a-z0-9\-]{0,20}", fullmatch=True), max_size=5),
+        mcp_deps=st.lists(
+            st.from_regex(r"[a-z][a-z0-9\-]{0,20}", fullmatch=True), max_size=5
+        ),
         skill_deps=st.lists(
             st.from_regex(r"[A-Za-z][A-Za-z0-9]{0,20}", fullmatch=True), max_size=5
         ),
-        commands=st.lists(st.from_regex(r"[a-z][a-z0-9]{0,10}", fullmatch=True), max_size=5),
+        commands=st.lists(
+            st.from_regex(r"[a-z][a-z0-9]{0,10}", fullmatch=True), max_size=5
+        ),
     )
     @settings(max_examples=200)
-    def test_dependencies_round_trip_property(self, managed_by, mcp_deps, skill_deps, commands):
+    def test_dependencies_round_trip_property(
+        self, managed_by, mcp_deps, skill_deps, commands
+    ):
         """**Validates: Requirements 5.2**"""
         deps = Dependencies(
             managedBy=managed_by,
@@ -721,13 +689,11 @@ class TestManifestNewProperties:
         )
         d = deps.to_dict()
         restored = Dependencies.from_dict(d)
-        # Semantic equivalence: field values match even if dict structure differs
         assert restored.managedBy == deps.managedBy
         assert restored.marketplace.mcp == deps.marketplace.mcp
         assert restored.marketplace.skills == deps.marketplace.skills
         assert restored.commands == deps.commands
 
-    # Feature: app-classification-redesign, Property 4: 单依赖项 managedBy 覆盖
     @given(
         default_managed=st.sampled_from(["gateway", "app"]),
         override_managed=st.sampled_from(["gateway", "app"]),
@@ -746,10 +712,8 @@ class TestManifestNewProperties:
                 },
             }
         )
-        # String entry uses default
         entry0 = deps.marketplace.mcp[0]
         assert isinstance(entry0, str)
-        # Object entry preserves its own managedBy
         entry1 = deps.marketplace.mcp[1]
         assert isinstance(entry1, dict)
         assert entry1["managedBy"] == override_managed
@@ -760,26 +724,33 @@ class TestProviderConfigEntity:
     sub-group by it in Settings → Providers)."""
 
     def test_entity_round_trips(self):
-        from gideon.apps.manifest import ProviderConfig
+        from gideon.extensions.apps.manifest import ProviderConfig
 
         pc = ProviderConfig(
             type="action",
             implementation="mod:create_provider",
             entity="task",
         )
-        d = pc.to_dict()
+        d = gideon.to_dict()
         assert d["entity"] == "task"
         assert ProviderConfig.from_dict(d).entity == "task"
 
     def test_entity_omitted_when_empty(self):
-        from gideon.apps.manifest import ProviderConfig
+        from gideon.extensions.apps.manifest import ProviderConfig
 
         pc = ProviderConfig(type="model", implementation="mod:f")
-        assert "entity" not in pc.to_dict()
-        assert ProviderConfig.from_dict({"type": "model", "implementation": "mod:f"}).entity == ""
+        assert "entity" not in gideon.to_dict()
+        assert (
+            ProviderConfig.from_dict(
+                {"type": "model", "implementation": "mod:f"}
+            ).entity
+            == ""
+        )
 
 
-def _handler_type_gaps(provider_types: set[str], handlers: set[str]) -> dict[str, list[str]]:
+def _handler_type_gaps(
+    provider_types: set[str], handlers: set[str]
+) -> dict[str, list[str]]:
     """Both #47 directions at once, over injectable inputs so each can be proven.
 
     - ``handler_not_declarable``: a live handler whose type PROVIDER_TYPES omits —
@@ -801,10 +772,8 @@ def _live_handler_types() -> set[str]:
     is often written across several lines, and a single-line regex silently saw only
     14 of the 18 registrations — under-reporting the very thing this guard measures.
     """
-    from gideon.providers.registry import get_provider_registry
+    from gideon.extensions.providers.registry import get_provider_registry
 
-    # _type_handlers is the registry's internal map; reading it IS the measurement
-    # (mirrors tests/test_entity_seam_handlers.py), so the private access is the point.
     return set(get_provider_registry()._type_handlers)
 
 
@@ -820,7 +789,7 @@ class TestProviderTypesMatchHandlers:
     directions and why every seam-served type must NAME the mechanism serving it."""
 
     def test_provider_types_equal_registered_handlers(self):
-        from gideon.apps.manifest import PROVIDER_TYPES
+        from gideon.extensions.apps.manifest import PROVIDER_TYPES
 
         handlers = _live_handler_types()
         assert handlers, "no type handlers registered — test needs updating"
@@ -844,7 +813,6 @@ class TestProviderTypesMatchHandlers:
         gaps = _handler_type_gaps({"model", "ghost_type"}, {"model"})
         assert gaps["declarable_no_handler"] == ["ghost_type"]
         assert gaps["handler_not_declarable"] == []
-        # ...and the forward direction still fails on its own class.
         forward = _handler_type_gaps({"model"}, {"model", "orphan_handler"})
         assert forward["handler_not_declarable"] == ["orphan_handler"]
 
@@ -853,8 +821,11 @@ class TestProviderTypesMatchHandlers:
         carries the mechanism that really serves it in ``source_of_truth``. That reason
         lives in CODE at the registration, not in a test-side allowlist that can drift
         from it — so no type is left silently declarable-and-dead."""
-        from gideon.apps.manifest import PROVIDER_TYPES
-        from gideon.providers.registry import EntitySeamHandler, get_provider_registry
+        from gideon.extensions.apps.manifest import PROVIDER_TYPES
+        from gideon.extensions.providers.registry import (
+            EntitySeamHandler,
+            get_provider_registry,
+        )
 
         handlers = dict(get_provider_registry()._type_handlers)
         seam_types = {
@@ -862,7 +833,9 @@ class TestProviderTypesMatchHandlers:
             for t, h in handlers.items()
             if isinstance(h, EntitySeamHandler) and t in PROVIDER_TYPES
         }
-        assert seam_types, "expected at least one seam-served type (agent/notification/skills)"
+        assert (
+            seam_types
+        ), "expected at least one seam-served type (agent/notification/skills)"
         for t in sorted(seam_types):
             reason = getattr(handlers[t], "source_of_truth", "")
             assert reason and reason.strip(), (
@@ -872,25 +845,20 @@ class TestProviderTypesMatchHandlers:
 
     def test_prompt_provider_manifest_validates(self):
         """Direct regression: a prompt-type provider manifest must pass validation."""
-        from gideon.apps.manifest import ProviderConfig
+        from gideon.extensions.apps.manifest import ProviderConfig
 
         pc = ProviderConfig(type="prompt", implementation="provider:create_provider")
-        errors = pc.validate()
+        errors = gideon.validate()
         assert not any(
             "provider.type" in e for e in errors
         ), f"prompt provider.type rejected: {errors}"
-
-
-# ---------------------------------------------------------------------------
-# uiCapabilities — the declared UI-capability block (APE-11)
-# ---------------------------------------------------------------------------
 
 
 class TestUiCapabilities:
     """The manifest half of APE-11.
 
     The block's whole job is to be READ by the browser's UI-SDK gate
-    (``resolvableAppSpecs`` in ``web/src/app/appSdk.tsx``), and the only path it
+    (``resolvableAppSpecs`` in ``apps/console/src/app/appSdk.tsx``), and the only path it
     travels to get there is ``GET /api/apps/<name>`` → ``manifest`` →
     ``AppHostPage`` → ``ContributedPage``. That handler serializes with
     ``AppManifest.to_dict()``, so a value that does not survive the round trip
@@ -898,11 +866,12 @@ class TestUiCapabilities:
     """
 
     def test_declared_capabilities_survive_the_round_trip(self):
-        original = _valid_manifest(uiCapabilities=["shell-primitives", "generative-widget"])
+        original = _valid_manifest(
+            uiCapabilities=["shell-primitives", "generative-widget"]
+        )
         m = AppManifest.from_dict(original)
         assert m.uiCapabilities == ["shell-primitives", "generative-widget"]
         assert m.validate() == []
-        # Typed, not swept into `extra` — otherwise validate() could never see it.
         assert "uiCapabilities" not in m.extra
         serialized = m.to_dict()
         assert serialized["uiCapabilities"] == ["shell-primitives", "generative-widget"]
@@ -919,7 +888,9 @@ class TestUiCapabilities:
         assert "uiCapabilities" not in m.to_dict()
 
     def test_unknown_capability_is_an_install_error(self):
-        m = AppManifest.from_dict(_valid_manifest(uiCapabilities=["shell-primitives", "bogus"]))
+        m = AppManifest.from_dict(
+            _valid_manifest(uiCapabilities=["shell-primitives", "bogus"])
+        )
         errors = m.validate()
         assert any("uiCapabilities" in e and "bogus" in e for e in errors), errors
 
@@ -934,19 +905,25 @@ class TestUiCapabilities:
         assert m.uiCapabilities == ["shel-primitives"]
 
     def test_duplicate_capability_is_an_error(self):
-        m = AppManifest.from_dict(_valid_manifest(uiCapabilities=["shell-primitives"] * 2))
+        m = AppManifest.from_dict(
+            _valid_manifest(uiCapabilities=["shell-primitives"] * 2)
+        )
         assert any("duplicate" in e for e in m.validate())
 
     def test_every_vocabulary_entry_validates(self):
         """Two-sided: the closed set is not just a rejection list, every member of it
         is accepted. A vocabulary whose entries all failed would pass the rejection
         tests above while granting nothing."""
-        from gideon.apps.manifest import UI_CAPABILITIES
+        from gideon.extensions.apps.manifest import UI_CAPABILITIES
 
-        assert UI_CAPABILITIES, "the vocabulary must be non-empty or the gate grants nothing"
+        assert (
+            UI_CAPABILITIES
+        ), "the vocabulary must be non-empty or the gate grants nothing"
         for cap in UI_CAPABILITIES:
             m = AppManifest.from_dict(_valid_manifest(uiCapabilities=[cap]))
-            assert m.validate() == [], f"{cap!r} is in the vocabulary but does not validate"
+            assert (
+                m.validate() == []
+            ), f"{cap!r} is in the vocabulary but does not validate"
 
     def test_the_frontend_gate_and_the_manifest_share_one_vocabulary(self):
         """The TS union in ``appSdk.tsx`` mirrors ``UI_CAPABILITIES`` by hand, so the
@@ -957,12 +934,20 @@ class TestUiCapabilities:
         import re
         from pathlib import Path
 
-        from gideon.apps.manifest import UI_CAPABILITIES
+        from gideon.extensions.apps.manifest import UI_CAPABILITIES
 
-        sdk = Path(__file__).resolve().parents[1] / "web" / "src" / "app" / "appSdk.tsx"
+        sdk = (
+            Path(__file__).resolve().parents[2]
+            / "apps/console"
+            / "src"
+            / "app"
+            / "appSdk.tsx"
+        )
         src = sdk.read_text(encoding="utf-8")
         match = re.search(r"export type UiCapability =([^\n]*(?:\n\s*\|[^\n]*)*)", src)
-        assert match, f"UiCapability union not found in {sdk} — did the export get renamed?"
+        assert (
+            match
+        ), f"UiCapability union not found in {sdk} — did the export get renamed?"
         declared = set(re.findall(r"'([a-z-]+)'", match.group(1)))
         assert declared == set(UI_CAPABILITIES), (
             f"appSdk.tsx UiCapability {sorted(declared)} != manifest UI_CAPABILITIES "

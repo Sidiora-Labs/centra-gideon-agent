@@ -1,45 +1,54 @@
-"""The sdist must graft the built SPA so a wheel built FROM it carries the SPA.
-
-`python -m build` (the release job's command, and `make build`) builds the sdist
-first, then builds the wheel from that sdist. setup.py's ``BuildWithWeb`` only
-copies ``web/dist`` into ``gideon/static/dist`` if ``web/dist`` exists in the
-build tree — so if the sdist omits ``web/dist``, the wheel-from-sdist is SPA-less
-and ``scripts/verify_wheel.py`` fails (the gateway can't serve ``/``).
-
-``MANIFEST.in``'s ``graft web/dist`` is what puts the SPA into the sdist. This test
-guards that graft statically (cheap — no build), complementing the full
-build-install-serve check that ``verify_wheel.py`` runs in the release pipeline.
-
-Regression: caught 2026-07-21 during the plan-34 release dry-run — the release
-pipeline had never run (no tag pushed) and `python -m build` produced a SPA-less
-wheel because there was no MANIFEST.in.
-"""
+"""Check source archive selection against the runtime and built console files."""
 
 from __future__ import annotations
 
-import re
+from fnmatch import fnmatch
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parents[1]
+import pytest
+from setuptools._distutils.filelist import FileList
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 _MANIFEST = _REPO_ROOT / "MANIFEST.in"
+_BUNDLE_ROOTS = ("runtime/gideon", "apps/console/dist")
+
+
+def _archive_selection() -> tuple[set[str], set[str]]:
+    available = {"LICENSE"}
+    for relative in _BUNDLE_ROOTS:
+        available.update(
+            path.relative_to(_REPO_ROOT).as_posix()
+            for path in (_REPO_ROOT / relative).rglob("*")
+            if path.is_file()
+        )
+    listing = FileList()
+    listing.set_allfiles(sorted(available))
+    for directive in _MANIFEST.read_text(encoding="utf-8").splitlines():
+        if directive.strip() and not directive.lstrip().startswith("#"):
+            listing.process_template_line(directive)
+    return available, set(listing.files)
 
 
 def test_manifest_exists() -> None:
-    assert _MANIFEST.is_file(), (
-        "MANIFEST.in is missing — without it the sdist omits web/dist and the "
-        "wheel built from the sdist (release job / `make build`) ships no SPA"
-    )
+    assert _MANIFEST.is_file(), "Source archives require MANIFEST.in."
 
 
-def test_manifest_grafts_web_dist() -> None:
-    """A ``graft web/dist`` line must be present (comments/whitespace tolerant)."""
-    text = _MANIFEST.read_text(encoding="utf-8")
-    grafts = {
-        line.split(None, 1)[1].strip().replace("\\", "/")
-        for line in text.splitlines()
-        if re.match(r"^\s*graft\s+\S", line)
+@pytest.mark.parametrize("bundle", _BUNDLE_ROOTS)
+def test_source_archive_contains_bundle_files(bundle: str) -> None:
+    available, selected = _archive_selection()
+    files = {path for path in available if path.startswith(f"{bundle}/")}
+    if not files and bundle == "apps/console/dist":
+        pytest.skip("Console bundle has not been built in this checkout.")
+    assert files, f"No files found in {bundle}"
+    expected = {
+        path
+        for path in files
+        if Path(path).name != ".DS_Store" and not fnmatch(path, "*.py[cod]")
     }
-    assert "web/dist" in grafts, (
-        f"MANIFEST.in must `graft web/dist` so the sdist carries the built SPA; "
-        f"found grafts={sorted(grafts)}"
-    )
+    assert selected.intersection(files) == expected
+
+
+def test_source_archive_contains_license() -> None:
+    _, selected = _archive_selection()
+    assert (_REPO_ROOT / "LICENSE").is_file()
+    assert "LICENSE" in selected

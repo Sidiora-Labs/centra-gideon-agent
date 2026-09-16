@@ -15,8 +15,6 @@ def _make_cfg(
     cfg.session.pool_agent = pool_agent
     cfg.session.pool_ttl_secs = pool_ttl_secs
     cfg.session.timeout_secs = 3600
-    # Single top-level default_agent (the nested agent.default_agent was removed);
-    # a real string so the `pool_agent or cfg.default_agent` fallback is exercised.
     cfg.default_agent = ""
     return cfg
 
@@ -30,22 +28,19 @@ def _make_provider() -> MagicMock:
     return p
 
 
-def _make_manager(pool_size: int = 2, pool_agent: str = "gideon", pool_ttl_secs: int = 1800):
-    from gideon.session import SessionManager
+def _make_manager(
+    pool_size: int = 2, pool_agent: str = "gideon", pool_ttl_secs: int = 1800
+):
+    from gideon.engine.session import ConversationDirectory
 
     cfg = _make_cfg(pool_size, pool_agent, pool_ttl_secs)
     factory = MagicMock(side_effect=lambda *a, **kw: _make_provider())
     with patch(
-        "gideon.session.default_workspace_dir",
+        "gideon.engine.session.default_workspace_dir",
         return_value="/home/user/.gideon/workspace",
     ):
-        mgr = SessionManager(cfg, provider_factory=factory)
+        mgr = ConversationDirectory(cfg, provider_factory=factory)
     return mgr, factory
-
-
-# ---------------------------------------------------------------------------
-# _fill_warm_pool
-# ---------------------------------------------------------------------------
 
 
 class TestFillWarmPool:
@@ -56,7 +51,6 @@ class TestFillWarmPool:
 
         assert mgr._warm_pool.qsize() == 3
         assert factory.call_count == 3
-        # Each provider should have been started
         for _ in range(3):
             p, spawn_time = mgr._warm_pool.get_nowait()
             p.start.assert_awaited_once()
@@ -88,7 +82,6 @@ class TestFillWarmPool:
         factory.side_effect = _factory
         await mgr._fill_warm_pool()
 
-        # Should have 1 successful + 1 failed (breaks loop)
         assert mgr._warm_pool.qsize() == 1
         assert len(failed_providers) == 1
         failed_providers[0].shutdown.assert_awaited_once()
@@ -98,20 +91,14 @@ class TestFillWarmPool:
         mgr, factory = _make_manager(pool_size=1)
         provider = _make_provider()
         provider.start = AsyncMock(side_effect=asyncio.CancelledError)
-        # shutdown also raises CancelledError (the real scenario)
         provider.shutdown = AsyncMock(side_effect=asyncio.CancelledError)
         factory.side_effect = lambda *a, **kw: provider
 
-        with patch("gideon.session._sync_kill_provider") as mock_kill:
+        with patch("gideon.engine.session._sync_kill_provider") as mock_kill:
             with pytest.raises(asyncio.CancelledError):
                 await mgr._fill_warm_pool()
             mock_kill.assert_called_once_with(provider)
         assert mgr._warm_pool.qsize() == 0
-
-
-# ---------------------------------------------------------------------------
-# Liveness drain loop
-# ---------------------------------------------------------------------------
 
 
 class TestLivenessDrainLoop:
@@ -151,11 +138,6 @@ class TestLivenessDrainLoop:
         assert pooled is healthy
 
 
-# ---------------------------------------------------------------------------
-# _claim_from_pool
-# ---------------------------------------------------------------------------
-
-
 class TestClaimFromPool:
     def test_claim_matching_agent(self):
         mgr, _ = _make_manager(pool_agent="gideon")
@@ -191,7 +173,7 @@ class TestClaimFromPool:
 
         result = mgr._claim_from_pool("custom-agent")
         assert result is None
-        assert mgr._warm_pool.qsize() == 1  # not consumed
+        assert mgr._warm_pool.qsize() == 1
 
     def test_claim_empty_pool_returns_none(self):
         mgr, _ = _make_manager()
@@ -203,12 +185,7 @@ class TestClaimFromPool:
         mgr._warm_pool.put_nowait((_make_provider(), time.monotonic()))
         result = mgr._claim_from_pool("some-agent")
         assert result is None
-        assert mgr._warm_pool.qsize() == 1  # not consumed
-
-
-# ---------------------------------------------------------------------------
-# _schedule_replenish
-# ---------------------------------------------------------------------------
+        assert mgr._warm_pool.qsize() == 1
 
 
 class TestScheduleReplenish:
@@ -228,11 +205,6 @@ class TestScheduleReplenish:
         assert len(mgr._background_tasks) == 0
 
 
-# ---------------------------------------------------------------------------
-# Pool drain on shutdown (close_all)
-# ---------------------------------------------------------------------------
-
-
 class TestPoolDrainOnShutdown:
     @pytest.mark.asyncio
     async def test_close_all_shuts_down_pool_providers(self):
@@ -248,11 +220,6 @@ class TestPoolDrainOnShutdown:
         assert mgr._warm_pool.qsize() == 0
 
 
-# ---------------------------------------------------------------------------
-# Config wiring
-# ---------------------------------------------------------------------------
-
-
 class TestConfigWiring:
     def test_pool_size_from_config(self):
         mgr, _ = _make_manager(pool_size=5, pool_agent="custom")
@@ -260,18 +227,18 @@ class TestConfigWiring:
         assert mgr._pool_agent == "custom"
 
     def test_pool_agent_falls_back_to_default_agent(self):
-        from gideon.session import SessionManager
+        from gideon.engine.session import ConversationDirectory
 
         cfg = _make_cfg(pool_size=1, pool_agent="")
         cfg.default_agent = "fallback-agent"
-        mgr = SessionManager(cfg)
+        mgr = ConversationDirectory(cfg)
         assert mgr._pool_agent == "fallback-agent"
 
     def test_pool_disabled_by_default(self):
-        from gideon.session import SessionManager
+        from gideon.engine.session import ConversationDirectory
 
         cfg = _make_cfg(pool_size=0)
-        mgr = SessionManager(cfg)
+        mgr = ConversationDirectory(cfg)
         assert mgr._pool_size == 0
 
     def test_pool_size_capped_at_max(self):
@@ -280,16 +247,11 @@ class TestConfigWiring:
         assert mgr._pool_size == 10
 
 
-# ---------------------------------------------------------------------------
-# get_or_create integration with pool
-# ---------------------------------------------------------------------------
-
-
 class TestGetOrCreatePoolIntegration:
     @pytest.mark.asyncio
     async def test_claims_from_pool_when_agent_matches(self):
         """get_or_create uses pooled provider, verifies rekey() called."""
-        from gideon.llm.acp_agent import AcpAgentProvider
+        from gideon.integrations.llm.acp_agent import AcpAgentProvider
 
         mgr, factory = _make_manager(pool_agent="gideon")
         pooled = MagicMock(spec=AcpAgentProvider)
@@ -318,14 +280,11 @@ class TestGetOrCreatePoolIntegration:
         mgr._warm_pool.put_nowait((pooled, time.monotonic()))
         mgr._drain_and_claim = AsyncMock(return_value=pooled)
 
-        # Simulate existing session in map
         mgr._session_map.get = MagicMock(return_value="existing-sid")
 
         provider, is_new, _ = await mgr.get_or_create("test-key", agent="gideon")
 
-        # Pool should be skipped — _drain_and_claim not called
         mgr._drain_and_claim.assert_not_awaited()
-        # Factory called for cold start
         factory.assert_called_once()
 
     @pytest.mark.asyncio
@@ -345,16 +304,14 @@ class TestGetOrCreatePoolIntegration:
             "test-key", agent="gideon", cwd="/Users/alice/workspace/proj"
         )
 
-        # Pool skipped
         mgr._drain_and_claim.assert_not_awaited()
-        # Factory called for cold start, cwd forwarded
         factory.assert_called_once()
         assert factory.call_args.kwargs.get("cwd") == "/Users/alice/workspace/proj"
 
     @pytest.mark.asyncio
     async def test_claims_pool_with_model_override_and_switches(self):
         """get_or_create claims pool even with model_override, then calls set_model."""
-        from gideon.llm.acp_agent import AcpAgentProvider
+        from gideon.integrations.llm.acp_agent import AcpAgentProvider
 
         mgr, factory = _make_manager(pool_agent="gideon")
         pooled = MagicMock(spec=AcpAgentProvider)
@@ -367,7 +324,9 @@ class TestGetOrCreatePoolIntegration:
         mgr._drain_and_claim = AsyncMock(return_value=pooled)
         mgr._schedule_replenish = MagicMock()
 
-        with patch.object(type(mgr), "_resolve_agent_model", return_value="default-model"):
+        with patch.object(
+            type(mgr), "_resolve_agent_model", return_value="default-model"
+        ):
             provider, is_new, _ = await mgr.get_or_create(
                 "test-key", agent="gideon", model="custom-model"
             )
@@ -378,18 +337,12 @@ class TestGetOrCreatePoolIntegration:
         pooled.set_model.assert_awaited_once_with("custom-model")
 
 
-# ---------------------------------------------------------------------------
-# TTL expiration
-# ---------------------------------------------------------------------------
-
-
 class TestTTLExpiration:
     @pytest.mark.asyncio
     async def test_stale_provider_discarded(self):
         """Provider older than TTL is discarded."""
         mgr, _ = _make_manager(pool_agent="gideon", pool_ttl_secs=60)
         stale = _make_provider()
-        # Simulate provider spawned 120s ago
         mgr._warm_pool.put_nowait((stale, time.monotonic() - 120))
 
         result = await mgr._drain_and_claim("gideon")
@@ -414,7 +367,6 @@ class TestTTLExpiration:
         """TTL=0 disables expiration check."""
         mgr, _ = _make_manager(pool_agent="gideon", pool_ttl_secs=0)
         old = _make_provider()
-        # Very old provider
         mgr._warm_pool.put_nowait((old, time.monotonic() - 10000))
 
         result = await mgr._drain_and_claim("gideon")
@@ -435,11 +387,6 @@ class TestTTLExpiration:
         mgr._schedule_replenish.assert_called_once()
 
 
-# ---------------------------------------------------------------------------
-# Model-matches-pool-default bypass (effective_model normalization)
-# ---------------------------------------------------------------------------
-
-
 class TestModelMatchesPoolDefault:
     """When the dashboard sends model == pool agent's default, treat as None
     so the pool isn't bypassed unnecessarily."""
@@ -447,7 +394,7 @@ class TestModelMatchesPoolDefault:
     @pytest.mark.asyncio
     async def test_pool_claimed_when_model_matches_agent_default(self):
         """model='claude-opus-4.6' matching pool agent default → pool used, no set_model."""
-        from gideon.llm.acp_agent import AcpAgentProvider
+        from gideon.integrations.llm.acp_agent import AcpAgentProvider
 
         mgr, factory = _make_manager(pool_agent="gideon")
         pooled = MagicMock(spec=AcpAgentProvider)
@@ -460,7 +407,9 @@ class TestModelMatchesPoolDefault:
         mgr._drain_and_claim = AsyncMock(return_value=pooled)
         mgr._schedule_replenish = MagicMock()
 
-        with patch.object(type(mgr), "_resolve_agent_model", return_value="claude-opus-4.6"):
+        with patch.object(
+            type(mgr), "_resolve_agent_model", return_value="claude-opus-4.6"
+        ):
             provider, is_new, _ = await mgr.get_or_create(
                 "test-key", agent="gideon", model="claude-opus-4.6"
             )
@@ -473,7 +422,7 @@ class TestModelMatchesPoolDefault:
     @pytest.mark.asyncio
     async def test_pool_claimed_when_model_differs_with_post_switch(self):
         """model='claude-sonnet-4.6' != pool default → pool claimed, set_model called."""
-        from gideon.llm.acp_agent import AcpAgentProvider
+        from gideon.integrations.llm.acp_agent import AcpAgentProvider
 
         mgr, factory = _make_manager(pool_agent="gideon")
         pooled = MagicMock(spec=AcpAgentProvider)
@@ -486,7 +435,9 @@ class TestModelMatchesPoolDefault:
         mgr._drain_and_claim = AsyncMock(return_value=pooled)
         mgr._schedule_replenish = MagicMock()
 
-        with patch.object(type(mgr), "_resolve_agent_model", return_value="claude-opus-4.6"):
+        with patch.object(
+            type(mgr), "_resolve_agent_model", return_value="claude-opus-4.6"
+        ):
             provider, is_new, _ = await mgr.get_or_create(
                 "test-key", agent="gideon", model="claude-sonnet-4.6"
             )
@@ -502,7 +453,9 @@ class TestModelMatchesPoolDefault:
         mgr, factory = _make_manager(pool_size=0, pool_agent="gideon")
         mgr._drain_and_claim = AsyncMock()
 
-        with patch.object(type(mgr), "_resolve_agent_model", return_value="claude-opus-4.6"):
+        with patch.object(
+            type(mgr), "_resolve_agent_model", return_value="claude-opus-4.6"
+        ):
             await mgr.get_or_create("test-key", agent="gideon", model="claude-opus-4.6")
 
         mgr._drain_and_claim.assert_not_awaited()
@@ -514,7 +467,9 @@ class TestModelMatchesPoolDefault:
         mgr._drain_and_claim = AsyncMock()
         mgr._session_map.get = MagicMock(return_value="existing-sid")
 
-        with patch.object(type(mgr), "_resolve_agent_model", return_value="claude-opus-4.6"):
+        with patch.object(
+            type(mgr), "_resolve_agent_model", return_value="claude-opus-4.6"
+        ):
             await mgr.get_or_create("test-key", agent="gideon", model="claude-opus-4.6")
 
         mgr._drain_and_claim.assert_not_awaited()
@@ -522,7 +477,7 @@ class TestModelMatchesPoolDefault:
     @pytest.mark.asyncio
     async def test_none_model_still_claims_from_pool(self):
         """model=None (no explicit model) → pool used as before."""
-        from gideon.llm.acp_agent import AcpAgentProvider
+        from gideon.integrations.llm.acp_agent import AcpAgentProvider
 
         mgr, factory = _make_manager(pool_agent="gideon")
         pooled = MagicMock(spec=AcpAgentProvider)
@@ -534,7 +489,9 @@ class TestModelMatchesPoolDefault:
         mgr._drain_and_claim = AsyncMock(return_value=pooled)
         mgr._schedule_replenish = MagicMock()
 
-        provider, is_new, _ = await mgr.get_or_create("test-key", agent="gideon", model=None)
+        provider, is_new, _ = await mgr.get_or_create(
+            "test-key", agent="gideon", model=None
+        )
 
         assert provider is pooled
         mgr._drain_and_claim.assert_awaited_once()
@@ -542,7 +499,7 @@ class TestModelMatchesPoolDefault:
     @pytest.mark.asyncio
     async def test_empty_pool_agent_skips_model_resolution_on_claim(self):
         """No pool_agent configured → no model resolution on post-claim check."""
-        from gideon.llm.acp_agent import AcpAgentProvider
+        from gideon.integrations.llm.acp_agent import AcpAgentProvider
 
         mgr, factory = _make_manager(pool_agent="")
         pooled = MagicMock(spec=AcpAgentProvider)
@@ -559,14 +516,7 @@ class TestModelMatchesPoolDefault:
             await mgr.get_or_create("test-key", agent=None, model="claude-opus-4.6")
 
         mock_resolve.assert_not_called()
-        # model provided but no pool_agent → pool_model is None → skip set_model
-        # (pool process already has whatever model gideon-cli defaults to)
         pooled.set_model.assert_not_awaited()
-
-
-# ---------------------------------------------------------------------------
-# Stateless sessions must not claim from pool
-# ---------------------------------------------------------------------------
 
 
 class TestStatelessSkipsPool:
@@ -595,11 +545,6 @@ class TestStatelessSkipsPool:
             mgr._drain_and_claim.assert_not_awaited()
 
 
-# ---------------------------------------------------------------------------
-# pool_size=0 must not attempt pool claim
-# ---------------------------------------------------------------------------
-
-
 class TestPoolDisabledSkipsClaim:
     @pytest.mark.asyncio
     async def test_pool_size_zero_skips_drain_and_claim(self):
@@ -613,11 +558,6 @@ class TestPoolDisabledSkipsClaim:
         factory.assert_called_once()
 
 
-# ---------------------------------------------------------------------------
-# _pool_health_loop
-# ---------------------------------------------------------------------------
-
-
 class TestPoolHealthLoop:
     @pytest.mark.asyncio
     async def test_removes_dead_provider_and_replenishes(self):
@@ -629,7 +569,6 @@ class TestPoolHealthLoop:
         mgr._warm_pool.put_nowait((dead, time.monotonic()))
         mgr._schedule_replenish = MagicMock()
 
-        # Run one iteration by patching sleep to raise after first call
         call_count = 0
 
         async def _sleep_once(secs):
@@ -746,11 +685,6 @@ class TestPoolHealthLoop:
         mgr._schedule_replenish.assert_called_once()
 
 
-# ---------------------------------------------------------------------------
-# _pool_pids
-# ---------------------------------------------------------------------------
-
-
 class TestPoolPids:
     def test_returns_pids_from_pool(self):
         """Extracts PIDs from pooled providers."""
@@ -767,7 +701,6 @@ class TestPoolPids:
         pids = mgr._pool_pids()
 
         assert pids == {1234, 5678}
-        # Non-destructive: queue still has both entries
         assert mgr._warm_pool.qsize() == 2
 
     def test_empty_pool_returns_empty_set(self):
@@ -779,7 +712,7 @@ class TestPoolPids:
         """Provider with no client attr is skipped, not crashed."""
         mgr, _ = _make_manager(pool_agent="gideon")
         p = _make_provider()
-        del p.client  # no client attribute
+        del p.client
         mgr._warm_pool.put_nowait((p, time.monotonic()))
 
         pids = mgr._pool_pids()
@@ -803,7 +736,6 @@ class TestPoolPids:
     def test_includes_sweep_pids_during_health_check(self):
         """PIDs temporarily out of queue during health sweep are still visible."""
         mgr, _ = _make_manager(pool_agent="gideon")
-        # Simulate health loop having drained providers
         mgr._pool_sweep_pids = {1111, 2222}
 
         pids = mgr._pool_pids()
@@ -811,22 +743,16 @@ class TestPoolPids:
         assert {1111, 2222} <= pids
 
 
-# ---------------------------------------------------------------------------
-# reload_provider_factory resets pool
-# ---------------------------------------------------------------------------
-
-
 class TestReloadProviderFactoryRefillsPool:
     @pytest.mark.asyncio
     async def test_reload_resets_pool_started_and_refills(self):
         """After reload_provider_factory, warm pool is replenished with new provider type."""
         mgr, factory = _make_manager(pool_size=1)
-        # Simulate initial start_pool having run
         mgr._pool_started = True
         old_provider = _make_provider()
         mgr._warm_pool.put_nowait((old_provider, time.monotonic()))
 
-        with patch("gideon.session.AppConfig.load") as mock_load:
+        with patch("gideon.engine.session.AppConfig.load") as mock_load:
             new_cfg = _make_cfg(pool_size=1)
             new_factory = MagicMock(side_effect=lambda *a, **kw: _make_provider())
             new_cfg.create_provider_factory = MagicMock(return_value=new_factory)
@@ -835,10 +761,8 @@ class TestReloadProviderFactoryRefillsPool:
 
             await mgr.reload_provider_factory()
 
-        # Old provider was shut down
         old_provider.shutdown.assert_awaited_once()
-        # Pool started was reset and start_pool ran (non-blocking task created)
-        assert mgr._pool_started is True  # re-set by start_pool
+        assert mgr._pool_started is True
 
     @pytest.mark.asyncio
     async def test_reload_cancels_old_health_task(self):
@@ -850,7 +774,7 @@ class TestReloadProviderFactoryRefillsPool:
         fake_task.cancel = MagicMock()
         mgr._pool_health_task = fake_task
 
-        with patch("gideon.session.AppConfig.load") as mock_load:
+        with patch("gideon.engine.session.AppConfig.load") as mock_load:
             new_cfg = _make_cfg(pool_size=1)
             new_cfg.create_provider_factory = MagicMock(
                 return_value=MagicMock(side_effect=lambda *a, **kw: _make_provider())
@@ -863,17 +787,12 @@ class TestReloadProviderFactoryRefillsPool:
         fake_task.cancel.assert_called_once()
 
 
-# ---------------------------------------------------------------------------
-# default_workspace_dir
-# ---------------------------------------------------------------------------
-
-
 class TestDefaultWorkspaceDir:
     def test_returns_realpath_of_workspace_dir(self, tmp_path):
         ws = tmp_path / "workspace"
         ws.mkdir()
-        with patch("gideon.config.loader.workspace_root", return_value=ws):
-            from gideon.config.loader import default_workspace_dir
+        with patch("gideon.core.config.loader.workspace_root", return_value=ws):
+            from gideon.core.config.loader import default_workspace_dir
 
             result = default_workspace_dir()
         import os
@@ -882,8 +801,8 @@ class TestDefaultWorkspaceDir:
 
     def test_returns_empty_when_dir_missing(self, tmp_path):
         missing = tmp_path / "nonexistent"
-        with patch("gideon.config.loader.workspace_root", return_value=missing):
-            from gideon.config.loader import default_workspace_dir
+        with patch("gideon.core.config.loader.workspace_root", return_value=missing):
+            from gideon.core.config.loader import default_workspace_dir
 
             result = default_workspace_dir()
         assert result == ""
@@ -892,48 +811,48 @@ class TestDefaultWorkspaceDir:
         ws = tmp_path / "workspace"
         ws.mkdir()
         with (
-            patch("gideon.config.loader.workspace_root", return_value=ws),
-            patch("gideon.security.is_sensitive_path", return_value=True),
+            patch("gideon.core.config.loader.workspace_root", return_value=ws),
+            patch("gideon.security.security.is_sensitive_path", return_value=True),
         ):
-            from gideon.config.loader import default_workspace_dir
+            from gideon.core.config.loader import default_workspace_dir
 
             result = default_workspace_dir()
         assert result == ""
 
     def test_returns_empty_on_exception(self):
-        with patch("gideon.config.loader.workspace_root", side_effect=RuntimeError("boom")):
-            from gideon.config.loader import default_workspace_dir
+        with patch(
+            "gideon.core.config.loader.workspace_root", side_effect=RuntimeError("boom")
+        ):
+            from gideon.core.config.loader import default_workspace_dir
 
             result = default_workspace_dir()
         assert result == ""
 
 
-# ---------------------------------------------------------------------------
-# _pool_cwd initialization and bypass logic
-# ---------------------------------------------------------------------------
-
-
 class TestPoolCwd:
     def test_pool_cwd_set_from_default_project_dir(self):
-        from gideon.session import SessionManager
+        from gideon.engine.session import ConversationDirectory
 
         cfg = _make_cfg()
-        with patch("gideon.session.default_workspace_dir", return_value="/custom/workspace"):
-            mgr = SessionManager(cfg)
+        with patch(
+            "gideon.engine.session.default_workspace_dir",
+            return_value="/custom/workspace",
+        ):
+            mgr = ConversationDirectory(cfg)
         assert mgr._pool_cwd == "/custom/workspace"
 
     def test_pool_cwd_empty_when_no_workspace(self):
-        from gideon.session import SessionManager
+        from gideon.engine.session import ConversationDirectory
 
         cfg = _make_cfg()
-        with patch("gideon.session.default_workspace_dir", return_value=""):
-            mgr = SessionManager(cfg)
+        with patch("gideon.engine.session.default_workspace_dir", return_value=""):
+            mgr = ConversationDirectory(cfg)
         assert mgr._pool_cwd == ""
 
     @pytest.mark.asyncio
     async def test_pool_claimed_when_cwd_matches_pool_cwd(self):
         """cwd == _pool_cwd should NOT bypass pool."""
-        from gideon.llm.acp_agent import AcpAgentProvider
+        from gideon.integrations.llm.acp_agent import AcpAgentProvider
 
         mgr, factory = _make_manager(pool_agent="gideon")
         pooled = MagicMock(spec=AcpAgentProvider)
@@ -948,7 +867,7 @@ class TestPoolCwd:
         provider, is_new, _ = await mgr.get_or_create(
             "test-key",
             agent="gideon",
-            cwd="/home/user/.gideon/workspace",  # same as _pool_cwd
+            cwd="/home/user/.gideon/workspace",
         )
 
         assert provider is pooled
@@ -958,12 +877,12 @@ class TestPoolCwd:
     @pytest.mark.asyncio
     async def test_pool_bypassed_when_pool_cwd_empty_and_cwd_set(self):
         """If _pool_cwd is empty, any cwd bypasses pool."""
-        from gideon.session import SessionManager
+        from gideon.engine.session import ConversationDirectory
 
         cfg = _make_cfg()
         factory = MagicMock(side_effect=lambda *a, **kw: _make_provider())
-        with patch("gideon.session.default_workspace_dir", return_value=""):
-            mgr = SessionManager(cfg, provider_factory=factory)
+        with patch("gideon.engine.session.default_workspace_dir", return_value=""):
+            mgr = ConversationDirectory(cfg, provider_factory=factory)
 
         pooled = _make_provider()
         mgr._warm_pool.put_nowait((pooled, time.monotonic()))
@@ -990,12 +909,12 @@ class TestPoolCwd:
     @pytest.mark.asyncio
     async def test_fill_warm_pool_passes_none_when_pool_cwd_empty(self):
         """Pool processes get cwd=None when _pool_cwd is empty."""
-        from gideon.session import SessionManager
+        from gideon.engine.session import ConversationDirectory
 
         cfg = _make_cfg(pool_size=1)
         factory = MagicMock(side_effect=lambda *a, **kw: _make_provider())
-        with patch("gideon.session.default_workspace_dir", return_value=""):
-            mgr = SessionManager(cfg, provider_factory=factory)
+        with patch("gideon.engine.session.default_workspace_dir", return_value=""):
+            mgr = ConversationDirectory(cfg, provider_factory=factory)
 
         await mgr._fill_warm_pool()
 

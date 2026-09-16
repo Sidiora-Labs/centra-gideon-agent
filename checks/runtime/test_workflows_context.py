@@ -26,8 +26,8 @@ import json
 
 import pytest
 
-from gideon.workflows import store
-from gideon.workflows.context import (
+from gideon.automation.workflows import store
+from gideon.automation.workflows.context import (
     MAX_BUCKET_ITEMS,
     MAX_HANDOFF_FIELD,
     SESSION_CONTINUOUS,
@@ -38,9 +38,15 @@ from gideon.workflows.context import (
     render_context,
     session_policy,
 )
-from gideon.workflows.controller import EngineServices, RunController
-from gideon.workflows.journal import CARRYOVER, DECISION, HANDOFF, LEDGER_KINDS, ledger
-from gideon.workflows.models import RunStatus, WorkflowRun
+from gideon.automation.workflows.controller import EngineServices, RunController
+from gideon.automation.workflows.journal import (
+    CARRYOVER,
+    DECISION,
+    HANDOFF,
+    LEDGER_KINDS,
+    ledger,
+)
+from gideon.automation.workflows.models import RunStatus, WorkflowRun
 
 pytestmark = pytest.mark.anyio
 
@@ -54,7 +60,7 @@ def anyio_backend() -> str:
 def _isolated(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
     return home
 
 
@@ -155,7 +161,9 @@ class TestCarryover:
 
     def test_a_file_entry_with_no_path_is_dropped(self) -> None:
         """A path is the only thing that makes the entry addressable."""
-        merged = Carryover().merge(Carryover(files_touched=[{"lines": "1-2"}, {"path": "ok.py"}]))
+        merged = Carryover().merge(
+            Carryover(files_touched=[{"lines": "1-2"}, {"path": "ok.py"}])
+        )
         assert [f["path"] for f in merged.files_touched] == ["ok.py"]
 
     def test_line_spans_survive_rendering(self) -> None:
@@ -178,9 +186,12 @@ class TestDecision:
 
     def test_both_field_spellings_are_accepted(self) -> None:
         """The journal writes `rejected_alternatives` (the plan's name); a model authoring one
-        naturally writes `rejected`. Refusing either would silently drop the load-bearing field."""
+        naturally writes `rejected`. Refusing either would silently drop the load-bearing field.
+        """
         assert Decision.from_dict({"choice": "x", "rejected": ["a"]}).rejected == ["a"]
-        assert Decision.from_dict({"choice": "x", "rejected_alternatives": ["b"]}).rejected == ["b"]
+        assert Decision.from_dict(
+            {"choice": "x", "rejected_alternatives": ["b"]}
+        ).rejected == ["b"]
 
     def test_a_choiceless_decision_is_empty(self) -> None:
         assert Decision(reason="because").empty is True
@@ -212,10 +223,9 @@ class TestRenderOrder:
 
     def test_nothing_to_say_renders_nothing(self) -> None:
         assert render_context() == ""
-        assert render_context(handoff=Handoff(), carryover=Carryover(), decisions=[]) == ""
-
-
-# ── the engine wiring ───────────────────────────────────────────────────────
+        assert (
+            render_context(handoff=Handoff(), carryover=Carryover(), decisions=[]) == ""
+        )
 
 
 def _completion_recorder(prompts: list[str]):
@@ -309,7 +319,9 @@ class TestEngineWiring:
         """A model that reads the task first has already begun planning without the constraints."""
         prompts: list[str] = []
         await _run(_loop_spec(), prompts)
-        assert prompts[-1].index("SETTLED DECISIONS") < prompts[-1].index("Do the work.")
+        assert prompts[-1].index("SETTLED DECISIONS") < prompts[-1].index(
+            "Do the work."
+        )
 
     async def test_a_CONTINUOUS_session_gets_no_injected_block(self) -> None:
         """A continuous session already holds the previous iteration in its transcript; prepending
@@ -324,7 +336,8 @@ class TestEngineWiring:
         run = await _run(_loop_spec(), prompts)
         records = ledger(run.id, kinds={HANDOFF, CARRYOVER, DECISION})
         counts = {
-            k: sum(1 for r in records if r.get("kind") == k) for k in (HANDOFF, CARRYOVER, DECISION)
+            k: sum(1 for r in records if r.get("kind") == k)
+            for k in (HANDOFF, CARRYOVER, DECISION)
         }
         assert counts == {HANDOFF: 3, CARRYOVER: 3, DECISION: 3}
 
@@ -350,7 +363,9 @@ class TestEngineWiring:
         spec = _loop_spec()
         run = store.create(WorkflowRun(id="", workflow_name="ctx"))
         store.write_spec(run.id, spec)
-        controller = RunController(run, spec, services=EngineServices(completion=silent))
+        controller = RunController(
+            run, spec, services=EngineServices(completion=silent)
+        )
         await controller.run_to_completion(timeout=30)
         assert ledger(run.id, kinds={HANDOFF, CARRYOVER, DECISION}) == []
 
@@ -386,7 +401,6 @@ class TestRehydration:
         prompts: list[str] = []
         run = await _run(_loop_spec(), prompts)
 
-        # A fresh controller over the same run — what a restart produces.
         revived = RunController(
             store.get(run.id),
             _loop_spec(),
@@ -411,7 +425,9 @@ class TestRehydration:
         handoff = next(iter(revived._handoffs.values()))
         assert "iteration 3" in handoff.verified_state
 
-    async def test_an_unreadable_ledger_does_not_block_a_resume(self, monkeypatch) -> None:
+    async def test_an_unreadable_ledger_does_not_block_a_resume(
+        self, monkeypatch
+    ) -> None:
         """It would start context-blind, which is worse than nothing but far better than a run that
         will not start at all."""
         spec = _loop_spec()
@@ -419,8 +435,8 @@ class TestRehydration:
         store.write_spec(run.id, spec)
         controller = RunController(run, spec, services=EngineServices(completion=None))
         monkeypatch.setattr(
-            "gideon.workflows.journal.ledger",
+            "gideon.automation.workflows.journal.ledger",
             lambda *a, **k: (_ for _ in ()).throw(OSError("disk gone")),
         )
-        controller._rehydrate_context()  # must not raise
+        controller._rehydrate_context()
         assert controller._handoffs == {}

@@ -1,4 +1,4 @@
-"""WS7 — JS-render fetch path (web/render.py + web_fetch render=True).
+"""WS7 — JS-render fetch path (apps/console/render.py + web_fetch render=True).
 
 Playwright is an optional dep (not installed in CI), so these tests exercise:
 - graceful unavailability when Playwright is absent,
@@ -16,11 +16,11 @@ import socket
 
 import pytest
 
-from gideon.net.client import FetchResponse
-from gideon.web import fetch as wf
-from gideon.web import render as rd
-from gideon.web.fetch import web_fetch
-from gideon.web.render import RenderResult, render_url
+from gideon.integrations.web import fetch as wf
+from gideon.integrations.web import render as rd
+from gideon.integrations.web.fetch import web_fetch
+from gideon.integrations.web.render import RenderResult, render_url
+from gideon.security.net.client import FetchResponse
 
 
 def _resolver(mapping):
@@ -39,10 +39,10 @@ def _web_tool_provider_cls():
     import sys
     from pathlib import Path
 
-    app_dir = Path(__file__).resolve().parents[2] / "apps" / "web-tools"
-    if not app_dir.is_dir():  # standalone core clone — the web-tools app isn't present
+    app_dir = Path(__file__).resolve().parents[3] / "apps" / "web-tools"
+    if not app_dir.is_dir():
         pytest.skip("web-tools app dir not present (standalone clone)")
-    uniq = "_pclaw_app_web_tools__provider"
+    uniq = "_gideon_app_web_tools__provider"
     if uniq in sys.modules:
         return sys.modules[uniq].WebToolProvider
     spec = importlib.util.spec_from_file_location(uniq, app_dir / "provider.py")
@@ -65,9 +65,6 @@ def _isolate(monkeypatch):
     yield
 
 
-# ── render_url ────────────────────────────────────────────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_render_unavailable_without_playwright(monkeypatch):
     monkeypatch.setattr(rd, "is_available", lambda: False)
@@ -79,16 +76,14 @@ async def test_render_unavailable_without_playwright(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_render_egress_guard_blocks_before_browser(monkeypatch):
-    # Playwright "available", but the URL resolves to a private IP → the egress guard
-    # denies it BEFORE any browser launch (async_playwright must never be reached).
     monkeypatch.setattr(rd, "is_available", lambda: True)
 
     def _boom(*a, **k):
         raise AssertionError("browser must not launch for a guard-denied URL")
 
-    # If the code tried to import/use playwright, this would surface — but the guard
-    # returns first, so we just assert the deny outcome.
-    out = await render_url("http://internal", resolver=_resolver({"internal": ["10.0.0.5"]}))
+    out = await render_url(
+        "http://internal", resolver=_resolver({"internal": ["10.0.0.5"]})
+    )
     assert out.ok is False
     assert out.unavailable is False
     assert "non-public" in out.error or "private" in out.error.lower()
@@ -96,23 +91,16 @@ async def test_render_egress_guard_blocks_before_browser(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_render_guard_allows_public_then_would_launch(monkeypatch):
-    # Public URL passes the guard; with Playwright genuinely absent the import path
-    # returns an unavailable result (proves the guard is not what stops it here).
-    monkeypatch.setattr(rd, "is_available", lambda: True)  # claim available…
-    # …but the real import inside will fail (not installed) → handled gracefully.
+    monkeypatch.setattr(rd, "is_available", lambda: True)
     out = await render_url(
         "https://example.com", resolver=_resolver({"example.com": ["93.184.216.34"]})
     )
-    assert out.ok is False  # import fails in this env
+    assert out.ok is False
     assert out.unavailable is True or "import" in out.error.lower()
-
-
-# ── web_fetch(render=True) ──────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
 async def test_web_fetch_render_falls_back_to_http_when_unavailable(monkeypatch):
-    # render requested but unavailable → falls through to the normal HTTP fetch.
     async def _fake_render(url, **kw):
         return RenderResult(ok=False, url=url, unavailable=True, error="no playwright")
 
@@ -127,14 +115,15 @@ async def test_web_fetch_render_falls_back_to_http_when_unavailable(monkeypatch)
         )
 
     monkeypatch.setattr(wf, "net_fetch", _fake_net)
-    out = await web_fetch("https://example.com/p", require_provenance=False, render=True)
+    out = await web_fetch(
+        "https://example.com/p", require_provenance=False, render=True
+    )
     assert out.ok is True
     assert "http path body" in out.content
 
 
 @pytest.mark.asyncio
 async def test_web_fetch_render_uses_rendered_html(monkeypatch):
-    # A successful render: web_fetch extracts from the rendered HTML, not an HTTP fetch.
     async def _fake_render(url, **kw):
         return RenderResult(
             ok=True,
@@ -149,14 +138,15 @@ async def test_web_fetch_render_uses_rendered_html(monkeypatch):
         raise AssertionError("net_fetch must not be called when render succeeds")
 
     monkeypatch.setattr(wf, "net_fetch", _net_boom)
-    out = await web_fetch("https://spa.example.com/p", require_provenance=False, render=True)
+    out = await web_fetch(
+        "https://spa.example.com/p", require_provenance=False, render=True
+    )
     assert out.ok is True
     assert "JS-rendered content" in out.content
 
 
 @pytest.mark.asyncio
 async def test_web_fetch_render_error_surfaces(monkeypatch):
-    # A genuine render failure (not unavailability) surfaces, no silent HTTP fallback.
     async def _fake_render(url, **kw):
         return RenderResult(
             ok=False,

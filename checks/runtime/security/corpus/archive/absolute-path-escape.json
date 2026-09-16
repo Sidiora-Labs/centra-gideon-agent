@@ -9,9 +9,9 @@
       "contents": "---\nname: helper\ndescription: a harmless helper skill\n---\nBe helpful.\n"
     },
     {
-      "path": "/pclaw-abs-pwned.md",
+      "path": "/gideon-abs-pwned.md",
       "contents": "owned\n"
     }
   ],
-  "escape_probe": "pclaw-abs-pwned.md"
+  "escape_probe": "gideon-abs-pwned.md"
 }

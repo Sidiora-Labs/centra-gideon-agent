@@ -34,7 +34,7 @@ from pathlib import Path
 
 import pytest
 
-from gideon.acp.mcp_servers import CORE_SERVER_NAME, core_mcp_servers
+from gideon.integrations.acp.mcp_servers import CORE_SERVER_NAME, core_mcp_servers
 
 
 @pytest.fixture
@@ -43,7 +43,7 @@ def home(tmp_path, monkeypatch):
     h = tmp_path / "home"
     (h / "agents").mkdir(parents=True)
     monkeypatch.setenv("GIDEON_HOME", str(h))
-    import gideon.config as cfg
+    import gideon.core.config as cfg
 
     monkeypatch.setattr(cfg, "config_dir", lambda: h, raising=False)
     return h
@@ -51,9 +51,6 @@ def home(tmp_path, monkeypatch):
 
 def _env_of(server: dict) -> dict[str, str]:
     return {e["name"]: e["value"] for e in server.get("env", [])}
-
-
-# ── prong A: the spec itself ────────────────────────────────────────────────
 
 
 def test_core_spec_is_the_acp_array_shape(home):
@@ -120,9 +117,6 @@ def test_core_spec_port_follows_the_configured_url(home, monkeypatch):
     assert env["GIDEON_PORT"] == "6777"
 
 
-# ── prong A: the three client sites + the pooled path ───────────────────────
-
-
 class _FakeSession:
     def __init__(self, sid="S1"):
         self.session_id = sid
@@ -149,7 +143,9 @@ class _FakeConn:
         self.new_params.append(params)
         return _FakeSession("NEW")
 
-    async def load_session(self, params, *, session_id=None, timeout=None, session_files_dir=None):
+    async def load_session(
+        self, params, *, session_id=None, timeout=None, session_files_dir=None
+    ):
         self.load_params.append(params)
         return _FakeSession(session_id or "LOADED")
 
@@ -167,7 +163,7 @@ class _FakeConn:
 
 
 def _client(home, session_key="sk-live"):
-    from gideon.acp.client import AcpClient
+    from gideon.integrations.acp.client import AcpClient
 
     return AcpClient(work_dir=home / "workspace", session_key=session_key)
 
@@ -204,7 +200,7 @@ def test_fresh_turn_session_carries_core(home):
     c._connection = conn
     c._session = _FakeSession("OLD")
     c._session_id = "OLD"
-    c._transport._process = object()  # is_alive() reads the process handle
+    c._transport._process = object()
     c._transport.is_alive = lambda: True  # type: ignore[method-assign]
 
     asyncio.run(c.start_fresh_turn_session())
@@ -238,7 +234,7 @@ def _fresh_turn(home, *, effort="xhigh", model="openai.gpt-5.4", mode="default")
     writes through to the transport — a hand-assembled client raises before the method runs,
     which would look like a passing test that never executed the path.
     """
-    from gideon.acp.dialect import CodexDialect
+    from gideon.integrations.acp.dialect import CodexDialect
 
     c = _client(home)
     c._dialect = CodexDialect()
@@ -277,8 +273,6 @@ def test_fresh_turn_session_reapplies_the_effort_pin(home):
     assert "effort" in ids, f"the effort pin was not re-applied: {ids}"
     effort_params = [p for _m, p in conn.sent if p.get("configId") == "effort"]
     assert effort_params[0]["value"] == "xhigh", effort_params
-    # Effort must follow the model, the ordering the full handshake documents (granularity
-    # can be model-dependent).
     assert ids.index("effort") > ids.index("model"), f"effort preceded model: {ids}"
 
 
@@ -287,7 +281,9 @@ def test_fresh_turn_session_drains_mcp_init_notifications(home):
     notifications queued to interleave into the turn — on the very path `AAP-4` exists to keep
     core reachable."""
     conn = _fresh_turn(home)
-    assert conn.drains == 1, f"init notifications were not drained (drains={conn.drains})"
+    assert (
+        conn.drains == 1
+    ), f"init notifications were not drained (drains={conn.drains})"
 
 
 def test_fresh_turn_session_sends_no_effort_verb_when_none_is_pinned(home):
@@ -295,7 +291,9 @@ def test_fresh_turn_session_sends_no_effort_verb_when_none_is_pinned(home):
     goes out, so the fix cannot be "always send something"."""
     pinned = _config_ids(_fresh_turn(home, effort="xhigh").sent)
     unpinned = _config_ids(_fresh_turn(home, effort="").sent)
-    assert "effort" in pinned and "effort" not in unpinned, f"pinned={pinned} unpinned={unpinned}"
+    assert (
+        "effort" in pinned and "effort" not in unpinned
+    ), f"pinned={pinned} unpinned={unpinned}"
 
 
 @pytest.mark.asyncio
@@ -307,7 +305,7 @@ async def test_pooled_path_defaults_to_core(home):
     unwritten key. The concurrent path therefore opened every session exactly as
     empty as the one-session path.
     """
-    from gideon.llm.acp_session_provider import open_acp_session_provider
+    from gideon.integrations.llm.acp_session_provider import open_acp_session_provider
 
     conn = _FakeConn()
     await open_acp_session_provider(
@@ -321,7 +319,7 @@ async def test_pooled_path_defaults_to_core(home):
 @pytest.mark.asyncio
 async def test_pooled_path_honours_an_explicit_empty_list(home):
     """``[]`` still means "no servers" — the default is not a clamp."""
-    from gideon.llm.acp_session_provider import open_acp_session_provider
+    from gideon.integrations.llm.acp_session_provider import open_acp_session_provider
 
     conn = _FakeConn()
     await open_acp_session_provider(
@@ -338,13 +336,10 @@ def test_pool_forwards_the_session_key_to_the_opener():
     """
     import inspect
 
-    from gideon.acp.connection_pool import AcpConnectionPool
+    from gideon.integrations.acp.connection_pool import AcpConnectionPool
 
     src = inspect.getsource(AcpConnectionPool.open_session)
     assert "session_key=session_key" in src
-
-
-# ── G31: the generated hook must not name the REAL home ─────────────────────
 
 
 def test_generated_hook_writes_into_the_active_home(home, monkeypatch):
@@ -355,7 +350,7 @@ def test_generated_hook_writes_into_the_active_home(home, monkeypatch):
     seeder was one consumer of this generated file, but the native path and the
     dashboard MCP manager write it too, so the leak was never prong B's to own.
     """
-    import gideon.agent as agent_mod
+    import gideon.engine.agent as agent_mod
 
     monkeypatch.setattr(agent_mod, "_USER_PROMPT", home / "nope.md", raising=False)
     cfg = agent_mod.build_agent_config()
@@ -369,40 +364,24 @@ def test_generated_hook_writes_into_the_active_home(home, monkeypatch):
 
 def test_shipped_defaults_name_no_real_home_path():
     """The shipped file itself must not carry a tilde path to a home."""
-    import gideon.agent as agent_mod
+    from importlib.resources import files
 
-    raw = (Path(agent_mod.__file__).parent / "config" / "defaults.json").read_text()
+    raw = files("gideon.core.config").joinpath("defaults.json").read_text()
     assert "~/.gideon" not in raw
 
 
 def test_unresolved_placeholder_fails_closed(home, monkeypatch):
     """A placeholder that survives would be run verbatim by the CLI's shell."""
-    import gideon.agent as agent_mod
+    import gideon.engine.agent as agent_mod
 
     with pytest.raises(RuntimeError, match="unresolved placeholder"):
         agent_mod._bundled_hooks(
-            {"hooks": {"postToolUse": [{"matcher": "bash", "command": "x >> {{NOPE}}"}]}}
+            {
+                "hooks": {
+                    "postToolUse": [{"matcher": "bash", "command": "x >> {{NOPE}}"}]
+                }
+            }
         )
-
-
-# ── prong B is DELETED — AAP-4 DEVIATION 2 ──────────────────────────────────
-#
-# ``acp/config_seed.py`` seeded a ``gideon.json`` symlink into a CLI's own
-# agent-discovery directory, for a CLI that ignored the protocol's ``mcpServers``
-# field. No such CLI exists: §2.1's four fenced drives measured all three shipped
-# CLIs honouring the protocol array (`O76`, `K100`, `C90`), and codex decisively —
-# ``gideon mcp-core`` ran four levels under ``codex-acp`` with zero
-# ``gideon`` entries in ``~/.codex/config.toml``, so the protocol frame was
-# the only channel. The seeder was also unreachable (nothing in either repo passed
-# ``agent_config_dir``) and kiro-shaped by construction (a hardcoded
-# ``gideon.json`` filename holding a kiro agent document, where codex reads
-# TOML ``[mcp_servers.*]`` and claude-code reads ``gideon.mcp.json``).
-#
-# The rails below are the deletion's regression floor. They exist because `G116`
-# proved the three cheap checks all pass on a half-deleted tree: ``mypy`` reports
-# success (``ignore_missing_imports`` hides a missing first-party MODULE), and both
-# ``config_seed`` imports were function-local, so importing ``_register`` succeeded
-# too. Only *calling* the disable path failed.
 
 
 def test_the_config_seeder_module_is_gone():
@@ -410,12 +389,9 @@ def test_the_config_seeder_module_is_gone():
     import importlib
 
     with pytest.raises(ModuleNotFoundError):
-        importlib.import_module("gideon.acp.config_seed")
+        importlib.import_module("gideon.integrations.acp.config_seed")
 
-    # Vacuity floor: the package this module lived in must still import, else the
-    # raise above would be an unrelated broken import root rather than the
-    # deletion this rail measures.
-    assert importlib.import_module("gideon.acp.mcp_servers") is not None
+    assert importlib.import_module("gideon.integrations.acp.mcp_servers") is not None
 
 
 def test_the_sdk_signature_no_longer_carries_agent_config_dir():
@@ -431,9 +407,9 @@ def test_the_sdk_signature_no_longer_carries_agent_config_dir():
 
     params = inspect.signature(register_acp_cli_entry).parameters
     assert "agent_config_dir" not in params
-    # Vacuity floor: the other bundle-declared vendor-knowledge parameters must
-    # still be there, or this rail would pass against a wrong/renamed symbol.
-    assert {"cli", "dialect", "command", "requires_executable", "login_command"} <= set(params)
+    assert {"cli", "dialect", "command", "requires_executable", "login_command"} <= set(
+        params
+    )
 
 
 def test_disable_is_registry_only_and_survives_the_deletion(monkeypatch):
@@ -443,7 +419,7 @@ def test_disable_is_registry_only_and_survives_the_deletion(monkeypatch):
     ``ModuleNotFoundError`` on a tree with ``config_seed.py`` removed. Asserting
     it runs clean is what makes the deletion complete rather than half-done.
     """
-    from gideon.acp_bundles import _register
+    from gideon.integrations.acp_bundles import _register
 
     unregistered: list[str] = []
 
@@ -455,9 +431,6 @@ def test_disable_is_registry_only_and_survives_the_deletion(monkeypatch):
 
     _register.unregister_acp_cli_entry("never-enabled")
 
-    # Vacuity floor: the call must actually have reached the registry. Without
-    # this, a disable path rewritten into a no-op would also "survive", and the
-    # rail would prove nothing about the deletion.
     assert unregistered == ["acp:never-enabled"]
 
 
@@ -466,7 +439,7 @@ def _stub_registry(monkeypatch):
     """Registration without mutating the process-wide provider registry — the same
     shape the seeding tests above use, so these tests can call the real
     ``register_acp_cli_entry`` for its DIRECTORY side effect without leaking entries."""
-    from gideon.acp_bundles import _register
+    from gideon.integrations.acp_bundles import _register
 
     monkeypatch.setattr(
         _register,
@@ -474,12 +447,12 @@ def _stub_registry(monkeypatch):
         lambda: type(
             "R",
             (),
-            {"unregister_entry": lambda self, n: None, "register_entry": lambda self, e: None},
+            {
+                "unregister_entry": lambda self, n: None,
+                "register_entry": lambda self, e: None,
+            },
         )(),
     )
-
-
-# ── AAP-7 §2.4: a DECLARED session_files_dir is provisioned, not just recorded ──
 
 
 def test_register_provisions_a_declared_session_files_dir(tmp_path, _stub_registry):
@@ -490,7 +463,7 @@ def test_register_provisions_a_declared_session_files_dir(tmp_path, _stub_regist
     that does not exist makes every probe a silent miss indistinguishable from an empty
     directory. So a bundle that declares one gets a live one.
     """
-    from gideon.acp_bundles._register import register_acp_cli_entry
+    from gideon.integrations.acp_bundles._register import register_acp_cli_entry
 
     target = tmp_path / "acp_sessions" / "demo"
     assert not target.exists()
@@ -509,7 +482,7 @@ def test_an_uncreatable_session_files_dir_drops_the_option(tmp_path, _stub_regis
     """VACUITY FLOOR / fail-honest: advertising a directory nothing can read is worse
     than declaring none, so a creation failure removes the option rather than leaving a
     dangling path for the readers to miss on."""
-    from gideon.acp_bundles._register import register_acp_cli_entry
+    from gideon.integrations.acp_bundles._register import register_acp_cli_entry
 
     blocker = tmp_path / "not-a-dir"
     blocker.write_text("i am a file")
@@ -525,9 +498,11 @@ def test_an_uncreatable_session_files_dir_drops_the_option(tmp_path, _stub_regis
 
 def test_no_declaration_creates_nothing(tmp_path, _stub_registry):
     """The option stays OPT-IN: a bundle that declares nothing gets nothing."""
-    from gideon.acp_bundles._register import register_acp_cli_entry
+    from gideon.integrations.acp_bundles._register import register_acp_cli_entry
 
-    entry = register_acp_cli_entry(cli="demo3", dialect="default", command=["/bin/true"])
+    entry = register_acp_cli_entry(
+        cli="demo3", dialect="default", command=["/bin/true"]
+    )
     assert entry is not None
     assert "session_files_dir" not in entry.options
 
@@ -536,11 +511,9 @@ def test_no_seed_receipt_is_written_anywhere(home):
     """The ``acp_seeds.json`` receipt is gone with its only writer and reader."""
     import inspect
 
-    from gideon.acp_bundles import _register
+    from gideon.integrations.acp_bundles import _register
 
     assert "config_seed" not in inspect.getsource(_register)
     assert not (home / "acp_seeds.json").exists()
-    # Vacuity floor: the home fixture is real and writable, so "no receipt" is a
-    # fact about the code and not about an unusable directory.
     (home / "probe.json").write_text("{}", encoding="utf-8")
     assert (home / "probe.json").exists()

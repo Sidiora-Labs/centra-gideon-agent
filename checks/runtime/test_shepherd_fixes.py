@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from gideon.security import audit_bash_command
+from gideon.security.security import audit_bash_command
 
 
 class TestExpandedBashPatterns:
@@ -61,14 +61,14 @@ class TestEnvPermissions:
     def test_env_permissions_enforced(self, tmp_path: object) -> None:
         from pathlib import Path
 
-        from gideon.config.loader import AppConfig
+        from gideon.core.config.loader import AppConfig
 
         tmp = Path(str(tmp_path))
         env_file = tmp / ".env"
         env_file.write_text("SLACK_BOT_TOKEN=xoxb-test\n")
         env_file.chmod(0o644)
 
-        with patch("gideon.config.loader.env_path", return_value=env_file):
+        with patch("gideon.core.config.loader.env_path", return_value=env_file):
             cfg = AppConfig.__new__(AppConfig)
             cfg.load_credentials()
 
@@ -81,7 +81,7 @@ class TestSelForwardCallback:
     def test_forward_callback_called(self, tmp_path: object) -> None:
         from pathlib import Path
 
-        from gideon.sel import SecurityEventLog
+        from gideon.security.sel import SecurityEventLog
 
         SecurityEventLog._instance = None
         SecurityEventLog._initialized = False
@@ -106,7 +106,7 @@ class TestSelForwardCallback:
     def test_forward_callback_failure_silent(self, tmp_path: object) -> None:
         from pathlib import Path
 
-        from gideon.sel import SecurityEventLog
+        from gideon.security.sel import SecurityEventLog
 
         SecurityEventLog._instance = None
         SecurityEventLog._initialized = False
@@ -127,7 +127,7 @@ class TestSelForwardCallback:
     def test_forward_callback_redacts_credentials(self, tmp_path: object) -> None:
         from pathlib import Path
 
-        from gideon.sel import SecurityEventLog
+        from gideon.security.sel import SecurityEventLog
 
         SecurityEventLog._instance = None
         SecurityEventLog._initialized = False
@@ -156,19 +156,19 @@ class TestObserveModeAuthFilter:
     def test_unauthorized_user_blocked(self) -> None:
         from unittest.mock import MagicMock
 
-        from gideon.security import should_record_observe_history
+        from gideon.security.security import should_record_observe_history
 
         assert not should_record_observe_history(MagicMock(), user_authorized=False)
 
     def test_authorized_user_allowed(self) -> None:
         from unittest.mock import MagicMock
 
-        from gideon.security import should_record_observe_history
+        from gideon.security.security import should_record_observe_history
 
         assert should_record_observe_history(MagicMock(), user_authorized=True)
 
     def test_no_history_object(self) -> None:
-        from gideon.security import should_record_observe_history
+        from gideon.security.security import should_record_observe_history
 
         assert not should_record_observe_history(None, user_authorized=True)
 
@@ -179,14 +179,14 @@ class TestLoaderChmodWarning:
     def test_chmod_enforced_on_open_permissions(self, tmp_path: object) -> None:
         from pathlib import Path
 
-        from gideon.config.loader import AppConfig
+        from gideon.core.config.loader import AppConfig
 
         tmp = Path(str(tmp_path))
         env_file = tmp / ".env"
         env_file.write_text("TEST_KEY=value\n")
         env_file.chmod(0o644)
 
-        with patch("gideon.config.loader.env_path", return_value=env_file):
+        with patch("gideon.core.config.loader.env_path", return_value=env_file):
             cfg = AppConfig.__new__(AppConfig)
             creds = cfg.load_credentials()
 
@@ -202,7 +202,7 @@ class TestLoadCredentialsEnvPropagation:
         import os
         from pathlib import Path
 
-        from gideon.config.loader import AppConfig
+        from gideon.core.config.loader import AppConfig
 
         monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
         monkeypatch.delenv("SLACK_APP_TOKEN", raising=False)
@@ -217,7 +217,7 @@ class TestLoadCredentialsEnvPropagation:
         )
         env_file.chmod(0o600)
 
-        with patch("gideon.config.loader.env_path", return_value=env_file):
+        with patch("gideon.core.config.loader.env_path", return_value=env_file):
             cfg = AppConfig.__new__(AppConfig)
             cfg.load_credentials()
 
@@ -231,7 +231,7 @@ class TestLoadCredentialsEnvPropagation:
         import os
         from pathlib import Path
 
-        from gideon.config.loader import AppConfig
+        from gideon.core.config.loader import AppConfig
 
         monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-from-systemd")
 
@@ -240,23 +240,23 @@ class TestLoadCredentialsEnvPropagation:
         env_file.write_text("SLACK_BOT_TOKEN=xoxb-from-file\n")
         env_file.chmod(0o600)
 
-        with patch("gideon.config.loader.env_path", return_value=env_file):
+        with patch("gideon.core.config.loader.env_path", return_value=env_file):
             cfg = AppConfig.__new__(AppConfig)
             creds = cfg.load_credentials()
 
-        # creds dict reflects env override semantics (env wins)…
         assert creds["SLACK_BOT_TOKEN"] == "xoxb-from-systemd"
-        # …and the env var is unchanged (setdefault is a no-op when set).
         assert os.environ["SLACK_BOT_TOKEN"] == "xoxb-from-systemd"
 
-    def test_empty_env_file_does_not_clobber_environ(self, tmp_path: object, monkeypatch) -> None:
+    def test_empty_env_file_does_not_clobber_environ(
+        self, tmp_path: object, monkeypatch
+    ) -> None:
         """When ~/.gideon/.env is bind-mounted empty inside a sandbox child,
         load_credentials() must not overwrite an env var the caller already
         propagated via os.environ.setdefault() in the parent."""
         import os
         from pathlib import Path
 
-        from gideon.config.loader import AppConfig
+        from gideon.core.config.loader import AppConfig
 
         monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-from-parent")
 
@@ -265,7 +265,7 @@ class TestLoadCredentialsEnvPropagation:
         env_file.write_text("")
         env_file.chmod(0o600)
 
-        with patch("gideon.config.loader.env_path", return_value=env_file):
+        with patch("gideon.core.config.loader.env_path", return_value=env_file):
             cfg = AppConfig.__new__(AppConfig)
             creds = cfg.load_credentials()
 

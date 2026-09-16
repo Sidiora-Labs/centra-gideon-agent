@@ -19,7 +19,10 @@ import wave
 
 import pytest
 
-from gideon.dashboard.handlers.doctor import _tts_clone_probe, _write_reference_clip
+from gideon.interfaces.dashboard.handlers.doctor import (
+    _tts_clone_probe,
+    _write_reference_clip,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -64,23 +67,26 @@ async def test_a_cloning_provider_is_probed_through_a_real_clip(monkeypatch):
     seen_exists: dict = {}
 
     async def fake_route(params, text, *, output_path=""):
-        # Capture whether the injected clip exists AT SYNTHESIS TIME — the whole point
-        # of generating it is that the provider's path validation passes.
         seen_exists["ref"] = params.get("ref_audio", "")
         seen_exists["existed"] = os.path.isfile(params.get("ref_audio", ""))
         return await params["provider"].synthesize(
-            text, ref_audio=params.get("ref_audio", ""), ref_text=params.get("ref_text", "")
+            text,
+            ref_audio=params.get("ref_audio", ""),
+            ref_text=params.get("ref_text", ""),
         )
 
-    import gideon.tts.registry as reg
+    import gideon.integrations.tts.registry as reg
 
     monkeypatch.setattr(reg, "active_voice_params", lambda **kw: _params(provider))
     monkeypatch.setattr(reg, "route_synthesis", fake_route)
 
     result = await _tts_clone_probe(_timed)
-    assert result == {"ok": True, "detail": "clone synthesis returned audio", "cloning": True}
+    assert result == {
+        "ok": True,
+        "detail": "clone synthesis returned audio",
+        "cloning": True,
+    }
     assert seen_exists["existed"] is True
-    # The generated clip is cleaned up after the probe.
     assert not os.path.exists(seen_exists["ref"])
 
 
@@ -88,9 +94,11 @@ async def test_a_locked_profile_clip_is_never_overridden(monkeypatch):
     provider = _FakeProvider()
 
     async def fake_route(params, text, *, output_path=""):
-        return await params["provider"].synthesize(text, ref_audio=params.get("ref_audio", ""))
+        return await params["provider"].synthesize(
+            text, ref_audio=params.get("ref_audio", "")
+        )
 
-    import gideon.tts.registry as reg
+    import gideon.integrations.tts.registry as reg
 
     monkeypatch.setattr(
         reg,
@@ -112,7 +120,7 @@ async def test_a_sidecar_death_surfaces_its_typed_reason(monkeypatch):
     async def fake_route(params, text, *, output_path=""):
         raise _Crash("child died")
 
-    import gideon.tts.registry as reg
+    import gideon.integrations.tts.registry as reg
 
     monkeypatch.setattr(reg, "active_voice_params", lambda **kw: _params(provider))
     monkeypatch.setattr(reg, "route_synthesis", fake_route)
@@ -124,7 +132,7 @@ async def test_a_sidecar_death_surfaces_its_typed_reason(monkeypatch):
 
 
 async def test_no_bound_voice_means_no_tts_row(monkeypatch):
-    import gideon.tts.registry as reg
+    import gideon.integrations.tts.registry as reg
 
     monkeypatch.setattr(reg, "active_voice_params", lambda **kw: None)
     assert await _tts_clone_probe(_timed) is None
@@ -135,20 +143,24 @@ async def test_a_non_cloning_provider_is_probed_without_a_clip(monkeypatch):
     provider.supports_cloning = False
 
     async def fake_route(params, text, *, output_path=""):
-        assert not params.get("ref_audio")  # plain-voice path: nothing injected
+        assert not params.get("ref_audio")
         return await params["provider"].synthesize(text)
 
-    import gideon.tts.registry as reg
+    import gideon.integrations.tts.registry as reg
 
     monkeypatch.setattr(reg, "active_voice_params", lambda **kw: _params(provider))
     monkeypatch.setattr(reg, "route_synthesis", fake_route)
 
     result = await _tts_clone_probe(_timed)
-    assert result == {"ok": True, "detail": "synthesis returned audio", "cloning": False}
+    assert result == {
+        "ok": True,
+        "detail": "synthesis returned audio",
+        "cloning": False,
+    }
 
 
 def test_the_sdk_facade_is_the_lmmv_machinery_unchanged():
-    from gideon.local_models import sidecar as core
+    from gideon.integrations.local_models import sidecar as core
     from gideon.sdk.sidecar import (
         SidecarCrashed,
         SidecarRunner,

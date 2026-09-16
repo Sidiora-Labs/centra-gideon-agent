@@ -11,12 +11,9 @@ import {
   pairingTargetFromScan,
   PAIR_ROUTE,
   PRIVATE_HOST_PATTERNS,
-} from '../www/shell/network.mjs'
+} from '../www/connection/address.mjs'
 
 test('the shell points at the SERVED companion route, not a local copy', () => {
-  // The load-bearing assertion of this atom. `#/companion` is what `web/src/app/App.tsx`
-  // registers; if this drifts, the shell opens a gateway page that does not exist and the
-  // "no forked UI" property has nothing left holding it up.
   assert.equal(COMPANION_ROUTE, '#/companion')
   assert.equal(companionUrl('http://192.168.1.10:10000'), 'http://192.168.1.10:10000/#/companion')
 })
@@ -66,9 +63,9 @@ test('the private-network rail admits RFC1918 and MagicDNS and nothing wider', (
   for (const host of [
     'example.com',
     '8.8.8.8',
-    '172.15.0.1', // one below the RFC1918 block
-    '172.32.0.1', // one above it
-    '100.64.0.1', // Tailscale CGNAT is reached by MagicDNS name, not by address
+    '172.15.0.1',
+    '172.32.0.1',
+    '100.64.0.1',
     'localhost.evil.com',
     'notlocalhost',
     'ts.net.evil.com',
@@ -81,13 +78,10 @@ test('host globs are anchored at both ends', () => {
   assert.ok(matchesHostPattern('anything.local', '*.local'))
   assert.ok(!matchesHostPattern('anything.local.evil.com', '*.local'))
   assert.ok(!matchesHostPattern('x10.0.0.1', '10.*'))
-  // A dot in a pattern is a literal dot, not "any character".
   assert.ok(!matchesHostPattern('127a0.0.1', '127.0.0.1'))
 })
 
 test('the rail spells out all sixteen RFC1918 172.x octets', () => {
-  // Vacuity floor: a `172.*` shortcut would hand the shell most of a public /8, and a rail
-  // built by a loop is exactly the kind that silently ends up empty.
   for (let octet = 16; octet <= 31; octet += 1) {
     assert.ok(PRIVATE_HOST_PATTERNS.includes(`172.${octet}.*`), `172.${octet}.* missing`)
   }
@@ -97,8 +91,6 @@ test('the rail spells out all sixteen RFC1918 172.x octets', () => {
 })
 
 test('a scanned pairing QR configures the gateway AND carries the code', () => {
-  // The payload shape is `pair/start`'s: `<base>/pair?code=XXXX-XXXX`, where `base` was
-  // resolved server-side so the phone gets the LAN address rather than 127.0.0.1.
   const { gatewayUrl, target } = pairingTargetFromScan('http://192.168.1.10:10000/pair?code=ABCD-2345')
   assert.equal(gatewayUrl, 'http://192.168.1.10:10000')
   assert.equal(target, 'http://192.168.1.10:10000/pair?code=ABCD-2345')

@@ -17,13 +17,15 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 from chat_test_helpers import _make_state
 
-from gideon.dashboard.chat import api_chat_session_edit_resend
+from gideon.interfaces.dashboard.chat import api_chat_session_edit_resend
 
 
 def _make_app(state) -> web.Application:
     app = web.Application()
     app["state"] = state
-    app.router.add_post("/api/chat/sessions/{session}/edit-resend", api_chat_session_edit_resend)
+    app.router.add_post(
+        "/api/chat/sessions/{session}/edit-resend", api_chat_session_edit_resend
+    )
     return app
 
 
@@ -33,7 +35,9 @@ async def _noop_run_chat(state, session, msg, **kwargs):
 
 @pytest.fixture(autouse=True)
 def _mock_run_chat(monkeypatch):
-    monkeypatch.setattr("gideon.dashboard.chat_regenerate.run_chat", _noop_run_chat)
+    monkeypatch.setattr(
+        "gideon.interfaces.dashboard.chat_regenerate.run_chat", _noop_run_chat
+    )
 
 
 def _seed(state, name: str, n_turns: int):
@@ -41,7 +45,9 @@ def _seed(state, name: str, n_turns: int):
     session = state.get_or_create_session(name)
     for i in range(n_turns):
         session.append("user", f"q{i}", "msg msg-u", ts=f"2026-06-30T05:0{i}:00+00:00")
-        session.append("assistant", f"a{i}", "msg msg-a", ts=f"2026-06-30T05:0{i}:30+00:00")
+        session.append(
+            "assistant", f"a{i}", "msg msg-a", ts=f"2026-06-30T05:0{i}:30+00:00"
+        )
     session.drain()
     return session
 
@@ -53,10 +59,12 @@ class TestRewind:
     ):
         """Editing turn 0 of a 3-turn chat replays under the SAME slot; the old tail
         survives on the edited message; the provider is reset so context rebuilds."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         state.sessions.reset = AsyncMock()
-        session = _seed(state, "s1", 3)  # 6 messages
+        session = _seed(state, "s1", 3)
         broadcasts: list[tuple[str, object]] = []
         monkeypatch.setattr(
             state, "broadcast_ws", lambda t, d: broadcasts.append((t, d)), raising=True
@@ -65,32 +73,40 @@ class TestRewind:
         async with TestClient(TestServer(_make_app(state))) as client:
             resp = await client.post(
                 "/api/chat/sessions/s1/edit-resend",
-                json={"ts": "2026-06-30T05:00:00+00:00", "content": "q0-edited", "rewind": True},
+                json={
+                    "ts": "2026-06-30T05:00:00+00:00",
+                    "content": "q0-edited",
+                    "rewind": True,
+                },
             )
             assert resp.status == 200
             body = await resp.json()
             assert body["ok"] is True
-            # retained = messages AFTER turn 0's user msg: a0, q1, a1, q2, a2 = 5
             assert body["rewound"] == 5
 
-        # same slot key preserved
         assert session.key == "s1"
-        # only the edited user turn remains in the live transcript
         assert len(session.messages) == 1
         edited = session.messages[0]
         assert edited["role"] == "user" and edited["content"] == "q0-edited"
-        # the discarded tail (old edited-turn content + everything after) is retained
         assert len(edited["rewound"]) == 1
         retained_msgs = edited["rewound"][0]["messages"]
-        assert [m["content"] for m in retained_msgs] == ["q0", "a0", "q1", "a1", "q2", "a2"]
-        # provider was reset (fork-and-swap) and clients were told to re-hydrate
+        assert [m["content"] for m in retained_msgs] == [
+            "q0",
+            "a0",
+            "q1",
+            "a1",
+            "q2",
+            "a2",
+        ]
         state.sessions.reset.assert_awaited_once()
         assert any(t == "chat_rewound" for t, _ in broadcasts)
 
     @pytest.mark.asyncio
     async def test_rewind_survives_reload(self, tmp_path, monkeypatch):
         """The rewound tail must reach disk and rehydrate on a fresh read."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         state.sessions.reset = AsyncMock()
         _seed(state, "s1", 3)
@@ -99,13 +115,18 @@ class TestRewind:
         async with TestClient(TestServer(_make_app(state))) as client:
             r = await client.post(
                 "/api/chat/sessions/s1/edit-resend",
-                json={"ts": "2026-06-30T05:00:00+00:00", "content": "q0-edited", "rewind": True},
+                json={
+                    "ts": "2026-06-30T05:00:00+00:00",
+                    "content": "q0-edited",
+                    "rewind": True,
+                },
             )
             assert r.status == 200
 
-        from gideon.dashboard.chat_persistence import _rehydrate_session_from_history
+        from gideon.interfaces.dashboard.chat_persistence import (
+            _rehydrate_session_from_history,
+        )
 
-        # drop from memory, reload from disk
         state._sessions.pop("s1", None)
         reloaded = _rehydrate_session_from_history(state, "s1")
         assert reloaded is not None
@@ -117,8 +138,10 @@ class TestRewind:
     @pytest.mark.asyncio
     async def test_rewind_snapshot_cap(self, tmp_path, monkeypatch):
         """Repeated rewinds on the same turn are capped at _MAX_REWIND_SNAPSHOTS."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        from gideon.dashboard.chat_regenerate import _MAX_REWIND_SNAPSHOTS
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        from gideon.interfaces.dashboard.chat_regenerate import _MAX_REWIND_SNAPSHOTS
 
         state = _make_state(tmp_path)
         state.sessions.reset = AsyncMock()
@@ -127,8 +150,6 @@ class TestRewind:
 
         async with TestClient(TestServer(_make_app(state))) as client:
             for i in range(_MAX_REWIND_SNAPSHOTS + 3):
-                # each rewind edits the (now-single) user turn, then re-adds a turn
-                # to have a tail to retain on the next rewind
                 r = await client.post(
                     "/api/chat/sessions/s1/edit-resend",
                     json={"content": f"e{i}", "rewind": True},
@@ -142,7 +163,9 @@ class TestRewind:
     @pytest.mark.asyncio
     async def test_no_rewind_flag_is_byte_identical(self, tmp_path, monkeypatch):
         """Without rewind, the last-turn path is unchanged: no tail, no provider reset."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         state.sessions.reset = AsyncMock()
         session = _seed(state, "s1", 1)
@@ -151,7 +174,7 @@ class TestRewind:
         async with TestClient(TestServer(_make_app(state))) as client:
             r = await client.post(
                 "/api/chat/sessions/s1/edit-resend",
-                json={"content": "q0-edited"},  # no rewind flag
+                json={"content": "q0-edited"},
             )
             assert r.status == 200
             assert (await r.json())["rewound"] == 0
@@ -163,7 +186,9 @@ class TestRewind:
 
     @pytest.mark.asyncio
     async def test_rewind_refused_while_running(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         state.sessions.reset = AsyncMock()
         session = _seed(state, "s1", 2)

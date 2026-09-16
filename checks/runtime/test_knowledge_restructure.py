@@ -33,9 +33,9 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import make_mocked_request
 
-from gideon import knowledge as knowledge_pkg
-from gideon.knowledge import maintenance, maintenance_passes, restructure
-from gideon.knowledge.store import KnowledgeStore
+from gideon.cognition import knowledge as knowledge_pkg
+from gideon.cognition.knowledge import maintenance, maintenance_passes, restructure
+from gideon.cognition.knowledge.store import KnowledgeStore
 
 
 class _CharEmbedder:
@@ -56,7 +56,7 @@ class _CharEmbedder:
         return [float(len(t)), float(ord(t[0])), float(ord(t[-1]))]
 
     def embed_for_item(self, title, summary, content=None):
-        from gideon.knowledge.embedder import compose_item_text
+        from gideon.cognition.knowledge.embedder import compose_item_text
 
         return self.embed(compose_item_text(title, summary, content))
 
@@ -101,38 +101,36 @@ def _offset(content, heading):
 def _apply(store, verb, item_id, params, *, relink=True):
     """Preview then confirm, the way any caller must."""
     plan = restructure.plan(store, verb, item_id, params)
-    return restructure.apply(store, verb, item_id, params, token=plan.token, relink=relink)
-
-
-# ── Section boundaries: one rule, shared with the chunker ────────────────────────
+    return restructure.apply(
+        store, verb, item_id, params, token=plan.token, relink=relink
+    )
 
 
 def test_split_boundaries_come_from_the_chunkers_own_heading_rule():
     """A split must cut where the chunker sections, or the halves re-chunk along other seams."""
-    from gideon.knowledge import chunking
+    from gideon.cognition.knowledge import chunking
 
     bounds = restructure.sections(BODY)
 
     assert [b["title"] for b in bounds] == ["Eviction policy", "Warmup strategy"]
-    # The offset is the start of the heading LINE, so slicing there gives each half its title.
     for bound in bounds:
         assert BODY[bound["offset"] :].startswith("## " + bound["title"])
-    # And the same rule the chunker uses, not a second regex that happens to agree today.
-    assert [b.title for b in chunking.section_boundaries(BODY)] == [b["title"] for b in bounds]
+    assert [b.title for b in chunking.section_boundaries(BODY)] == [
+        b["title"] for b in bounds
+    ]
 
 
 def test_a_document_with_no_headings_offers_no_split_boundaries():
     assert restructure.sections("just one long paragraph with no headings at all") == []
 
 
-# ── Warn BEFORE applying ─────────────────────────────────────────────────────────
-
-
 def test_a_merge_states_the_citations_it_would_break_before_applying(store):
     keep = _note(store, "Survivor")
     loser = _note(store, "Folded copy")
     citer = _note(store, "Citer", content="a claim [1]")
-    store.set_item_citations(citer, [{"marker": 1, "source_item_id": loser, "chunk_index": 2}])
+    store.set_item_citations(
+        citer, [{"marker": 1, "source_item_id": loser, "chunk_index": 2}]
+    )
 
     plan = restructure.plan(store, "merge", keep, {"merge_id": loser})
 
@@ -141,20 +139,21 @@ def test_a_merge_states_the_citations_it_would_break_before_applying(store):
     citation_break = next(b for b in plan.breaks if b.kind == "citation")
     assert citation_break.relinkable is True
     assert citer in citation_break.refs
-    # The preview named the consequence, and nothing moved while it did.
     assert store.get_item(loser) is not None
     assert store.item_citations(citer)[0]["source_item_id"] == loser
 
 
 def test_a_retitle_states_the_wikilinks_it_would_break_and_offers_to_relink(store):
     target = _note(store, "Cache Design")
-    _note(store, "Referrer", content="see [[Cache Design]] and [[Cache Design|the doc]]")
+    _note(
+        store, "Referrer", content="see [[Cache Design]] and [[Cache Design|the doc]]"
+    )
 
     plan = restructure.plan(store, "retitle", target, {"title": "Caching Design"})
 
     link_break = next(b for b in plan.breaks if b.kind == "wikilink")
     assert link_break.relinkable is True
-    assert "2" in link_break.message  # both occurrences counted, not just the item
+    assert "2" in link_break.message
     assert plan.relinkable is True
 
 
@@ -164,20 +163,18 @@ def test_change_kind_warns_when_the_new_kind_expects_citations_the_item_lacks(st
     plan = restructure.plan(store, "change_kind", item, {"kind": "report"})
 
     contract = next(b for b in plan.breaks if b.kind == "kind_contract")
-    # Not relinkable: no rewrite can invent attribution that does not exist.
     assert contract.relinkable is False
 
 
 def test_a_verb_with_nothing_to_break_reports_no_breaks(store):
     item = _note(store, "Lonely", content=BODY)
 
-    plan = restructure.plan(store, "split", item, {"offsets": [_offset(BODY, "## Eviction")]})
+    plan = restructure.plan(
+        store, "split", item, {"offsets": [_offset(BODY, "## Eviction")]}
+    )
 
     assert plan.breaks == ()
     assert plan.relinkable is False
-
-
-# ── The preview binds the confirm ────────────────────────────────────────────────
 
 
 def test_a_confirm_with_a_token_from_no_preview_is_refused(store):
@@ -188,9 +185,8 @@ def test_a_confirm_with_a_token_from_no_preview_is_refused(store):
         restructure.apply(store, "split", item, params, token="0" * 32)
 
     assert caught.value.code == "preview_stale"
-    # The refusal carries the FRESH plan, so a client re-renders instead of round-tripping.
     assert caught.value.detail["plan"]["token"] != "0" * 32
-    assert store.get_item(item)["content"] == BODY  # nothing applied
+    assert store.get_item(item)["content"] == BODY
 
 
 def test_a_body_edited_between_preview_and_confirm_invalidates_the_token(store):
@@ -206,7 +202,9 @@ def test_a_body_edited_between_preview_and_confirm_invalidates_the_token(store):
 def test_a_token_cannot_be_reused_for_different_parameters(store):
     """The durability lesson: binding only the STATE lets a confirm act on another selection."""
     item = _note(store, "Doc", content=BODY)
-    previewed = restructure.plan(store, "split", item, {"offsets": [_offset(BODY, "## Eviction")]})
+    previewed = restructure.plan(
+        store, "split", item, {"offsets": [_offset(BODY, "## Eviction")]}
+    )
 
     with pytest.raises(restructure.PreviewStale):
         restructure.apply(
@@ -231,13 +229,8 @@ def test_a_break_appearing_between_the_phases_invalidates_the_token(store):
         restructure.apply(store, "merge", keep, {"merge_id": loser}, token=plan.token)
 
 
-# ── Idempotence under a doubled submit ───────────────────────────────────────────
-
-
 def test_a_doubled_split_submit_creates_one_set_of_children(store):
     item = _note(store, "Doc", content=BODY)
-    # Both boundaries, so this is a genuine three-way split and a doubled submit would be
-    # visible as four extra items rather than one.
     params = {"offsets": [_offset(BODY, "## Eviction"), _offset(BODY, "## Warmup")]}
     plan = restructure.plan(store, "split", item, params)
 
@@ -249,7 +242,7 @@ def test_a_doubled_split_submit_creates_one_set_of_children(store):
     assert second["idempotent"] is True
     assert second["created"] == first["created"]
     total = store.db.execute("SELECT COUNT(*) AS n FROM items").fetchone()["n"]
-    assert total == 3  # the parent plus exactly two children, not five
+    assert total == 3
 
 
 @pytest.mark.parametrize(
@@ -291,12 +284,11 @@ def test_a_doubled_merge_submit_deletes_one_item(store):
     assert store.get_item(keep) is not None
 
 
-# ── Provenance, chunk lineage and inbound relations ──────────────────────────────
-
-
 def test_a_split_child_inherits_provenance_and_is_linked_to_its_parent(store):
     shelf = store.create_collection(name="Reading")
-    parent = _note(store, "Caching", content=BODY, tags=["infra"], url="https://example.test/a")
+    parent = _note(
+        store, "Caching", content=BODY, tags=["infra"], url="https://example.test/a"
+    )
     store.add_to_collection(shelf, parent)
     store.set_item_identity(parent, kind="reference")
 
@@ -308,7 +300,6 @@ def test_a_split_child_inherits_provenance_and_is_linked_to_its_parent(store):
     assert child["url"] == "https://example.test/a"
     assert child["kind"] == "reference"
     assert [c["id"] for c in store.collections_for_item(child["id"])] == [shelf]
-    # A real edge, so "where did this come from" still has an answer.
     edge = store.db.execute(
         "SELECT relation_type FROM item_relations WHERE source_item_id = ? AND target_item_id = ?",
         (child["id"], parent),
@@ -318,7 +309,9 @@ def test_a_split_child_inherits_provenance_and_is_linked_to_its_parent(store):
 
 def test_a_split_child_does_not_inherit_the_watched_source_persist_key(store):
     """Copying `source_id`/`guid` would collide on the partial UNIQUE index or fake a sighting."""
-    source_id = store.create_source(name="Feed", provider="watched-feed", kind="feed", spec={})
+    source_id = store.create_source(
+        name="Feed", provider="watched-feed", kind="feed", spec={}
+    )
     parent = store.create_typed_item(
         item_type="note", title="Polled", content=BODY, source_id=source_id, guid="g-1"
     )
@@ -339,7 +332,9 @@ def test_a_highlight_follows_the_text_it_marks_into_the_new_item(store):
     child = result["created"][0]
 
     assert result["annotations_moved"] == 1
-    assert [a["quote"] for a in store.list_annotations(child)] == ["least recently used wins here"]
+    assert [a["quote"] for a in store.list_annotations(child)] == [
+        "least recently used wins here"
+    ]
     assert [a["quote"] for a in store.list_annotations(parent)] == [
         "opening paragraph about caching"
     ]
@@ -349,7 +344,9 @@ def test_a_highlight_spanning_the_cut_is_reported_rather_than_moved_arbitrarily(
     parent = _note(store, "Caching", content=BODY)
     store.add_annotation(parent, "caching\n\n## Eviction policy\nleast")
 
-    plan = restructure.plan(store, "split", parent, {"offsets": [_offset(BODY, "## Eviction")]})
+    plan = restructure.plan(
+        store, "split", parent, {"offsets": [_offset(BODY, "## Eviction")]}
+    )
 
     stranded = next(b for b in plan.breaks if b.kind == "annotation")
     assert stranded.relinkable is False
@@ -370,12 +367,14 @@ def test_deleting_a_related_item_no_longer_trips_the_foreign_key(store):
     assert store.add_item_relation(bystander, doomed, "depends_on")
     assert store.add_item_relation(doomed, bystander, "supersedes")
 
-    store.delete_item(doomed)  # raised IntegrityError before this atom
+    store.delete_item(doomed)
 
     assert store.get_item(doomed) is None
     assert store.get_item(bystander) is not None
-    # Both legs went, so no row is left pointing at an id that no longer exists.
-    assert store.db.execute("SELECT COUNT(*) AS n FROM item_relations").fetchone()["n"] == 0
+    assert (
+        store.db.execute("SELECT COUNT(*) AS n FROM item_relations").fetchone()["n"]
+        == 0
+    )
 
 
 def test_deleting_an_item_clears_its_membership_and_its_own_citations(store):
@@ -383,11 +382,16 @@ def test_deleting_an_item_clears_its_membership_and_its_own_citations(store):
     shelf = store.create_collection(name="Shelf")
     doomed = _note(store, "Doomed")
     store.add_to_collection(shelf, doomed)
-    store.set_item_citations(doomed, [{"marker": 1, "source_item_id": _note(store, "Src")}])
+    store.set_item_citations(
+        doomed, [{"marker": 1, "source_item_id": _note(store, "Src")}]
+    )
 
     store.delete_item(doomed)
 
-    assert store.db.execute("SELECT COUNT(*) AS n FROM collection_items").fetchone()["n"] == 0
+    assert (
+        store.db.execute("SELECT COUNT(*) AS n FROM collection_items").fetchone()["n"]
+        == 0
+    )
     assert store.item_citations(doomed) == []
 
 
@@ -406,10 +410,11 @@ def test_merging_a_related_item_no_longer_trips_the_foreign_key(store):
     moved = store.merge_items(keep, loser)
 
     assert moved["relations"] == 1
-    # The edge followed the survivor rather than being dropped or refusing the merge.
     rows = [
         (r["source_item_id"], r["target_item_id"])
-        for r in store.db.execute("SELECT source_item_id, target_item_id FROM item_relations")
+        for r in store.db.execute(
+            "SELECT source_item_id, target_item_id FROM item_relations"
+        )
     ]
     assert rows == [(third, keep)]
 
@@ -418,14 +423,14 @@ def test_a_merge_relinks_citations_at_the_survivor_and_widens_their_chunk(store)
     keep = _note(store, "Survivor")
     loser = _note(store, "Folded copy")
     citer = _note(store, "Citer", content="claim [1]")
-    store.set_item_citations(citer, [{"marker": 1, "source_item_id": loser, "chunk_index": 4}])
+    store.set_item_citations(
+        citer, [{"marker": 1, "source_item_id": loser, "chunk_index": 4}]
+    )
 
     _apply(store, "merge", keep, {"merge_id": loser})
 
     row = store.item_citations(citer)[0]
     assert row["source_item_id"] == keep
-    # Chunk 4 of the deleted copy is not chunk 4 of the survivor, so the citation widens to
-    # the whole item rather than pointing confidently at unrelated text.
     assert row["chunk_index"] == -1
 
 
@@ -437,15 +442,15 @@ def test_declining_the_relink_leaves_the_break_the_preview_described(store):
 
     _apply(store, "merge", keep, {"merge_id": loser}, relink=False)
 
-    # Still pointing at the deleted id: the citation table deliberately permits this, and a
-    # user who declined the offer got exactly what they chose.
     assert store.item_citations(citer)[0]["source_item_id"] == loser
 
 
 def test_a_retitle_rewrites_inbound_wikilinks_and_re_derives_the_logical_key(store):
     target = _note(store, "Cache Design")
     store.set_item_identity(target, kind="reference")
-    referrer = _note(store, "Referrer", content="see [[Cache Design]] and [[Cache Design|docs]]")
+    referrer = _note(
+        store, "Referrer", content="see [[Cache Design]] and [[Cache Design|docs]]"
+    )
     before = store.get_item(target)["logical_key"]
 
     result = _apply(store, "retitle", target, {"title": "Caching Design"})
@@ -453,11 +458,7 @@ def test_a_retitle_rewrites_inbound_wikilinks_and_re_derives_the_logical_key(sto
     assert result["wikilinks_relinked"]["links"] == 2
     body = store.get_item(referrer)["content"]
     assert "[[Caching Design]]" in body
-    # The author's chosen alias survives verbatim — a relink repoints the link, not the prose.
     assert "[[Caching Design|docs]]" in body
-    # 🔴 `update_item` cannot write `logical_key`, so a retitle that forgot this would leave the
-    # store's own identity keyed on a title that no longer exists, and the next persist of the
-    # same record would be admitted as a second item.
     assert store.get_item(target)["logical_key"] == "reference:caching-design"
     assert before != store.get_item(target)["logical_key"]
 
@@ -521,7 +522,6 @@ def test_splitting_at_an_offset_that_is_not_a_boundary_is_refused(store):
         restructure.plan(store, "split", item, {"offsets": [5]})
 
     assert caught.value.code == "not_a_section_boundary"
-    # The refusal hands back the boundaries that ARE available, so a client can correct itself.
     assert [s["title"] for s in caught.value.detail["sections"]] == [
         "Eviction policy",
         "Warmup strategy",
@@ -533,7 +533,9 @@ def test_extracting_the_whole_body_is_refused_rather_than_emptying_the_item(stor
     item = _note(store, "Doc", content=body)
 
     with pytest.raises(restructure.RestructureError) as caught:
-        restructure.plan(store, "extract", item, {"start": 0, "end": len(body), "title": "All"})
+        restructure.plan(
+            store, "extract", item, {"start": 0, "end": len(body), "title": "All"}
+        )
 
     assert caught.value.code == "extract_empties_source"
 
@@ -553,11 +555,10 @@ def test_extract_can_copy_a_passage_without_removing_it(store):
     assert store.get_item(result["created"][0])["content"] == "keep this sentence."
 
 
-# ── Chunk lineage: the failure the atom names by name ────────────────────────────
-
-
 def _vectors(store, item_id):
-    row = store.db.execute("SELECT embedding FROM items WHERE id = ?", (item_id,)).fetchone()
+    row = store.db.execute(
+        "SELECT embedding FROM items WHERE id = ?", (item_id,)
+    ).fetchone()
     chunks = store.get_chunks(item_id, with_embedding=True)
     return row["embedding"], [c.get("embedding") for c in chunks]
 
@@ -570,7 +571,9 @@ def _run_refresh(store, monkeypatch, embedder):
     return maintenance.execute(batch_size=50)
 
 
-def test_split_does_not_leave_the_halves_holding_the_parents_vectors(store, monkeypatch):
+def test_split_does_not_leave_the_halves_holding_the_parents_vectors(
+    store, monkeypatch
+):
     """🔴 "A split whose halves keep the parent's vectors is silently wrong."
 
     Asserted on the VECTOR VALUES, not on row presence: a stale vector is present, non-null and
@@ -588,18 +591,16 @@ def test_split_does_not_leave_the_halves_holding_the_parents_vectors(store, monk
     parent = _note(store, "Caching", content=BODY)
     _run_refresh(store, monkeypatch, embedder)
     parent_vector, parent_chunks = _vectors(store, parent)
-    assert parent_vector is not None and parent_chunks  # the fixture actually has vectors
+    assert parent_vector is not None and parent_chunks
     before_texts = {c["text"] for c in store.get_chunks(parent)}
     assert any("prefill on deploy" in t for t in before_texts)
 
     result = _apply(store, "split", parent, {"offsets": [_offset(BODY, "## Warmup")]})
     child = result["created"][0]
 
-    # Immediately after the verb the stale artifacts are GONE rather than carried over.
     assert _vectors(store, parent) == (None, [])
     assert _vectors(store, child) == (None, [])
 
-    # And the host rebuilds them from the NEW bodies.
     outcome = _run_refresh(store, monkeypatch, embedder)
     assert outcome.per_pass[maintenance_passes.PASS_DERIVED_REFRESH] > 0
     new_parent_vector, new_parent_chunks = _vectors(store, parent)
@@ -607,17 +608,13 @@ def test_split_does_not_leave_the_halves_holding_the_parents_vectors(store, monk
     assert new_parent_vector is not None and new_parent_chunks
     assert new_child_vector is not None and new_child_chunks
 
-    # THE ASSERTION: the parent no longer carries a chunk over text it no longer holds, and
-    # the child's chunk vectors are its own rather than copies of the parent's.
     after_parent_texts = {c["text"] for c in store.get_chunks(parent)}
     assert not any("prefill on deploy" in t for t in after_parent_texts)
     assert any("prefill on deploy" in c["text"] for c in store.get_chunks(child))
     assert new_child_chunks != new_parent_chunks
-    # Tuples because a deserialized chunk vector is a list of floats.
     parent_set = {tuple(v or ()) for v in new_parent_chunks}
     child_set = {tuple(v or ()) for v in new_child_chunks}
     assert parent_set.isdisjoint(child_set)
-    # The item vectors differ because the titles do — the compact identity signal, recomputed.
     assert new_child_vector != new_parent_vector
 
 
@@ -631,11 +628,23 @@ def test_a_verb_clears_only_the_similarity_edges_the_item_itself_claimed(store):
     """
     a = _note(store, "Caching", content=BODY)
     mine = _note(store, "My finding", content="a document A's own pass matched")
-    theirs = _note(store, "Their finding", content="a document that matched A from its side")
+    theirs = _note(
+        store, "Their finding", content="a document that matched A from its side"
+    )
     store.upsert_similarity_edges(
         [
-            {"source_item_id": a, "target_item_id": mine, "score": 0.9, "claimed_by": a},
-            {"source_item_id": a, "target_item_id": theirs, "score": 0.8, "claimed_by": theirs},
+            {
+                "source_item_id": a,
+                "target_item_id": mine,
+                "score": 0.9,
+                "claimed_by": a,
+            },
+            {
+                "source_item_id": a,
+                "target_item_id": theirs,
+                "score": 0.8,
+                "claimed_by": theirs,
+            },
         ]
     )
     assert store.count_similarity_edges() == 2
@@ -650,9 +659,10 @@ def test_a_verb_clears_only_the_similarity_edges_the_item_itself_claimed(store):
     ]
     assert len(remaining) == 1
     assert theirs in remaining[0] and a in remaining[0]
-    # And A is back in the sweep backlog rather than silently marked as already examined.
     assert (
-        store.db.execute("SELECT 1 FROM similarity_sweeps WHERE item_id = ?", (a,)).fetchone()
+        store.db.execute(
+            "SELECT 1 FROM similarity_sweeps WHERE item_id = ?", (a,)
+        ).fetchone()
         is None
     )
 
@@ -679,8 +689,6 @@ def test_the_refresh_pass_reports_progress_not_backlog_size(store, monkeypatch):
     first = _run_refresh(store, monkeypatch, embedder)
     second = _run_refresh(store, monkeypatch, embedder)
 
-    # Whatever the first tick managed, a second finds no further progress rather than
-    # re-reporting the un-chunkable item forever.
     assert second.per_pass[maintenance_passes.PASS_DERIVED_REFRESH] == 0
     assert first.errors == {}
 
@@ -696,9 +704,6 @@ def test_a_restructure_marks_the_maintenance_watermark_dirty(store):
     assert maintenance.is_dirty()
 
 
-# ── Undo ─────────────────────────────────────────────────────────────────────────
-
-
 def test_undoing_a_merge_restores_the_item_its_relations_and_its_citations(store):
     keep = _note(store, "Survivor", content="survivor body")
     loser = _note(store, "Folded copy", content="folded body", tags=["gone"])
@@ -708,7 +713,9 @@ def test_undoing_a_merge_restores_the_item_its_relations_and_its_citations(store
     bystander = _note(store, "Bystander")
     store.add_item_relation(bystander, loser, "depends_on")
     citer = _note(store, "Citer", content="claim [1]")
-    store.set_item_citations(citer, [{"marker": 1, "source_item_id": loser, "chunk_index": 7}])
+    store.set_item_citations(
+        citer, [{"marker": 1, "source_item_id": loser, "chunk_index": 7}]
+    )
 
     result = _apply(store, "merge", keep, {"merge_id": loser})
     assert store.get_item(loser) is None
@@ -721,13 +728,13 @@ def test_undoing_a_merge_restores_the_item_its_relations_and_its_citations(store
     assert restored["tags"] == ["gone"]
     assert [c["id"] for c in store.collections_for_item(loser)] == [shelf]
     assert [a["quote"] for a in store.list_annotations(loser)] == ["folded body"]
-    # The RELATION is back on its original leg, not left pointing at the survivor.
     rows = [
         (r["source_item_id"], r["target_item_id"])
-        for r in store.db.execute("SELECT source_item_id, target_item_id FROM item_relations")
+        for r in store.db.execute(
+            "SELECT source_item_id, target_item_id FROM item_relations"
+        )
     ]
     assert rows == [(bystander, loser)]
-    # And the citation's original chunk lineage is back, not just its item id.
     row = store.item_citations(citer)[0]
     assert (row["source_item_id"], row["chunk_index"]) == (loser, 7)
 
@@ -742,8 +749,10 @@ def test_undoing_a_split_removes_the_children_and_restores_the_body(store):
     assert outcome["restored"]["created_removed"] == len(children)
     assert store.get_item(parent)["content"] == BODY
     assert [store.get_item(c) for c in children] == [None for _ in children]
-    # The lineage edges went with the children rather than dangling.
-    assert store.db.execute("SELECT COUNT(*) AS n FROM item_relations").fetchone()["n"] == 0
+    assert (
+        store.db.execute("SELECT COUNT(*) AS n FROM item_relations").fetchone()["n"]
+        == 0
+    )
 
 
 def test_undoing_a_retitle_restores_the_referrers_bodies_too(store):
@@ -755,8 +764,6 @@ def test_undoing_a_retitle_restores_the_referrers_bodies_too(store):
     restructure.undo(store, result["undo_token"])
 
     assert store.get_item(target)["title"] == "Cache Design"
-    # An undo that restored only the retitled item would leave every referrer naming a title
-    # that no longer exists — the mirror of the break the relink exists to repair.
     assert "[[Cache Design]]" in store.get_item(referrer)["content"]
 
 
@@ -770,8 +777,6 @@ def test_an_undo_re_invalidates_the_derived_layer(store, monkeypatch):
 
     restructure.undo(store, result["undo_token"])
 
-    # The body is back to the full document, so a vector computed over the truncated half is
-    # exactly as stale as the forward direction's would have been.
     assert _vectors(store, parent) == (None, [])
 
 
@@ -814,9 +819,6 @@ def test_the_undo_journal_survives_reopening_the_store(store, tmp_path):
         reopened.close()
 
 
-# ── THE VALIDATION BAR ───────────────────────────────────────────────────────────
-
-
 def test_restructuring_a_real_library_leaves_search_graph_and_citations_resolving(
     store, monkeypatch
 ):
@@ -828,8 +830,6 @@ def test_restructuring_a_real_library_leaves_search_graph_and_citations_resolvin
     """
     embedder = _CharEmbedder()
 
-    # A real library: five items, real tags and shelves, real entity mentions, real typed
-    # relations between items, real citations with chunk numbers, real highlights.
     shelf = store.create_collection(name="Infrastructure")
     caching = _note(store, "Caching notes", content=BODY, tags=["infra", "perf"])
     queues = _note(
@@ -839,8 +839,12 @@ def test_restructuring_a_real_library_leaves_search_graph_and_citations_resolvin
         tags=["infra"],
     )
     glossary = _note(store, "Glossary", content="LRU means least recently used")
-    synthesis = _note(store, "Latency review", content="warm caches help [1] and queues shed [2]")
-    referrer = _note(store, "Stray thought", content="see [[Caching notes]] for the eviction rule")
+    synthesis = _note(
+        store, "Latency review", content="warm caches help [1] and queues shed [2]"
+    )
+    referrer = _note(
+        store, "Stray thought", content="see [[Caching notes]] for the eviction rule"
+    )
     for item in (caching, queues, glossary):
         store.add_to_collection(shelf, item)
     store.add_annotation(caching, "least recently used wins here")
@@ -857,8 +861,18 @@ def test_restructuring_a_real_library_leaves_search_graph_and_citations_resolvin
     store.set_item_citations(
         synthesis,
         [
-            {"marker": 1, "source_item_id": caching, "chunk_index": 1, "excerpt": "warm"},
-            {"marker": 2, "source_item_id": queues, "chunk_index": 0, "excerpt": "shed"},
+            {
+                "marker": 1,
+                "source_item_id": caching,
+                "chunk_index": 1,
+                "excerpt": "warm",
+            },
+            {
+                "marker": 2,
+                "source_item_id": queues,
+                "chunk_index": 0,
+                "excerpt": "shed",
+            },
         ],
     )
     _run_refresh(store, monkeypatch, embedder)
@@ -872,10 +886,14 @@ def test_restructuring_a_real_library_leaves_search_graph_and_citations_resolvin
         live = {r["id"] for r in store.db.execute("SELECT id FROM items")}
         relations = [
             (r["source_item_id"], r["target_item_id"])
-            for r in store.db.execute("SELECT source_item_id, target_item_id FROM item_relations")
+            for r in store.db.execute(
+                "SELECT source_item_id, target_item_id FROM item_relations"
+            )
         ]
         assert all(s in live and t in live for s, t in relations), relations
-        mentions = [r["item_id"] for r in store.db.execute("SELECT item_id FROM mentions")]
+        mentions = [
+            r["item_id"] for r in store.db.execute("SELECT item_id FROM mentions")
+        ]
         assert all(m in live for m in mentions), mentions
         return subgraph
 
@@ -889,13 +907,11 @@ def test_restructuring_a_real_library_leaves_search_graph_and_citations_resolvin
         assert rows, "the synthesis lost its attributions entirely"
         return {r["src"]: r["found"] for r in rows}
 
-    # Baseline: everything resolves before we touch it.
     assert caching in search("eviction")
     assert queues in search("backpressure")
     assert graph_resolves()["nodes"]
     assert all(found is not None for found in citations_resolve().values())
 
-    # ── A sequence of restructures, each through preview → confirm ──
     split = _apply(store, "split", caching, {"offsets": [_offset(BODY, "## Warmup")]})
     warmup = split["created"][0]
     _apply(store, "retitle", caching, {"title": "Caching notes (eviction)"})
@@ -915,41 +931,30 @@ def test_restructuring_a_real_library_leaves_search_graph_and_citations_resolvin
     _apply(store, "merge", glossary, {"merge_id": extracted["created"][0]})
     _run_refresh(store, monkeypatch, embedder)
 
-    # ── The title-keyed inbound reference followed the retitle ──
-    # The one reference in this library that names an item by TITLE rather than by id, so it is
-    # the only one a retitle can silently strand.
     assert "[[Caching notes (eviction)]]" in store.get_item(referrer)["content"]
 
-    # ── SEARCH still returns, for text on both sides of every cut ──
     assert caching in search("eviction"), "the parent lost its own remaining text"
     assert warmup in search("prefill"), "the split-off half is unsearchable"
     assert queues in search("backpressure")
     assert search("caching"), "the FTS index went empty"
-    # The retitled item is findable by its NEW title and not only its body.
     assert caching in search("eviction")
 
-    # ── The GRAPH still resolves: no edge, mention or relation points at a deleted item ──
     subgraph = graph_resolves()
     assert subgraph["nodes"], "the entity graph collapsed"
-    # The split child was linked to its parent, so the item-level graph GREW rather than broke.
     lineage = store.db.execute(
         "SELECT COUNT(*) AS n FROM item_relations WHERE relation_type = ?",
         (restructure.LINEAGE_RELATION,),
     ).fetchone()["n"]
     assert lineage >= 2
 
-    # ── CITATIONS still resolve: every marker names a live item ──
     resolved = citations_resolve()
     assert all(found is not None for found in resolved.values()), resolved
     assert len(store.item_citations(synthesis)) == 2, "a marker was lost"
 
-    # ── And the derived layer describes the CURRENT text, not the pre-restructure text ──
     for item_id in (caching, warmup, queues):
         vector, chunks = _vectors(store, item_id)
         assert vector is not None, f"{item_id} was left vector-less"
         assert chunks, f"{item_id} was left without chunks"
-    # No chunk text survives that is absent from its item's body — the signature of a chunk
-    # row that outlived the passage it was cut from.
     for row in store.db.execute("SELECT item_id, text FROM chunks"):
         body = store.get_item(row["item_id"])["content"]
         assert row["text"].strip()[:40] in body, (row["item_id"], row["text"][:40])
@@ -959,9 +964,6 @@ def queues_len(store, item_id):
     """The offset of the second section of the queues note, for a keep-in-source extract."""
     content = store.get_item(item_id)["content"]
     return restructure.sections(content)[1]["offset"]
-
-
-# ── The HTTP surface ─────────────────────────────────────────────────────────────
 
 
 def _run(coro):
@@ -984,7 +986,7 @@ def _call(store, handler, method, path, *, match_info=None, body=None):
 
 
 def _handlers():
-    from gideon.dashboard.handlers import knowledge as H
+    from gideon.interfaces.dashboard.handlers import knowledge as H
 
     return H
 
@@ -996,7 +998,7 @@ def test_every_restructure_route_is_actually_registered():
     nothing about whether a request can reach them. `routes.md` is generated by a STATIC scan of
     the `add_post` calls, so it would list a route whose registration was unreachable too.
     """
-    from gideon.dashboard.handlers import knowledge as H
+    from gideon.interfaces.dashboard.handlers import knowledge as H
 
     app = web.Application()
     app["state"] = SimpleNamespace(knowledge_store=None)
@@ -1004,7 +1006,8 @@ def test_every_restructure_route_is_actually_registered():
     H.setup_knowledge_routes(app)
 
     registered = {
-        (r.method, str(getattr(r.resource, "canonical", ""))) for r in app.router.routes()
+        (r.method, str(getattr(r.resource, "canonical", "")))
+        for r in app.router.routes()
     }
     assert ("GET", "/api/knowledge/items/{id}/sections") in registered
     assert ("POST", "/api/knowledge/items/{id}/restructure/{verb}") in registered
@@ -1014,7 +1017,7 @@ def test_every_restructure_route_is_actually_registered():
 
 def test_the_restructure_verb_route_resolves_a_real_request_path():
     """The dynamic `{verb}` segment must not be shadowed by a sibling `/items/{id}/…` route."""
-    from gideon.dashboard.handlers import knowledge as H
+    from gideon.interfaces.dashboard.handlers import knowledge as H
 
     app = web.Application()
     app["state"] = SimpleNamespace(knowledge_store=None)
@@ -1024,7 +1027,9 @@ def test_the_restructure_verb_route_resolves_a_real_request_path():
 
     resolved = _run(
         app.router.resolve(
-            make_mocked_request("POST", "/api/knowledge/items/abc/restructure/split", app=app)
+            make_mocked_request(
+                "POST", "/api/knowledge/items/abc/restructure/split", app=app
+            )
         )
     )
     assert resolved.route.handler is H.restructure_item
@@ -1093,7 +1098,6 @@ def test_a_stale_confirm_is_a_409_carrying_the_fresh_preview(store):
 
     assert resp.status == 409
     assert payload["error"]["code"] == "preview_stale"
-    # The fresh plan rides along, so the client re-renders without a second round trip.
     assert payload["plan"]["token"] != "0" * 32
     assert store.get_item(item)["content"] == BODY
 
@@ -1111,7 +1115,6 @@ def test_an_unknown_verb_is_a_404_in_the_platform_error_envelope(store):
     )
 
     assert resp.status == 404
-    # The NESTED envelope, because a two-phase client must branch on the code.
     assert payload["error"]["code"] == "unknown_verb"
     assert payload["error"]["message"]
 
@@ -1145,7 +1148,10 @@ def test_the_sections_endpoint_serves_the_split_boundaries(store):
     )
 
     assert resp.status == 200
-    assert [s["title"] for s in payload["sections"]] == ["Eviction policy", "Warmup strategy"]
+    assert [s["title"] for s in payload["sections"]] == [
+        "Eviction policy",
+        "Warmup strategy",
+    ]
     assert payload["length"] == len(BODY)
 
 

@@ -18,9 +18,9 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.workflows import scope, secrets, store
-from gideon.workflows.controller import EngineServices, RunController
-from gideon.workflows.models import InstanceState, RunStatus, WorkflowRun
+from gideon.automation.workflows import scope, secrets, store
+from gideon.automation.workflows.controller import EngineServices, RunController
+from gideon.automation.workflows.models import InstanceState, RunStatus, WorkflowRun
 
 pytestmark = pytest.mark.anyio
 
@@ -34,11 +34,8 @@ def anyio_backend() -> str:
 def _isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
     return home
-
-
-# ── path matching ────────────────────────────────────────────────────────────
 
 
 class TestInScope:
@@ -99,7 +96,9 @@ class TestAllowedWritePaths:
         assert scope.allowed_write_paths({}, "/tmp/ws") == ["/tmp/ws"]
 
     def test_declared_paths_come_first_then_workspace(self) -> None:
-        got = scope.allowed_write_paths({"allowed_write_paths": ["/a", "/b"]}, "/tmp/ws")
+        got = scope.allowed_write_paths(
+            {"allowed_write_paths": ["/a", "/b"]}, "/tmp/ws"
+        )
         assert got == ["/a", "/b", "/tmp/ws"]
 
     def test_a_bare_string_is_accepted(self) -> None:
@@ -114,11 +113,12 @@ class TestAllowedWritePaths:
 
     def test_mode_defaults_to_warn_and_rejects_garbage(self) -> None:
         assert scope.scope_mode({}) == scope.ScopeMode.WARN
-        assert scope.scope_mode({"write_scope_mode": "reject"}) == scope.ScopeMode.REJECT
-        assert scope.scope_mode({"write_scope_mode": "nonsense"}) == scope.ScopeMode.WARN
-
-
-# ── snapshot + diff ──────────────────────────────────────────────────────────
+        assert (
+            scope.scope_mode({"write_scope_mode": "reject"}) == scope.ScopeMode.REJECT
+        )
+        assert (
+            scope.scope_mode({"write_scope_mode": "nonsense"}) == scope.ScopeMode.WARN
+        )
 
 
 class TestSnapshotDiff:
@@ -134,7 +134,7 @@ class TestSnapshotDiff:
     def test_a_created_file_outside_scope_violates(self, tmp_path) -> None:
         ws = tmp_path / "ws"
         ws.mkdir()
-        roots = [str(tmp_path)]  # watch wider than we allow
+        roots = [str(tmp_path)]
         before = scope.snapshot(roots)
         (tmp_path / "escaped.txt").write_text("oops")
         report = scope.diff(before, scope.snapshot(roots), [str(ws)])
@@ -170,7 +170,9 @@ class TestSnapshotDiff:
         assert any(p.endswith("real.txt") for p in snap.entries)
         assert not any("node_modules" in p for p in snap.entries)
 
-    def test_a_truncated_snapshot_reports_incomplete(self, tmp_path, monkeypatch) -> None:
+    def test_a_truncated_snapshot_reports_incomplete(
+        self, tmp_path, monkeypatch
+    ) -> None:
         """A capped walk must degrade to 'could not verify', never to a false pass."""
         monkeypatch.setattr(scope, "MAX_SNAPSHOT_ENTRIES", 2)
         ws = tmp_path / "ws"
@@ -185,9 +187,6 @@ class TestSnapshotDiff:
     def test_a_missing_root_is_skipped_not_fatal(self, tmp_path) -> None:
         snap = scope.snapshot([str(tmp_path / "does-not-exist")])
         assert len(snap) == 0
-
-
-# ── controller integration ───────────────────────────────────────────────────
 
 
 def _stage_spec(config: dict) -> dict:
@@ -224,11 +223,11 @@ def _writer_provider(target: str):
 
 
 class TestControllerScopeEnforcement:
-    async def test_warn_mode_records_the_violation_but_keeps_the_outcome(self, tmp_path) -> None:
+    async def test_warn_mode_records_the_violation_but_keeps_the_outcome(
+        self, tmp_path
+    ) -> None:
         ws = tmp_path / "ws"
         ws.mkdir()
-        # The escape lands OUTSIDE the workspace. `cwd` is the workspace, and the
-        # workspace is always in-scope — so the target must sit above it to be a violation.
         escape = tmp_path / "escaped.txt"
         spec = _stage_spec(
             {
@@ -242,18 +241,22 @@ class TestControllerScopeEnforcement:
         c = RunController(
             run,
             spec,
-            services=EngineServices(get_provider=_writer_provider(str(escape)), cwd=str(ws)),
+            services=EngineServices(
+                get_provider=_writer_provider(str(escape)), cwd=str(ws)
+            ),
         )
         assert await c.run_to_completion(timeout=20) == RunStatus.COMPLETE
         inst = store.read_state(run.id)["root.children[0]"]
-        assert inst.state == InstanceState.DONE  # warn preserves the outcome
-        from gideon.workflows.journal import STEP_SCOPE, ledger
+        assert inst.state == InstanceState.DONE
+        from gideon.automation.workflows.journal import STEP_SCOPE, ledger
 
         scope_events = [e for e in ledger(run.id) if e.get("kind") == STEP_SCOPE]
         assert len(scope_events) == 1
         assert any("escaped.txt" in v for v in scope_events[0]["violations"])
 
-    async def test_reject_mode_flips_the_node_to_scope_violation(self, tmp_path) -> None:
+    async def test_reject_mode_flips_the_node_to_scope_violation(
+        self, tmp_path
+    ) -> None:
         ws = tmp_path / "ws"
         ws.mkdir()
         escape = tmp_path / "escaped.txt"
@@ -269,7 +272,9 @@ class TestControllerScopeEnforcement:
         c = RunController(
             run,
             spec,
-            services=EngineServices(get_provider=_writer_provider(str(escape)), cwd=str(ws)),
+            services=EngineServices(
+                get_provider=_writer_provider(str(escape)), cwd=str(ws)
+            ),
         )
         assert await c.run_to_completion(timeout=20) == RunStatus.FAILED
         inst = store.read_state(run.id)["root.children[0]"]
@@ -292,14 +297,12 @@ class TestControllerScopeEnforcement:
         c = RunController(
             run,
             spec,
-            # `cwd` is the workspace itself, not its parent: `watch_roots` climbs one level
-            # above cwd, and under xdist the shared `popen-gwN` tmp root holds sibling tests'
-            # files (a neighbour's still-open WAL SQLite flushes there mid-run). Watching `ws`
-            # keeps the snapshot inside this test's private tree, as the warn/reject cases do.
-            services=EngineServices(get_provider=_writer_provider(str(inside)), cwd=str(ws)),
+            services=EngineServices(
+                get_provider=_writer_provider(str(inside)), cwd=str(ws)
+            ),
         )
         assert await c.run_to_completion(timeout=20) == RunStatus.COMPLETE
-        from gideon.workflows.journal import STEP_SCOPE, ledger
+        from gideon.automation.workflows.journal import STEP_SCOPE, ledger
 
         assert [e for e in ledger(run.id) if e.get("kind") == STEP_SCOPE] == []
 
@@ -312,7 +315,7 @@ class TestControllerScopeEnforcement:
             calls["n"] += 1
             return real(roots)
 
-        import gideon.workflows.controller as ctrl
+        import gideon.automation.workflows.controller as ctrl
 
         original = ctrl.scope_snapshot
         ctrl.scope_snapshot = counting
@@ -334,12 +337,16 @@ class TestControllerScopeEnforcement:
         assert calls["n"] == 0
 
 
-# ── secrets hygiene (WF2-R14) ────────────────────────────────────────────────
-
-
 class TestSecretDetection:
     def test_secret_named_keys_are_recognized(self) -> None:
-        for key in ("api_key", "apiKey", "OPENAI_API_KEY", "token", "password", "secret"):
+        for key in (
+            "api_key",
+            "apiKey",
+            "OPENAI_API_KEY",
+            "token",
+            "password",
+            "secret",
+        ):
             assert secrets.is_secret_key(key), key
 
     def test_reference_keys_are_not_treated_as_values(self) -> None:
@@ -374,16 +381,25 @@ class TestSecretDetection:
         bundled template was refused with "the spec contains literal credentials — use
         {{secret:KEY}} instead", pointing at a schema entry whose value is the word `array`.
         """
-        from gideon.workflows.bundled_defs import read_template, template_names
+        from gideon.automation.workflows.bundled_defs import (
+            read_template,
+            template_names,
+        )
 
         names = template_names()
-        assert names, "no bundled templates were discovered — this ratchet would be vacuous"
+        assert (
+            names
+        ), "no bundled templates were discovered — this ratchet would be vacuous"
         refused: dict[str, list[str]] = {}
         for name in names:
             definition = read_template(name)
             if definition is None:
                 continue
-            spec = definition.to_dict() if hasattr(definition, "to_dict") else dict(definition)
+            spec = (
+                definition.to_dict()
+                if hasattr(definition, "to_dict")
+                else dict(definition)
+            )
             findings = secrets.find_inline_secrets(spec)
             if findings:
                 refused[name] = [f.key for f in findings]
@@ -396,7 +412,7 @@ class TestStripAndReinject:
         stripped = secrets.strip_secrets(spec)
         assert stripped["config"]["_has_api_key"] is True
         assert "api_key" not in stripped["config"]
-        assert stripped["config"]["url"] == "https://x"  # non-secrets untouched
+        assert stripped["config"]["url"] == "https://x"
 
     def test_a_secret_binding_survives_stripping_intact(self) -> None:
         """It holds no value; stripping it would make the round-trip lossy and quietly
@@ -405,8 +421,12 @@ class TestStripAndReinject:
         assert secrets.strip_secrets(spec)["config"]["api_key"] == "{{secret:KEY}}"
 
     def test_reinject_restores_by_node_id(self) -> None:
-        stored = {"root": {"children": [{"id": "a", "config": {"api_key": "sk-stored"}}]}}
-        incoming = {"root": {"children": [{"id": "a", "config": {"_has_api_key": True}}]}}
+        stored = {
+            "root": {"children": [{"id": "a", "config": {"api_key": "sk-stored"}}]}
+        }
+        incoming = {
+            "root": {"children": [{"id": "a", "config": {"_has_api_key": True}}]}
+        }
         merged = secrets.reinject_secrets(incoming, stored)
         assert merged["root"]["children"][0]["config"]["api_key"] == "sk-stored"
         assert "_has_api_key" not in merged["root"]["children"][0]["config"]
@@ -422,7 +442,6 @@ class TestStripAndReinject:
                 ]
             }
         }
-        # The same two nodes, order swapped — every path changed.
         incoming = {
             "root": {
                 "children": [
@@ -439,7 +458,9 @@ class TestStripAndReinject:
         stored = {"root": {"children": [{"id": "a", "config": {"api_key": "sk-old"}}]}}
         incoming = {
             "root": {
-                "children": [{"id": "a", "config": {"api_key": "sk-new", "_has_api_key": True}}]
+                "children": [
+                    {"id": "a", "config": {"api_key": "sk-new", "_has_api_key": True}}
+                ]
             }
         }
         merged = secrets.reinject_secrets(incoming, stored)
@@ -448,7 +469,9 @@ class TestStripAndReinject:
     def test_a_false_flag_clears_the_credential(self) -> None:
         """How a user removes a credential without a separate endpoint."""
         stored = {"root": {"children": [{"id": "a", "config": {"api_key": "sk-old"}}]}}
-        incoming = {"root": {"children": [{"id": "a", "config": {"_has_api_key": False}}]}}
+        incoming = {
+            "root": {"children": [{"id": "a", "config": {"_has_api_key": False}}]}
+        }
         merged = secrets.reinject_secrets(incoming, stored)
         assert "api_key" not in merged["root"]["children"][0]["config"]
 
@@ -475,7 +498,10 @@ class TestInlineSecretLint:
     def test_a_credential_shape_anywhere_is_flagged(self) -> None:
         """A token pasted into a prompt is just as leaked as one in an api_key field."""
         found = secrets.find_inline_secrets(
-            {"id": "n", "config": {"prompt": "use sk-ant-abcdefghijklmnopqrstuvwxyz to auth"}}
+            {
+                "id": "n",
+                "config": {"prompt": "use sk-ant-abcdefghijklmnopqrstuvwxyz to auth"},
+            }
         )
         assert len(found) == 1 and found[0].key == "prompt"
 
@@ -492,7 +518,12 @@ class TestInlineSecretLint:
         assert secrets.find_inline_secrets({"config": {"note": value}})
 
     def test_the_sanctioned_binding_is_not_a_finding(self) -> None:
-        assert secrets.find_inline_secrets({"id": "n", "config": {"api_key": "{{secret:K}}"}}) == []
+        assert (
+            secrets.find_inline_secrets(
+                {"id": "n", "config": {"api_key": "{{secret:K}}"}}
+            )
+            == []
+        )
 
     def test_ordinary_config_is_not_flagged(self) -> None:
         """A lint that cries wolf gets muted, and a muted lint protects nothing."""
@@ -513,7 +544,9 @@ class TestInlineSecretLint:
     def test_a_finding_never_carries_the_value_itself(self) -> None:
         """An error message that quotes the credential leaks it into the logs that render
         the message."""
-        found = secrets.find_inline_secrets({"config": {"api_key": "sk-supersecret-value"}})
+        found = secrets.find_inline_secrets(
+            {"config": {"api_key": "sk-supersecret-value"}}
+        )
         assert found
         assert "supersecret" not in found[0].to_dict()["hint"]
         assert "supersecret" not in str(found[0].to_dict())

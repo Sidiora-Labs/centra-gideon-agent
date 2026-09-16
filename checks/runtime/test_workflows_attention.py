@@ -23,21 +23,25 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.workflows import attention
+from gideon.automation.workflows import attention
 
 
 @pytest.fixture(autouse=True)
 def _isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
-    monkeypatch.setattr("gideon.inbox.config_dir", lambda: home, raising=False)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
+    monkeypatch.setattr(
+        "gideon.integrations.inbox.config_dir", lambda: home, raising=False
+    )
     return home
 
 
 class TestDedupKey:
     def test_the_key_is_scoped_to_run_path_and_epoch(self) -> None:
-        assert attention.dedup_key("r1", "root.body#0", 0) == "workflow:r1:root.body#0:0"
+        assert (
+            attention.dedup_key("r1", "root.body#0", 0) == "workflow:r1:root.body#0:0"
+        )
 
     def test_two_polls_of_one_gate_share_a_key(self) -> None:
         """The load-bearing property. The watchdog re-observes a waiting run every few
@@ -49,7 +53,8 @@ class TestDedupKey:
 
     def test_a_rewind_re_asking_is_a_NEW_key(self) -> None:
         """Epoch-scoped, not token-scoped: a rewind genuinely re-asks the question, and
-        suppressing the second ask would leave the run waiting on a row marked handled."""
+        suppressing the second ask would leave the run waiting on a row marked handled.
+        """
         before = attention.dedup_key("r1", "root.gate", 0)
         after = attention.dedup_key("r1", "root.gate", 1)
         assert before != after
@@ -64,7 +69,9 @@ class TestTitleAndBody:
     def test_the_asks_own_prompt_is_the_title(self) -> None:
         """The actual question, not a generic label: "workflow needs input" forces the user to
         open the row before learning anything at all."""
-        title = attention.ask_title("deploy", "confirm", {"prompt": "Ship v2.3 to production?"})
+        title = attention.ask_title(
+            "deploy", "confirm", {"prompt": "Ship v2.3 to production?"}
+        )
         assert title == "Ship v2.3 to production?"
 
     def test_a_long_prompt_is_clipped(self) -> None:
@@ -74,8 +81,13 @@ class TestTitleAndBody:
         assert title.endswith("…")
 
     def test_a_promptless_ask_still_says_what_and_where(self) -> None:
-        assert attention.ask_title("deploy", "confirm", {}) == "deploy: confirm needs your input"
-        assert attention.ask_title("deploy", "", None) == "deploy: a step needs your input"
+        assert (
+            attention.ask_title("deploy", "confirm", {})
+            == "deploy: confirm needs your input"
+        )
+        assert (
+            attention.ask_title("deploy", "", None) == "deploy: a step needs your input"
+        )
 
     def test_the_promptless_FALLBACK_IS_REACHABLE_from_a_real_gate(self) -> None:
         """🪤 The test above proves the fallback WORKS. Nothing proved it ever RAN.
@@ -90,23 +102,24 @@ class TestTitleAndBody:
         So this asserts the CALL SITE, not the helper: the ask a real promptless gate produces must
         leave `prompt` empty, and the title composed from it must name the run and the step.
         """
-        from gideon.workflows.engine import _ask_payload
+        from gideon.automation.workflows.engine import _ask_payload
 
         class _Node:
             id = "init_gate"
 
-        ask = _ask_payload(_Node(), {})  # a bundled gate: no prompt, no message
+        ask = _ask_payload(_Node(), {})
 
-        assert ask["prompt"] == "", f"a prompt was manufactured again: {ask['prompt']!r}"
+        assert (
+            ask["prompt"] == ""
+        ), f"a prompt was manufactured again: {ask['prompt']!r}"
         title = attention.ask_title("code-project", "init_gate", ask)
         assert title == "code-project: init_gate needs your input", title
-        # The generic literal must not come back by any route.
         assert "Approval needed" not in title
 
     def test_an_AUTHORED_prompt_still_wins_over_the_fallback(self) -> None:
         """The fix must not cost the question. A gate that authors a prompt — 12 of the 19 do —
         keeps it as the headline, and `message` is still accepted as its alias."""
-        from gideon.workflows.engine import _ask_payload
+        from gideon.automation.workflows.engine import _ask_payload
 
         class _Node:
             id = "approve"
@@ -114,11 +127,15 @@ class TestTitleAndBody:
         for cfg in ({"prompt": "Ship the release?"}, {"message": "Ship the release?"}):
             ask = _ask_payload(_Node(), cfg)
             assert ask["prompt"] == "Ship the release?", cfg
-            assert attention.ask_title("release-check", "approve", ask) == "Ship the release?"
+            assert (
+                attention.ask_title("release-check", "approve", ask)
+                == "Ship the release?"
+            )
 
     def test_the_SHIPPED_TEMPLATES_still_contain_promptless_gates(self) -> None:
         """The vacuity floor. If every bundled gate ever authored a prompt, the change above would
-        be unreachable and the two tests before it would prove nothing about the product."""
+        be unreachable and the two tests before it would prove nothing about the product.
+        """
         import glob
         import json
 
@@ -132,15 +149,23 @@ class TestTitleAndBody:
                 for value in node:
                     walk(value, out)
 
-        files = sorted(glob.glob("src/gideon/packs/bundled/*/templates/*.json")) + sorted(
-            glob.glob("src/gideon/workflows/bundled/**/*.json", recursive=True)
+        files = sorted(
+            glob.glob("runtime/gideon/extensions/packs/bundled/*/templates/*.json")
+        ) + sorted(
+            glob.glob(
+                "runtime/gideon/automation/workflows/bundled/**/*.json", recursive=True
+            )
         )
-        assert len(files) > 10, f"the template corpus must be discoverable, found {len(files)}"
+        assert (
+            len(files) > 10
+        ), f"the template corpus must be discoverable, found {len(files)}"
         gates, promptless = 0, 0
         for path in files:
             try:
                 doc = json.load(open(path, encoding="utf-8"))
-            except Exception:  # noqa: BLE001 — a malformed fixture is not this test's subject
+            except (
+                Exception
+            ):  # noqa: BLE001 — a malformed fixture is not this test's subject
                 continue
             nodes: list = []
             walk(doc.get("root") or doc, nodes)
@@ -152,7 +177,9 @@ class TestTitleAndBody:
                 if not (cfg.get("prompt") or cfg.get("message")):
                     promptless += 1
         assert gates >= 10, f"only {gates} gates found — the walk is missing nodes"
-        assert promptless >= 1, "no promptless gate ships, so the fallback is unreachable again"
+        assert (
+            promptless >= 1
+        ), "no promptless gate ships, so the fallback is unreachable again"
 
     def test_the_body_names_the_kind_of_answer_wanted(self) -> None:
         for kind, expected in (
@@ -170,7 +197,9 @@ class TestTitleAndBody:
     def test_the_body_carries_the_outstanding_count(self) -> None:
         """The decision often depends on it: "is this the last step, or are eight waiting on
         me?" changes how urgently a user acts."""
-        body = attention.ask_body({"kind": "approval"}, {"outstanding": ["a", "b", "c"]})
+        body = attention.ask_body(
+            {"kind": "approval"}, {"outstanding": ["a", "b", "c"]}
+        )
         assert "3 other step(s)" in body
 
 
@@ -182,7 +211,7 @@ class TestRaise:
             calls.append(kw)
             return "item-1"
 
-        monkeypatch.setattr("gideon.inbox.emit_attention_item", fake_emit)
+        monkeypatch.setattr("gideon.integrations.inbox.emit_attention_item", fake_emit)
         item_id = attention.raise_gate_item(
             object(),
             run_id="r1",
@@ -204,7 +233,7 @@ class TestRaise:
         which turns the inbox into a notification with extra steps."""
         captured: dict = {}
         monkeypatch.setattr(
-            "gideon.inbox.emit_attention_item",
+            "gideon.integrations.inbox.emit_attention_item",
             lambda state, **kw: captured.update(kw) or "i",
         )
         attention.raise_gate_item(
@@ -225,7 +254,7 @@ class TestRaise:
         """`loop/needs_input` is registered, carries `attention=True`, and is what a user's
         "always interrupt me for needs_input" rule keys on. A second pair would make a
         workflow gate need its own separate configuration for the same behaviour."""
-        from gideon.notification_kinds import resolve_kind
+        from gideon.workspace.notification_kinds import resolve_kind
 
         kind = resolve_kind(attention.SOURCE, attention.KIND)
         assert (kind.source, kind.kind) == (
@@ -256,7 +285,7 @@ class TestRaise:
         def boom(state, **kw):
             raise RuntimeError("inbox is on fire")
 
-        monkeypatch.setattr("gideon.inbox.emit_attention_item", boom)
+        monkeypatch.setattr("gideon.integrations.inbox.emit_attention_item", boom)
         assert (
             attention.raise_gate_item(
                 object(),
@@ -272,8 +301,10 @@ class TestRaise:
 
 
 class TestResolve:
-    def _seed(self, run_id: str = "r1", node_id: str = "confirm", status: str = "pending"):
-        from gideon.inbox import InboxItem, InboxStore, ItemKind
+    def _seed(
+        self, run_id: str = "r1", node_id: str = "confirm", status: str = "pending"
+    ):
+        from gideon.integrations.inbox import InboxItem, InboxStore, ItemKind
 
         store = InboxStore()
         store.load()
@@ -294,7 +325,7 @@ class TestResolve:
         return item.id
 
     def test_answering_closes_the_row(self) -> None:
-        from gideon.inbox import InboxStore, ItemStatus
+        from gideon.integrations.inbox import InboxStore, ItemStatus
 
         item_id = self._seed()
         assert attention.resolve_gate_item(None, "r1", "confirm") == 1
@@ -305,7 +336,7 @@ class TestResolve:
     def test_it_is_HANDLED_not_DISMISSED(self) -> None:
         """Different facts. Dismissed reads as "the user ignored it" and feeds the engagement
         signals accordingly; this was actually answered."""
-        from gideon.inbox import InboxStore, ItemStatus
+        from gideon.integrations.inbox import InboxStore, ItemStatus
 
         item_id = self._seed()
         attention.resolve_gate_item(None, "r1", "confirm")
@@ -316,7 +347,7 @@ class TestResolve:
     def test_answering_one_gate_leaves_a_CONCURRENT_gate_open(self) -> None:
         """A run with two gates has two rows. Closing both on one answer would hide a question
         the run is still genuinely waiting on."""
-        from gideon.inbox import InboxStore
+        from gideon.integrations.inbox import InboxStore
 
         a = self._seed(node_id="confirm")
         b = self._seed(node_id="review")
@@ -334,7 +365,7 @@ class TestResolve:
         assert attention.resolve_run_items(None, "r1") == 2
 
     def test_another_runs_rows_are_untouched(self) -> None:
-        from gideon.inbox import InboxStore
+        from gideon.integrations.inbox import InboxStore
 
         mine = self._seed(run_id="r1")
         theirs = self._seed(run_id="r2")
@@ -347,7 +378,7 @@ class TestResolve:
     def test_a_dismissed_row_is_not_rewritten(self) -> None:
         """The user's own action wins: they already decided about this row, and silently
         flipping it to handled would overwrite that."""
-        from gideon.inbox import InboxStore
+        from gideon.integrations.inbox import InboxStore
 
         item_id = self._seed(status="dismissed")
         assert attention.resolve_gate_item(None, "r1", "confirm") == 0
@@ -373,7 +404,7 @@ class TestEmitSeamRegressions:
         could not see — and that the service's next save would silently overwrite. The row hit
         disk and the inbox stayed empty.
         """
-        from gideon.inbox import InboxStore, emit_attention_item
+        from gideon.integrations.inbox import InboxStore, emit_attention_item
 
         live = InboxStore()
         live.load()
@@ -388,9 +419,15 @@ class TestEmitSeamRegressions:
                 pass
 
         item_id = emit_attention_item(
-            _State(), source="loop", kind="needs_input", title="Ship it?", body="Waiting."
+            _State(),
+            source="loop",
+            kind="needs_input",
+            title="Ship it?",
+            body="Waiting.",
         )
-        assert item_id in live.items, "the row went to a detached store the API cannot serve"
+        assert (
+            item_id in live.items
+        ), "the row went to a detached store the API cannot serve"
 
     def test_a_mock_state_does_not_capture_the_write(self) -> None:
         """The type check matters: a `MagicMock()` state answers every getattr, so an
@@ -398,10 +435,14 @@ class TestEmitSeamRegressions:
         """
         from unittest.mock import MagicMock
 
-        from gideon.inbox import InboxStore, emit_attention_item
+        from gideon.integrations.inbox import InboxStore, emit_attention_item
 
         item_id = emit_attention_item(
-            MagicMock(), source="loop", kind="needs_input", title="Ship it?", body="Waiting."
+            MagicMock(),
+            source="loop",
+            kind="needs_input",
+            title="Ship it?",
+            body="Waiting.",
         )
         on_disk = InboxStore()
         on_disk.load()
@@ -412,7 +453,7 @@ class TestEmitSeamRegressions:
         row therefore read "Waiting for your approval." and LOST the actual question — the one
         thing a user needs in order to decide from the list.
         """
-        from gideon.inbox import InboxStore, emit_attention_item
+        from gideon.integrations.inbox import InboxStore, emit_attention_item
 
         item_id = emit_attention_item(
             None,
@@ -428,10 +469,12 @@ class TestEmitSeamRegressions:
         assert "Waiting for your approval." in message
 
     def test_a_titleless_or_bodyless_item_has_no_stray_blank_lines(self) -> None:
-        from gideon.inbox import InboxStore, emit_attention_item
+        from gideon.integrations.inbox import InboxStore, emit_attention_item
 
         store = InboxStore()
-        only_title = emit_attention_item(None, source="loop", kind="needs_input", title="Just this")
+        only_title = emit_attention_item(
+            None, source="loop", kind="needs_input", title="Just this"
+        )
         store.load()
         assert store.items[only_title].message == "Just this"
 
@@ -441,7 +484,12 @@ class TestEmitSeamRegressions:
         an answered gate's row stayed open. Found by approving a real gate in a real browser and
         watching the row survive it.
         """
-        from gideon.inbox import InboxItem, InboxStore, ItemKind, ItemStatus
+        from gideon.integrations.inbox import (
+            InboxItem,
+            InboxStore,
+            ItemKind,
+            ItemStatus,
+        )
 
         live = InboxStore()
         live.load()
@@ -467,5 +515,4 @@ class TestEmitSeamRegressions:
             _inbox_svc = _Svc()
 
         assert attention.resolve_gate_item(_State(), "rLIVE", "confirm") == 1
-        # The LIVE instance is what the API serves, so that is where the close must land.
         assert live.items["needs_input-live"].status == ItemStatus.HANDLED.value

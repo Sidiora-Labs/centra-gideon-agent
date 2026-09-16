@@ -14,11 +14,14 @@ from __future__ import annotations
 
 import asyncio
 
-import gideon.agents.native.builtin_tools as BT
+import gideon.engine.agents.native.builtin_tools as BT
 
 
 def _names(provider) -> set[str]:
-    return {t.name for t in asyncio.get_event_loop().run_until_complete(provider.list_tools())}
+    return {
+        t.name
+        for t in asyncio.get_event_loop().run_until_complete(provider.list_tools())
+    }
 
 
 _FACTORIES = {
@@ -31,7 +34,7 @@ _FACTORIES = {
 
 
 def test_categories_partition_the_full_set():
-    full = _names(BT.NativeBuiltinToolProvider(cwd="/tmp"))  # categories=None → all
+    full = _names(BT.NativeBuiltinToolProvider(cwd="/tmp"))
     union: set[str] = set()
     counts: dict[str, int] = {}
     for factory in _FACTORIES.values():
@@ -48,16 +51,28 @@ def test_each_provider_stamps_its_own_name():
         prov = factory()
         defs = asyncio.get_event_loop().run_until_complete(prov.list_tools())
         assert defs, f"{name} surfaced no tools"
-        assert all(t.provider == name for t in defs), f"{name} mis-stamped a tool's provider"
+        assert all(
+            t.provider == name for t in defs
+        ), f"{name} mis-stamped a tool's provider"
 
 
 def test_platform_owns_filesystem_shell_and_affordance():
     plat = _names(BT.create_platform_tools_provider())
-    assert {"read_file", "write_file", "edit_file", "list_dir", "glob", "grep", "repo_map"} <= plat
+    assert {
+        "read_file",
+        "write_file",
+        "edit_file",
+        "list_dir",
+        "glob",
+        "grep",
+        "repo_map",
+    } <= plat
     assert "bash" in plat
     assert "tool_result_get" in plat
-    # platform must NOT carry the installable-app categories
-    assert not ({"knowledge_search", "task_create", "project_run_create", "post_to_inbox"} & plat)
+    assert not (
+        {"knowledge_search", "task_create", "project_run_create", "post_to_inbox"}
+        & plat
+    )
 
 
 def test_app_categories_are_the_installable_entities():
@@ -68,9 +83,6 @@ def test_app_categories_are_the_installable_entities():
         "knowledge_get",
         "knowledge_update",
         "knowledge_stats",
-        # The decision journal (PROACTIVE-ASSISTANT §2.2, PA-4) rides the SAME app entity: a
-        # decision is a knowledge item, so the journal must not be installable or removable
-        # independently of the library its entries live in.
         "log_decision",
         "decision_list",
         "decision_resolve",
@@ -86,8 +98,6 @@ def test_app_categories_are_the_installable_entities():
 
 
 def test_category_map_covers_every_tool():
-    # every tool the monolith exposes must have a category, else it'd be dropped by
-    # every category provider (orphaned).
     full = _names(BT.NativeBuiltinToolProvider(cwd="/tmp"))
     uncategorized = {n for n in full if n not in BT._CATEGORY_OF}
     assert not uncategorized, f"tools with no category: {uncategorized}"

@@ -7,15 +7,13 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.dashboard.chat import _dequeue_next_message
-from gideon.dashboard.state import (
+from gideon.interfaces.dashboard.chat import _dequeue_next_message
+from gideon.interfaces.dashboard.state import (
     CRON_NOTIFY_PREFIX,
     SUBAGENT_COMPLETION_PREFIX,
-    DashboardState,
+    ConsoleState,
     _ChatSession,
 )
-
-# ── Unit tests: _dequeue_next_message ──
 
 
 class TestDequeueNextMessage:
@@ -35,9 +33,14 @@ class TestDequeueNextMessage:
         next_msg, consumed = _dequeue_next_message(session, merge_enabled=True)
 
         assert (
-            next_msg == "[3 queued messages merged]\n\nfix the bug\n\nalso add tests\n\nuse junit5"
+            next_msg
+            == "[3 queued messages merged]\n\nfix the bug\n\nalso add tests\n\nuse junit5"
         )
-        assert [c["content"] for c in consumed] == ["fix the bug", "also add tests", "use junit5"]
+        assert [c["content"] for c in consumed] == [
+            "fix the bug",
+            "also add tests",
+            "use junit5",
+        ]
         assert len(session._queue) == 0
 
     def test_single_message_pops_normally_when_enabled(self):
@@ -93,7 +96,6 @@ class TestDequeueNextMessage:
         for item in session._queue:
             session.append("queued", item["content"], "msg msg-queued")
 
-        # First dequeue: only "user msg" pops (cron breaks the merge)
         next_msg, consumed = _dequeue_next_message(session, merge_enabled=True)
 
         assert next_msg == "user msg"
@@ -138,9 +140,14 @@ class TestDequeueNextMessage:
 
     def test_subagent_completion_not_merged(self):
         """Subagent completions are never merged — popped individually like crons."""
-        subagent_msg = f"{SUBAGENT_COMPLETION_PREFIX}\nAgent `abc123` completed ✅\nResult text"
+        subagent_msg = (
+            f"{SUBAGENT_COMPLETION_PREFIX}\nAgent `abc123` completed ✅\nResult text"
+        )
         session = _ChatSession("s1")
-        session._queue = [{"id": "a", "content": "user msg"}, {"id": "b", "content": subagent_msg}]
+        session._queue = [
+            {"id": "a", "content": "user msg"},
+            {"id": "b", "content": subagent_msg},
+        ]
         for item in session._queue:
             session.append("queued", item["content"], "msg msg-queued")
 
@@ -176,22 +183,17 @@ class TestDequeueNextMessage:
         for item in session._queue:
             session.append("queued", item["content"], "msg msg-queued")
 
-        # First pop: sa1
         next_msg, consumed = _dequeue_next_message(session, merge_enabled=True)
         assert next_msg == sa1
         assert [q["content"] for q in session._queue] == [sa2]
 
-        # Second pop: sa2
         next_msg, consumed = _dequeue_next_message(session, merge_enabled=True)
         assert next_msg == sa2
         assert len(session._queue) == 0
 
 
-# ── API tests: /api/dashboard/config ──
-
-
 def _make_state(tmp_path):
-    state = DashboardState.__new__(DashboardState)
+    state = ConsoleState.__new__(ConsoleState)
     state._sessions = {}
     state._background_tasks = set()
     state._pending_approvals = {}
@@ -203,7 +205,7 @@ def _make_state(tmp_path):
 
 
 def _make_config_app(tmp_path):
-    from gideon.dashboard.handlers import api_dashboard_config
+    from gideon.interfaces.dashboard.handlers import api_dashboard_config
 
     state = _make_state(tmp_path)
     app = web.Application()
@@ -218,10 +220,12 @@ class TestDashboardConfigMergeQueued:
     async def test_get_includes_merge_queued_messages(self, tmp_path, monkeypatch):
         """GET /api/dashboard/config returns merge_queued_messages field."""
         monkeypatch.setattr(
-            "gideon.config.loader.config_path", lambda: tmp_path / "config.json"
+            "gideon.core.config.loader.config_path", lambda: tmp_path / "config.json"
         )
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        with patch("gideon.sel.sel") as mock_sel:
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        with patch("gideon.security.sel.sel") as mock_sel:
             mock_sel.return_value = MagicMock()
             app = _make_config_app(tmp_path)
             async with TestClient(TestServer(app)) as client:
@@ -229,15 +233,17 @@ class TestDashboardConfigMergeQueued:
                 assert resp.status == 200
                 data = await resp.json()
                 assert "merge_queued_messages" in data
-                assert data["merge_queued_messages"] is False  # default
+                assert data["merge_queued_messages"] is False
 
     @pytest.mark.asyncio
     async def test_put_persists_merge_queued_messages(self, tmp_path, monkeypatch):
         """PUT merge_queued_messages=true persists to config.json."""
         cfg_file = tmp_path / "config.json"
-        monkeypatch.setattr("gideon.config.loader.config_path", lambda: cfg_file)
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        with patch("gideon.sel.sel") as mock_sel:
+        monkeypatch.setattr("gideon.core.config.loader.config_path", lambda: cfg_file)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        with patch("gideon.security.sel.sel") as mock_sel:
             mock_sel.return_value = MagicMock()
             app = _make_config_app(tmp_path)
             async with TestClient(TestServer(app)) as client:
@@ -247,12 +253,10 @@ class TestDashboardConfigMergeQueued:
                 )
                 assert resp.status == 200
 
-                # Verify persisted
                 assert cfg_file.exists()
                 saved = json.loads(cfg_file.read_text())
                 assert saved["dashboard"]["merge_queued_messages"] is True
 
-                # Verify GET reflects the change
                 resp = await client.get("/api/dashboard/config")
                 data = await resp.json()
                 assert data["merge_queued_messages"] is True
@@ -261,10 +265,12 @@ class TestDashboardConfigMergeQueued:
     async def test_put_rejects_non_dict_body(self, tmp_path, monkeypatch):
         """PUT with a non-object JSON body returns 400."""
         monkeypatch.setattr(
-            "gideon.config.loader.config_path", lambda: tmp_path / "config.json"
+            "gideon.core.config.loader.config_path", lambda: tmp_path / "config.json"
         )
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        with patch("gideon.sel.sel") as mock_sel:
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        with patch("gideon.security.sel.sel") as mock_sel:
             mock_sel.return_value = MagicMock()
             app = _make_config_app(tmp_path)
             async with TestClient(TestServer(app)) as client:
@@ -277,14 +283,18 @@ class TestDashboardConfigMergeQueued:
     async def test_put_rejects_unknown_fields(self, tmp_path, monkeypatch):
         """PUT with unknown fields returns 400."""
         monkeypatch.setattr(
-            "gideon.config.loader.config_path", lambda: tmp_path / "config.json"
+            "gideon.core.config.loader.config_path", lambda: tmp_path / "config.json"
         )
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        with patch("gideon.sel.sel") as mock_sel:
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        with patch("gideon.security.sel.sel") as mock_sel:
             mock_sel.return_value = MagicMock()
             app = _make_config_app(tmp_path)
             async with TestClient(TestServer(app)) as client:
-                resp = await client.put("/api/dashboard/config", json={"bogus_field": True})
+                resp = await client.put(
+                    "/api/dashboard/config", json={"bogus_field": True}
+                )
                 assert resp.status == 400
                 data = await resp.json()
                 assert "Unknown fields" in data["error"]
@@ -293,10 +303,12 @@ class TestDashboardConfigMergeQueued:
     async def test_put_rejects_non_boolean_merge_queued(self, tmp_path, monkeypatch):
         """PUT merge_queued_messages with non-boolean returns 400."""
         monkeypatch.setattr(
-            "gideon.config.loader.config_path", lambda: tmp_path / "config.json"
+            "gideon.core.config.loader.config_path", lambda: tmp_path / "config.json"
         )
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        with patch("gideon.sel.sel") as mock_sel:
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        with patch("gideon.security.sel.sel") as mock_sel:
             mock_sel.return_value = MagicMock()
             app = _make_config_app(tmp_path)
             async with TestClient(TestServer(app)) as client:

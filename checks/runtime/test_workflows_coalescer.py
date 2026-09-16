@@ -21,7 +21,7 @@ import asyncio
 
 import pytest
 
-from gideon.workflows.coalescer import (
+from gideon.automation.workflows.coalescer import (
     BATCH_EVENT,
     COALESCING_EVENTS,
     EventCoalescer,
@@ -82,7 +82,7 @@ class TestBatching:
         c = EventCoalescer(sink, window=0.01)
         for i in range(20):
             c.publish("workflow:r1", "workflow_node_done", _node(f"root.children[{i}]"))
-        assert frames == []  # nothing written yet — the window is open
+        assert frames == []
         await asyncio.sleep(0.05)
         assert len(frames) == 1
         key, event, payload = frames[0]
@@ -132,7 +132,8 @@ class TestBatching:
 
     async def test_a_repeat_for_the_same_instance_supersedes(self) -> None:
         """Two `done`s for one instance inside one window: the later state is strictly more
-        current, so keeping both would write a frame that immediately contradicts itself."""
+        current, so keeping both would write a frame that immediately contradicts itself.
+        """
         frames, sink = _sink()
         c = EventCoalescer(sink, window=0.01)
         c.publish("workflow:r1", "workflow_node_done", _node("a", status="running"))
@@ -151,7 +152,10 @@ class TestBatching:
         c.publish("workflow:r1", "workflow_node_done", _node("a"))
         await asyncio.sleep(0.05)
         members = frames[0][2]["events"]
-        assert [m["event"] for m in members] == ["workflow_node_started", "workflow_node_done"]
+        assert [m["event"] for m in members] == [
+            "workflow_node_started",
+            "workflow_node_done",
+        ]
 
     async def test_a_payload_with_no_instance_path_is_never_collapsed(self) -> None:
         """`workflow_progress` carries a whole node list, not one instance. Collapsing two
@@ -170,7 +174,6 @@ class TestBatching:
         c = EventCoalescer(sink, window=5.0, max_batch=3)
         for i in range(7):
             c.publish("workflow:r1", "workflow_node_done", _node(f"n{i}"))
-        # 3 + 3 flushed immediately; 1 still pending behind the (long) timer.
         assert len(frames) == 2
         assert all(len(f[2]["events"]) == 3 for f in frames)
         assert c.pending == 1
@@ -188,7 +191,8 @@ class TestPassThrough:
 
     async def test_a_pass_through_flushes_the_pending_batch_first(self) -> None:
         """Otherwise a status flip overtakes the node events that logically precede it, and
-        a consumer sees the run go `complete` while its last node still reads `running`."""
+        a consumer sees the run go `complete` while its last node still reads `running`.
+        """
         frames, sink = _sink()
         c = EventCoalescer(sink, window=5.0)
         c.publish("workflow:r1", "workflow_node_done", _node("a"))
@@ -229,8 +233,6 @@ class TestWindowBounds:
         for i in range(6):
             c.publish("workflow:r1", "workflow_node_done", _node(f"n{i}"))
             await asyncio.sleep(0.01)
-        # ~60ms of steady publishing at a 30ms window: at least one flush must have happened
-        # already, which a re-armed timer would have prevented entirely.
         assert frames, "a steady stream starved the debounce window"
 
     async def test_flush_all_strands_nothing(self) -> None:
@@ -264,7 +266,7 @@ class TestWindowBounds:
 
         c = EventCoalescer(exploding, window=0.01)
         c.publish("workflow:r1", "workflow_node_done", _node("a"))
-        await asyncio.sleep(0.05)  # the timer fires inside the loop; must not raise
+        await asyncio.sleep(0.05)
 
 
 class TestUnbatchedEquivalence:
@@ -300,11 +302,11 @@ def test_the_allowlist_is_a_subset_of_the_published_events() -> None:
     import re
     from pathlib import Path
 
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[2]
     published: set[str] = set()
     for rel in (
-        "src/gideon/workflows/controller.py",
-        "src/gideon/workflows/service.py",
+        "runtime/gideon/automation/workflows/controller.py",
+        "runtime/gideon/automation/workflows/service.py",
     ):
         text = (root / rel).read_text(encoding="utf-8")
         published |= set(re.findall(r'_publish\(\s*"(workflow_[a-z_]+)"', text))

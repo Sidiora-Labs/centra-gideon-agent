@@ -44,18 +44,15 @@ from pathlib import Path
 
 import pytest
 
-from gideon import tmux_substrate
-from gideon.agents import runner_lifecycle
-from gideon.workflows import containers, provisioning, store, worktrees
-from gideon.workflows.controller import EngineServices, RunController
-from gideon.workflows.models import RunStatus, WorkflowRun
-from gideon.workflows.watchdog import WorkflowWatchdog
+from gideon.automation.workflows import containers, provisioning, store, worktrees
+from gideon.automation.workflows.controller import EngineServices, RunController
+from gideon.automation.workflows.models import RunStatus, WorkflowRun
+from gideon.automation.workflows.watchdog import WorkflowWatchdog
+from gideon.engine import tmux_substrate
+from gideon.engine.agents import runner_lifecycle
 
 pytestmark = pytest.mark.anyio
 
-#: Whether a REAL tmux binary exists on this machine's PATH — captured at import, BEFORE
-#: any fixture prepends the shim, so the skip decision is about the machine and can never
-#: be satisfied by our own fake.
 _REAL_TMUX = shutil.which("tmux") is not None
 
 
@@ -74,8 +71,6 @@ SPEC = {
 }
 
 
-# ── the tmux shim (superset of the sibling suite's: it can also CREATE and KILL) ─────────
-
 _SHIM = '''#!{python}
 import os, signal, subprocess, sys
 # argv shape produced by tmux_substrate._argv: ["-L", <socket>, <subcommand>, ...]
@@ -83,7 +78,7 @@ argv = sys.argv[1:]
 if argv[:1] == ["-L"]:
     argv = argv[2:]
 sub = argv[0] if argv else ""
-root = os.environ["PCLAW_SHIM_SESSIONS"]
+root = os.environ["GIDEON_SHIM_SESSIONS"]
 
 
 def live():
@@ -100,7 +95,7 @@ def live():
 
 
 if sub == "new-session":
-    if os.environ.get("PCLAW_SHIM_FAIL_NEW"):
+    if os.environ.get("GIDEON_SHIM_FAIL_NEW"):
         sys.exit(1)                       # the "tmux refused" leg for the fallback tests
     args = argv[1:]
     name = cwd = ""
@@ -163,7 +158,7 @@ def tmux_shim(tmp_path, monkeypatch):
     """Put the kernel-backed ``tmux`` on PATH; yield the session-registry dir.
 
     Also pins ``PYTHONPATH`` to the ABSOLUTE ``src`` dir: the ceiling shim a durable step
-    execs (``python -m gideon._spawn_exec_shim``) starts with the WORKER's cwd, so a
+    execs (``python -m gideon.engine._spawn_exec_shim``) starts with the WORKER's cwd, so a
     relative ``PYTHONPATH=src`` from the pytest invocation would resolve against the tmp
     workspace and the import would fail — a test-harness artefact, not a production one
     (the gateway runs from an installed package).
@@ -176,14 +171,13 @@ def tmux_shim(tmp_path, monkeypatch):
     shim.write_text(_SHIM.format(python=sys.executable), encoding="utf-8")
     shim.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
-    monkeypatch.setenv("PCLAW_SHIM_SESSIONS", str(sessions))
-    monkeypatch.setenv("PYTHONPATH", str(Path(__file__).resolve().parent.parent / "src"))
+    monkeypatch.setenv("GIDEON_SHIM_SESSIONS", str(sessions))
+    monkeypatch.setenv(
+        "PYTHONPATH", str(Path(__file__).resolve().parent.parent.parent / "src")
+    )
     try:
         yield sessions
     finally:
-        # Scoped to the pids THIS registry recorded — never a pattern kill. The shim's
-        # workers are process-group leaders (start_new_session), so killpg reaches a
-        # worker's own children too.
         for record in sessions.glob("*"):
             try:
                 pid = int(record.read_text(encoding="utf-8").partition("\t")[0])
@@ -216,14 +210,16 @@ def isolated_home(tmp_path, monkeypatch):
     """
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: home)
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
-    monkeypatch.setattr("gideon.workflows.leases.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.automation.workflows.leases.config_dir", lambda: home)
     return home
 
 
 def _run(**kw) -> WorkflowRun:
-    run = store.create(WorkflowRun(id="", workflow_name="ei6ds", status=RunStatus.RUNNING, **kw))
+    run = store.create(
+        WorkflowRun(id="", workflow_name="ei6ds", status=RunStatus.RUNNING, **kw)
+    )
     store.write_spec(run.id, SPEC)
     store.save(run)
     return run
@@ -245,9 +241,6 @@ async def _wait_for(predicate, *, timeout: float = 10.0, what: str = "condition"
             return
         await asyncio.sleep(0.05)
     raise AssertionError(f"timed out waiting for {what}")
-
-
-# ── the spawn function itself ────────────────────────────────────────────────────────────
 
 
 class TestNewSession:
@@ -286,15 +279,27 @@ class TestNewSession:
         assert not await tmux_substrate.new_session(
             "has space", workspace=str(tmp_path), command=cmd
         )
-        assert not await tmux_substrate.new_session("has.dot", workspace=str(tmp_path), command=cmd)
-        assert not await tmux_substrate.new_session("", workspace=str(tmp_path), command=cmd)
-        assert not await tmux_substrate.new_session("pclaw-ok", workspace=str(tmp_path), command=[])
-        assert list(tmux_shim.glob("*")) == [], "a refused spawn still created a session"
+        assert not await tmux_substrate.new_session(
+            "has.dot", workspace=str(tmp_path), command=cmd
+        )
+        assert not await tmux_substrate.new_session(
+            "", workspace=str(tmp_path), command=cmd
+        )
+        assert not await tmux_substrate.new_session(
+            "gideon-ok", workspace=str(tmp_path), command=[]
+        )
+        assert (
+            list(tmux_shim.glob("*")) == []
+        ), "a refused spawn still created a session"
 
-    async def test_missing_tmux_answers_false_and_never_raises(self, tmp_path, monkeypatch):
+    async def test_missing_tmux_answers_false_and_never_raises(
+        self, tmp_path, monkeypatch
+    ):
         monkeypatch.setenv("PATH", "/nonexistent")
         assert (
-            await tmux_substrate.new_session("pclaw-x", workspace=str(tmp_path), command=["true"])
+            await tmux_substrate.new_session(
+                "gideon-x", workspace=str(tmp_path), command=["true"]
+            )
             is False
         )
 
@@ -304,21 +309,18 @@ class TestNewSession:
         ws = tmp_path / "envws"
         ws.mkdir()
         ok = await tmux_substrate.new_session(
-            "pclaw-envtest",
+            "gideon-envtest",
             workspace=str(ws),
             command=[
                 sys.executable,
                 "-c",
-                "import os; open('mark', 'w').write(os.environ.get('PCLAW_MARK', ''))",
+                "import os; open('mark', 'w').write(os.environ.get('GIDEON_MARK', ''))",
             ],
-            env={"PCLAW_MARK": "42"},
+            env={"GIDEON_MARK": "42"},
         )
         assert ok
         await _wait_for(lambda: (ws / "mark").exists(), what="the env-marker file")
         assert (ws / "mark").read_text(encoding="utf-8") == "42"
-
-
-# ── the run-worker launch seam (run_step's durable branch) ──────────────────────────────
 
 
 class TestDurableStepSeam:
@@ -330,19 +332,25 @@ class TestDurableStepSeam:
         the bare path writes no rc, so its presence cannot be a false positive."""
         ws = tmp_path / "ws"
         ws.mkdir()
-        step = _write_step(ws, "open('done.txt', 'w').write('yo')\nprint('hello-out')\n")
+        step = _write_step(
+            ws, "open('done.txt', 'w').write('yo')\nprint('hello-out')\n"
+        )
         ok, detail = await provisioning.run_step(
-            step, ws, env={}, durable_session="pclaw-proj-r1-ei6ds"
+            step, ws, env={}, durable_session="gideon-proj-r1-ei6ds"
         )
         assert ok, f"the durable step failed: {detail}"
-        assert "hello-out" in detail, "the step's stdout did not come back through the out file"
-        assert (ws / "done.txt").exists(), "the step's own effect is missing — it never ran"
+        assert (
+            "hello-out" in detail
+        ), "the step's stdout did not come back through the out file"
+        assert (
+            ws / "done.txt"
+        ).exists(), "the step's own effect is missing — it never ran"
         rc = (ws / worktrees.setup_marker(step)).with_suffix(".rc")
         assert (
             rc.exists() and rc.read_text(encoding="utf-8").strip() == "0"
         ), "no rc file — the step ran as a bare subprocess, so the durable seam is inert"
         assert (
-            tmux_shim / "pclaw-proj-r1-ei6ds"
+            tmux_shim / "gideon-proj-r1-ei6ds"
         ).exists(), "no session was ever registered — tmux was not where the step ran"
 
     async def test_tmux_refusing_the_spawn_falls_back_to_the_bare_subprocess(
@@ -350,17 +358,19 @@ class TestDurableStepSeam:
     ):
         """The fail-open clause: durability must never break a run. tmux says no → the step
         still runs, exactly as it did before this feature existed."""
-        monkeypatch.setenv("PCLAW_SHIM_FAIL_NEW", "1")
+        monkeypatch.setenv("GIDEON_SHIM_FAIL_NEW", "1")
         ws = tmp_path / "ws"
         ws.mkdir()
         step = _write_step(ws, "open('done.txt', 'w').write('yo')\nprint('bare-out')\n")
         ok, detail = await provisioning.run_step(
-            step, ws, env={}, durable_session="pclaw-proj-r2-ei6ds"
+            step, ws, env={}, durable_session="gideon-proj-r2-ei6ds"
         )
         assert ok and "bare-out" in detail
         assert (ws / "done.txt").exists()
         rc = (ws / worktrees.setup_marker(step)).with_suffix(".rc")
-        assert not rc.exists(), "an rc file exists — the durable path claims to have run it"
+        assert (
+            not rc.exists()
+        ), "an rc file exists — the durable path claims to have run it"
         assert list(tmux_shim.glob("*")) == []
 
     async def test_tmux_MISSING_takes_the_bare_path_via_the_gate(
@@ -369,11 +379,9 @@ class TestDurableStepSeam:
         """The other fallback flavour: no binary → `durable_sessions_enabled()` is False →
         not one tmux subprocess is attempted (there is no tmux to attempt it with)."""
         monkeypatch.setenv(
-            "PATH", os.pathsep.join(p for p in os.environ["PATH"].split(os.pathsep) if p)
+            "PATH",
+            os.pathsep.join(p for p in os.environ["PATH"].split(os.pathsep) if p),
         )
-        # Strip any tmux from PATH by pointing at an empty bindir + the python's own dir
-        # (run_step needs to resolve sys.executable's binary through an absolute path, so
-        # PATH content is irrelevant to the step itself).
         empty = tmp_path / "emptybin"
         empty.mkdir()
         monkeypatch.setenv("PATH", str(empty))
@@ -381,30 +389,39 @@ class TestDurableStepSeam:
         ws = tmp_path / "ws"
         ws.mkdir()
         step = _write_step(ws, "open('done.txt', 'w').write('yo')\n")
-        ok, _ = await provisioning.run_step(step, ws, env={}, durable_session="pclaw-proj-r3-ei6ds")
+        ok, _ = await provisioning.run_step(
+            step, ws, env={}, durable_session="gideon-proj-r3-ei6ds"
+        )
         assert ok and (ws / "done.txt").exists()
 
-    async def test_the_flag_off_never_touches_tmux(self, tmux_shim, durable_on, tmp_path):
+    async def test_the_flag_off_never_touches_tmux(
+        self, tmux_shim, durable_on, tmp_path
+    ):
         """VACUITY FLOOR for the seam test above: prove the durable branch is the flag's
         doing, not an unconditional rewrite of run_step."""
         durable_on(False)
         ws = tmp_path / "ws"
         ws.mkdir()
         step = _write_step(ws, "open('done.txt', 'w').write('yo')\n")
-        ok, _ = await provisioning.run_step(step, ws, env={}, durable_session="pclaw-proj-r4-ei6ds")
+        ok, _ = await provisioning.run_step(
+            step, ws, env={}, durable_session="gideon-proj-r4-ei6ds"
+        )
         assert ok and (ws / "done.txt").exists()
-        assert list(tmux_shim.glob("*")) == [], "the flag was off and tmux was still used"
+        assert (
+            list(tmux_shim.glob("*")) == []
+        ), "the flag was off and tmux was still used"
 
     async def test_a_failing_step_reports_its_exit_code_and_output(
         self, tmux_shim, durable_on, tmp_path
     ):
         """The bare path's `(False, "exited N: …")` contract survives the reroute — the
-        caller (`_run_setup`) records that string on the run, so its shape is load-bearing."""
+        caller (`_run_setup`) records that string on the run, so its shape is load-bearing.
+        """
         ws = tmp_path / "ws"
         ws.mkdir()
         step = _write_step(ws, "import sys\nprint('boom')\nsys.exit(3)\n")
         ok, detail = await provisioning.run_step(
-            step, ws, env={}, durable_session="pclaw-proj-r5-ei6ds"
+            step, ws, env={}, durable_session="gideon-proj-r5-ei6ds"
         )
         assert not ok
         assert "exited 3" in detail and "boom" in detail
@@ -419,7 +436,7 @@ class TestDurableStepSeam:
         durable session for it would make the sweep suspend a run whose work was never
         separable. Without this test the parameter is a wire no test would notice cut.
         """
-        from gideon.workflows.workspace import Mode, WorkspaceSpec
+        from gideon.automation.workflows.workspace import Mode, WorkspaceSpec
 
         run_dir = tmp_path / "rundir"
         run_dir.mkdir()
@@ -427,14 +444,16 @@ class TestDurableStepSeam:
             WorkspaceSpec(mode=Mode.SCRATCH, setup="touch done.txt"),
             run_id="r-iso",
             run_dir=run_dir,
-            durable_session="pclaw-proj-riso-ei6ds",
+            durable_session="gideon-proj-riso-ei6ds",
         )
         assert out.setup_ran == ["touch done.txt"] and out.isolated
         ws = Path(out.path)
         assert (ws / "done.txt").exists()
         rc = (ws / worktrees.setup_marker("touch done.txt")).with_suffix(".rc")
-        assert rc.exists(), "the isolated workspace's setup did not go through the durable seam"
-        assert (tmux_shim / "pclaw-proj-riso-ei6ds").exists()
+        assert (
+            rc.exists()
+        ), "the isolated workspace's setup did not go through the durable seam"
+        assert (tmux_shim / "gideon-proj-riso-ei6ds").exists()
 
         inplace = tmp_path / "inplace"
         inplace.mkdir()
@@ -442,12 +461,14 @@ class TestDurableStepSeam:
             WorkspaceSpec(mode=Mode.IN_PLACE, setup="touch bare.txt"),
             run_id="r-inp",
             workspace_dir=str(inplace),
-            durable_session="pclaw-proj-rinp-ei6ds",
+            durable_session="gideon-proj-rinp-ei6ds",
         )
         assert not out2.isolated and (inplace / "bare.txt").exists()
         assert not (
-            tmux_shim / "pclaw-proj-rinp-ei6ds"
-        ).exists(), "an in-place run was given a durable worker its substrate cannot honour"
+            tmux_shim / "gideon-proj-rinp-ei6ds"
+        ).exists(), (
+            "an in-place run was given a durable worker its substrate cannot honour"
+        )
 
     async def test_the_controller_names_the_session_the_sweep_recomputes(
         self, tmux_shim, durable_on, tmp_path
@@ -484,7 +505,7 @@ class TestDurableStepSeam:
         lock exists to prevent — and the survivor must finish, not be killed."""
         ws = tmp_path / "ws"
         ws.mkdir()
-        name = "pclaw-proj-r6-ei6ds"
+        name = "gideon-proj-r6-ei6ds"
         assert await tmux_substrate.new_session(
             name,
             workspace=str(ws),
@@ -498,14 +519,13 @@ class TestDurableStepSeam:
         step = _write_step(ws, "open('second', 'w').write('2')\n")
         ok, _ = await provisioning.run_step(step, ws, env={}, durable_session=name)
         assert ok
-        assert (ws / "first").exists(), "the surviving worker was cut down instead of adopted"
+        assert (
+            ws / "first"
+        ).exists(), "the surviving worker was cut down instead of adopted"
         assert (ws / "second").exists()
         assert (
             time.monotonic() - started >= 0.5
         ), "run_step did not wait for the survivor — the two ran concurrently"
-
-
-# ── SC5 end to end: the spawn side produces the session the sweep reattaches to ─────────
 
 
 class TestSC5SpawnToReattach:
@@ -530,13 +550,16 @@ class TestSC5SpawnToReattach:
         )
         name = containers.durable_worker_name(run)
         step = _write_step(ws, "import time\ntime.sleep(120)\n", name="long_step.py")
-        task = asyncio.ensure_future(provisioning.run_step(step, ws, env={}, durable_session=name))
+        task = asyncio.ensure_future(
+            provisioning.run_step(step, ws, env={}, durable_session=name)
+        )
         try:
             await _wait_for(
-                lambda: tmux_substrate.has_session(name), what="the durable worker to spawn"
+                lambda: tmux_substrate.has_session(name),
+                what="the durable worker to spawn",
             )
         finally:
-            task.cancel()  # the gateway dies; the handle is simply abandoned
+            task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
         assert await tmux_substrate.has_session(
@@ -554,14 +577,18 @@ class TestSC5SpawnToReattach:
         assert await controller.run_to_completion(timeout=30) == RunStatus.COMPLETE
         await controller.stop()
         starts = [
-            e for e in _journal_events(run.id) if e.get("kind") == "run_started" and "resumed" in e
+            e
+            for e in _journal_events(run.id)
+            if e.get("kind") == "run_started" and "resumed" in e
         ]
         assert (
             starts and starts[-1]["resumed"] is True
         ), "the reattached run resumed but the journal did not flag it `resumed`"
         await tmux_substrate.kill_session(name)
 
-    async def test_a_genuinely_dead_session_is_tombstoned(self, tmux_shim, durable_on, tmp_path):
+    async def test_a_genuinely_dead_session_is_tombstoned(
+        self, tmux_shim, durable_on, tmp_path
+    ):
         """SC5's second clause with a session that EXISTED and died: the spawn side must not
         make the sweep credulous — only the living rescue a run."""
         run = _run(project_id="proj", extra={"worktree_path": str(tmp_path / "gone")})
@@ -571,7 +598,9 @@ class TestSC5SpawnToReattach:
         assert await tmux_substrate.new_session(
             name, workspace=str(ws), command=[sys.executable, "-c", "pass"]
         )
-        await _wait_for(lambda: not tmux_substrate.has_session_sync(name), what="the worker to die")
+        await _wait_for(
+            lambda: not tmux_substrate.has_session_sync(name), what="the worker to die"
+        )
         wd = WorkflowWatchdog(None, EngineServices())
         await wd._poll_once()
         assert (
@@ -579,7 +608,9 @@ class TestSC5SpawnToReattach:
         ), "a run whose worker is genuinely gone was not tombstoned"
         await wd.stop()
 
-    async def test_teardown_kills_the_runs_durable_worker(self, tmux_shim, durable_on, tmp_path):
+    async def test_teardown_kills_the_runs_durable_worker(
+        self, tmux_shim, durable_on, tmp_path
+    ):
         """The other end of the lifecycle: a deleted run must not leave a detached worker
         running in a directory teardown is about to remove."""
         run = _run(project_id="proj", extra={})
@@ -599,7 +630,7 @@ class TestSC5SpawnToReattach:
 
 def _journal_events(run_id: str) -> list[dict]:
     """Raw journal read, same shape (and same honesty argument) as the sibling suite's."""
-    from gideon.workflows import journal as journal_mod
+    from gideon.automation.workflows import journal as journal_mod
 
     path = Path(store.run_dir(run_id)) / journal_mod.JOURNAL_FILE
     if not path.exists():
@@ -614,24 +645,19 @@ def _journal_events(run_id: str) -> list[dict]:
     return out
 
 
-# ── the shared run→name derivation ───────────────────────────────────────────────────────
-
-
 class TestDurableWorkerName:
     def test_the_spawn_side_and_the_sweep_derive_the_same_name(self):
         """`containers.durable_worker_name` is the ONE derivation both halves call; this
-        pins its fallbacks so neither half can drift to a name the other never computes."""
+        pins its fallbacks so neither half can drift to a name the other never computes.
+        """
         from types import SimpleNamespace
 
         run = SimpleNamespace(project_id="proj", id="r-1", workflow_name="wf")
-        assert containers.durable_worker_name(run) == tmux_substrate.durable_session_name(
-            "proj", "r-1", "wf"
-        )
+        assert containers.durable_worker_name(
+            run
+        ) == tmux_substrate.durable_session_name("proj", "r-1", "wf")
         bare = SimpleNamespace(project_id="", id="r-2", workflow_name="")
-        assert containers.durable_worker_name(bare) == "pclaw-default-r-2-run"
-
-
-# ── SC5 against a REAL tmux daemon (skipped where none is installed) ────────────────────
+        assert containers.durable_worker_name(bare) == "gideon-default-r-2-run"
 
 
 @pytest.mark.skipif(not _REAL_TMUX, reason="tmux is not installed on this machine")
@@ -654,13 +680,15 @@ class TestSC5RealTmux:
     ):
         ws = tmp_path / "scratch"
         ws.mkdir()
-        live_run = _run(project_id="proj", extra={"worktree_path": str(tmp_path / "gone-live")})
-        dead_run = _run(project_id="proj", extra={"worktree_path": str(tmp_path / "gone-dead")})
+        live_run = _run(
+            project_id="proj", extra={"worktree_path": str(tmp_path / "gone-live")}
+        )
+        dead_run = _run(
+            project_id="proj", extra={"worktree_path": str(tmp_path / "gone-dead")}
+        )
         live_name = containers.durable_worker_name(live_run)
         dead_name = containers.durable_worker_name(dead_run)
         try:
-            # The live worker comes from the PRODUCTION seam: a long marker command through
-            # run_step's durable branch, abandoned mid-flight (the gateway "dies").
             task = asyncio.ensure_future(
                 provisioning.run_step("sleep 60", ws, env={}, durable_session=live_name)
             )
@@ -673,7 +701,6 @@ class TestSC5RealTmux:
                 task.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await task
-            # The dead worker existed and was killed — only genuinely dead sessions tombstone.
             assert await tmux_substrate.new_session(
                 dead_name, workspace=str(ws), command=["sleep", "60"]
             )
@@ -716,8 +743,6 @@ class TestSC5RealTmux:
         )
         name = containers.durable_worker_name(run)
         try:
-            # `sleep 120` through run_step's durable branch: the worker is tmux's child, not
-            # ours, so cancelling the awaiter is a real gateway death and not a fixture flag.
             task = asyncio.ensure_future(
                 provisioning.run_step("sleep 120", ws, env={}, durable_session=name)
             )
@@ -741,7 +766,9 @@ class TestSC5RealTmux:
                 store.get(run.id).status == RunStatus.PAUSED
             ), "the sweep did not reattach to the still-alive real worker"
 
-            controller = RunController(store.get(run.id), SPEC, services=EngineServices())
+            controller = RunController(
+                store.get(run.id), SPEC, services=EngineServices()
+            )
             assert await controller.run_to_completion(timeout=30) == RunStatus.COMPLETE
             await controller.stop()
             starts = [

@@ -247,14 +247,14 @@ origin.** This is not a preference. The served dashboard is structurally incapab
 it:
 
 - **The dashboard is per-gateway by construction.** A shell loads the SPA *from* a gateway:
-  `desktop/main.js:1243` is a bare `wc.loadURL(localGatewayUrl)`, and `navigateToEndpoint` does the
+  `apps/desktop/src/application/endpoint-session.js:159` calls `page.loadURL(this.gateway.url)`, and `navigateToEndpoint` does the
   same with a paired gateway's origin. One shell window is looking at one gateway at a time,
-  always. (`localGatewayUrl` is resolved from the spawned gateway's READY line at
-  `desktop/main.js:201`; `activeUrl` is what the WebView is currently pointed at. They are separate
+  always. (`LocalGateway.url` is resolved from the spawned gateway's READY line at
+  `apps/desktop/src/application/local-gateway.js:49`; `EndpointSession.state.activeUrl` is what the WebView is currently pointed at. They are separate
   variables on purpose — see [What the desktop shell narrows](desktop.md#connecting-to-a-gateway-you-did-not-start).)
 - **The SPA has no base-URL concept at all.** Its API client speaks root-relative `/api` paths
-  on the same origin (`web/src/lib/api.ts:1-3`), and the WebSocket is built from
-  `location.host` (`web/src/lib/useChatSocket.ts:32`). There is no variable to re-point. A
+  on the same origin (`apps/console/src/lib/api.ts:1-3`), and the WebSocket is built from
+  `location.host` (`apps/console/src/lib/useChatSocket.ts:32`). There is no variable to re-point. A
   bundle served by gateway A can only ever talk to gateway A.
 
 So a registry kept inside the dashboard would be a registry each gateway held a separate copy
@@ -265,12 +265,12 @@ of, listing itself — which is not a registry.
 The good news first. Because the SPA is origin-bound, **browser origin isolation already
 partitions everything it stores.** Two gateways on two origins get two separate `localStorage`
 and `sessionStorage` buckets for free — including the `cache:`-prefixed sessionStorage mirror
-at `web/src/lib/data/store.ts:50`, and the other 47 non-test files under `web/src` that touch
+at `apps/console/src/lib/data/store.ts:50`, and the other 47 non-test files under `apps/console/src` that touch
 web storage. A wrapper does **not** need to namespace, wrap, or patch any of that, and should
 not try.
 
 The bad news, and the whole point of this subsection: **the shell's own storage is a single
-scope spanning all N gateways.** `desktop/main.js` declares no `partition`, so the default
+scope spanning all N gateways.** `apps/desktop/main.js` declares no `partition`, so the default
 session applies. That single scope is the one and only place two brains can bleed into each
 other.
 
@@ -357,7 +357,7 @@ Two different jobs, and mixing them up is the common bug:
 ```ts
 import { endpointSocket, endpointSocketUrl } from './lib/endpoints'
 
-endpointSocketUrl('https://pc.example.com')   // 'wss://pc.example.com/api/ws'
+endpointSocketUrl('https://gideon.example.com')   // 'wss://gideon.example.com/api/ws'
 endpointSocketUrl('http://claw.local:10000')  // 'ws://claw.local:10000/api/ws'
 endpointSocket(activeEndpoint(registry))      // same, from a registry row
 ```
@@ -406,8 +406,8 @@ return `403`.
 Until that is reconciled, set **both** fields to the same public URL:
 
 ```jsonc
-{ "dashboard": { "url": "https://pc.example.com",
-                 "public_url": "https://pc.example.com" } }
+{ "dashboard": { "url": "https://gideon.example.com",
+                 "public_url": "https://gideon.example.com" } }
 ```
 
 `dashboard.url` is the field that widens the origin allowlist (and it refuses to do so unless
@@ -421,9 +421,9 @@ already specified in code:
 
 - The socket reconnects with **capped exponential backoff** — `retry` climbs to a ceiling of 6
   and the next attempt is scheduled at `250 * 2 ** retry` ms
-  (`web/src/lib/useChatSocket.ts:45-46`).
+  (`apps/console/src/lib/useChatSocket.ts:45-46`).
 - The catch-up callback fires **only after a real connection existed**, guarded by `everOpened`
-  (`web/src/lib/useChatSocket.ts:36`), so a first-load failure is not reported as a dropped
+  (`apps/console/src/lib/useChatSocket.ts:36`), so a first-load failure is not reported as a dropped
   connection.
 - Degraded UI is whatever the dashboard already renders in that state. It is the same contract
   the rest of the product uses; a companion is not a special case.
@@ -438,7 +438,7 @@ failure against `base_url`), and say so on that endpoint's row in the switcher.
 A shell that hosts the SPA inherits all of the above and can stop reading here. A shell that
 opens the socket itself has no SPA to inherit from, and two behaviours were measured against a
 real TLS tunnel being killed under a live session
-(`tests/test_ca7_wss_tunnel_e2e.py`):
+(`checks/runtime/test_ca7_wss_tunnel_e2e.py`):
 
 - **The drop arrives in one of two shapes, and you must handle both.** The read either returns a
   close/error message or it *raises* a connection-reset error — the latter when the client's
@@ -447,7 +447,7 @@ real TLS tunnel being killed under a live session
   neither arrives, you are looking at the hang this contract exists to prevent, not a quiet link.
 - **Your device session survives the drop — keep it.** Reconnecting does not mean re-pairing. The
   session is cookie-borne, and the cookie path deliberately skips IP binding
-  (`src/gideon/dashboard/token_auth.py:1072` reads `if not from_cookie and not
+  (`runtime/gideon/dashboard/token_auth.py:1072` reads `if not from_cookie and not
   check_token_ip(...)`), so the same session still authenticates after a tunnel restart has moved
   your apparent address — which is exactly what happens when a phone changes network. This is the
   concrete reason the guide forbids `?token=` for a companion: that path *is* IP-bound, so a shell
@@ -495,7 +495,7 @@ If a wrapper needs something not on this list, that is a change to this document
 
 ## Bringing up a new platform
 
-Two shells exist today: the desktop app (`desktop/main.js`) and the phone, which installs the
+Two shells exist today: the desktop app (`apps/desktop/main.js`) and the phone, which installs the
 served SPA as a PWA. Neither of them is a port. That is the whole point, and it is the reason
 a third platform is a small job rather than a new product.
 
@@ -504,7 +504,7 @@ The recipe is two steps, and there is no third:
 1. **Wrap the served UI.** Load an endpoint's `base_url` as an origin in whatever the platform
    calls a web view, and stop. No forked UI, no per-platform screens, no second API. If you
    find yourself designing a view, you are on the wrong side of the line — that view belongs
-   in `web/` where every platform gets it at once, including the two that already shipped.
+   in `apps/console/` where every platform gets it at once, including the two that already shipped.
 2. **Implement the client contract above.** All eight items, unchanged. The registry shape,
    the per-endpoint namespacing, the switcher, the health rows, the socket-URL rule. A new
    platform is not an occasion to re-decide any of them; if you disagree with one, argue with
@@ -526,8 +526,8 @@ Which platforms are supported at all is `PLATFORM-REACH`'s call, not this contra
 clears a platform, **no code for that platform lands in this repository** — and that includes
 the well-meant kind:
 
-- no platform SDK dependency, and no platform SDK identifier in `src/gideon` or
-  `web/src` (those two are the surfaces every platform shares; a native symbol appearing there
+- no platform SDK dependency, and no platform SDK identifier in `runtime/gideon` or
+  `apps/console/src` (those two are the surfaces every platform shares; a native symbol appearing there
   means a shell has leaked into the shared half);
 - no `if (platform === …)` branch reserving a slot for a shell that does not exist;
 - no empty directory, no scaffold, no stub "so the wiring is ready".

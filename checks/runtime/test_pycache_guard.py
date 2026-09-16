@@ -24,8 +24,6 @@ from types import ModuleType
 import pycache_guard
 import pytest
 
-# Same-length bodies. The literal is three characters in every variant, so the
-# file's size is identical across edits — half of the collision the rail removes.
 _SOURCE = 'def probe():\n    return "{token}"\n'
 
 _PROBE = "probe_module.py"
@@ -54,7 +52,10 @@ def _same_length_edit(root: Path, token: str) -> None:
     source.write_text(body)
     os.utime(source, ns=(before.st_atime_ns, before.st_mtime_ns))
     after = source.stat()
-    assert (int(after.st_mtime), after.st_size) == (int(before.st_mtime), before.st_size)
+    assert (int(after.st_mtime), after.st_size) == (
+        int(before.st_mtime),
+        before.st_size,
+    )
     assert token in source.read_text(), "the new body really is what is on disk"
 
 
@@ -88,7 +89,9 @@ class TestTheMaskingIsReal:
     def test_the_default_cache_masks_a_same_length_same_mtime_edit(self, tmp_path):
         root = _tree(tmp_path, "AAA")
         assert _run(root, prefix=None) == "AAA"
-        assert (root / "__pycache__").is_dir(), "the first run must have written a cache"
+        assert (
+            root / "__pycache__"
+        ).is_dir(), "the first run must have written a cache"
 
         _same_length_edit(root, "BBB")
 
@@ -110,7 +113,9 @@ class TestTheMaskingIsReal:
             "believing it fixed."
         )
 
-    def test_relocating_the_cache_without_making_it_fresh_masks_identically(self, tmp_path):
+    def test_relocating_the_cache_without_making_it_fresh_masks_identically(
+        self, tmp_path
+    ):
         """Freshness is the load-bearing property, not the location.
 
         This is why ``activate()`` refuses to inherit a prefix that is not marked as
@@ -136,7 +141,9 @@ class TestThePerRunPrefixRemovesIt:
             "with no cache from the previous run reachable, there is nothing to validate "
             "incorrectly — the mutation on disk is the code that runs"
         )
-        assert not (root / "__pycache__").exists(), "nothing was written beside the source"
+        assert not (
+            root / "__pycache__"
+        ).exists(), "nothing was written beside the source"
 
     def test_it_holds_for_a_second_same_length_edit(self, tmp_path):
         """Not a one-shot: the third cycle of a mutate/revert loop behaves too."""
@@ -182,7 +189,9 @@ class TestTheDetectorFires:
     def test_it_names_a_module_cached_outside_the_prefix(self, tmp_path):
         stale = ModuleType("stale_module")
         stale.__cached__ = str(tmp_path / "elsewhere" / "__pycache__" / "stale.pyc")
-        assert pycache_guard.cached_outside(tmp_path / "prefix", [stale]) == ["stale_module"]
+        assert pycache_guard.cached_outside(tmp_path / "prefix", [stale]) == [
+            "stale_module"
+        ]
 
     def test_it_accepts_a_module_cached_under_the_prefix(self, tmp_path):
         prefix = tmp_path / "prefix"
@@ -218,9 +227,13 @@ class TestActivateIsIdempotentAndShareable:
 
         assert pycache_guard.activate() == inherited
         assert sys.pycache_prefix == str(inherited)
-        assert inherited.is_dir(), "an inherited-but-absent directory is created, not assumed"
+        assert (
+            inherited.is_dir()
+        ), "an inherited-but-absent directory is created, not assumed"
 
-    def test_it_overrides_a_prefix_that_is_not_a_per_run_one(self, monkeypatch, tmp_path):
+    def test_it_overrides_a_prefix_that_is_not_a_per_run_one(
+        self, monkeypatch, tmp_path
+    ):
         """A developer's stable cache directory is not freshness — see the masking case."""
         stable = tmp_path / "my-stable-cache"
         monkeypatch.setenv(pycache_guard.ENV_VAR, str(stable))

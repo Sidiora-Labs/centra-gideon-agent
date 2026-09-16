@@ -9,10 +9,10 @@ import json
 
 import pytest
 
-from gideon.loop import files as loop_files
-from gideon.loop import manager, store
-from gideon.loop import watchdog as W
-from gideon.loop.loop import Loop, LoopStatus
+from gideon.automation.loop import files as loop_files
+from gideon.automation.loop import manager, store
+from gideon.automation.loop import watchdog as W
+from gideon.automation.loop.loop import Loop, LoopStatus
 
 
 def _run(coro):
@@ -21,7 +21,7 @@ def _run(coro):
 
 @pytest.fixture(autouse=True)
 def _tmp_config(monkeypatch, tmp_path):
-    monkeypatch.setattr("gideon.loop.files.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.automation.loop.files.config_dir", lambda: tmp_path)
     return tmp_path
 
 
@@ -42,7 +42,7 @@ class _FakeState:
         self._sessions = {}
         self.notes = []
         self.refreshed = []
-        from gideon.dashboard.sse import SseRegistry
+        from gideon.interfaces.dashboard.sse import SseRegistry
 
         self._sse = SseRegistry()
 
@@ -58,7 +58,12 @@ class _FakeState:
 
 class _FakeNudge:
     def __init__(self, lid, session_name):
-        self.id, self.session_name, self.active, self.cycle_count = lid, session_name, True, 0
+        self.id, self.session_name, self.active, self.cycle_count = (
+            lid,
+            session_name,
+            True,
+            0,
+        )
 
 
 class _FakeSvc:
@@ -67,7 +72,14 @@ class _FakeSvc:
         self._n = 0
 
     async def add(
-        self, *, session_name, message, idle_secs, max_cycles, stop_sentinel_path, first_idle_secs=0
+        self,
+        *,
+        session_name,
+        message,
+        idle_secs,
+        max_cycles,
+        stop_sentinel_path,
+        first_idle_secs=0,
     ):
         self._n += 1
         lp = _FakeNudge(f"N{self._n}", session_name)
@@ -75,7 +87,9 @@ class _FakeSvc:
         return lp
 
     def get_by_session(self, session_name):
-        return next((lp for lp in self._loops.values() if lp.session_name == session_name), None)
+        return next(
+            (lp for lp in self._loops.values() if lp.session_name == session_name), None
+        )
 
     async def update(self, loop_id, **kw):
         lp = self._loops.get(loop_id)
@@ -111,7 +125,11 @@ def _write_finding(cid, cycle, **extra):
     d = loop_files.loop_dir(cid)
     (d / "findings" / f"cycle_{cycle:03d}.json").write_text(
         json.dumps(
-            {"cycle": cycle, "new_findings_count": extra.pop("new_findings_count", 1), **extra}
+            {
+                "cycle": cycle,
+                "new_findings_count": extra.pop("new_findings_count", 1),
+                **extra,
+            }
         )
     )
 
@@ -119,21 +137,27 @@ def _write_finding(cid, cycle, **extra):
 class TestVerifiableCompletes:
     def test_verifiable_completes_when_check_passes(self):
         c = _running(
-            kind_config={"goal_type": "verifiable", "verify_command": "true"}, max_cycles=20
+            kind_config={"goal_type": "verifiable", "verify_command": "true"},
+            max_cycles=20,
         )
         wd = _wd()
-        wd._state._sessions[manager.session_key(c.id)] = _FakeSession(manager.session_key(c.id))
-        _run(wd._poll_once())  # seed liveness
+        wd._state._sessions[manager.session_key(c.id)] = _FakeSession(
+            manager.session_key(c.id)
+        )
+        _run(wd._poll_once())
         _write_finding(c.id, 1)
-        _run(wd._poll_once())  # new finding → verify passes → complete
+        _run(wd._poll_once())
         assert store.get(c.id).status == LoopStatus.COMPLETE.value
 
     def test_verifiable_keeps_running_when_check_fails(self):
         c = _running(
-            kind_config={"goal_type": "verifiable", "verify_command": "false"}, max_cycles=20
+            kind_config={"goal_type": "verifiable", "verify_command": "false"},
+            max_cycles=20,
         )
         wd = _wd()
-        wd._state._sessions[manager.session_key(c.id)] = _FakeSession(manager.session_key(c.id))
+        wd._state._sessions[manager.session_key(c.id)] = _FakeSession(
+            manager.session_key(c.id)
+        )
         _run(wd._poll_once())
         _write_finding(c.id, 1)
         _run(wd._poll_once())
@@ -164,38 +188,44 @@ class TestVerifiableMultiSubGoalGate:
 
     def _signal(self, loop, findings):
         """The done-ness signal through the SHIPPED path: resolve the declared policy exactly as
-        `loop/watchdog.py` does, then evaluate it with the one kind-agnostic evaluator."""
-        from gideon.loop import supervisor
-        from gideon.workflows.supervisor_policy import policy_for_kind
+        `loop/watchdog.py` does, then evaluate it with the one kind-agnostic evaluator.
+        """
+        from gideon.automation.loop import supervisor
+        from gideon.automation.workflows.supervisor_policy import policy_for_kind
 
         return _run(
-            supervisor.done_signal(loop, findings, policy_for_kind(loop.kind, loop.kind_config))
+            supervisor.done_signal(
+                loop, findings, policy_for_kind(loop.kind, loop.kind_config)
+            )
         )
 
     def test_green_check_but_judge_fails_does_not_complete(self, monkeypatch):
-        # Command passes, but only the engine is built → judge FAILs → NOT done.
-        import gideon.loop.gates as gates
+        import gideon.automation.loop.gates as gates
 
         monkeypatch.setattr(gates, "run_verify_command", lambda *a, **k: _coro(True))
         monkeypatch.setattr(gates, "judge_verdict", lambda *a, **k: _coro("FAIL"))
         loop = self._loop()
-        findings = [{"cycle": 1, "summary": "Phase 1/3 engine complete; AI/UI/proof remain"}]
+        findings = [
+            {"cycle": 1, "summary": "Phase 1/3 engine complete; AI/UI/proof remain"}
+        ]
         assert self._signal(loop, findings) is False
 
     def test_green_check_and_judge_passes_completes(self, monkeypatch):
-        import gideon.loop.gates as gates
+        import gideon.automation.loop.gates as gates
 
         monkeypatch.setattr(gates, "run_verify_command", lambda *a, **k: _coro(True))
         monkeypatch.setattr(gates, "judge_verdict", lambda *a, **k: _coro("PASS"))
         loop = self._loop()
         findings = [
-            {"cycle": 9, "summary": "engine+AI+UI+never-lose proof all built; all tests green"}
+            {
+                "cycle": 9,
+                "summary": "engine+AI+UI+never-lose proof all built; all tests green",
+            }
         ]
         assert self._signal(loop, findings) is True
 
     def test_judge_unavailable_defers_not_false(self, monkeypatch):
-        # Empty/unrendered verdict (provider down) → None (defer), not a clean pass/fail.
-        import gideon.loop.gates as gates
+        import gideon.automation.loop.gates as gates
 
         monkeypatch.setattr(gates, "run_verify_command", lambda *a, **k: _coro(True))
         monkeypatch.setattr(gates, "judge_verdict", lambda *a, **k: _coro(""))
@@ -203,8 +233,7 @@ class TestVerifiableMultiSubGoalGate:
         assert self._signal(loop, [{"cycle": 1, "summary": "engine only"}]) is None
 
     def test_single_sub_goal_keeps_pure_command_behavior(self, monkeypatch):
-        # 0/1 sub-goal → the command IS the whole goal; no judge required.
-        import gideon.loop.gates as gates
+        import gideon.automation.loop.gates as gates
 
         monkeypatch.setattr(gates, "run_verify_command", lambda *a, **k: _coro(True))
         loop = _running(
@@ -235,10 +264,12 @@ class TestNewKindsRunEndToEnd:
     def test_new_kind_completes_on_budget(self, kind):
         c = _running(kind=kind, kind_config={}, max_cycles=1)
         wd = _wd()
-        wd._state._sessions[manager.session_key(c.id)] = _FakeSession(manager.session_key(c.id))
-        _run(wd._poll_once())  # seed liveness
+        wd._state._sessions[manager.session_key(c.id)] = _FakeSession(
+            manager.session_key(c.id)
+        )
+        _run(wd._poll_once())
         _write_finding(c.id, 1)
-        _run(wd._poll_once())  # no done-signal / no hook → budget (1) caps it
+        _run(wd._poll_once())
         assert store.get(c.id).status == LoopStatus.COMPLETE.value
 
 
@@ -246,46 +277,50 @@ class TestBudgetCap:
     def test_completes_at_budget(self):
         c = _running(kind_config={"goal_type": "open_ended"}, max_cycles=1)
         wd = _wd()
-        wd._state._sessions[manager.session_key(c.id)] = _FakeSession(manager.session_key(c.id))
+        wd._state._sessions[manager.session_key(c.id)] = _FakeSession(
+            manager.session_key(c.id)
+        )
         _run(wd._poll_once())
         _write_finding(c.id, 1)
-        _run(wd._poll_once())  # open_ended judge defers (no model) → budget (1) caps it
+        _run(wd._poll_once())
         assert store.get(c.id).status == LoopStatus.COMPLETE.value
-        # A budget stop is NON-genuine: error_message records WHY, so the cockpit can
-        # distinguish "stopped on budget" from a clean done after a reload.
         assert "budget" in (store.get(c.id).error_message or "").lower()
 
     def test_genuine_complete_has_no_error_note(self):
         c = _running(
-            kind_config={"goal_type": "verifiable", "verify_command": "true"}, max_cycles=20
+            kind_config={"goal_type": "verifiable", "verify_command": "true"},
+            max_cycles=20,
         )
         wd = _wd()
-        wd._state._sessions[manager.session_key(c.id)] = _FakeSession(manager.session_key(c.id))
+        wd._state._sessions[manager.session_key(c.id)] = _FakeSession(
+            manager.session_key(c.id)
+        )
         _run(wd._poll_once())
         _write_finding(c.id, 1)
-        _run(wd._poll_once())  # verify passes → genuine completion
+        _run(wd._poll_once())
         assert store.get(c.id).status == LoopStatus.COMPLETE.value
-        assert (store.get(c.id).error_message or "") == ""  # clean done, no note
+        assert (store.get(c.id).error_message or "") == ""
 
     def test_monitor_budget_stop_is_genuine(self):
-        # A monitor's cycle budget IS its watch window — reaching it is a clean
-        # completion, NOT the error-flavored "stopped before done" an open_ended budget
-        # stop gets. So no error_message even though it hit the cap without self-completing.
         c = _running(kind_config={"goal_type": "monitor"}, max_cycles=1)
         wd = _wd()
-        wd._state._sessions[manager.session_key(c.id)] = _FakeSession(manager.session_key(c.id))
+        wd._state._sessions[manager.session_key(c.id)] = _FakeSession(
+            manager.session_key(c.id)
+        )
         _run(wd._poll_once())
         _write_finding(c.id, 1)
-        _run(wd._poll_once())  # monitor never self-completes → budget (1) caps it, genuinely
+        _run(wd._poll_once())
         assert store.get(c.id).status == LoopStatus.COMPLETE.value
-        assert (store.get(c.id).error_message or "") == ""  # clean — the watch window ended
+        assert (store.get(c.id).error_message or "") == ""
 
 
 class TestNeedsInput:
     def test_attended_question_pauses(self):
         c = _running(attended=True)
         wd = _wd()
-        wd._state._sessions[manager.session_key(c.id)] = _FakeSession(manager.session_key(c.id))
+        wd._state._sessions[manager.session_key(c.id)] = _FakeSession(
+            manager.session_key(c.id)
+        )
         loop_files.write_question(c.id, "which db?")
         _run(wd._poll_once())
         assert store.get(c.id).status == LoopStatus.NEEDS_INPUT.value
@@ -293,17 +328,18 @@ class TestNeedsInput:
     def test_unattended_question_is_discarded(self):
         c = _running(attended=False)
         wd = _wd()
-        wd._state._sessions[manager.session_key(c.id)] = _FakeSession(manager.session_key(c.id))
+        wd._state._sessions[manager.session_key(c.id)] = _FakeSession(
+            manager.session_key(c.id)
+        )
         loop_files.write_question(c.id, "which db?")
         _run(wd._poll_once())
         assert store.get(c.id).status == LoopStatus.RUNNING.value
-        assert loop_files.pending_question(c.id) is None  # discarded
+        assert loop_files.pending_question(c.id) is None
 
 
 class TestTrustTtl:
     def test_expired_trust_pauses_for_reauth(self, monkeypatch):
         c = _running()
-        # force started_at far in the past so the trust window is exceeded
         store.update_status(c.id, LoopStatus.RUNNING, started_at=1.0)
         wd = _wd()
         sess = _FakeSession(manager.session_key(c.id))
@@ -319,21 +355,22 @@ class TestCycleHook:
     the policy's declared done-signal path when the hook returns a bool."""
 
     def test_hook_completing_completes_the_loop(self, monkeypatch):
-        from gideon.loop import kinds
+        from gideon.automation.loop import kinds
 
         kinds.ensure_loaded()
         calls = {}
 
         async def _hook(loop, findings, ctx):
             calls["ran"] = True
-            # the hook drives its own completion via the ctx (like code's final stage)
             await ctx.complete(loop.id, "all stages complete")
             return True
 
         monkeypatch.setattr(kinds.get("code"), "on_new_cycle", _hook, raising=False)
         c = _running(kind="code", kind_config={"entry_stage": "design"}, max_cycles=20)
         wd = _wd()
-        wd._state._sessions[manager.session_key(c.id)] = _FakeSession(manager.session_key(c.id))
+        wd._state._sessions[manager.session_key(c.id)] = _FakeSession(
+            manager.session_key(c.id)
+        )
         _run(wd._poll_once())
         _write_finding(c.id, 1)
         _run(wd._poll_once())
@@ -341,17 +378,19 @@ class TestCycleHook:
         assert store.get(c.id).status == LoopStatus.COMPLETE.value
 
     def test_hook_returning_false_keeps_running(self, monkeypatch):
-        from gideon.loop import kinds
+        from gideon.automation.loop import kinds
 
         kinds.ensure_loaded()
 
         async def _hook(loop, findings, ctx):
-            return False  # advanced a stage, not done yet
+            return False
 
         monkeypatch.setattr(kinds.get("code"), "on_new_cycle", _hook, raising=False)
         c = _running(kind="code", kind_config={"entry_stage": "design"}, max_cycles=20)
         wd = _wd()
-        wd._state._sessions[manager.session_key(c.id)] = _FakeSession(manager.session_key(c.id))
+        wd._state._sessions[manager.session_key(c.id)] = _FakeSession(
+            manager.session_key(c.id)
+        )
         _run(wd._poll_once())
         _write_finding(c.id, 1)
         _run(wd._poll_once())
@@ -386,14 +425,16 @@ class TestCycleVerdictPublish:
         )
         wd._publish_cycle_verdict(c.id, 3)
         kinds_emitted = {e for e, _ in events}
-        assert "cycle_verdict" in kinds_emitted and "ratchet_regression" in kinds_emitted
+        assert (
+            "cycle_verdict" in kinds_emitted and "ratchet_regression" in kinds_emitted
+        )
         verdict_data = next(d for e, d in events if e == "cycle_verdict")
         assert verdict_data["cycle"] == 3 and verdict_data["marginal_value"] == 1.2
 
     def test_no_verdict_for_cycle_is_noop(self):
         c = _running()
         wd, events = self._captured_wd()
-        wd._publish_cycle_verdict(c.id, 5)  # nothing persisted for cycle 5
+        wd._publish_cycle_verdict(c.id, 5)
         assert events == []
 
     def test_clean_verdict_emits_no_regression(self):
@@ -427,24 +468,28 @@ class TestJudgeErrorOnlyWhenACheckExists:
         return wd, events
 
     def test_general_without_verify_command_does_not_flag_judge_error(self):
-        # the declared policy says the check is optional and unset → None is normal, not degraded.
         c = _running(kind="general", kind_config={}, max_cycles=20)
         wd, events = self._captured_wd()
-        wd._state._sessions[manager.session_key(c.id)] = _FakeSession(manager.session_key(c.id))
-        _run(wd._poll_once())  # seed liveness
+        wd._state._sessions[manager.session_key(c.id)] = _FakeSession(
+            manager.session_key(c.id)
+        )
+        _run(wd._poll_once())
         _write_finding(c.id, 1)
-        _run(wd._poll_once())  # declared signal → None, but no check exists
+        _run(wd._poll_once())
         assert "judge_error" not in {e for e, _ in events}
         assert store.get(c.id).status == LoopStatus.RUNNING.value
 
     def test_open_ended_goal_with_no_verdict_still_flags_judge_error(self):
-        # Goal open_ended HAS a judge check; a None verdict IS genuine degradation.
-        c = _running(kind="goal", kind_config={"goal_type": "open_ended"}, max_cycles=20)
+        c = _running(
+            kind="goal", kind_config={"goal_type": "open_ended"}, max_cycles=20
+        )
         wd, events = self._captured_wd()
-        wd._state._sessions[manager.session_key(c.id)] = _FakeSession(manager.session_key(c.id))
+        wd._state._sessions[manager.session_key(c.id)] = _FakeSession(
+            manager.session_key(c.id)
+        )
         _run(wd._poll_once())
         _write_finding(c.id, 1)
-        _run(wd._poll_once())  # judge can't assess in-test → None → degraded
+        _run(wd._poll_once())
         assert "judge_error" in {e for e, _ in events}
 
 
@@ -456,24 +501,33 @@ class TestReconcileLinkedTasks:
 
     @pytest.fixture(autouse=True)
     def _wire_tasks(self, monkeypatch, tmp_path):
-        monkeypatch.setattr("gideon.tasks.hierarchy.config_dir", lambda: tmp_path)
-        import gideon.tasks.native as nat
+        monkeypatch.setattr(
+            "gideon.engine.tasks.hierarchy.config_dir", lambda: tmp_path
+        )
+        import gideon.engine.tasks.native as nat
 
         monkeypatch.setattr(nat, "config_dir", lambda: tmp_path, raising=False)
 
     def test_closes_open_leaves_gated_open(self):
-        from gideon.tasks import registry
+        from gideon.engine.tasks import registry
 
         c = _running()
         plain = _run(registry.create_task(provider_name="native", title="done-able"))
         gated = _run(
-            registry.create_task(provider_name="native", title="gated", exit_criteria=["ship it"])
+            registry.create_task(
+                provider_name="native", title="gated", exit_criteria=["ship it"]
+            )
         )
         store.link_tasks(c.id, [plain.id, gated.id])
         _run(_wd()._reconcile_linked_tasks(c.id))
-        assert _run(registry.get_task(plain.id, provider_name="native")).status.value == "done"
-        # gated task's exit criteria unmet → left open, not force-closed
-        assert _run(registry.get_task(gated.id, provider_name="native")).status.value != "done"
+        assert (
+            _run(registry.get_task(plain.id, provider_name="native")).status.value
+            == "done"
+        )
+        assert (
+            _run(registry.get_task(gated.id, provider_name="native")).status.value
+            != "done"
+        )
 
 
 class TestDeliverableArtifact:
@@ -499,9 +553,13 @@ class TestDeliverableArtifact:
 
     def test_open_ended_report_registered(self, monkeypatch):
         c = _running(kind_config={"goal_type": "open_ended"})
-        (loop_files.loop_dir(c.id) / "REPORT.md").write_text("# Findings\nReal content.")
+        (loop_files.loop_dir(c.id) / "REPORT.md").write_text(
+            "# Findings\nReal content."
+        )
         prov = self._FakeProvider()
-        monkeypatch.setattr("gideon.artifacts.registry.get_provider", lambda name=None: prov)
+        monkeypatch.setattr(
+            "gideon.workspace.artifacts.registry.get_provider", lambda name=None: prov
+        )
         _wd()._register_deliverable_artifact(c.id)
         assert len(prov.created) == 1
         assert f"loop:{c.id}" in prov.created[0]["tags"]
@@ -511,44 +569,44 @@ class TestDeliverableArtifact:
         # be retrievable via list(tag="loop:<id>") — the exact query the cockpit Outputs
         # panel runs. Guards the whole chain (tag format → clean_tags → tag filter), not
         # just that the right kwarg was passed to a fake.
-        from gideon.artifacts.native import NativeArtifactProvider
+        from gideon.workspace.artifacts.native import NativeArtifactProvider
 
         real = NativeArtifactProvider(root=tmp_path / "artifacts")
-        monkeypatch.setattr("gideon.artifacts.registry.get_provider", lambda name=None: real)
+        monkeypatch.setattr(
+            "gideon.workspace.artifacts.registry.get_provider", lambda name=None: real
+        )
         c = _running(kind_config={"goal_type": "open_ended"})
-        (loop_files.loop_dir(c.id) / "REPORT.md").write_text("# Findings\nThe report body.")
+        (loop_files.loop_dir(c.id) / "REPORT.md").write_text(
+            "# Findings\nThe report body."
+        )
         _wd()._register_deliverable_artifact(c.id)
-        # list() is metadata-only (omits content, by design) — assert the tag query
-        # finds it; then fetch its content via get() like the cockpit does on click.
         found = real.list(tag=f"loop:{c.id}")
         assert len(found) == 1 and f"loop:{c.id}" in found[0].tags
         assert "report body" in (real.get(found[0].slug).content or "").lower()
 
     def test_design_md_registered(self, monkeypatch):
-        # a design loop's DESIGN.md is its document deliverable — must surface too.
         c = _running(kind="design", kind_config={})
         (loop_files.loop_dir(c.id) / "DESIGN.md").write_text(
             "# Design System\nTokens + components."
         )
         prov = self._FakeProvider()
-        monkeypatch.setattr("gideon.artifacts.registry.get_provider", lambda name=None: prov)
+        monkeypatch.setattr(
+            "gideon.workspace.artifacts.registry.get_provider", lambda name=None: prov
+        )
         _wd()._register_deliverable_artifact(c.id)
         assert len(prov.created) == 1 and f"loop:{c.id}" in prov.created[0]["tags"]
 
     def test_verifiable_registers_nothing(self, monkeypatch):
         c = _running(kind_config={"goal_type": "verifiable", "verify_command": "true"})
-        # even if a stray file exists, verifiable declares no deliverable name
         (loop_files.loop_dir(c.id) / "REPORT.md").write_text("noise")
         prov = self._FakeProvider()
-        monkeypatch.setattr("gideon.artifacts.registry.get_provider", lambda name=None: prov)
+        monkeypatch.setattr(
+            "gideon.workspace.artifacts.registry.get_provider", lambda name=None: prov
+        )
         _wd()._register_deliverable_artifact(c.id)
         assert prov.created == []
 
     def test_deliverable_resolved_in_bound_workspace(self, monkeypatch, tmp_path):
-        # The brief directs the worker to write the deliverable into the BOUND WORKSPACE
-        # (fix 2de9af4), NOT the loop dir. The watchdog must resolve workspace-first or
-        # it never finds the file → no file-backed artifact (the live repro: SPEC.md in
-        # the workspace, the loop dir empty, only the worker's ad-hoc artifact_save left).
         ws = tmp_path / "ws"
         ws.mkdir()
         c = _running(
@@ -556,18 +614,21 @@ class TestDeliverableArtifact:
             kind_config={"goal_type": "open_ended", "primary_deliverable": "SPEC.md"},
         )
         (ws / "SPEC.md").write_text("# SPEC\nThe locked contract.")
-        # nothing in the loop dir — the OLD code looked only there and would register nothing
         prov = self._FakeProvider()
-        monkeypatch.setattr("gideon.artifacts.registry.get_provider", lambda name=None: prov)
+        monkeypatch.setattr(
+            "gideon.workspace.artifacts.registry.get_provider", lambda name=None: prov
+        )
         _wd()._register_deliverable_artifact(c.id)
         assert len(prov.created) == 1
         assert prov.created[0]["source_path"] == str((ws / "SPEC.md").resolve())
         assert f"loop:{c.id}" in prov.created[0]["tags"]
 
     def test_missing_file_registers_nothing(self, monkeypatch):
-        c = _running(kind_config={"goal_type": "open_ended"})  # no REPORT.md written
+        c = _running(kind_config={"goal_type": "open_ended"})
         prov = self._FakeProvider()
-        monkeypatch.setattr("gideon.artifacts.registry.get_provider", lambda name=None: prov)
+        monkeypatch.setattr(
+            "gideon.workspace.artifacts.registry.get_provider", lambda name=None: prov
+        )
         _wd()._register_deliverable_artifact(c.id)
         assert prov.created == []
 
@@ -580,7 +641,9 @@ class TestStageAdvanceNotify:
     def test_stage_advance_raises_notification(self):
         c = _running(kind="code")
         wd = _wd()
-        wd._publish(c.id, "stage_advance", {"loop_id": c.id, "completed_stage": "design"})
+        wd._publish(
+            c.id, "stage_advance", {"loop_id": c.id, "completed_stage": "design"}
+        )
         titles = [t for (_kind, t, _body, _meta) in wd._state.notes]
         assert "Stage complete" in titles
 
@@ -595,8 +658,10 @@ class TestStagnation:
     def test_stagnant_after_window_of_empty_findings(self):
         c = _running(max_cycles=50)
         wd = _wd()
-        wd._state._sessions[manager.session_key(c.id)] = _FakeSession(manager.session_key(c.id))
-        _run(wd._poll_once())  # seed
+        wd._state._sessions[manager.session_key(c.id)] = _FakeSession(
+            manager.session_key(c.id)
+        )
+        _run(wd._poll_once())
         for i in range(1, W.DEFAULT_STAGNATION_WINDOW + 1):
             _write_finding(c.id, i, new_findings_count=0)
             _run(wd._poll_once())

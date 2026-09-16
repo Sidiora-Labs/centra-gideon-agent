@@ -13,16 +13,16 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.workflows import store
-from gideon.workflows.coalescer import BATCH_EVENT
-from gideon.workflows.controller import EngineServices, RunController
-from gideon.workflows.models import (
+from gideon.automation.workflows import store
+from gideon.automation.workflows.coalescer import BATCH_EVENT
+from gideon.automation.workflows.controller import EngineServices, RunController
+from gideon.automation.workflows.models import (
     InstanceState,
     NodeInstance,
     RunStatus,
     WorkflowRun,
 )
-from gideon.workflows.watchdog import (
+from gideon.automation.workflows.watchdog import (
     WorkflowWatchdog,
     _sweep_run_dir,
     prune_runs,
@@ -41,7 +41,7 @@ def anyio_backend() -> str:
 def _isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
     return home
 
 
@@ -136,14 +136,18 @@ class TestOrphanReaping:
         store.write_state(
             run.id,
             {
-                "root.children[0]": NodeInstance("root.children[0]", InstanceState.DONE),
-                "root.children[1]": NodeInstance("root.children[1]", InstanceState.DONE),
+                "root.children[0]": NodeInstance(
+                    "root.children[0]", InstanceState.DONE
+                ),
+                "root.children[1]": NodeInstance(
+                    "root.children[1]", InstanceState.DONE
+                ),
             },
         )
         wd = WorkflowWatchdog(None, EngineServices())
         await wd._poll_once()
         assert store.get(run.id).status == RunStatus.COMPLETE
-        assert wd.controller(run.id) is None  # reaped, not adopted
+        assert wd.controller(run.id) is None
         await wd.stop()
 
     async def test_a_failed_terminal_state_reaps_to_failed(self) -> None:
@@ -151,8 +155,12 @@ class TestOrphanReaping:
         store.write_state(
             run.id,
             {
-                "root.children[0]": NodeInstance("root.children[0]", InstanceState.DONE),
-                "root.children[1]": NodeInstance("root.children[1]", InstanceState.FAILED),
+                "root.children[0]": NodeInstance(
+                    "root.children[0]", InstanceState.DONE
+                ),
+                "root.children[1]": NodeInstance(
+                    "root.children[1]", InstanceState.FAILED
+                ),
             },
         )
         wd = WorkflowWatchdog(None, EngineServices())
@@ -172,7 +180,9 @@ class TestOrphanReaping:
         assert wd.controller(run.id) is not None
         await wd.stop()
 
-    async def test_an_adopted_run_resumes_without_re_running_finished_work(self) -> None:
+    async def test_an_adopted_run_resumes_without_re_running_finished_work(
+        self,
+    ) -> None:
         """The whole point of adoption: a restart must not redo completed nodes, and an
         earlier node's output has to survive into a later node's bindings."""
         spec = {
@@ -228,7 +238,7 @@ class TestStickyCancel:
         wd = WorkflowWatchdog(None, EngineServices())
         await wd._poll_once()
         assert store.get(run.id).status == RunStatus.CANCELLED
-        assert not store.cancel_requested(run.id)  # intent consumed
+        assert not store.cancel_requested(run.id)
         await wd.stop()
 
     async def test_a_live_controller_cancels_itself(self) -> None:
@@ -240,7 +250,6 @@ class TestStickyCancel:
         wd.register(mine)
         store.request_cancel(run.id)
         await wd._poll_once()
-        # The watchdog deferred rather than writing the status itself.
         assert store.cancel_requested(run.id)
         await wd.stop()
 
@@ -250,7 +259,9 @@ class TestBootSweep:
     honestly by whether their substrate outlived the process, before adoption relaunches
     them. Inline runs are left to adoption (their journal is the recoverable state)."""
 
-    async def test_an_isolated_run_whose_worktree_survived_is_suspended(self, tmp_path) -> None:
+    async def test_an_isolated_run_whose_worktree_survived_is_suspended(
+        self, tmp_path
+    ) -> None:
         wt = tmp_path / "wt-live"
         wt.mkdir()
         run = _run()
@@ -259,17 +270,19 @@ class TestBootSweep:
         wd = WorkflowWatchdog(None, EngineServices())
         await wd._poll_once()
         saved = store.get(run.id)
-        assert saved.status == RunStatus.PAUSED  # SUSPENDED — resumable
-        assert wd.controller(run.id) is None  # swept, not relaunched
+        assert saved.status == RunStatus.PAUSED
+        assert wd.controller(run.id) is None
         await wd.stop()
 
-    async def test_an_isolated_run_whose_worktree_is_gone_is_cancelled(self, tmp_path) -> None:
+    async def test_an_isolated_run_whose_worktree_is_gone_is_cancelled(
+        self, tmp_path
+    ) -> None:
         run = _run()
-        run.extra["worktree_path"] = str(tmp_path / "wt-gone")  # never created
+        run.extra["worktree_path"] = str(tmp_path / "wt-gone")
         store.save(run)
         wd = WorkflowWatchdog(None, EngineServices())
         await wd._poll_once()
-        assert store.get(run.id).status == RunStatus.CANCELLED  # zombie, honestly aborted
+        assert store.get(run.id).status == RunStatus.CANCELLED
         await wd.stop()
 
     async def test_an_inline_run_is_left_to_adoption_not_swept(self) -> None:
@@ -278,7 +291,6 @@ class TestBootSweep:
         run = _run()
         wd = WorkflowWatchdog(None, EngineServices())
         await wd._poll_once()
-        # Not cancelled by the sweep; adoption picked it up instead.
         assert store.get(run.id).status != RunStatus.CANCELLED
         assert wd.controller(run.id) is not None
         await wd.stop()
@@ -294,8 +306,6 @@ class TestBootSweep:
         wd = WorkflowWatchdog(None, EngineServices())
         await wd._poll_once()
         assert store.get(run.id).status == RunStatus.PAUSED
-        # A second isolated run appears after boot; the sweep already ran, so it is not
-        # swept — it is adopted/handled as a live run.
         assert wd._swept is True
         await wd.stop()
 
@@ -309,7 +319,6 @@ class TestBootSweep:
         mine = RunController(run, SPEC, services=EngineServices())
         wd.register(mine)
         await wd._poll_once()
-        # A live controller owns the run — the sweep leaves its status alone.
         assert store.get(run.id).status == RunStatus.RUNNING
         await wd.stop()
 
@@ -341,12 +350,9 @@ class TestPublisher:
         wd = WorkflowWatchdog(_State(), EngineServices())
         controller = await wd.launch(run, SPEC)
         await controller.run_to_completion(timeout=20)
-        await wd.stop()  # flushes any window still open, so nothing is stranded
+        await wd.stop()
         assert published
         assert all(k == f"workflow:{run.id}" for k, _, _ in published)
-        # Node events are COALESCED (WF2-R11 batch-5), so they may arrive inside a
-        # `workflow_batch` envelope. Unwrap before asserting: the claim is that the event
-        # reaches the run's key, not that the transport declined to batch it.
         names = set()
         for _key, event, data in published:
             if event == BATCH_EVENT:
@@ -387,7 +393,9 @@ class TestPublisher:
         await controller.run_to_completion(timeout=20)
         assert signals
         assert all(s["type"] == "workflow_run_update" for s in signals)
-        assert all(set(s) == {"type", "run_id"} for s in signals), "payload, not a signal"
+        assert all(
+            set(s) == {"type", "run_id"} for s in signals
+        ), "payload, not a signal"
         await wd.stop()
 
 
@@ -403,7 +411,7 @@ class TestLoopHubAdoption:
     """
 
     async def test_a_watching_loop_cockpit_receives_the_runs_events(self) -> None:
-        from gideon.dashboard.sse import SseRegistry
+        from gideon.interfaces.dashboard.sse import SseRegistry
 
         loop_registry = SseRegistry()
 
@@ -419,8 +427,6 @@ class TestLoopHubAdoption:
                 return loop_registry
 
         run = _run()
-        # A cockpit is ALREADY watching this container as a loop — `hub()` creates and
-        # subscribes, which is what a live cockpit's SSE connection does.
         hub = loop_registry.hub(f"loop:{run.id}")
         received: list[str] = []
         hub.publish = lambda event, data: received.append(event)  # type: ignore[method-assign]
@@ -429,12 +435,14 @@ class TestLoopHubAdoption:
         controller = await wd.launch(run, SPEC)
         await controller.run_to_completion(timeout=20)
         await wd.stop()
-        assert received, "a watching loop cockpit received nothing — the adoption is inert"
+        assert (
+            received
+        ), "a watching loop cockpit received nothing — the adoption is inert"
 
     async def test_the_mirror_does_NOT_resurrect_an_unwatched_loop_hub(self) -> None:
         """`peek`, never `hub`. Creating one would leak a hub per workflow run and resurrect a
         stream for a container nobody is watching."""
-        from gideon.dashboard.sse import SseRegistry
+        from gideon.interfaces.dashboard.sse import SseRegistry
 
         loop_registry = SseRegistry()
 
@@ -461,9 +469,15 @@ class TestLoopHubAdoption:
         cannot silently start mirroring onto an unrelated hub."""
         import inspect
 
-        from gideon.workflows.watchdog import WorkflowWatchdog as W
+        from gideon.automation.workflows.watchdog import WorkflowWatchdog as W
+        from gideon.automation.workflows.watchdog import (
+            _RunEventRelay,
+        )
 
-        source = inspect.getsource(W._publish_to_equivalent_loop_hub)
+        wrapper = inspect.getsource(W._publish_to_equivalent_loop_hub)
+        assert "self._events.mirror(state, key, event, payload)" in wrapper
+        assert "self._events = _RunEventRelay(self)" in inspect.getsource(W.__init__)
+        source = inspect.getsource(_RunEventRelay.mirror)
         assert "keys_equivalent" in source
         assert ".peek(" in source and ".hub(" not in source
 
@@ -504,8 +518,10 @@ class TestRetention:
         assert await prune_runs("keeper", keep=2) == 3
         remaining, total = store.list_runs(workflow_name="keeper")
         assert total == 2
-        # Newest survive.
-        assert {r.created_at for r in remaining} == {"2026-01-05T00:00:00Z", "2026-01-04T00:00:00Z"}
+        assert {r.created_at for r in remaining} == {
+            "2026-01-05T00:00:00Z",
+            "2026-01-04T00:00:00Z",
+        }
 
     async def test_a_pinned_run_is_never_pruned(self) -> None:
         for i in range(4):
@@ -539,7 +555,9 @@ class TestRetention:
         assert any(r.status == RunStatus.RUNNING for r in remaining)
 
     async def test_pruning_under_the_cap_is_a_no_op(self) -> None:
-        r = store.create(WorkflowRun(id="", workflow_name="few", status=RunStatus.COMPLETE))
+        r = store.create(
+            WorkflowRun(id="", workflow_name="few", status=RunStatus.COMPLETE)
+        )
         store.save(r)
         assert await prune_runs("few", keep=10) == 0
 

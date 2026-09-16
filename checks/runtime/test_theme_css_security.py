@@ -11,7 +11,7 @@ and documents the security model:
 
 import pytest
 
-from gideon.dashboard.handlers import (
+from gideon.interfaces.dashboard.handlers import (
     _CSS_VALUE_ALLOWED_RE,
     _THEME_CSS_VARS_SET,
     _sanitize_css_value,
@@ -23,8 +23,6 @@ from gideon.dashboard.handlers import (
 class TestSanitizeCssValue:
     """Unit tests for _sanitize_css_value positive allowlist."""
 
-    # ── Safe values that MUST pass ──
-
     @pytest.mark.parametrize(
         "val",
         [
@@ -35,64 +33,50 @@ class TestSanitizeCssValue:
             "rgba(255, 255, 255, 0.1)",
             "hsl(220, 15%, 10%)",
             "hsla(220, 15%, 10%, 0.5)",
-            "0 1px 3px rgba(0, 0, 0, 0.12)",  # shadow
+            "0 1px 3px rgba(0, 0, 0, 0.12)",
             "0 4px 12px rgba(0, 0, 0, 0.25)",
             "none",
             "transparent",
             "1px",
             "50%",
-            "0 0 0 2px rgba(99, 102, 241, 0.3)",  # ring
+            "0 0 0 2px rgba(99, 102, 241, 0.3)",
             "inset 0 1px 0 rgba(255, 255, 255, 0.05)",
-            "rgb(255 255 255 / 0.1)",  # modern slash syntax
+            "rgb(255 255 255 / 0.1)",
         ],
     )
     def test_safe_values_pass(self, val: str) -> None:
         assert _sanitize_css_value(val) is not None, f"safe value rejected: {val!r}"
 
-    # ── Dangerous values that MUST be rejected ──
-
     @pytest.mark.parametrize(
         "val,reason",
         [
-            # Semicolon injection — escapes the declaration to inject new rules
             ("#fff; } body { background: red", "semicolon injection"),
             ("#fff;--evil:red", "mid-value semicolon"),
             ("red; }", "brace escape via semicolon"),
-            # HTML escape from <style> tag
             ("</style><script>alert(1)</script>", "HTML tag injection"),
             ("<img src=x>", "HTML tag"),
-            # CSS function injection
             ("url(//evil.com/track.gif)", "url() data exfil"),
             ("url('javascript:alert(1)')", "javascript: url"),
             ("expression(alert(1))", "IE expression()"),
             ("image(//evil.com/x.png)", "image() function"),
             ("image-set(//evil.com/x.png 1x)", "image-set() function"),
-            # Backslash Unicode escapes
             ("\\0075rl(//evil.com)", "unicode escape for url"),
             ("\\00075rl(//evil.com)", "unicode escape variant"),
             # @-rule injection
             ("@import url(//evil.com)", "@import"),
             ("@charset 'utf-8'", "@charset"),
-            # Quote injection
             ('"escape the attribute"', "double quote"),
             ("'escape the attribute'", "single quote"),
-            # Brace injection
             ("} body { color: red", "closing brace"),
             ("{malicious}", "opening brace"),
-            # Colon injection (could start new declarations in some contexts)
             ("red: value", "colon in value"),
-            # Zero-width / control characters
             ("red\x00blue", "null byte"),
-            # Excessive length
             ("a" * 201, "over 200 chars"),
-            # Non-string types
             (123, "integer"),  # type: ignore[arg-type]
             (None, "None"),  # type: ignore[arg-type]
             (["red"], "list"),  # type: ignore[arg-type]
-            # Empty / whitespace
             ("", "empty string"),
             ("   ", "whitespace only"),
-            # IE-specific
             ("-moz-binding: url(evil.xml#xss)", "-moz-binding"),
             ("behavior: url(evil.htc)", "behavior property"),
         ],
@@ -249,7 +233,6 @@ class TestCssVarsSetSync:
     """Verify backend _THEME_CSS_VARS_SET matches the current web token vocabulary."""
 
     def test_required_vars_in_allowed_set(self) -> None:
-        # --color-primary is the defining anchor of a theme.
         assert "--color-primary" in _THEME_CSS_VARS_SET
 
     def test_core_color_vars_in_allowed_set(self) -> None:
@@ -263,7 +246,6 @@ class TestCssVarsSetSync:
             assert v in _THEME_CSS_VARS_SET
 
     def test_legacy_vocab_not_in_set(self) -> None:
-        # The old (retired-frontend) vocabulary must be fully gone — no dual vocab.
         for v in ("--bg", "--text", "--accent", "--card", "--panel", "--shadow-sm"):
             assert v not in _THEME_CSS_VARS_SET
 

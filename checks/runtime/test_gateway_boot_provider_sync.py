@@ -30,7 +30,7 @@ back into the process-wide ``ProviderRegistry`` on a fresh start. ``start_dashbo
 closes that gap with ONE synchronous ``sync_entries_from_config()`` immediately after
 ``load_all_extensions()``. Deleting that call left 257 selected tests green: the
 FUNCTION had a rail (``test_registry_config_sync.py``), the WIRE had none — and a
-module-level call is outside ``inert-surface-baseline.json``'s vocabulary (it censuses
+module-level call is outside ``checks/catalogs/inert-surfaces.json``'s vocabulary (it censuses
 declared surfaces: config keys, enum members, trigger kinds, editable-config entries,
 SDK exports), so nothing else was ever going to notice.
 
@@ -63,9 +63,6 @@ PROVIDER = "railed-oai"
 MODEL = "glm-5.1"
 PTYPE = "openai_compatible"
 
-# A NATIVE tool extension: shipped in `apps/native/`, seeded + enabled on a fresh home by
-# `load_all_extensions()`, and of the one provider type whose per-type registry has no
-# lazy self-healing re-registration behind it.
 TOOL_APP = "gideon-workflows"
 
 
@@ -118,8 +115,8 @@ def boot_home(tmp_path, monkeypatch):
         json.dumps({"chat": [f"{PROVIDER}:{MODEL}"]}), encoding="utf-8"
     )
 
-    import gideon.config as config_pkg
-    import gideon.config.loader as config_loader
+    import gideon.core.config as config_pkg
+    import gideon.core.config.loader as config_loader
 
     assert config_loader.config_dir().resolve() == tmp_path.resolve()
     assert config_pkg.config_dir().resolve() == tmp_path.resolve()
@@ -136,8 +133,8 @@ def fresh_registry(monkeypatch):
     has nothing to do with the boot replay, which is exactly how a first attempt at
     this rail passed identically with and without the sync.
     """
-    from gideon.llm import registry as llm_registry
-    from gideon.llm.capabilities import Capability, ProviderCapability
+    from gideon.integrations.llm import registry as llm_registry
+    from gideon.integrations.llm.capabilities import Capability, ProviderCapability
 
     reg = llm_registry.ProviderRegistry()
     monkeypatch.setattr(llm_registry, "_default_registry", reg)
@@ -173,8 +170,8 @@ def fresh_extension_registries(boot_home, monkeypatch):
     Depends on ``boot_home`` so the home redirect is already installed: both registries are
     read back through their MODULES here, after the redirect, never imported ahead of it.
     """
-    from gideon.providers import registry as prov_registry
-    from gideon.tool_providers import registry as tool_registry
+    from gideon.extensions.providers import registry as prov_registry
+    from gideon.integrations.tool_providers import registry as tool_registry
 
     monkeypatch.setattr(tool_registry, "_providers", {})
     monkeypatch.setattr(prov_registry, "_registry", None)
@@ -189,18 +186,22 @@ async def _boot(monkeypatch):
     ``register_default_transports`` through the module at call time, so patching the
     module attribute gives a faithful observation point rather than a new seam.
     """
-    import gideon.channel_transports as channel_transports
-    from gideon.dashboard.server import start_dashboard
-    from gideon.llm import registry as llm_registry
+    import gideon.integrations.channel_transports as channel_transports
+    from gideon.integrations.llm import registry as llm_registry
+    from gideon.interfaces.dashboard.server import start_dashboard
 
     samples: list[list[str]] = []
     real_register = channel_transports.register_default_transports
 
     def _sample_then_register() -> None:
-        samples.append(sorted(e.name for e in llm_registry.get_default_registry().list_entries()))
+        samples.append(
+            sorted(e.name for e in llm_registry.get_default_registry().list_entries())
+        )
         real_register()
 
-    monkeypatch.setattr(channel_transports, "register_default_transports", _sample_then_register)
+    monkeypatch.setattr(
+        channel_transports, "register_default_transports", _sample_then_register
+    )
     runner, _state = await start_dashboard(sessions=MagicMock(count=0), port=0)
     return runner, samples
 
@@ -212,30 +213,27 @@ async def test_boot_replays_config_providers_before_any_startup_hook(
     """A restart leaves the user's configured provider resolvable, from the body call."""
     runner, samples = await _boot(monkeypatch)
     try:
-        # The entry the user created before the restart is back.
         entries = fresh_registry.list_entries()
         assert [e.name for e in entries] == [PROVIDER]
         assert (entries[0].type, entries[0].model) == (PTYPE, MODEL)
 
-        # …and it BUILDS — the step that otherwise raises "isn't installed or configured".
         assert isinstance(fresh_registry.build(PROVIDER), _FakeModelProvider)
 
-        # The user-facing effect: the model pinned in Settings → Models resolves for chat.
-        from gideon.providers.provider_bridge import resolve_provider_for_use_case
+        from gideon.extensions.providers.provider_bridge import (
+            resolve_provider_for_use_case,
+        )
 
         assert resolve_provider_for_use_case("chat") is not None
 
-        # ORDERING: it happened in start_dashboard's synchronous body, so it is already
-        # done before the first on_startup hook — and therefore before any boot-time
-        # handler that resolves a provider (embedding/knowledge auto-embed). Moving the
-        # replay to on_startup time would make this sample empty.
         assert samples == [[PROVIDER]]
     finally:
         await runner.cleanup()
 
 
 @pytest.mark.asyncio
-async def test_no_other_boot_step_replays_config_providers(boot_home, fresh_registry, monkeypatch):
+async def test_no_other_boot_step_replays_config_providers(
+    boot_home, fresh_registry, monkeypatch
+):
     """Vacuity floor: neutralize the replay and the SAME boot leaves chat unresolvable.
 
     Without this the rail above could be passing on something else's work — the
@@ -245,7 +243,7 @@ async def test_no_other_boot_step_replays_config_providers(boot_home, fresh_regi
     thing that registers the entries, and the failure the user meets is the misdirecting
     "isn't installed or configured" sentence.
     """
-    from gideon.llm import registry as llm_registry
+    from gideon.integrations.llm import registry as llm_registry
 
     monkeypatch.setattr(llm_registry, "sync_entries_from_config", lambda: 0)
     runner, samples = await _boot(monkeypatch)
@@ -253,12 +251,14 @@ async def test_no_other_boot_step_replays_config_providers(boot_home, fresh_regi
         assert fresh_registry.list_entries() == []
         assert samples == [[]]
 
-        from gideon.providers.provider_bridge import (
+        from gideon.extensions.providers.provider_bridge import (
             ProviderResolutionError,
             resolve_provider_for_use_case,
         )
 
-        with pytest.raises(ProviderResolutionError, match="isn't installed or configured"):
+        with pytest.raises(
+            ProviderResolutionError, match="isn't installed or configured"
+        ):
             resolve_provider_for_use_case("chat")
     finally:
         await runner.cleanup()
@@ -276,38 +276,27 @@ async def test_boot_loads_provider_extensions_and_makes_one_resolvable(
     """
     ext_registry, tool_registry = fresh_extension_registries
 
-    # The isolation this rail rests on, asserted before anything reads registry CONTENTS:
-    # the home is redirected (through BOTH `config_dir` bindings — see `boot_home`), so
-    # native-app seeding and installed-app discovery run against tmp_path, not the real
-    # ~/.gideon.
-    import gideon.config as config_pkg
-    import gideon.config.loader as config_loader
-    from gideon.apps.manager import apps_dir
+    import gideon.core.config as config_pkg
+    import gideon.core.config.loader as config_loader
+    from gideon.extensions.apps.manager import apps_dir
 
     assert config_loader.config_dir().resolve() == boot_home.resolve()
     assert config_pkg.config_dir().resolve() == boot_home.resolve()
     assert apps_dir().resolve().is_relative_to(boot_home.resolve())
 
-    # FLOOR — absent before boot. Nothing has been discovered or enabled yet.
     assert ext_registry.get(TOOL_APP) is None
     assert tool_registry.get_provider(TOOL_APP) is None
 
     runner, _samples = await _boot(monkeypatch)
     try:
-        # PRESENT AFTER — the extension was discovered and REGISTERED…
         record = ext_registry.get(TOOL_APP)
         assert (
             record is not None
         ), f"{TOOL_APP} was never registered: boot discovered no provider extensions"
         assert record.provider_config.type == "tool"
 
-        # …and ENABLED, which is the step that builds the provider and hands it to the
-        # type handler. Registered-but-disabled is the shape a discovery-only boot leaves.
         assert record.enabled
 
-        # The consequence a caller actually observes: the provider is live in the per-type
-        # registry that tool resolution reads. `ToolTypeHandler.register` is the only writer
-        # into it in the tree, so this can only have come from the boot wire.
         assert tool_registry.get_provider(TOOL_APP) is not None
     finally:
         await runner.cleanup()
@@ -325,7 +314,7 @@ async def test_no_other_boot_step_loads_provider_extensions(
     one of them discovers as a side effect. None does: with the loader neutralized the
     gateway still boots, still serves routes, and owns not one provider extension.
     """
-    from gideon.providers import loader
+    from gideon.extensions.providers import loader
 
     ext_registry, tool_registry = fresh_extension_registries
     monkeypatch.setattr(loader, "load_all_extensions", lambda: None)

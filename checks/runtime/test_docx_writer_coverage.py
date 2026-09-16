@@ -25,7 +25,7 @@ Three rules this file lives by:
    compile-time-ish failure too: it must be measured before it can be added.
 
 Deliberately NOT re-measured here: the run-level properties DFE-2 already pins in
-`tests/test_docx_run_fidelity.py` (bold / italic / code font / hyperlink text + URL +
+`checks/runtime/test_docx_run_fidelity.py` (bold / italic / code font / hyperlink text + URL +
 relationship + rPr schema order, the `ParagraphStyle` numerics, the page margins, the
 `Cell` table paths, and the legacy-equivalence golden). Overlap is waste. What was
 genuinely unmeasured, and is measured here, is the STRUCTURAL identity of each block
@@ -43,7 +43,7 @@ from typing import Callable
 import pytest
 from docx import Document
 
-from gideon.documents.model import (
+from gideon.workspace.documents.model import (
     BLOCK_KINDS,
     Block,
     Cell,
@@ -52,23 +52,14 @@ from gideon.documents.model import (
     ParagraphStyle,
     Run,
 )
-from gideon.documents.writers.docx_writer import render_docx
+from gideon.workspace.documents.writers.docx_writer import render_docx
 
 _MONOSPACE = "Courier New"
 _URL = "https://example.invalid/dfe3"
 
-#: One twentieth of a point, in EMU. `w:pgSz` and `w:pgMar` are stored in twips, so a page
-#: dimension cannot read back at exact EMU — see `_measure_page_size`.
 _ONE_TWIP_EMU = 635
 
-#: The three verdicts. `partial` is not a hedge: it names a field whose value survives
-#: in SOME form but is not recoverable as what the model declared (an artifact slug that
-#: lands as prose), or which the writer honours only in one direction (a `bold` that can
-#: be switched on but never off), or only for some block kinds.
 VERDICTS = ("emitted", "dropped", "partial")
-
-
-# --------------------------------------------------------------------------- plumbing
 
 
 def _render(*blocks: Block, title: str = "", page: PageSetup | None = None) -> bytes:
@@ -99,9 +90,6 @@ def _table_cell_runs(cells: list[list[Cell]], row: int, col: int) -> list:
     return list(table.cell(row, col).paragraphs[0].runs)
 
 
-# ------------------------------------------------------- the vacuity floor, made real
-
-
 def test_the_vacuity_floor_is_real():
     """Why every absence assertion below carries a positive control.
 
@@ -114,15 +102,7 @@ def test_the_vacuity_floor_is_real():
     assert _reopen(empty).paragraphs == []
     assert _reopen(empty).tables == []
     assert "w:pPr" not in _document_xml(empty)
-    # ...and yet it IS a real docx: the absence is genuinely vacuous, not a crash.
     assert "word/document.xml" in _part_names(empty)
-
-
-# ------------------------------------------------- POSITIVE: every block kind's shape
-#
-# DFE-2 asserts each kind "renders something" (its marker appears in the visible text
-# or the raw XML). That rules out a dropped block but not a MISRENDERED one: a table
-# emitted as prose passes it. These rows pin what each kind actually becomes.
 
 
 def test_a_heading_block_becomes_a_heading_styled_paragraph_at_its_level():
@@ -134,8 +114,12 @@ def test_a_heading_block_becomes_a_heading_styled_paragraph_at_its_level():
 
 def test_an_out_of_range_heading_level_is_clamped_in_the_emitted_document():
     """The model clamps to 1-6; the OUTPUT is where that has to be visible."""
-    assert _styles(_render(Block("heading", text="lo", level=0))) == [("Heading 1", "lo")]
-    assert _styles(_render(Block("heading", text="hi", level=99))) == [("Heading 6", "hi")]
+    assert _styles(_render(Block("heading", text="lo", level=0))) == [
+        ("Heading 1", "lo")
+    ]
+    assert _styles(_render(Block("heading", text="hi", level=99))) == [
+        ("Heading 6", "hi")
+    ]
 
 
 def test_a_paragraph_block_becomes_a_normal_paragraph():
@@ -166,7 +150,6 @@ def test_a_table_block_becomes_a_real_table_element_not_prose():
     assert table.style.name == "Table Grid"
     assert [c.text for c in table.rows[0].cells] == ["h1", "h2"]
     assert [c.text for c in table.rows[1].cells] == ["a", "b"]
-    # A table's content must NOT also leak out as body paragraphs.
     assert [para.text for para in _reopen(data).paragraphs] == []
 
 
@@ -191,7 +174,7 @@ def test_a_code_block_becomes_a_monospace_paragraph_and_carries_no_code_style():
     para = _reopen(data).paragraphs[0]
 
     assert para.style.name == "Normal", "recorded loss: no code paragraph style exists"
-    assert [run.font.name for run in para.runs] == [_MONOSPACE]  # positive control
+    assert [run.font.name for run in para.runs] == [_MONOSPACE]
     assert para.text == "x = 1"
 
 
@@ -209,14 +192,9 @@ def test_the_structural_sweep_covers_every_declared_block_kind():
         "numbered": True,
         "table": True,
         "pagebreak": True,
-        # Recorded losses: a `code` block is a Normal paragraph (font only) and an
-        # `image` block is a text paragraph. Neither kind is recoverable as itself.
         "code": False,
         "image": False,
     }
-
-
-# ---------------------------------------------------- POSITIVE: the container fields
 
 
 def test_the_document_title_becomes_a_title_styled_paragraph():
@@ -242,20 +220,14 @@ def test_a_paragraph_style_on_a_list_block_reaches_every_item_paragraph():
     """`Block.style` on a multi-paragraph kind applies per item, not just to the first."""
     from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-    data = _render(Block("bullets", items=["a", "b"], style=ParagraphStyle(align="right")))
+    data = _render(
+        Block("bullets", items=["a", "b"], style=ParagraphStyle(align="right"))
+    )
 
     assert [para.alignment for para in _reopen(data).paragraphs] == [
         WD_ALIGN_PARAGRAPH.RIGHT,
         WD_ALIGN_PARAGRAPH.RIGHT,
     ]
-
-
-# ------------------------------------------------------------------ RECORDED LOSSES
-#
-# Each test below names the field, asserts the emitted document does not carry it, and
-# pairs that with a positive control in the SAME bytes so the absence is not vacuous.
-# These are the LossReport's vocabulary: a round-trip proof must expect a loss here,
-# not an equality.
 
 
 def test_an_image_block_carries_no_image_only_a_text_placeholder():
@@ -271,14 +243,15 @@ def test_an_image_block_carries_no_image_only_a_text_placeholder():
     doc = _reopen(data)
     xml = _document_xml(data)
 
-    # Positive control: the slug IS present, as text. The absences below are not vacuous.
     assert _styles(data) == [("Normal", "[image: chart-1]")]
 
     assert "w:drawing" not in xml, "recorded loss: no drawing element"
     assert "a:blip" not in xml, "recorded loss: no image reference"
     assert [name for name in _part_names(data) if "media" in name] == []
     assert len(doc.inline_shapes) == 0, "recorded loss: no inline shape"
-    assert "image" not in {rel.reltype.rsplit("/", 1)[-1] for rel in doc.part.rels.values()}
+    assert "image" not in {
+        rel.reltype.rsplit("/", 1)[-1] for rel in doc.part.rels.values()
+    }
 
 
 def test_an_explicit_block_text_beside_runs_is_dropped():
@@ -295,15 +268,17 @@ def test_an_explicit_block_text_beside_runs_is_dropped():
 
     data = _render(block)
 
-    assert _styles(data) == [("Normal", "RICH-RUN")]  # positive control
+    assert _styles(data) == [("Normal", "RICH-RUN")]
     assert "PLAIN-OVERRIDE" not in _document_xml(data)
 
 
 def test_an_explicit_heading_text_beside_runs_is_dropped_too():
     """The same loss on the other runs-bearing kind, so it is recorded as a rule."""
-    data = _render(Block("heading", text="H-OVERRIDE", level=2, runs=[Run(text="H-RUN")]))
+    data = _render(
+        Block("heading", text="H-OVERRIDE", level=2, runs=[Run(text="H-RUN")])
+    )
 
-    assert _styles(data) == [("Heading 2", "H-RUN")]  # positive control
+    assert _styles(data) == [("Heading 2", "H-RUN")]
     assert "H-OVERRIDE" not in _document_xml(data)
 
 
@@ -318,7 +293,7 @@ def test_explicit_table_rows_beside_cells_are_dropped():
 
     data = _render(block)
 
-    assert _reopen(data).tables[0].cell(0, 0).text == "CELLS-WIN"  # positive control
+    assert _reopen(data).tables[0].cell(0, 0).text == "CELLS-WIN"
     assert "ROWS-ONLY" not in _document_xml(data)
 
 
@@ -329,7 +304,7 @@ def test_an_explicit_cell_text_beside_cell_runs_is_dropped():
 
     data = _render(Block("table", cells=[[cell], [Cell(text="body")]]))
 
-    assert _reopen(data).tables[0].cell(0, 0).text == "CELL-RUN"  # positive control
+    assert _reopen(data).tables[0].cell(0, 0).text == "CELL-RUN"
     assert "CELL-OVERRIDE" not in _document_xml(data)
 
 
@@ -349,8 +324,6 @@ def test_a_run_cannot_switch_off_the_bold_its_container_imposes():
     header = _table_cell_runs(cells, 0, 0)
     body = _table_cell_runs(cells, 1, 0)
 
-    # Positive control: outside the header the same run IS left alone, so the header's
-    # forced `True` is a real override rather than a property of every run.
     assert [run.bold for run in body] == [None]
     assert [run.bold for run in header] == [True], "recorded loss: bold=False ignored"
 
@@ -361,10 +334,14 @@ def test_a_code_blocks_monospace_overrides_a_runs_own_code_flag():
     Same one-directional convention as bold: the container's monospace only ever adds.
     The positive control is the same run in a `paragraph` block, where it is untouched.
     """
-    in_code = _reopen(_render(Block("code", runs=[Run(text="p", code=False)]))).paragraphs[0]
-    in_prose = _reopen(_render(Block("paragraph", runs=[Run(text="p", code=False)]))).paragraphs[0]
+    in_code = _reopen(
+        _render(Block("code", runs=[Run(text="p", code=False)]))
+    ).paragraphs[0]
+    in_prose = _reopen(
+        _render(Block("paragraph", runs=[Run(text="p", code=False)]))
+    ).paragraphs[0]
 
-    assert [run.font.name for run in in_prose.runs] == [None]  # positive control
+    assert [run.font.name for run in in_prose.runs] == [None]
     assert [run.font.name for run in in_code.runs] == [_MONOSPACE]
 
 
@@ -384,11 +361,11 @@ def test_a_paragraph_style_on_a_table_image_or_pagebreak_block_is_dropped(kind, 
     rendered with the template's defaults. Not a wish for a feature — a fact a
     round-trip proof must expect, since the model round-trips a value the file lacks.
     """
-    style = ParagraphStyle(align="center", space_before_pt=12, space_after_pt=13, line_spacing=2.0)
+    style = ParagraphStyle(
+        align="center", space_before_pt=12, space_after_pt=13, line_spacing=2.0
+    )
     dropped = _document_xml(_render(Block(kind, style=style, **extra)))
 
-    # Positive control: the SAME style on a paragraph block does reach the file, so
-    # these absences measure the kind dispatch and not a broken style object.
     honoured = _document_xml(_render(Block("paragraph", text="a", style=style)))
     assert "w:jc" in honoured and "w:spacing" in honoured
 
@@ -404,14 +381,17 @@ def test_a_portrait_page_is_emitted_as_geometry_only_never_as_an_explicit_orient
     `w:orient` attribute, and is byte-identical to a document that declared nothing. A
     reader recovers "portrait" by comparing width to height, never by reading a field.
     """
-    landscape = _render(Block("paragraph", text="a"), page=PageSetup(orientation="landscape"))
-    portrait = _render(Block("paragraph", text="a"), page=PageSetup(orientation="portrait"))
+    landscape = _render(
+        Block("paragraph", text="a"), page=PageSetup(orientation="landscape")
+    )
+    portrait = _render(
+        Block("paragraph", text="a"), page=PageSetup(orientation="portrait")
+    )
     silent = _render(Block("paragraph", text="a"))
 
-    assert "w:orient" in _document_xml(landscape)  # positive control
+    assert "w:orient" in _document_xml(landscape)
     assert "w:orient" not in _document_xml(portrait)
     assert _document_xml(portrait) == _document_xml(silent)
-    # The geometry still expresses the intent, which is why this is partial, not lost.
     section = _reopen(portrait).sections[0]
     assert section.page_height > section.page_width
 
@@ -425,7 +405,9 @@ def test_a_portrait_page_is_emitted_as_geometry_only_never_as_an_explicit_orient
         ("artifact_slug", {"artifact_slug": "ORPHAN-SLUG"}, "ORPHAN-SLUG"),
     ],
 )
-def test_a_field_belonging_to_another_kind_is_dropped_without_complaint(field_name, extra, marker):
+def test_a_field_belonging_to_another_kind_is_dropped_without_complaint(
+    field_name, extra, marker
+):
     """RECORDED LOSS: `Block` is one flat dataclass, so every kind ignores most of it.
 
     Setting `items` on a paragraph, or `rows` on a heading, is silently discarded. This
@@ -434,39 +416,27 @@ def test_a_field_belonging_to_another_kind_is_dropped_without_complaint(field_na
     """
     data = _render(Block("paragraph", text="KEPT", **extra))
 
-    assert _styles(data) == [("Normal", "KEPT")]  # positive control
+    assert _styles(data) == [("Normal", "KEPT")]
     assert _reopen(data).tables == []
-    assert marker not in _document_xml(data), f"recorded loss: paragraph drops {field_name}"
+    assert marker not in _document_xml(
+        data
+    ), f"recorded loss: paragraph drops {field_name}"
 
-
-# =========================================================================== THE CENSUS
-#
-# One structured collection, every model field, asserted against the live measurements
-# below so it cannot rot. This is the table the next session reads.
 
 WRITER_COVERAGE: dict[str, str] = {
-    # --- Run -----------------------------------------------------------------------
     "Run.text": "emitted",
-    # ON only: a container (a header row) can force it on and the run cannot refuse.
     "Run.bold": "partial",
     "Run.italic": "emitted",
-    # A font substitution, not a semantic flag, and a `code` block forces it on.
     "Run.code": "partial",
     "Run.link": "emitted",
-    # --- ParagraphStyle (measured on a `paragraph` block; the per-kind drop is
-    #     recorded against `Block.style`, which is where the dispatch lives) ---------
     "ParagraphStyle.align": "emitted",
     "ParagraphStyle.space_before_pt": "emitted",
     "ParagraphStyle.space_after_pt": "emitted",
     "ParagraphStyle.line_spacing": "emitted",
     "ParagraphStyle.indent_left_pt": "emitted",
     "ParagraphStyle.indent_right_pt": "emitted",
-    # Measured with a NEGATIVE value on purpose: a hanging indent is the only place this
-    # model treats a non-zero negative as a real request.
     "ParagraphStyle.first_line_indent_pt": "emitted",
     "ParagraphStyle.keep_with_next": "emitted",
-    # --- PageSetup -----------------------------------------------------------------
-    # `landscape` writes `w:orient`; `portrait` is geometry only.
     "PageSetup.orientation": "partial",
     "PageSetup.size": "emitted",
     "PageSetup.margin_top_pt": "emitted",
@@ -476,49 +446,25 @@ WRITER_COVERAGE: dict[str, str] = {
     "PageSetup.header_text": "emitted",
     "PageSetup.footer_text": "emitted",
     "PageSetup.page_numbers": "emitted",
-    # --- Cell ----------------------------------------------------------------------
     "Cell.runs": "emitted",
-    # Dropped when `runs` is also supplied.
     "Cell.text": "partial",
-    # ON only, exactly like `Run.bold`.
     "Cell.bold": "partial",
     "Cell.align": "emitted",
-    # --- Block ---------------------------------------------------------------------
-    # 6 of 8 kinds are recoverable from the emitted structure; `code` and `image` are not.
     "Block.kind": "partial",
-    # Dropped when `runs` is also supplied; ignored outright by 5 of the 8 kinds.
     "Block.text": "partial",
     "Block.level": "emitted",
     "Block.items": "emitted",
-    # Dropped when `cells` is also supplied.
     "Block.rows": "partial",
-    # Survives as placeholder PROSE: no image part, no drawing, no relationship.
     "Block.artifact_slug": "partial",
     "Block.runs": "emitted",
     "Block.cells": "emitted",
-    # Honoured on heading/paragraph/bullets/numbered/code; dropped on table/image/pagebreak.
     "Block.style": "partial",
-    # --- DocumentModel -------------------------------------------------------------
     "DocumentModel.title": "emitted",
     "DocumentModel.blocks": "emitted",
     "DocumentModel.page": "emitted",
 }
 
-#: How many rows of each verdict the census holds. A vacuity floor for the table
-#: itself: without it the census could quietly collapse to "everything is emitted".
-#:
-#: `dropped: 0` is a FINDING, not an oversight: no model field is unconditionally
-#: dropped by this writer. Every loss recorded above is CONDITIONAL — on a sibling
-#: field being supplied too (`Block.text` beside `runs`), on the block kind
-#: (`Block.style` on a table), or on direction (`bold` can be switched on, never off).
-#: That is why a LossReport has to be computed per block, not read off a static list.
 CENSUS_SHAPE = {"emitted": 28, "partial": 10, "dropped": 0}
-
-
-# ------------------------------------------------------- the live measurements
-#
-# Each returns a verdict from real bytes. They are what makes the table above an
-# assertion rather than a comment.
 
 
 def _kind_recovers_heading() -> bool:
@@ -553,10 +499,11 @@ def _kind_recovers_code() -> bool:
 def _kind_recovers_image() -> bool:
     """An `image` block is a text paragraph: no drawing, no media part, no relationship."""
     data = _render(Block("image", artifact_slug="s"))
-    return "w:drawing" in _document_xml(data) or any("media" in n for n in _part_names(data))
+    return "w:drawing" in _document_xml(data) or any(
+        "media" in n for n in _part_names(data)
+    )
 
 
-#: kind -> "is this kind recoverable AS ITSELF from the emitted document?"
 _KIND_RECOVERY: dict[str, Callable[[], bool]] = {
     "heading": _kind_recovers_heading,
     "paragraph": _kind_recovers_paragraph,
@@ -577,27 +524,47 @@ def _verdict(*, present: bool, faithful: bool) -> str:
 
 
 def _measure_run_text() -> str:
-    para = _reopen(_render(Block("paragraph", runs=[Run(text="wording")]))).paragraphs[0]
+    para = _reopen(_render(Block("paragraph", runs=[Run(text="wording")]))).paragraphs[
+        0
+    ]
     return _verdict(present="wording" in para.text, faithful=para.text == "wording")
 
 
 def _measure_run_bold() -> str:
-    on = _reopen(_render(Block("paragraph", runs=[Run("x", bold=True)]))).paragraphs[0].runs[0]
+    on = (
+        _reopen(_render(Block("paragraph", runs=[Run("x", bold=True)])))
+        .paragraphs[0]
+        .runs[0]
+    )
     refused = [[Cell(runs=[Run("h", bold=False)])], [Cell(text="b")]]
     forced = _table_cell_runs(refused, 0, 0)[0].bold is True
     return _verdict(present=on.bold is True, faithful=not forced)
 
 
 def _measure_run_italic() -> str:
-    runs = _reopen(_render(Block("paragraph", runs=[Run("x", italic=True)]))).paragraphs[0].runs
+    runs = (
+        _reopen(_render(Block("paragraph", runs=[Run("x", italic=True)])))
+        .paragraphs[0]
+        .runs
+    )
     plain = _reopen(_render(Block("paragraph", runs=[Run("x")]))).paragraphs[0].runs
     return _verdict(present=runs[0].italic is True, faithful=plain[0].italic is None)
 
 
 def _measure_run_code() -> str:
-    on = _reopen(_render(Block("paragraph", runs=[Run("x", code=True)]))).paragraphs[0].runs[0]
-    in_code = _reopen(_render(Block("code", runs=[Run("x", code=False)]))).paragraphs[0].runs[0]
-    return _verdict(present=on.font.name == _MONOSPACE, faithful=in_code.font.name is None)
+    on = (
+        _reopen(_render(Block("paragraph", runs=[Run("x", code=True)])))
+        .paragraphs[0]
+        .runs[0]
+    )
+    in_code = (
+        _reopen(_render(Block("code", runs=[Run("x", code=False)])))
+        .paragraphs[0]
+        .runs[0]
+    )
+    return _verdict(
+        present=on.font.name == _MONOSPACE, faithful=in_code.font.name is None
+    )
 
 
 def _measure_run_link() -> str:
@@ -620,19 +587,25 @@ def _measure_style_align() -> str:
 def _measure_style_space_before() -> str:
     from docx.shared import Pt
 
-    got = _styled_paragraph(ParagraphStyle(space_before_pt=7)).paragraph_format.space_before
+    got = _styled_paragraph(
+        ParagraphStyle(space_before_pt=7)
+    ).paragraph_format.space_before
     return _verdict(present=got is not None, faithful=got == Pt(7))
 
 
 def _measure_style_space_after() -> str:
     from docx.shared import Pt
 
-    got = _styled_paragraph(ParagraphStyle(space_after_pt=9)).paragraph_format.space_after
+    got = _styled_paragraph(
+        ParagraphStyle(space_after_pt=9)
+    ).paragraph_format.space_after
     return _verdict(present=got is not None, faithful=got == Pt(9))
 
 
 def _measure_style_line_spacing() -> str:
-    got = _styled_paragraph(ParagraphStyle(line_spacing=1.5)).paragraph_format.line_spacing
+    got = _styled_paragraph(
+        ParagraphStyle(line_spacing=1.5)
+    ).paragraph_format.line_spacing
     return _verdict(present=got is not None, faithful=got == 1.5)
 
 
@@ -649,14 +622,18 @@ def _measure_page_orientation() -> str:
 def _measure_style_indent_left() -> str:
     from docx.shared import Pt
 
-    got = _styled_paragraph(ParagraphStyle(indent_left_pt=24)).paragraph_format.left_indent
+    got = _styled_paragraph(
+        ParagraphStyle(indent_left_pt=24)
+    ).paragraph_format.left_indent
     return _verdict(present=got is not None, faithful=got == Pt(24))
 
 
 def _measure_style_indent_right() -> str:
     from docx.shared import Pt
 
-    got = _styled_paragraph(ParagraphStyle(indent_right_pt=12)).paragraph_format.right_indent
+    got = _styled_paragraph(
+        ParagraphStyle(indent_right_pt=12)
+    ).paragraph_format.right_indent
     return _verdict(present=got is not None, faithful=got == Pt(12))
 
 
@@ -671,7 +648,9 @@ def _measure_style_first_line_indent() -> str:
 
 
 def _measure_style_keep_with_next() -> str:
-    got = _styled_paragraph(ParagraphStyle(keep_with_next=True)).paragraph_format.keep_with_next
+    got = _styled_paragraph(
+        ParagraphStyle(keep_with_next=True)
+    ).paragraph_format.keep_with_next
     return _verdict(present=got is not None, faithful=got is True)
 
 
@@ -682,7 +661,9 @@ def _measure_page_size() -> str:
     not control."""
     from docx.shared import Mm
 
-    section = _reopen(_render(Block("paragraph", text="a"), page=PageSetup(size="a4"))).sections[0]
+    section = _reopen(
+        _render(Block("paragraph", text="a"), page=PageSetup(size="a4"))
+    ).sections[0]
     return _verdict(
         present=section.page_width is not None,
         faithful=abs(section.page_width - Mm(210)) <= _ONE_TWIP_EMU,
@@ -719,7 +700,10 @@ def _measure_page_margin_edge(edge: str) -> Callable[[], str]:
         from docx.shared import Pt
 
         section = _reopen(
-            _render(Block("paragraph", text="a"), page=PageSetup(**{f"margin_{edge}_pt": 90.0}))
+            _render(
+                Block("paragraph", text="a"),
+                page=PageSetup(**{f"margin_{edge}_pt": 90.0}),
+            )
         ).sections[0]
         got = getattr(section, f"{edge}_margin")
         return _verdict(present=got is not None, faithful=got == Pt(90))
@@ -728,7 +712,9 @@ def _measure_page_margin_edge(edge: str) -> Callable[[], str]:
 
 
 def _measure_cell_runs() -> str:
-    runs = _table_cell_runs([[Cell(text="h")], [Cell(runs=[Run("rich", italic=True)])]], 1, 0)
+    runs = _table_cell_runs(
+        [[Cell(text="h")], [Cell(runs=[Run("rich", italic=True)])]], 1, 0
+    )
     return _verdict(
         present=[run.text for run in runs] == ["rich"],
         faithful=runs[0].italic is True,
@@ -737,7 +723,9 @@ def _measure_cell_runs() -> str:
 
 def _measure_cell_text() -> str:
     plain = _table_cell_runs([[Cell(text="h")], [Cell(text="only")]], 1, 0)
-    beside = _render(Block("table", cells=[[Cell(text="h")], [Cell(text="LOST", runs=[Run("r")])]]))
+    beside = _render(
+        Block("table", cells=[[Cell(text="h")], [Cell(text="LOST", runs=[Run("r")])]])
+    )
     return _verdict(
         present=[run.text for run in plain] == ["only"],
         faithful="LOST" in _document_xml(beside),
@@ -746,7 +734,9 @@ def _measure_cell_text() -> str:
 
 def _measure_cell_bold() -> str:
     body = _table_cell_runs([[Cell(text="h")], [Cell(text="loud", bold=True)]], 1, 0)
-    header = _table_cell_runs([[Cell(text="quiet", bold=False)], [Cell(text="b")]], 0, 0)
+    header = _table_cell_runs(
+        [[Cell(text="quiet", bold=False)], [Cell(text="b")]], 0, 0
+    )
     return _verdict(present=body[0].bold is True, faithful=header[0].bold is not True)
 
 
@@ -773,10 +763,13 @@ def _measure_block_text() -> str:
 def _measure_block_level() -> str:
     got = [
         style
-        for style, _ in _styles(_render(*(Block("heading", text="h", level=n) for n in (2, 5))))
+        for style, _ in _styles(
+            _render(*(Block("heading", text="h", level=n) for n in (2, 5)))
+        )
     ]
     return _verdict(
-        present=got != ["Heading 1", "Heading 1"], faithful=got == ["Heading 2", "Heading 5"]
+        present=got != ["Heading 1", "Heading 1"],
+        faithful=got == ["Heading 2", "Heading 5"],
     )
 
 
@@ -806,7 +799,9 @@ def _measure_block_artifact_slug() -> str:
 
 
 def _measure_block_runs() -> str:
-    runs = _reopen(_render(Block("paragraph", runs=[Run("a"), Run("b", bold=True)]))).paragraphs[0]
+    runs = _reopen(
+        _render(Block("paragraph", runs=[Run("a"), Run("b", bold=True)]))
+    ).paragraphs[0]
     return _verdict(
         present=[run.text for run in runs.runs] == ["a", "b"],
         faithful=runs.runs[1].bold is True,
@@ -842,14 +837,21 @@ def _measure_block_style() -> str:
 
 def _measure_document_title() -> str:
     got = _styles(_render(Block("paragraph", text="b"), title="Report"))
-    return _verdict(present=any(text == "Report" for _, text in got), faithful=got[0][0] == "Title")
+    return _verdict(
+        present=any(text == "Report" for _, text in got), faithful=got[0][0] == "Title"
+    )
 
 
 def _measure_document_blocks() -> str:
     got = [
-        text for _, text in _styles(_render(*(Block("paragraph", text=f"p{n}") for n in range(3))))
+        text
+        for _, text in _styles(
+            _render(*(Block("paragraph", text=f"p{n}") for n in range(3)))
+        )
     ]
-    return _verdict(present=set(got) == {"p0", "p1", "p2"}, faithful=got == ["p0", "p1", "p2"])
+    return _verdict(
+        present=set(got) == {"p0", "p1", "p2"}, faithful=got == ["p0", "p1", "p2"]
+    )
 
 
 def _measure_document_page() -> str:
@@ -858,7 +860,9 @@ def _measure_document_page() -> str:
     section = _reopen(
         _render(Block("paragraph", text="a"), page=PageSetup(margin_left_pt=90.0))
     ).sections[0]
-    return _verdict(present=section.left_margin is not None, faithful=section.left_margin == Pt(90))
+    return _verdict(
+        present=section.left_margin is not None, faithful=section.left_margin == Pt(90)
+    )
 
 
 _MEASUREMENTS: dict[str, Callable[[], str]] = {
@@ -903,9 +907,6 @@ _MEASUREMENTS: dict[str, Callable[[], str]] = {
 }
 
 
-# ------------------------------------------------------------- the census, asserted
-
-
 def test_the_census_covers_every_model_field():
     """A new model field must be MEASURED before it can be added. No silent drops."""
     declared = {
@@ -915,7 +916,9 @@ def test_the_census_covers_every_model_field():
     }
 
     assert declared == set(WRITER_COVERAGE), "every model field needs a census verdict"
-    assert declared == set(_MEASUREMENTS), "every census verdict needs a live measurement"
+    assert declared == set(
+        _MEASUREMENTS
+    ), "every census verdict needs a live measurement"
 
 
 def test_the_census_verdicts_are_from_the_closed_vocabulary():
@@ -924,7 +927,9 @@ def test_the_census_verdicts_are_from_the_closed_vocabulary():
 
 def test_the_census_shape_is_pinned_so_it_cannot_collapse_to_all_emitted():
     """Vacuity floor for the table itself."""
-    counted = {verdict: list(WRITER_COVERAGE.values()).count(verdict) for verdict in VERDICTS}
+    counted = {
+        verdict: list(WRITER_COVERAGE.values()).count(verdict) for verdict in VERDICTS
+    }
 
     assert counted == CENSUS_SHAPE
     assert sum(CENSUS_SHAPE.values()) == len(WRITER_COVERAGE) == 38

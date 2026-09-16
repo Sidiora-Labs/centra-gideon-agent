@@ -59,7 +59,6 @@ def main() -> int:
     fails: list[str] = []
     probe_key = f"pref.memval_{int(time.time() * 1000)}"
 
-    # 1. service-layer API endpoints all respond with their expected shape
     sem = _get("/api/memory/semantic")
     check("entries" in sem, "semantic endpoint shape", fails)
     check("events" in _get("/api/memory/events"), "events endpoint shape", fails)
@@ -68,14 +67,12 @@ def main() -> int:
     lint = _get("/api/memory/lint")
     check("flags" in lint, "lint endpoint shape", fails)
 
-    # 2. write → read → DB → WAL round-trip (the M2/M3 service path)
     st, _ = _req("PUT", "/api/memory/semantic",
                  {"key": probe_key, "value": "memory validation probe", "confidence": 1.0})
     check(st == 200, f"semantic write status={st}", fails)
     after = _get("/api/memory/semantic")["entries"]
     check(any(e["key"] == probe_key for e in after), "written entry visible via API", fails)
 
-    # DB: row exists with self-consistent axes (the live-validation fix)
     conn = sqlite3.connect(DB)
     conn.row_factory = sqlite3.Row
     try:
@@ -85,7 +82,6 @@ def main() -> int:
         if row is not None:
             check(row["scope"] == "global", f"DB scope={row['scope']} (want global)", fails)
             check(row["tier"] == "semantic", f"DB tier={row['tier']} (want semantic — not NULL)", fails)
-        # v6 axis columns present
         cols = {r[1] for r in conn.execute("PRAGMA table_info(semantic_memory)").fetchall()}
         check({"tier", "scope", "scope_ref", "category", "visit_count"} <= cols,
               "v6 axis columns present on semantic_memory", fails)
@@ -95,18 +91,15 @@ def main() -> int:
     finally:
         conn.close()
 
-    # WAL: a create event was logged for the write
     events = _get("/api/memory/events?limit=20")["events"]
     check(any(e.get("memory_key") == probe_key and e.get("event_type") == "create" for e in events),
           "WAL create event recorded", fails)
 
-    # 3. delete → gone from API + DB (and a delete event)
     st, _ = _req("DELETE", f"/api/memory/semantic/{probe_key}")
     check(st == 200, f"semantic delete status={st}", fails)
     gone = _get("/api/memory/semantic")["entries"]
     check(not any(e["key"] == probe_key for e in gone), "deleted entry gone from API", fails)
 
-    # 4. the memory tools are present (runtime-facing surface)
     tools = {t["name"] for t in _get("/api/tools")["tools"]}
     for t in ("memory_remember", "memory_list", "memory_forget", "memory_recall"):
         check(t in tools, f"memory tool {t} present", fails)

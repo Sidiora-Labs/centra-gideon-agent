@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { connect, connectFromScan, readStoredGateway, start } from '../www/shell/boot.mjs'
-import { ENDPOINT_FIELDS, REGISTRY_STORAGE_KEY } from '../www/shell/registry.mjs'
+import { connect, connectFromScan, readStoredGateway, start } from '../www/bootstrap/start.mjs'
+import { ENDPOINT_FIELDS, REGISTRY_STORAGE_KEY } from '../www/connection/registry.mjs'
 
 function fakeStorage(initial = {}) {
   const map = new Map(Object.entries(initial))
@@ -31,8 +31,6 @@ test('connecting hands the WebView to the served companion', () => {
 })
 
 test('the connect writes the registry endpoints.ts declares, under ITS key', () => {
-  // The anti-second-contract assertion. A bespoke `gideon.gatewayUrl` would pass every
-  // other test in this file and still be the thing endpoints.ts exists to prevent.
   const storage = fakeStorage()
   connect({ raw: '192.168.1.10:10000', storage, location: fakeLocation() })
 
@@ -54,9 +52,7 @@ test('the registry holds no credential — only a URL, a label and ids', () => {
   const storage = fakeStorage()
   connect({ raw: '10.0.0.4:10000', storage, location: fakeLocation() })
   const serialized = storage.map.get(REGISTRY_STORAGE_KEY)
-  // The device session is an httponly `Set-Cookie` from `pair/complete`, so it lives in the
-  // WebView cookie jar and is invisible to this script. Nothing token-shaped can be here.
-  for (const smell of ['token', 'secret', 'cookie', 'pc_token', 'password']) {
+  for (const smell of ['token', 'secret', 'cookie', 'gideon_token', 'password']) {
     assert.ok(!serialized.toLowerCase().includes(smell), `${smell} must not be persisted`)
   }
 })
@@ -114,12 +110,10 @@ test('storage that throws costs the shortcut, not the session', () => {
   assert.equal(readStoredGateway(hostile), '')
 
   const location = fakeLocation()
-  // Still connects: the address was usable this launch even though it cannot be remembered.
   assert.equal(connect({ raw: '10.0.0.4:10000', storage: hostile, location }).ok, true)
   assert.deepEqual(location.replaced, ['http://10.0.0.4:10000/#/companion'])
 })
 
-// ── start(): the second-launch path ────────────────────────────────────────
 
 function fakeDoc(elements = {}) {
   const listeners = new Map()
@@ -137,7 +131,6 @@ function fakeDoc(elements = {}) {
 
 const view = { getComputedStyle: () => ({ getPropertyValue: () => '0px' }), addEventListener() {} }
 
-/** A registry naming one active endpoint at `baseUrl`. */
 function registryFor(baseUrl) {
   return {
     [REGISTRY_STORAGE_KEY]: JSON.stringify({
@@ -198,9 +191,22 @@ test('with nothing remembered the form drives the connect', () => {
 test('safe areas are applied to the shell element during start', () => {
   const { doc, nodes } = fakeDoc()
   const insetView = {
-    getComputedStyle: () => ({ getPropertyValue: (name) => (name === '--pc-safe-top' ? '47px' : '0px') }),
+    getComputedStyle: () => ({ getPropertyValue: (name) => (name === '--gideon-safe-top' ? '47px' : '0px') }),
     addEventListener() {},
   }
   start({ doc, view: insetView, storage: fakeStorage(), location: fakeLocation() })
   assert.equal(nodes.shell.style.paddingTop, '47px')
+})
+
+test('a rejected remembered gateway leaves the form usable for recovery', () => {
+  const { doc, nodes, listeners } = fakeDoc()
+  const storage = fakeStorage(registryFor('https://public.example.test'))
+  const location = fakeLocation()
+  start({ doc, view, storage, location })
+  assert.equal(nodes.status.hidden, false)
+  nodes.gateway.value = '10.1.2.3:10000'
+  listeners.get('submit')({ preventDefault() {} })
+  assert.equal(nodes.status.hidden, true)
+  assert.deepEqual(location.replaced, ['http://10.1.2.3:10000/#/companion'])
+  assert.equal(stored(storage).endpoints.length, 1)
 })

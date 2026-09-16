@@ -2,25 +2,20 @@
 
 from unittest.mock import MagicMock
 
-from gideon.dashboard.state import DashboardState, _ChatSession
-from gideon.history import ConversationLog
-
-# -- Helpers --
+from gideon.cognition.history import ConversationLog
+from gideon.interfaces.dashboard.state import ConsoleState, _ChatSession
 
 
 def _make_state(tmp_path, **kwargs):
     sessions = MagicMock(count=0)
     sessions.remove = MagicMock()
     sessions.get_channel_link = MagicMock(return_value=(None, None))
-    return DashboardState(
+    return ConsoleState(
         sessions=sessions,
         start_time=0.0,
         conversation_log=ConversationLog(base_dir=tmp_path),
         **kwargs,
     )
-
-
-# -- Unit tests: _ChatSession channel fields --
 
 
 class TestChatSessionChannelFields:
@@ -63,7 +58,7 @@ class TestChatSessionChannelFields:
         assert d["channel_thread_ts"] == "1234.5678"
 
 
-# -- Unit tests: DashboardState.link_channel --
+# -- Unit tests: ConsoleState.link_channel --
 
 
 class TestDashboardStateLinkChannel:
@@ -81,13 +76,12 @@ class TestDashboardStateLinkChannel:
         state.link_channel("s1", "1234.5678", "C123")
         state.sessions.set_channel_link.assert_called_once()
         call_args = state.sessions.set_channel_link.call_args[0]
-        assert "s1" in call_args[0]  # history key contains session name
+        assert "s1" in call_args[0]
         assert call_args[1] == "1234.5678"
         assert call_args[2] == "C123"
 
     def test_link_channel_missing_session_noop(self, tmp_path):
         state = _make_state(tmp_path)
-        # Should not raise
         state.link_channel("nonexistent", "1234.5678", "C123")
 
     def test_link_multiple_sessions(self, tmp_path):
@@ -102,13 +96,8 @@ class TestDashboardStateLinkChannel:
         assert state._sessions["s2"]._channel_thread_ts == "222.000"
 
 
-# -- Unit tests: session restore with channel link --
-
-
 class TestSessionRestoreChannelLink:
-    # TODO: Add integration test for restore_sessions() populating channel link
-    # from SessionStore. The restore path is complex and requires full
-    # DashboardState initialization with real SessionManager.
+    # ConsoleState initialization with real ConversationDirectory.
 
     def test_unlinked_session_stays_false(self, tmp_path):
         state = _make_state(tmp_path)

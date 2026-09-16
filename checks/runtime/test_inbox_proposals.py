@@ -21,18 +21,20 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from gideon.inbox import InboxStore, ItemKind, ItemStatus
+from gideon.integrations.inbox import InboxStore, ItemKind, ItemStatus
 
 
 @pytest.fixture()
 def home(tmp_path, monkeypatch):
     """Isolate the proposals dir, the inbox store, and the rules store."""
-    from gideon import notification_rules as nr
-    from gideon.skills import proposals as pr
+    from gideon.extensions.skills import proposals as pr
+    from gideon.workspace import notification_rules as nr
 
     (tmp_path / "entity_settings").mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr(pr, "_proposals_dir", lambda: _mkdir(tmp_path / "skill_proposals"))
-    monkeypatch.setattr("gideon.inbox.config_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        pr, "_proposals_dir", lambda: _mkdir(tmp_path / "skill_proposals")
+    )
+    monkeypatch.setattr("gideon.integrations.inbox.config_dir", lambda: tmp_path)
     monkeypatch.setattr(nr, "config_dir", lambda: tmp_path)
     return tmp_path
 
@@ -43,7 +45,7 @@ def _mkdir(p):
 
 
 def _enqueue(slug="extract-tables", **kw):
-    from gideon.skills import proposals as pr
+    from gideon.extensions.skills import proposals as pr
 
     return pr.enqueue(
         slug=slug,
@@ -68,9 +70,6 @@ def _proposal_items(home):
     return [i for i in _items(home) if i.item_kind == ItemKind.PROPOSAL.value]
 
 
-# ── T4.1: enqueue surfaces an item ──────────────────────────────────────
-
-
 def test_enqueue_raises_a_proposal_item(home):
     prop = _enqueue()
     assert prop is not None
@@ -84,11 +83,12 @@ def test_enqueue_raises_a_proposal_item(home):
 
 
 def test_enqueue_notifies_once_through_the_registered_kind(home):
-    from gideon import notification_kinds as nk
+    from gideon.workspace import notification_kinds as nk
 
     state = MagicMock()
     with patch(
-        "gideon.inbox_providers.native_source.get_dashboard_state", return_value=state
+        "gideon.integrations.inbox_providers.native_source.get_dashboard_state",
+        return_value=state,
     ):
         _enqueue()
     assert state.notify.call_count == 1
@@ -100,7 +100,8 @@ def test_a_refine_proposal_is_labelled_differently(home):
     """ "New skill proposed" would be wrong for a refinement of an existing one."""
     state = MagicMock()
     with patch(
-        "gideon.inbox_providers.native_source.get_dashboard_state", return_value=state
+        "gideon.integrations.inbox_providers.native_source.get_dashboard_state",
+        return_value=state,
     ):
         _enqueue(kind="refine", refine_target="pdf-reader")
     assert "Refine" in state.notify.call_args[0][1]
@@ -110,7 +111,8 @@ def test_re_enqueueing_the_same_proposal_does_not_stack_rows(home):
     """Same slug+session+created_at ⇒ same pid ⇒ one row, one notification."""
     state = MagicMock()
     with patch(
-        "gideon.inbox_providers.native_source.get_dashboard_state", return_value=state
+        "gideon.integrations.inbox_providers.native_source.get_dashboard_state",
+        return_value=state,
     ):
         _enqueue()
         _enqueue()
@@ -120,10 +122,11 @@ def test_re_enqueueing_the_same_proposal_does_not_stack_rows(home):
 
 def test_enqueue_survives_an_unreachable_inbox(home, monkeypatch):
     """Surfacing is best-effort: the proposal must still be queued."""
-    from gideon.skills import proposals as pr
+    from gideon.extensions.skills import proposals as pr
 
     monkeypatch.setattr(
-        "gideon.inbox.emit_attention_item", MagicMock(side_effect=OSError("no disk"))
+        "gideon.integrations.inbox.emit_attention_item",
+        MagicMock(side_effect=OSError("no disk")),
     )
     prop = _enqueue()
     assert prop is not None
@@ -132,16 +135,16 @@ def test_enqueue_survives_an_unreachable_inbox(home, monkeypatch):
 
 def test_enqueue_works_headless(home):
     """No dashboard state (CLI / startup) — the item still lands."""
-    with patch("gideon.inbox_providers.native_source.get_dashboard_state", return_value=None):
+    with patch(
+        "gideon.integrations.inbox_providers.native_source.get_dashboard_state",
+        return_value=None,
+    ):
         assert _enqueue() is not None
     assert len(_proposal_items(home)) == 1
 
 
-# ── T4.1: resolution records WHICH answer ───────────────────────────────
-
-
 def test_reject_dismisses_the_item(home):
-    from gideon.skills import proposals as pr
+    from gideon.extensions.skills import proposals as pr
 
     prop = _enqueue()
     assert pr.reject(prop.id) is True
@@ -155,12 +158,14 @@ def test_accept_marks_the_item_handled_not_dismissed(home, monkeypatch):
     A naive implementation therefore leaves an INSTALLED skill's row reading "dismissed" —
     the record of the user's answer would be wrong.
     """
-    from gideon.skills import proposals as pr
+    from gideon.extensions.skills import proposals as pr
 
     prop = _enqueue()
     fake_loader = MagicMock()
     fake_loader.create_auto_skill.return_value = "auto/extract-tables"
-    with patch("gideon.skills.loader.SkillsLoader", return_value=fake_loader):
+    with patch(
+        "gideon.extensions.skills.loader.ProcedureLibrary", return_value=fake_loader
+    ):
         name = pr.accept(prop.id).name
     assert name == "auto/extract-tables"
     assert _proposal_items(home)[0].status == ItemStatus.HANDLED.value
@@ -168,48 +173,46 @@ def test_accept_marks_the_item_handled_not_dismissed(home, monkeypatch):
 
 def test_resolution_never_moves_an_item_backwards(home):
     """A resolved item must not be dragged back into an open state."""
-    from gideon.skills import proposals as pr
+    from gideon.extensions.skills import proposals as pr
 
     prop = _enqueue()
     pr._resolve_inbox_item(prop.id, "handled")
-    pr._resolve_inbox_item(prop.id, "pending")  # would resurrect it
+    pr._resolve_inbox_item(prop.id, "pending")
     assert _proposal_items(home)[0].status in ("handled", "pending")
-    # Explicitly: the guard allows a terminal→terminal correction but the caller only ever
-    # passes terminal statuses; assert the two real transitions.
     pr._resolve_inbox_item(prop.id, "dismissed")
     assert _proposal_items(home)[0].status == "dismissed"
 
 
 def test_resolution_ignores_unrelated_items(home):
-    from gideon.inbox import emit_attention_item
-    from gideon.skills import proposals as pr
+    from gideon.extensions.skills import proposals as pr
+    from gideon.integrations.inbox import emit_attention_item
 
     prop = _enqueue()
     store = InboxStore()
     store.load()
-    emit_attention_item(None, source="loop", kind="needs_input", title="other", store=store)
+    emit_attention_item(
+        None, source="loop", kind="needs_input", title="other", store=store
+    )
     pr.reject(prop.id)
     others = [i for i in _items(home) if i.item_kind == ItemKind.NEEDS_INPUT.value]
     assert others and others[0].status == ItemStatus.PENDING
 
 
 def test_resolution_survives_a_missing_inbox(home, monkeypatch):
-    from gideon.skills import proposals as pr
+    from gideon.extensions.skills import proposals as pr
 
     prop = _enqueue()
-    monkeypatch.setattr("gideon.inbox.InboxStore", MagicMock(side_effect=OSError("gone")))
-    assert pr.reject(prop.id) is True  # must not raise
-
-
-# ── T4.2: the idempotent backfill ───────────────────────────────────────
+    monkeypatch.setattr(
+        "gideon.integrations.inbox.InboxStore", MagicMock(side_effect=OSError("gone"))
+    )
+    assert pr.reject(prop.id) is True
 
 
 def test_backfill_surfaces_a_proposal_that_predates_s4(home):
     """A proposal written before this feature has no item; list_pending must fix that."""
-    from gideon.skills import proposals as pr
+    from gideon.extensions.skills import proposals as pr
 
     prop = _enqueue()
-    # Simulate the pre-S4 world: the proposal exists, its inbox item does not.
     store = InboxStore()
     store.load()
     store.items.clear()
@@ -222,7 +225,7 @@ def test_backfill_surfaces_a_proposal_that_predates_s4(home):
 
 
 def test_backfill_is_idempotent(home):
-    from gideon.skills import proposals as pr
+    from gideon.extensions.skills import proposals as pr
 
     _enqueue()
     store = InboxStore()
@@ -236,7 +239,7 @@ def test_backfill_is_idempotent(home):
 
 def test_backfill_does_not_resurrect_an_answered_proposal(home):
     """The worst failure: re-asking a question the user already decided."""
-    from gideon.skills import proposals as pr
+    from gideon.extensions.skills import proposals as pr
 
     _enqueue()
     store = InboxStore()
@@ -244,7 +247,6 @@ def test_backfill_does_not_resurrect_an_answered_proposal(home):
     for item in store.items.values():
         item.status = ItemStatus.DISMISSED.value
     store.save()
-    # The proposal file still exists and is pending (e.g. reject failed to unlink).
     assert pr.backfill_inbox_items() == 0
     items = _proposal_items(home)
     assert len(items) == 1 and items[0].status == ItemStatus.DISMISSED.value
@@ -252,7 +254,7 @@ def test_backfill_does_not_resurrect_an_answered_proposal(home):
 
 def test_list_pending_backfills_on_read(home):
     """The read path both surfaces use, so the first look after upgrade is correct."""
-    from gideon.skills import proposals as pr
+    from gideon.extensions.skills import proposals as pr
 
     _enqueue()
     store = InboxStore()
@@ -264,14 +266,14 @@ def test_list_pending_backfills_on_read(home):
 
 
 def test_backfill_with_no_proposals_is_a_no_op(home):
-    from gideon.skills import proposals as pr
+    from gideon.extensions.skills import proposals as pr
 
     assert pr.backfill_inbox_items() == 0
     assert _proposal_items(home) == []
 
 
 def test_backfill_handles_several_proposals(home):
-    from gideon.skills import proposals as pr
+    from gideon.extensions.skills import proposals as pr
 
     for i in range(3):
         _enqueue(slug=f"skill-{i}", created_at=f"2026-07-30T00:0{i}:00Z")
@@ -284,7 +286,7 @@ def test_backfill_handles_several_proposals(home):
 
 
 def test_backfill_skips_a_malformed_proposal_file(home):
-    from gideon.skills import proposals as pr
+    from gideon.extensions.skills import proposals as pr
 
     _enqueue()
     (pr._proposals_dir() / "broken.json").write_text("{not json", encoding="utf-8")
@@ -292,12 +294,12 @@ def test_backfill_skips_a_malformed_proposal_file(home):
     store.load()
     store.items.clear()
     store.save()
-    assert pr.backfill_inbox_items() == 1  # the good one only, no crash
+    assert pr.backfill_inbox_items() == 1
 
 
 def test_backfilled_item_carries_the_same_refs_as_a_fresh_one(home):
     """A consumer keying off refs must not care whether an item was backfilled."""
-    from gideon.skills import proposals as pr
+    from gideon.extensions.skills import proposals as pr
 
     prop = _enqueue()
     fresh = _proposal_items(home)[0].refs
@@ -316,13 +318,6 @@ def test_proposal_item_is_json_serializable(home):
     json.dumps([i.to_dict() for i in _proposal_items(home)])
 
 
-# ── T4.4: mirroring a session-modal approval ────────────────────────────
-#
-# An approval prompt is deliberately session-modal for latency. But it waits up to two
-# hours, so a prompt the user walked away from is a standing request they cannot see. The
-# mirror only fires AFTER a grace period, so approving promptly leaves no litter.
-
-
 class _Event:
     def __init__(self, request_id="req-1", title="write_file"):
         self.request_id = request_id
@@ -330,7 +325,7 @@ class _Event:
 
 
 def test_mirror_creates_an_agent_request_item(home):
-    from gideon.dashboard import chat_runner as cr
+    from gideon.interfaces.dashboard import chat_runner as cr
 
     state = MagicMock()
     item_id = cr._mirror_approval_to_inbox(state, "chat-7", _Event(), "high")
@@ -345,7 +340,7 @@ def test_mirror_creates_an_agent_request_item(home):
 
 def test_mirror_is_deduped_per_request(home):
     """A re-entered prompt for the same request must not stack rows."""
-    from gideon.dashboard import chat_runner as cr
+    from gideon.interfaces.dashboard import chat_runner as cr
 
     state = MagicMock()
     first = cr._mirror_approval_to_inbox(state, "chat-7", _Event(), "high")
@@ -355,11 +350,14 @@ def test_mirror_is_deduped_per_request(home):
 
 
 def test_mirror_distinguishes_different_requests(home):
-    from gideon.dashboard import chat_runner as cr
+    from gideon.interfaces.dashboard import chat_runner as cr
 
     cr._mirror_approval_to_inbox(MagicMock(), "chat-7", _Event("req-1"), "high")
     cr._mirror_approval_to_inbox(MagicMock(), "chat-7", _Event("req-2"), "high")
-    assert len([i for i in _items(home) if i.item_kind == ItemKind.AGENT_REQUEST.value]) == 2
+    assert (
+        len([i for i in _items(home) if i.item_kind == ItemKind.AGENT_REQUEST.value])
+        == 2
+    )
 
 
 @pytest.mark.parametrize(
@@ -373,7 +371,7 @@ def test_mirror_distinguishes_different_requests(home):
 )
 def test_resolving_the_mirror_records_which_answer(home, outcome, expected):
     """ "Approved" and "rejected" are different answers; the item is the only record."""
-    from gideon.dashboard import chat_runner as cr
+    from gideon.interfaces.dashboard import chat_runner as cr
 
     item_id = cr._mirror_approval_to_inbox(MagicMock(), "chat-7", _Event(), "high")
     cr._resolve_mirrored_approval(item_id, outcome)
@@ -383,11 +381,11 @@ def test_resolving_the_mirror_records_which_answer(home, outcome, expected):
 
 
 def test_resolving_an_already_resolved_mirror_is_a_no_op(home):
-    from gideon.dashboard import chat_runner as cr
+    from gideon.interfaces.dashboard import chat_runner as cr
 
     item_id = cr._mirror_approval_to_inbox(MagicMock(), "chat-7", _Event(), "high")
     cr._resolve_mirrored_approval(item_id, "approved")
-    cr._resolve_mirrored_approval(item_id, "rejected")  # must not flip it back
+    cr._resolve_mirrored_approval(item_id, "rejected")
     store = InboxStore()
     store.load()
     assert store.items[item_id].status == "handled"
@@ -395,24 +393,25 @@ def test_resolving_an_already_resolved_mirror_is_a_no_op(home):
 
 def test_resolving_an_empty_id_is_a_no_op(home):
     """The common path: approval answered within the grace period, nothing mirrored."""
-    from gideon.dashboard import chat_runner as cr
+    from gideon.interfaces.dashboard import chat_runner as cr
 
-    cr._resolve_mirrored_approval("", "approved")  # must not raise
+    cr._resolve_mirrored_approval("", "approved")
 
 
 def test_mirror_survives_an_unreachable_inbox(home, monkeypatch):
     """Never break the approval the user is actually waiting on."""
-    from gideon.dashboard import chat_runner as cr
+    from gideon.interfaces.dashboard import chat_runner as cr
 
     monkeypatch.setattr(
-        "gideon.inbox.emit_attention_item", MagicMock(side_effect=OSError("no disk"))
+        "gideon.integrations.inbox.emit_attention_item",
+        MagicMock(side_effect=OSError("no disk")),
     )
     assert cr._mirror_approval_to_inbox(MagicMock(), "chat-7", _Event(), "high") == ""
 
 
 def test_grace_period_is_short_enough_to_be_useful(home):
     """A grace longer than a coffee break defeats the purpose; shorter litters the inbox."""
-    from gideon.dashboard import chat_runner as cr
+    from gideon.interfaces.dashboard import chat_runner as cr
 
     assert 30.0 <= cr._APPROVAL_MIRROR_GRACE_SECS <= 300.0
 
@@ -427,7 +426,7 @@ async def test_shielded_wait_does_not_cancel_the_approval_future():
     """
     import asyncio
 
-    from gideon.dashboard import chat_runner as cr
+    from gideon.interfaces.dashboard import chat_runner as cr
 
     fut: asyncio.Future[str] = asyncio.get_running_loop().create_future()
     with pytest.raises(asyncio.TimeoutError):

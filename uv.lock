@@ -2278,7 +2278,7 @@ wheels = [
 ]
 
 [[package]]
-name = "gideon"
+name = "gideon-agent-harness"
 version = "0.1.3"
 source = { editable = "." }
 dependencies = [
@@ -2420,13 +2420,13 @@ requires-dist = [
     { name = "openai", marker = "extra == 'openai'", specifier = ">=1.0" },
     { name = "openpyxl", specifier = ">=3.1,<4" },
     { name = "pdfplumber", specifier = ">=0.11,<1" },
-    { name = "gideon", extras = ["bedrock"], marker = "extra == 'dev'" },
-    { name = "gideon", extras = ["embeddings"], marker = "extra == 'models'" },
-    { name = "gideon", extras = ["mcp"], marker = "extra == 'dev'" },
-    { name = "gideon", extras = ["models"], marker = "extra == 'dev'" },
-    { name = "gideon", extras = ["stt"], marker = "extra == 'models'" },
-    { name = "gideon", extras = ["test"], marker = "extra == 'dev'" },
-    { name = "gideon", extras = ["tts"], marker = "extra == 'models'" },
+    { name = "gideon-agent-harness", extras = ["bedrock"], marker = "extra == 'dev'" },
+    { name = "gideon-agent-harness", extras = ["embeddings"], marker = "extra == 'models'" },
+    { name = "gideon-agent-harness", extras = ["mcp"], marker = "extra == 'dev'" },
+    { name = "gideon-agent-harness", extras = ["models"], marker = "extra == 'dev'" },
+    { name = "gideon-agent-harness", extras = ["stt"], marker = "extra == 'models'" },
+    { name = "gideon-agent-harness", extras = ["test"], marker = "extra == 'dev'" },
+    { name = "gideon-agent-harness", extras = ["tts"], marker = "extra == 'models'" },
     { name = "pillow", specifier = ">=10,<13" },
     { name = "piper-tts", marker = "extra == 'tts'", specifier = ">=1.2" },
     { name = "playwright", marker = "extra == 'js-render'", specifier = ">=1.40" },

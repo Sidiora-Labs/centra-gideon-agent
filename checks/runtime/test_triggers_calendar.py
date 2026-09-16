@@ -19,7 +19,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from gideon.triggers.calendar import (
+from gideon.automation.triggers.calendar import (
     BROAD_GLOB_SEGMENTS,
     DAY_ALIASES,
     DAYS,
@@ -46,7 +46,7 @@ from gideon.triggers.calendar import (
     window_closes_at,
 )
 
-MONDAY = datetime(2024, 1, 1)  # a Monday, so weekday() arithmetic is readable
+MONDAY = datetime(2024, 1, 1)
 FRIDAY = datetime(2024, 1, 5)
 SATURDAY = datetime(2024, 1, 6)
 
@@ -61,15 +61,12 @@ def _restore_duty_gates():
     singleton and
     the provider registry).
     """
-    import gideon.triggers.calendar as cal
+    import gideon.automation.triggers.calendar as cal
 
     saved = dict(cal._DUTY_GATES)
     yield
     cal._DUTY_GATES.clear()
     cal._DUTY_GATES.update(saved)
-
-
-# ── the contract with the shipped matcher ──
 
 
 def test_wrap_semantics_match_the_shipped_notification_matcher():
@@ -80,12 +77,15 @@ def test_wrap_semantics_match_the_shipped_notification_matcher():
     answers to "is 23:00 inside 22:00→08:00" on one machine would be a bug nobody could explain, so
     the wrap rule is asserted identical across every half hour of the day.
     """
-    from gideon.providers.entity_routes import _in_quiet_window
+    from gideon.extensions.providers.entity_routes import _in_quiet_window
 
     windows = [QuietWindow(start="22:00", end="08:00")]
     for hour in range(24):
         for minute in (0, 30):
-            mine = in_quiet_window(windows, MONDAY.replace(hour=hour, minute=minute)) is not None
+            mine = (
+                in_quiet_window(windows, MONDAY.replace(hour=hour, minute=minute))
+                is not None
+            )
             theirs = _in_quiet_window("22:00", "08:00", hour * 60 + minute)
             assert mine == theirs, f"divergence at {hour:02d}:{minute:02d}"
 
@@ -107,9 +107,6 @@ def test_a_normal_window_is_half_open():
     assert in_quiet_window(windows, MONDAY.replace(hour=17)) is None
 
 
-# ── the three dimensions the shipped matcher lacks ──
-
-
 def test_day_of_week_restricts_a_window():
     windows = [QuietWindow(start="09:00", end="17:00", days=("sat", "sun"))]
     assert in_quiet_window(windows, SATURDAY.replace(hour=10)) is not None
@@ -126,7 +123,6 @@ def test_a_friday_night_window_carries_into_saturday_morning():
     windows = [QuietWindow(start="22:00", end="08:00", days=("fri",))]
     assert in_quiet_window(windows, FRIDAY.replace(hour=23)) is not None
     assert in_quiet_window(windows, SATURDAY.replace(hour=2)) is not None
-    # But Saturday NIGHT is not a Friday window.
     assert in_quiet_window(windows, SATURDAY.replace(hour=23)) is None
 
 
@@ -138,9 +134,6 @@ def test_several_windows_can_apply_to_one_trigger():
     assert in_quiet_window(windows, MONDAY.replace(hour=12, minute=30)) is not None
     assert in_quiet_window(windows, MONDAY.replace(hour=23)) is not None
     assert in_quiet_window(windows, MONDAY.replace(hour=15)) is None
-
-
-# ── parsing ──
 
 
 @pytest.mark.parametrize(
@@ -161,7 +154,9 @@ def test_parse_windows_accepts_all_three_shapes():
     """The reserved key had no established form; all three are things a person plausibly writes."""
     single, _ = parse_windows({"start": "22:00", "end": "08:00"})
     listed, _ = parse_windows([{"start": "22:00", "end": "08:00"}])
-    full, _ = parse_windows({"windows": [{"start": "22:00", "end": "08:00"}], "resolution": "skip"})
+    full, _ = parse_windows(
+        {"windows": [{"start": "22:00", "end": "08:00"}], "resolution": "skip"}
+    )
     assert len(single) == len(listed) == len(full) == 1
 
 
@@ -187,20 +182,26 @@ def test_a_resolution_only_block_is_not_a_malformed_window():
 
 
 def test_day_aliases_expand_at_parse_time():
-    windows, issues = parse_windows({"start": "09:00", "end": "17:00", "days": ["weekends"]})
+    windows, issues = parse_windows(
+        {"start": "09:00", "end": "17:00", "days": ["weekends"]}
+    )
     assert not issues
     assert windows[0].days == DAY_ALIASES["weekends"]
 
 
 def test_an_unknown_day_is_reported_and_the_window_still_applies():
-    windows, issues = parse_windows({"start": "09:00", "end": "17:00", "days": ["mon", "funday"]})
+    windows, issues = parse_windows(
+        {"start": "09:00", "end": "17:00", "days": ["mon", "funday"]}
+    )
     assert windows and windows[0].days == ("mon",)
     assert any("funday" in issue for issue in issues)
 
 
 def test_no_valid_days_falls_back_to_every_day():
     """A window that matched nothing is a config that silently does nothing."""
-    windows, issues = parse_windows({"start": "09:00", "end": "17:00", "days": ["nope"]})
+    windows, issues = parse_windows(
+        {"start": "09:00", "end": "17:00", "days": ["nope"]}
+    )
     assert windows and windows[0].days == DAYS
     assert issues
 
@@ -210,14 +211,13 @@ def test_a_non_object_quiet_hours_is_reported():
     assert windows == [] and issues
 
 
-# ── resolution: skip vs catch_up ──
-
-
 def test_skip_is_the_default_because_it_is_reversible():
     """A skipped fire is one missing run the user can trigger by hand; an unwanted catch-up is an
     action already taken."""
     assert resolution_of({}) == QuietResolution.SKIP.value
-    assert resolution_of({"start": "22:00", "end": "08:00"}) == QuietResolution.SKIP.value
+    assert (
+        resolution_of({"start": "22:00", "end": "08:00"}) == QuietResolution.SKIP.value
+    )
     assert resolution_of({"resolution": "nonsense"}) == QuietResolution.SKIP.value
 
 
@@ -232,7 +232,9 @@ def test_a_catch_up_lands_after_the_window_closes_never_inside_it():
     the
     fire never happens. Computed from the window's end instead.
     """
-    gates = {"quiet_hours": {"start": "22:00", "end": "08:00", "resolution": "catch_up"}}
+    gates = {
+        "quiet_hours": {"start": "22:00", "end": "08:00", "resolution": "catch_up"}
+    }
     decision, _issues = evaluate_quiet(gates, MONDAY.replace(hour=23, minute=30))
     assert decision.outcome == GateOutcome.QUIET.value
     assert decision.catch_up_at > 0
@@ -266,9 +268,6 @@ def test_no_quiet_hours_allows_every_moment():
         assert decision.allowed
 
 
-# ── the duty gate: fail-open, time-boxed ──
-
-
 def test_the_builtin_manual_gate_is_registered():
     assert "manual" in duty_gate_names()
 
@@ -297,7 +296,7 @@ async def test_the_manual_gate_suppresses_when_toggled_off():
 async def test_no_gate_configured_allows():
     assert (await evaluate_duty({}, MONDAY)).allowed
     assert (await evaluate_duty({"duty_gate": {}}, MONDAY)).allowed
-    assert (await evaluate_duty({"duty_gate": "manual"}, MONDAY)).allowed  # wrong shape
+    assert (await evaluate_duty({"duty_gate": "manual"}, MONDAY)).allowed
 
 
 @pytest.mark.asyncio
@@ -331,7 +330,9 @@ async def test_a_hanging_gate_TIMES_OUT_AND_FAILS_OPEN():
         return DutyVerdict(on_duty=False)
 
     register_duty_gate("hangs", hangs)
-    decision = await evaluate_duty({"duty_gate": {"provider": "hangs"}}, MONDAY, timeout=0.1)
+    decision = await evaluate_duty(
+        {"duty_gate": {"provider": "hangs"}}, MONDAY, timeout=0.1
+    )
     assert decision.allowed
     assert "did not answer" in decision.reason
 
@@ -373,11 +374,8 @@ def test_clear_duty_gates_is_available_for_tests():
     assert duty_gate_names() == []
 
 
-# ── the #47 rule: PROVIDER_TYPES and the handler land together ──
-
-
 def test_duty_gate_is_a_declarable_provider_type():
-    from gideon.apps.manifest import PROVIDER_TYPES
+    from gideon.extensions.apps.manifest import PROVIDER_TYPES
 
     assert "duty_gate" in PROVIDER_TYPES
 
@@ -386,7 +384,7 @@ def test_duty_gate_has_a_live_type_handler():
     """A manifest type with no runtime handler installs successfully and then does nothing."""
     import inspect
 
-    from gideon.providers import registry
+    from gideon.extensions.providers import registry
 
     src = inspect.getsource(registry)
     assert 'register_type_handler("duty_gate"' in src
@@ -400,8 +398,11 @@ def test_a_duty_gate_provider_must_expose_on_duty():
     unfiltered, which is the opposite of what its author asked for. Catching the shape here makes it
     an install error instead.
     """
-    from gideon.apps.manifest import ProviderConfig
-    from gideon.providers.registry import DutyGateTypeHandler, RegisteredProvider
+    from gideon.extensions.apps.manifest import ProviderConfig
+    from gideon.extensions.providers.registry import (
+        DutyGateTypeHandler,
+        RegisteredProvider,
+    )
 
     handler = DutyGateTypeHandler()
     ext = RegisteredProvider(
@@ -413,18 +414,15 @@ def test_a_duty_gate_provider_must_expose_on_duty():
         handler.register(ext, object())
 
 
-# ── gate classification ──
-
-
 def test_duty_gate_is_a_recognized_gate_key():
-    from gideon.triggers.models import GATE_KEYS
+    from gideon.automation.triggers.models import GATE_KEYS
 
     assert "duty_gate" in GATE_KEYS
 
 
 def test_duty_gate_is_classified_FAIL_OPEN():
     """§1.4: it calls out to a provider, so it must not become a kill switch."""
-    from gideon.triggers.models import FAIL_OPEN_GATES, gate_failure_mode
+    from gideon.automation.triggers.models import FAIL_OPEN_GATES, gate_failure_mode
 
     assert "duty_gate" in FAIL_OPEN_GATES
     assert gate_failure_mode("duty_gate") == "open"
@@ -432,12 +430,9 @@ def test_duty_gate_is_classified_FAIL_OPEN():
 
 def test_quiet_hours_is_not_fail_open_because_it_cannot_hang():
     """Local arithmetic always produces an answer, so there is no failure mode to classify."""
-    from gideon.triggers.models import gate_failure_mode
+    from gideon.automation.triggers.models import gate_failure_mode
 
     assert gate_failure_mode("quiet_hours") == "closed"
-
-
-# ── config defaults (the fifth config point) ──
 
 
 @pytest.mark.parametrize(
@@ -445,7 +440,7 @@ def test_quiet_hours_is_not_fail_open_because_it_cannot_hang():
     [
         ("22:00-08:00", ("22:00", "08:00")),
         ("22:00 to 08:00", ("22:00", "08:00")),
-        ("09:00–17:00", ("09:00", "17:00")),  # en dash
+        ("09:00–17:00", ("09:00", "17:00")),
     ],
 )
 def test_parse_default_window_accepts_the_compact_config_form(value, expected):
@@ -468,20 +463,24 @@ def test_a_triggers_own_setting_always_beats_the_default(monkeypatch):
     override a deliberate choice with a fallback.
     """
     monkeypatch.setattr(
-        "gideon.triggers.calendar.default_quiet_window",
+        "gideon.automation.triggers.calendar.default_quiet_window",
         lambda: QuietWindow(start="22:00", end="08:00"),
     )
-    monkeypatch.setattr("gideon.triggers.calendar.default_duty_gate", lambda: "manual")
+    monkeypatch.setattr(
+        "gideon.automation.triggers.calendar.default_duty_gate", lambda: "manual"
+    )
     assert apply_defaults({"quiet_hours": {}})["quiet_hours"] == {}
     assert apply_defaults({"duty_gate": {}})["duty_gate"] == {}
 
 
 def test_defaults_fill_only_an_absent_key(monkeypatch):
     monkeypatch.setattr(
-        "gideon.triggers.calendar.default_quiet_window",
+        "gideon.automation.triggers.calendar.default_quiet_window",
         lambda: QuietWindow(start="22:00", end="08:00"),
     )
-    monkeypatch.setattr("gideon.triggers.calendar.default_duty_gate", lambda: "manual")
+    monkeypatch.setattr(
+        "gideon.automation.triggers.calendar.default_duty_gate", lambda: "manual"
+    )
     filled = apply_defaults({"debounce_secs": 5})
     assert filled["debounce_secs"] == 5
     assert filled["quiet_hours"]["start"] == "22:00"
@@ -490,7 +489,7 @@ def test_defaults_fill_only_an_absent_key(monkeypatch):
 
 def test_the_config_fields_round_trip():
     """The standard four-point contract."""
-    from gideon.config.loader import WorkflowsConfig
+    from gideon.core.config.loader import WorkflowsConfig
 
     config = WorkflowsConfig()
     assert config.default_quiet_windows == ""
@@ -500,13 +499,10 @@ def test_the_config_fields_round_trip():
 
 
 def test_the_config_fields_are_patchable():
-    from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+    from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
     assert "workflows.default_quiet_windows" in _EDITABLE_CONFIG
     assert "workflows.duty_gate_default" in _EDITABLE_CONFIG
-
-
-# ── the week grid ──
 
 
 def test_suppressed_slots_are_annotated_not_filtered():
@@ -526,7 +522,7 @@ def test_suppressed_slots_are_annotated_not_filtered():
     assert not truncated
     assert len(occurrences) == 24
     suppressed = [o for o in occurrences if o.suppressed_by]
-    assert len(suppressed) == 10  # 22,23,00..07
+    assert len(suppressed) == 10
     assert all(o.reason for o in suppressed)
 
 
@@ -570,14 +566,19 @@ def test_an_old_trigger_does_not_iterate_from_its_first_fire():
 
 def test_a_trigger_with_no_recurrence_projects_nothing():
     assert project_occurrences(
-        trigger_id="t", trigger_name="x", interval_secs=0, first_fire_at=1.0, start=MONDAY
+        trigger_id="t",
+        trigger_name="x",
+        interval_secs=0,
+        first_fire_at=1.0,
+        start=MONDAY,
     ) == ([], False)
     assert project_occurrences(
-        trigger_id="t", trigger_name="x", interval_secs=60, first_fire_at=0, start=MONDAY
+        trigger_id="t",
+        trigger_name="x",
+        interval_secs=60,
+        first_fire_at=0,
+        start=MONDAY,
     ) == ([], False)
-
-
-# ── skip dates: AUTO-A3's struck columns (S81) ──
 
 
 def _daily(**over):
@@ -607,7 +608,6 @@ def test_a_skip_date_is_struck_not_silently_fired():
     struck = [o for o in occurrences if o.suppressed_by == GateOutcome.SKIPPED.value]
     assert len(struck) == 1
     assert struck[0].reason == f"skip date {day}"
-    # And nothing else moved: the other six fires are untouched.
     assert len([o for o in occurrences if not o.suppressed_by]) == 6
 
 
@@ -620,11 +620,12 @@ def test_the_grid_agrees_with_the_scheduler_about_the_calendar_date():
     would have struck the WRONG column: a grid that is confidently wrong, which is worse than one
     that was merely silent.
     """
-    # 21:30 UTC is the 5th in UTC and the 6th in Tokyo.
     inst = datetime(2026, 8, 5, 21, 30, tzinfo=timezone.utc)
     start = datetime.fromtimestamp(inst.timestamp() - 3600)
     for tz_name in ("UTC", "Asia/Tokyo", "America/Los_Angeles"):
-        job_date = datetime.fromtimestamp(inst.timestamp(), ZoneInfo(tz_name)).strftime("%Y-%m-%d")
+        job_date = datetime.fromtimestamp(inst.timestamp(), ZoneInfo(tz_name)).strftime(
+            "%Y-%m-%d"
+        )
         occurrences, _ = project_occurrences(
             trigger_id="t",
             trigger_name="x",
@@ -649,9 +650,9 @@ def test_a_skip_date_read_in_server_time_would_miss_a_foreign_zone():
     that instant is the previous day. This is the exact silent miss the paired fix prevents.
     """
     inst = datetime(2026, 8, 5, 21, 30, tzinfo=timezone.utc)
-    tokyo_date = datetime.fromtimestamp(inst.timestamp(), ZoneInfo("Asia/Tokyo")).strftime(
-        "%Y-%m-%d"
-    )
+    tokyo_date = datetime.fromtimestamp(
+        inst.timestamp(), ZoneInfo("Asia/Tokyo")
+    ).strftime("%Y-%m-%d")
     occurrences, _ = project_occurrences(
         trigger_id="t",
         trigger_name="x",
@@ -660,11 +661,10 @@ def test_a_skip_date_read_in_server_time_would_miss_a_foreign_zone():
         start=datetime.fromtimestamp(inst.timestamp() - 3600),
         days=3,
         skip_dates=[tokyo_date],
-        tz_name="",  # server-local
+        tz_name="",
     )
     first = [o for o in occurrences if abs(o.at - inst.timestamp()) < 1]
     assert first
-    # Only meaningful when the host is not already on Tokyo time; CI runs UTC.
     server_date = datetime.fromtimestamp(inst.timestamp()).strftime("%Y-%m-%d")
     if server_date != tokyo_date:
         assert first[0].suppressed_by != GateOutcome.SKIPPED.value
@@ -682,7 +682,11 @@ def test_a_skip_date_wins_over_a_quiet_window():
         skip_dates=[day],
         gates={"quiet_hours": {"start": "00:00", "end": "23:59"}},
     )
-    on_day = [o for o in occurrences if datetime.fromtimestamp(o.at).strftime("%Y-%m-%d") == day]
+    on_day = [
+        o
+        for o in occurrences
+        if datetime.fromtimestamp(o.at).strftime("%Y-%m-%d") == day
+    ]
     assert on_day
     assert on_day[0].suppressed_by == GateOutcome.SKIPPED.value
     assert "skip date" in on_day[0].reason
@@ -728,20 +732,20 @@ def test_skipped_is_a_distinct_gate_outcome():
     assert GateOutcome.SKIPPED.value != GateOutcome.QUIET.value
 
 
-# ── automation doctor (§7 criterion 12) ──
-
-
 def test_an_orphaned_workflow_ref_is_reported():
     """§7 criterion 12 names this one by hand. It fires and fails forever, silently."""
     report = diagnose(
-        [{"id": "t1", "workflow": {"def": "nightly-backup"}}], known_workflows={"digest"}
+        [{"id": "t1", "workflow": {"def": "nightly-backup"}}],
+        known_workflows={"digest"},
     )
     codes = [f.code for f in report.findings]
     assert "orphaned_workflow_ref" in codes
 
 
 def test_a_known_workflow_ref_is_not_reported():
-    report = diagnose([{"id": "t1", "workflow": {"def": "digest"}}], known_workflows={"digest"})
+    report = diagnose(
+        [{"id": "t1", "workflow": {"def": "digest"}}], known_workflows={"digest"}
+    )
     assert report.healthy
 
 
@@ -780,7 +784,10 @@ def test_a_known_run_workflow_ref_is_not_reported():
             {
                 "id": "t1",
                 "workflow": {
-                    "inline": {"provider": "run-workflow", "config": {"workflow": "digest"}}
+                    "inline": {
+                        "provider": "run-workflow",
+                        "config": {"workflow": "digest"},
+                    }
                 },
             }
         ],
@@ -796,7 +803,10 @@ def test_a_non_run_workflow_inline_action_is_not_read_as_a_workflow_ref():
             {
                 "id": "t1",
                 "workflow": {
-                    "inline": {"provider": "run-script", "config": {"workflow": "not-a-ref"}}
+                    "inline": {
+                        "provider": "run-script",
+                        "config": {"workflow": "not-a-ref"},
+                    }
                 },
             }
         ],
@@ -811,7 +821,9 @@ def test_the_orphan_check_is_skipped_when_the_registry_cannot_be_read():
     A doctor that cries wolf when it cannot read the registry is worse than one that stays quiet
     about that dimension.
     """
-    report = diagnose([{"id": "t1", "workflow": {"def": "anything"}}], known_workflows=None)
+    report = diagnose(
+        [{"id": "t1", "workflow": {"def": "anything"}}], known_workflows=None
+    )
     assert report.healthy
 
 
@@ -827,7 +839,8 @@ def test_globs_that_match_nearly_everything(glob):
 
 
 @pytest.mark.parametrize(
-    "glob", ["~/projects/**", "~/projects/acme/**/*.py", "/tmp/x/*.log", "~/Documents/*", ""]
+    "glob",
+    ["~/projects/**", "~/projects/acme/**/*.py", "/tmp/x/*.log", "~/Documents/*", ""],
 )
 def test_scoped_globs_are_not_flagged(glob):
     """Measured at 2 segments first, which flagged `~/projects/**` — a reasonable scope for someone
@@ -841,17 +854,23 @@ def test_the_broad_glob_line_is_documented():
 
 def test_quiet_windows_covering_the_whole_week_are_reported():
     """A trigger that can never fire looks configured and does nothing."""
-    report = diagnose([{"id": "t", "gates": {"quiet_hours": {"start": "00:00", "end": "23:59"}}}])
+    report = diagnose(
+        [{"id": "t", "gates": {"quiet_hours": {"start": "00:00", "end": "23:59"}}}]
+    )
     assert "quiet_hours_cover_everything" in [f.code for f in report.findings]
 
 
 def test_a_normal_overnight_window_is_not_reported_as_covering_everything():
-    report = diagnose([{"id": "t", "gates": {"quiet_hours": {"start": "22:00", "end": "08:00"}}}])
+    report = diagnose(
+        [{"id": "t", "gates": {"quiet_hours": {"start": "22:00", "end": "08:00"}}}]
+    )
     assert report.healthy
 
 
 def test_an_invalid_quiet_window_is_reported_because_the_user_is_not_protected():
-    report = diagnose([{"id": "t", "gates": {"quiet_hours": {"start": "25:00", "end": "08:00"}}}])
+    report = diagnose(
+        [{"id": "t", "gates": {"quiet_hours": {"start": "25:00", "end": "08:00"}}}]
+    )
     findings = [f for f in report.findings if f.code == "invalid_quiet_window"]
     assert findings
     assert "NOT protected" in findings[0].fix
@@ -859,7 +878,9 @@ def test_an_invalid_quiet_window_is_reported_because_the_user_is_not_protected()
 
 def test_catch_up_without_a_window_is_reported_once():
     """One finding for one mistake — the spurious second one was found by probing."""
-    report = diagnose([{"id": "t", "gates": {"quiet_hours": {"resolution": "catch_up"}}}])
+    report = diagnose(
+        [{"id": "t", "gates": {"quiet_hours": {"resolution": "catch_up"}}}]
+    )
     assert [f.code for f in report.findings] == ["catch_up_without_quiet_hours"]
 
 
@@ -870,7 +891,8 @@ def test_an_unknown_duty_gate_is_reported_because_it_fails_OPEN():
     asked for — so the doctor has to say so.
     """
     report = diagnose(
-        [{"id": "t", "gates": {"duty_gate": {"provider": "acme"}}}], known_duty_gates={"manual"}
+        [{"id": "t", "gates": {"duty_gate": {"provider": "acme"}}}],
+        known_duty_gates={"manual"},
     )
     findings = [f for f in report.findings if f.code == "unknown_duty_gate"]
     assert findings and "UNFILTERED" in findings[0].detail
@@ -878,7 +900,8 @@ def test_an_unknown_duty_gate_is_reported_because_it_fails_OPEN():
 
 def test_a_registered_duty_gate_is_not_reported():
     report = diagnose(
-        [{"id": "t", "gates": {"duty_gate": {"provider": "manual"}}}], known_duty_gates={"manual"}
+        [{"id": "t", "gates": {"duty_gate": {"provider": "manual"}}}],
+        known_duty_gates={"manual"},
     )
     assert report.healthy
 

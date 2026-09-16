@@ -19,15 +19,19 @@ from pathlib import Path
 
 import pytest
 
-from gideon.workflows.bindings import BindingContext
-from gideon.workflows.engine import NodeResult, apply_artifact_gate, dispatch_gate
-from gideon.workflows.models import (
+from gideon.automation.workflows.bindings import BindingContext
+from gideon.automation.workflows.engine import (
+    NodeResult,
+    apply_artifact_gate,
+    dispatch_gate,
+)
+from gideon.automation.workflows.models import (
     Failure,
     FailureClass,
     InstanceState,
     Node,
 )
-from gideon.workflows.resilience import (
+from gideon.automation.workflows.resilience import (
     DEFAULT_ERROR_STREAK,
     ESCALATION_OPTIONS,
     MAX_DIGEST_ATTEMPTS,
@@ -42,7 +46,7 @@ from gideon.workflows.resilience import (
     estimate_calls,
     retry_prompt,
 )
-from gideon.workflows.verify import (
+from gideon.automation.workflows.verify import (
     LADDER_ORDER,
     Verdict,
     check_required_artifacts,
@@ -327,7 +331,10 @@ class TestVerdictParsing:
 
 class TestLadder:
     def test_all_passing_criteria_pass_the_gate(self) -> None:
-        criteria = [{"name": "lint", "rung": "static"}, {"name": "unit", "rung": "runtime"}]
+        criteria = [
+            {"name": "lint", "rung": "static"},
+            {"name": "unit", "rung": "runtime"},
+        ]
         r = run_ladder(criteria, {"lint": True, "unit": True})
         assert r.passed and r.verdict == Verdict.PASS
 
@@ -349,7 +356,7 @@ class TestLadder:
             {"name": "lint", "rung": "static", "hard": True},
         ]
         r = run_ladder(criteria, {"e2e": False, "lint": False})
-        assert r.stopped_at == "static"  # static failed first, so it reports first
+        assert r.stopped_at == "static"
 
     def test_a_soft_failure_does_not_stop_the_ladder(self) -> None:
         criteria = [
@@ -464,7 +471,9 @@ class TestArtifactGate:
         )
         with tempfile.TemporaryDirectory() as ws:
             Path(ws, "out.md").write_text("x")
-            r = apply_artifact_gate(node, NodeResult(state=InstanceState.DONE, output={}), ws)
+            r = apply_artifact_gate(
+                node, NodeResult(state=InstanceState.DONE, output={}), ws
+            )
             assert r.state == InstanceState.DONE
             assert r.output["artifacts"]
 
@@ -496,13 +505,12 @@ class TestArtifactGate:
         assert r.failure.failure_class == FailureClass.INTERNAL
 
 
-#: A contract-shaped judge answer. Since WF2LOO-13 the gate asks for this object rather than one
-#: bare word, so a test that hands back `"PASS"` is testing the protocol the engine no longer
-#: speaks — it now reads as "the judge could not answer", which is a PROTOCOL failure.
 def _answer(verdict: str, **extra) -> str:
     import json as _json
 
-    return _json.dumps({"verdict": verdict, "proof": "ran the command; exit 0", **extra})
+    return _json.dumps(
+        {"verdict": verdict, "proof": "ran the command; exit 0", **extra}
+    )
 
 
 class TestJudgeGate:
@@ -515,12 +523,9 @@ class TestJudgeGate:
         )
         r = await dispatch_gate(node, BindingContext(), now=0.0, completion=judge)
         assert r.state == InstanceState.DONE
-        # The verdict rides out with its evidence chain now (LOOPS-EVOLUTION R3): the controller
-        # emits `judge_verdict` from these fields.
         assert r.output["verdict"] == "PASS"
         assert r.output["judge_status"] == "kept"
         assert r.output["judge_evidence"]["samples"] == ["PASS"]
-        # And the VALIDATED record, so a template binds engine-computed data (WF2LOO-13).
         assert r.output["judge_verdict"]["valid"] is True
         assert r.output["judge_verdict"]["proof"]
 
@@ -557,7 +562,9 @@ class TestJudgeGate:
         }
         for verdict, state in expected.items():
 
-            async def judge(prompt, *, use_case="reasoning", output_type=None, _v=verdict):
+            async def judge(
+                prompt, *, use_case="reasoning", output_type=None, _v=verdict
+            ):
                 return _answer(_v)
 
             node = Node.from_dict(
@@ -567,9 +574,15 @@ class TestJudgeGate:
             assert r.state == state, verdict
 
     async def test_retry_is_retryable_and_reject_is_not(self) -> None:
-        for verdict, retryable in (("RETRY", True), ("REPLAN", True), ("REJECT", False)):
+        for verdict, retryable in (
+            ("RETRY", True),
+            ("REPLAN", True),
+            ("REJECT", False),
+        ):
 
-            async def judge(prompt, *, use_case="reasoning", output_type=None, _v=verdict):
+            async def judge(
+                prompt, *, use_case="reasoning", output_type=None, _v=verdict
+            ):
                 return _answer(_v)
 
             node = Node.from_dict(
@@ -590,8 +603,6 @@ class TestJudgeGate:
         r = await dispatch_gate(node, BindingContext(), now=0.0, completion=waffle)
         assert r.state == InstanceState.FAILED
         assert r.failure.failure_class == FailureClass.PROTOCOL
-        # NAMED and observable: the evidence chain exists even when the judge could not answer,
-        # so the ledger's `judge_verdict` event still has the raw text to read.
         assert r.output["judge_evidence"]["protocol_error"] is True
         assert r.output["judge_evidence"]["texts"]
 
@@ -624,13 +635,10 @@ class TestJudgeGate:
             {"kind": "gate", "id": "g", "config": {"kind": "judge", "prompt": "rubric"}}
         )
         await dispatch_gate(node, BindingContext(), now=0.0, completion=judge)
-        # Every member of the closed set, and the proof requirement the engine will enforce. A
-        # contract enforced against a prompt that never stated it is a trap, not a gate.
         for member in ("PASS", "REJECT", "RETRY", "REPLAN", "ESCALATE", "NEEDS_INPUT"):
             assert f'"{member}"' in seen["prompt"], member
         assert "neither `proof` nor `evidence_refs` is REJECTED" in seen["prompt"]
         assert "ONE JSON object" in seen["prompt"]
-        # A judge reasons, so it defaults to the reasoning tier rather than the cheap one.
         assert seen["use_case"] == "reasoning"
 
     async def test_provenance_is_stripped_from_what_the_judge_reads(self) -> None:
@@ -660,7 +668,6 @@ class TestJudgeGate:
         assert "attempt 4 of 5" not in seen["prompt"]
         assert "iteration 3" not in seen["prompt"]
         assert "[attempt redacted]" in seen["prompt"]
-        # The evidence itself still reaches the judge — blinding must not blind it to the work.
         assert "produced the report" in seen["prompt"]
 
     async def test_a_self_judged_gate_may_not_complete_its_own_work(self) -> None:
@@ -685,13 +692,13 @@ class TestJudgeGate:
         assert r.state == InstanceState.WAITING
         assert r.ask
         assert "may not complete its own work" in r.output["actor_note"]
-        # An INDEPENDENT judge is terminal-capable, so the same answer completes the node —
-        # without this half the test could pass on a gate that never completes anything.
         independent = Node.from_dict(
             {"kind": "gate", "id": "g", "config": {"kind": "judge", "prompt": "good?"}}
         )
         assert (
-            await dispatch_gate(independent, BindingContext(), now=0.0, completion=judge)
+            await dispatch_gate(
+                independent, BindingContext(), now=0.0, completion=judge
+            )
         ).state == InstanceState.DONE
 
     async def test_a_judge_gate_needs_a_rubric(self) -> None:
@@ -702,7 +709,9 @@ class TestJudgeGate:
 
 
 class TestLadderGate:
-    async def test_every_criterion_is_evaluated_through_the_injected_verifier(self) -> None:
+    async def test_every_criterion_is_evaluated_through_the_injected_verifier(
+        self,
+    ) -> None:
         seen: list[str] = []
 
         async def verifier(crit):
@@ -754,7 +763,11 @@ class TestLadderGate:
 
     async def test_no_verifier_wired_is_internal_not_a_pass(self) -> None:
         node = Node.from_dict(
-            {"kind": "gate", "id": "g", "config": {"kind": "ladder", "criteria": [{"name": "x"}]}}
+            {
+                "kind": "gate",
+                "id": "g",
+                "config": {"kind": "ladder", "criteria": [{"name": "x"}]},
+            }
         )
         r = await dispatch_gate(node, BindingContext(), now=0.0)
         assert r.failure.failure_class == FailureClass.INTERNAL
@@ -798,7 +811,9 @@ class TestTheEvidenceIsNotDuplicatedIntoThePrompt:
             seen["prompt"] = prompt
             return _answer("PASS")
 
-        node = Node.from_dict({"kind": "gate", "id": "g", "config": {"kind": "judge", **cfg}})
+        node = Node.from_dict(
+            {"kind": "gate", "id": "g", "config": {"kind": "judge", **cfg}}
+        )
         await dispatch_gate(node, BindingContext(), now=0.0, completion=judge)
         return seen["prompt"]
 
@@ -812,5 +827,7 @@ class TestTheEvidenceIsNotDuplicatedIntoThePrompt:
     async def test_evidence_the_prompt_omits_reaches_the_judge(self) -> None:
         """The other direction: a gate whose evidence is NOT in its prompt now shows it."""
         report = "A measurement the prompt never quoted, long enough to clear the pre-tier screen."
-        text = await self._instruction({"prompt": "Judge the work.", "evidence": report})
+        text = await self._instruction(
+            {"prompt": "Judge the work.", "evidence": report}
+        )
         assert report in text

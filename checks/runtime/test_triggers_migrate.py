@@ -30,20 +30,15 @@ import time
 
 import pytest
 
-from gideon.triggers.migrate import (
+from gideon.automation.triggers.migrate import (
     NEVER_PERSISTED,
     clock_spec,
     convert_job,
     migrate_crons,
     unconverted_fields,
 )
-from gideon.triggers.models import LEGACY_FIELD_MAP
+from gideon.automation.triggers.models import LEGACY_FIELD_MAP
 
-#: The EXACT key list `ScheduleService._save` wrote, copied from that method before S112 deleted the
-#: class. This is the on-disk `crons.json` format the boot migration still reads, so it is pinned as
-#: data here rather than reconstructed from belief — the original fixture's whole point was that "a
-#: hand-written dict encodes what I THINK the format is, and this program has repeatedly found that
-#: belief wrong". The keys come from the shipped writer; only their source moved.
 _SAVED_KEYS = (
     "id",
     "name",
@@ -78,7 +73,6 @@ _SAVED_KEYS = (
     "strict_schedule",
 )
 
-#: `_STORE_VERSION` at the time the writer was deleted.
 _SAVED_VERSION = 2
 
 
@@ -90,7 +84,10 @@ def _as_saved(jobs) -> dict:
     return {
         "version": _SAVED_VERSION,
         "jobs": [
-            {k: (asdict(j.schedule) if k == "schedule" else getattr(j, k)) for k in _SAVED_KEYS}
+            {
+                k: (asdict(j.schedule) if k == "schedule" else getattr(j, k))
+                for k in _SAVED_KEYS
+            }
             for j in jobs
         ],
     }
@@ -100,7 +97,7 @@ def _as_saved(jobs) -> dict:
 def real_store(tmp_path, monkeypatch):
     """A `crons.json` in the shape the shipped writer produced (see `_as_saved`)."""
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.schedule import ScheduleDefinition, ScheduleJob
+    from gideon.automation.schedule import ScheduleDefinition, ScheduleJob
 
     jobs = [
         ScheduleJob(
@@ -144,14 +141,9 @@ def real_store(tmp_path, monkeypatch):
             last_error="boom",
         ),
     ]
-    # Written to disk and read back, so the fixture still exercises a real JSON round-trip (the
-    # migration reads a FILE) rather than handing the migrator live Python objects.
     path = tmp_path / "crons.json"
     path.write_text(json.dumps(_as_saved(jobs), indent=2), encoding="utf-8")
     return json.loads(path.read_text(encoding="utf-8"))
-
-
-# ── the losslessness bar ──
 
 
 def test_a_REAL_store_migrates_with_NOTHING_unaccounted(real_store):
@@ -181,7 +173,8 @@ def test_an_UNKNOWN_field_is_reported_not_swallowed():
 
 def test_the_NEVER_PERSISTED_fields_are_not_reported_as_lost():
     """`dry_run` and `last_outcome` are on the dataclass but absent from `_save`'s projection, so a
-    `crons.json` row cannot carry them. Reporting them would make the audit lie the other way."""
+    `crons.json` row cannot carry them. Reporting them would make the audit lie the other way.
+    """
     assert unconverted_fields({"id": "j", "dry_run": True, "last_outcome": "ok"}) == []
     assert NEVER_PERSISTED == {"dry_run", "last_outcome"}
 
@@ -197,13 +190,10 @@ def test_the_measurement_behind_NEVER_PERSISTED_still_holds():
     """
     import dataclasses as dc
 
-    from gideon.schedule import ScheduleJob
+    from gideon.automation.schedule import ScheduleJob
 
     fields = {f.name for f in dc.fields(ScheduleJob)}
     assert fields - set(_SAVED_KEYS) == NEVER_PERSISTED
-
-
-# ── the clock spec: the three kinds do not line up ──
 
 
 def test_a_cron_job_keeps_its_EXPRESSION(real_store):
@@ -216,7 +206,9 @@ def test_a_cron_job_keeps_its_EXPRESSION(real_store):
     assert spec["expr"] == "0 3 * * *"
 
 
-@pytest.mark.parametrize("key,expected", [("timezone", "Europe/London"), ("strict", True)])
+@pytest.mark.parametrize(
+    "key,expected", [("timezone", "Europe/London"), ("strict", True)]
+)
 def test_the_QUIETLY_LOSABLE_fields_survive(real_store, key, expected):
     """A lost `timezone` runs at the wrong hour for half the year; a lost
     `strict` catches up when the
@@ -244,7 +236,9 @@ def test_an_INTERVAL_job_does_NOT_become_a_one_shot(real_store):
     `every` and `at` both carry one
     number, so the shape match is tempting — and it would turn every recurring interval job into a
     one-shot that fires once and dies."""
-    converted = next(c for c in migrate_crons(real_store).converted if c.trigger["id"] == "j-every")
+    converted = next(
+        c for c in migrate_crons(real_store).converted if c.trigger["id"] == "j-every"
+    )
     assert converted.trigger["spec"]["kind"] != "at"
     assert converted.trigger["spec"]["interval_secs"] == 300
     assert any("one-shot" in note for note in converted.notes)
@@ -255,7 +249,9 @@ def test_a_ONE_SHOT_keeps_the_user_s_delete_choice(real_store):
     the user marked to KEEP must
     not be deleted because the new default says otherwise."""
     spec = next(
-        c.trigger["spec"] for c in migrate_crons(real_store).converted if c.trigger["id"] == "j-at"
+        c.trigger["spec"]
+        for c in migrate_crons(real_store).converted
+        if c.trigger["id"] == "j-at"
     )
     assert spec["kind"] == "at"
     assert spec["delete_after_run"] is True
@@ -278,12 +274,10 @@ def test_a_cron_job_with_NO_expression_is_flagged():
     assert any("cannot be scheduled" in n for n in notes)
 
 
-# ── delivery, session, and what it runs ──
-
-
 def test_SILENT_wins_over_a_channel():
     """The legacy flag means the agent sends via send_message itself, so a trigger that ALSO auto-
-    delivered would double-post — the symptom that makes someone distrust the whole migration."""
+    delivered would double-post — the symptom that makes someone distrust the whole migration.
+    """
     converted = convert_job({"id": "j", "name": "n", "silent": True, "channel": "C1"})
     assert converted.trigger["delivery"] == "none"
 
@@ -294,7 +288,9 @@ def test_a_channel_becomes_a_channel_route():
 
 
 def test_PERSISTENT_session_becomes_pinned(real_store):
-    converted = next(c for c in migrate_crons(real_store).converted if c.trigger["id"] == "j-every")
+    converted = next(
+        c for c in migrate_crons(real_store).converted if c.trigger["id"] == "j-every"
+    )
     assert converted.trigger["session"] == "pinned:cron:j-every"
 
 
@@ -310,7 +306,11 @@ def test_a_session_key_WITHOUT_the_flag_stays_fresh():
 
 def test_an_action_becomes_an_INLINE_workflow():
     converted = convert_job(
-        {"id": "j", "name": "n", "action": {"provider": "bash", "config": {"command": "true"}}}
+        {
+            "id": "j",
+            "name": "n",
+            "action": {"provider": "bash", "config": {"command": "true"}},
+        }
     )
     assert converted.trigger["workflow"]["inline"]["provider"] == "bash"
 
@@ -319,13 +319,12 @@ def test_an_agent_SEQUENCE_is_not_flattened_to_its_first_step(real_store):
     """Silently flattening a three-step sequence into one inline action
     would run only step one — and
     the user would see a "successful" automation doing a third of the work."""
-    converted = next(c for c in migrate_crons(real_store).converted if c.trigger["id"] == "j-seq")
+    converted = next(
+        c for c in migrate_crons(real_store).converted if c.trigger["id"] == "j-seq"
+    )
     assert converted.trigger["workflow"] == {}
     assert any("workflow DEF" in note for note in converted.notes)
     assert any("research" in note for note in converted.notes)
-
-
-# ── the safe-by-default posture ──
 
 
 def test_a_row_with_NOTES_loads_DISABLED_even_if_it_was_enabled(real_store):
@@ -333,7 +332,9 @@ def test_a_row_with_NOTES_loads_DISABLED_even_if_it_was_enabled(real_store):
     interpret. The opposite default would
     run a half-understood automation unattended."""
     for tid in ("j-every", "j-seq"):
-        converted = next(c for c in migrate_crons(real_store).converted if c.trigger["id"] == tid)
+        converted = next(
+            c for c in migrate_crons(real_store).converted if c.trigger["id"] == tid
+        )
         assert converted.notes
         assert converted.trigger["enabled"] is False
         assert converted.trigger["state"] == "paused"
@@ -341,7 +342,9 @@ def test_a_row_with_NOTES_loads_DISABLED_even_if_it_was_enabled(real_store):
 
 def test_a_CLEAN_row_stays_enabled(real_store):
     """The migration must not pause everything out of caution — that is its own kind of breakage."""
-    converted = next(c for c in migrate_crons(real_store).converted if c.trigger["id"] == "j-cron")
+    converted = next(
+        c for c in migrate_crons(real_store).converted if c.trigger["id"] == "j-cron"
+    )
     assert converted.notes == []
     assert converted.trigger["enabled"] is True
     assert converted.trigger["state"] == "active"
@@ -372,11 +375,10 @@ def test_a_MALFORMED_store_does_not_raise():
         assert migrate_crons(garbage).converted == []
 
 
-# ── health rollups ──
-
-
 def test_an_ERRORED_job_migrates_as_FAILING(real_store):
-    converted = next(c for c in migrate_crons(real_store).converted if c.trigger["id"] == "j-seq")
+    converted = next(
+        c for c in migrate_crons(real_store).converted if c.trigger["id"] == "j-seq"
+    )
     assert converted.trigger["health_status"] == "failing"
     assert converted.trigger["last_error_summary"] == "boom"
 
@@ -393,12 +395,11 @@ def test_a_never_run_job_has_NO_fabricated_timestamps():
     """Rendering epoch 0 as 1970-01-01 puts a date on screen that reads
     as a real event — the kind of
     thing a user tries to explain rather than dismiss."""
-    converted = convert_job({"id": "j", "name": "n", "last_run_ts": 0, "last_failure_at": 0})
+    converted = convert_job(
+        {"id": "j", "name": "n", "last_run_ts": 0, "last_failure_at": 0}
+    )
     assert converted.trigger["last_success_at"] == ""
     assert converted.trigger["last_failure_at"] == ""
-
-
-# ── the report is reviewable before anything is replaced ──
 
 
 def test_the_report_names_what_NEEDS_REVIEW(real_store):
@@ -413,7 +414,9 @@ def test_DELIBERATE_drops_are_reported_separately_from_unaccounted_ones():
     """A dropped field was deliberately not carried and the map says why;
     an unaccounted one is a bug in
     the migration rather than a decision about the data."""
-    converted = convert_job({"id": "j", "name": "n", "acked_items": ["a"], "last_result": "x"})
+    converted = convert_job(
+        {"id": "j", "name": "n", "acked_items": ["a"], "last_result": "x"}
+    )
     assert set(converted.dropped) >= {"acked_items", "last_result"}
     assert converted.unaccounted == []
     assert converted.lossless is True
@@ -437,7 +440,7 @@ def test_the_map_still_covers_every_ScheduleJob_field():
     fail here rather than dropping it quietly."""
     import dataclasses as dc
 
-    from gideon.schedule import ScheduleJob
+    from gideon.automation.schedule import ScheduleJob
 
     names = {f.name for f in dc.fields(ScheduleJob)}
     assert names <= set(LEGACY_FIELD_MAP["ScheduleJob"])

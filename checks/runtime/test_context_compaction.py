@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from gideon.agents.native.runtime import NativeAgentRuntime
-from gideon.agents.provider import AgentRuntimeDefinition
-from gideon.context_compaction import (
+from gideon.cognition.context_compaction import (
     _drop_orphan_tool_results,
     compact,
     extract_file_refs,
@@ -12,6 +10,8 @@ from gideon.context_compaction import (
     should_compact,
     total_chars,
 )
+from gideon.engine.agents.native.runtime import NativeAgentRuntime
+from gideon.engine.agents.provider import AgentRuntimeDefinition
 
 
 def _convo(n_tool_rounds: int, tool_size: int = 2000) -> list[dict]:
@@ -25,18 +25,20 @@ def _convo(n_tool_rounds: int, tool_size: int = 2000) -> list[dict]:
                     {
                         "id": f"c{i}",
                         "type": "function",
-                        "function": {"name": "bash", "arguments": f'{{"path": "src/f{i}.py"}}'},
+                        "function": {
+                            "name": "bash",
+                            "arguments": f'{{"path": "src/f{i}.py"}}',
+                        },
                     }
                 ],
             }
         )
-        msgs.append({"role": "tool", "tool_call_id": f"c{i}", "content": "X" * tool_size})
+        msgs.append(
+            {"role": "tool", "tool_call_id": f"c{i}", "content": "X" * tool_size}
+        )
     msgs.append({"role": "user", "content": "latest request"})
     msgs.append({"role": "assistant", "content": "latest reply"})
     return msgs
-
-
-# ── pruning pre-pass ──
 
 
 def test_prune_shrinks_old_verbose_tool_results():
@@ -44,14 +46,13 @@ def test_prune_shrinks_old_verbose_tool_results():
     before = total_chars(msgs)
     pruned = prune_tool_outputs(msgs)
     assert total_chars(pruned) < before
-    assert len(pruned) == len(msgs)  # never drops messages (tool-pairing)
+    assert len(pruned) == len(msgs)
 
 
 def test_prune_keeps_recent_tool_results_full():
     msgs = _convo(10)
     pruned = prune_tool_outputs(msgs)
     tool_contents = [m["content"] for m in pruned if m["role"] == "tool"]
-    # The most recent few stay full (length 2000), older ones are digested.
     assert tool_contents[-1] == "X" * 2000
     assert any("pruned tool result" in c for c in tool_contents)
 
@@ -69,31 +70,28 @@ def test_prune_preserves_projection_raw_ref(caplog):
         "preview\n\n[projected log output: showing 100 of 5000 chars — "
         'full result: tool_result_get(result_id="r_ab12")]' + "\n" * 700
     )
-    # Old (non-recent) verbose result + 5 recent small ones so it gets pruned.
     msgs = [{"role": "tool", "tool_call_id": "c0", "content": projected}]
-    msgs += [{"role": "tool", "tool_call_id": f"c{i}", "content": "x" * 10} for i in range(1, 6)]
+    msgs += [
+        {"role": "tool", "tool_call_id": f"c{i}", "content": "x" * 10}
+        for i in range(1, 6)
+    ]
     pruned = prune_tool_outputs(msgs)
     digest = pruned[0]["content"]
     assert "pruned tool result" in digest
-    assert 'tool_result_get(result_id="r_ab12")' in digest  # recovery handle survived
-    # a result with no affordance still digests normally (no spurious handle)
+    assert 'tool_result_get(result_id="r_ab12")' in digest
     plain = [{"role": "tool", "tool_call_id": "c", "content": "y" * 800}]
-    plain += [{"role": "tool", "tool_call_id": f"d{i}", "content": "z" * 10} for i in range(5)]
+    plain += [
+        {"role": "tool", "tool_call_id": f"d{i}", "content": "z" * 10} for i in range(5)
+    ]
     assert "tool_result_get" not in prune_tool_outputs(plain)[0]["content"]
-
-
-# ── file extraction ──
 
 
 def test_extract_files_from_tool_args_and_content():
     msgs = _convo(3)
     msgs.append({"role": "user", "content": "also check config/loader.py please"})
     files = extract_file_refs(msgs)
-    assert "src/f0.py" in files  # from tool args
-    assert "config/loader.py" in files  # from content
-
-
-# ── full compact ──
+    assert "src/f0.py" in files
+    assert "config/loader.py" in files
 
 
 def test_compact_reduces_and_preserves_anchors():
@@ -101,10 +99,8 @@ def test_compact_reduces_and_preserves_anchors():
     before = total_chars(msgs)
     c = compact(msgs)
     assert total_chars(c) < before
-    # Latest user + assistant survive verbatim in the tail.
     assert c[-1]["content"] == "latest reply"
     assert c[-2]["content"] == "latest request"
-    # A fenced compaction summary is present.
     assert any("CONTEXT COMPACTION" in str(m.get("content", "")) for m in c)
 
 
@@ -113,13 +109,12 @@ def test_compact_preserves_file_references():
     c = compact(msgs)
     blob = "\n".join(str(m.get("content", "")) for m in c)
     assert "Relevant Files" in blob
-    assert "src/f0.py" in blob  # an early file (in the compacted middle) survives
+    assert "src/f0.py" in blob
 
 
 def test_compact_short_convo_is_just_prepass():
-    msgs = _convo(1)  # below head+tail protection
+    msgs = _convo(1)
     c = compact(msgs)
-    # No summary injected — too short to have a middle.
     assert not any("CONTEXT COMPACTION" in str(m.get("content", "")) for m in c)
 
 
@@ -137,7 +132,11 @@ def test_drop_orphan_tool_results():
             "role": "assistant",
             "content": "a",
             "tool_calls": [
-                {"id": "c1", "type": "function", "function": {"name": "x", "arguments": "{}"}}
+                {
+                    "id": "c1",
+                    "type": "function",
+                    "function": {"name": "x", "arguments": "{}"},
+                }
             ],
         },
         {"role": "tool", "tool_call_id": "c1", "content": "paired"},
@@ -147,18 +146,12 @@ def test_drop_orphan_tool_results():
     assert "orphan" not in ids and "c1" in ids
 
 
-# ── anti-thrashing ──
-
-
 def test_should_compact_anti_thrash():
     assert should_compact([]) is True
     assert should_compact([0.5]) is True
-    assert should_compact([0.05, 0.05]) is False  # 2 weak saves → skip
-    assert should_compact([0.5, 0.05]) is True  # only 1 weak → still try
+    assert should_compact([0.05, 0.05]) is False
+    assert should_compact([0.5, 0.05]) is True
     assert should_compact([0.05, 0.5]) is True
-
-
-# ── native loop integration ──
 
 
 def _runtime():
@@ -176,54 +169,47 @@ def _runtime():
 def test_maybe_compact_skips_under_threshold():
     rt = _runtime()
     rt._messages = _convo(10)
-    rt._last_context_pct = 50.0  # under 70
+    rt._last_context_pct = 50.0
     before = len(rt._messages)
     rt._maybe_compact()
-    assert len(rt._messages) == before  # untouched
+    assert len(rt._messages) == before
 
 
 def test_maybe_compact_fires_over_threshold():
     rt = _runtime()
     rt._messages = _convo(10)
-    rt._last_context_pct = 85.0  # over 70
+    rt._last_context_pct = 85.0
     before = total_chars(rt._messages)
     rt._maybe_compact()
     assert total_chars(rt._messages) < before
-    assert rt._compaction_saves  # recorded a save fraction
+    assert rt._compaction_saves
 
 
 def test_maybe_compact_anti_thrash_blocks_repeat():
     rt = _runtime()
     rt._messages = _convo(10)
     rt._last_context_pct = 85.0
-    rt._compaction_saves = [0.02, 0.02]  # two prior weak saves
+    rt._compaction_saves = [0.02, 0.02]
     before = len(rt._messages)
     rt._maybe_compact()
-    assert len(rt._messages) == before  # anti-thrash skipped it
-
-
-# ── no-usage char backstop (#1774): providers that report no usage still compact ──
+    assert len(rt._messages) == before
 
 
 def test_no_usage_backstop_compacts_an_overgrown_history():
     """With _last_context_pct None (stream_options-rejecting endpoint), an
     over-window history must still trigger compaction via the char estimate."""
     rt = _runtime()
-    # Model "s" is not in the windows table → DEFAULT window (200k tokens).
-    # 200_000 tokens * 3.0 chars/token * 70% ≈ 420M chars would be absurd, so
-    # pin the estimate path through a tiny fake window instead.
     rt._messages = _convo(10)
-    assert rt._last_context_pct is None  # the no-usage state, as-initialized
+    assert rt._last_context_pct is None
     from unittest.mock import patch
 
-    with patch("gideon.model_windows.model_context_window", return_value=2000):
-        # ~10 rounds * 2000-char tool outputs ≈ 20k+ chars ≈ 7000 est tokens
-        # over a 2000-token window → far past 70%.
+    with patch(
+        "gideon.integrations.model_windows.model_context_window", return_value=2000
+    ):
         before = total_chars(rt._messages)
         rt._maybe_compact()
-    assert total_chars(rt._messages) < before  # backstop fired
-    assert rt._compaction_saves  # recorded for anti-thrash
-    # The estimate must never leak into the DISPLAYED gauge.
+    assert total_chars(rt._messages) < before
+    assert rt._compaction_saves
     assert rt._last_context_pct is None
 
 
@@ -234,10 +220,12 @@ def test_no_usage_backstop_stays_quiet_under_the_window():
     assert rt._last_context_pct is None
     from unittest.mock import patch
 
-    with patch("gideon.model_windows.model_context_window", return_value=200_000):
+    with patch(
+        "gideon.integrations.model_windows.model_context_window", return_value=200_000
+    ):
         before = len(rt._messages)
         rt._maybe_compact()
-    assert len(rt._messages) == before  # untouched
+    assert len(rt._messages) == before
     assert rt._last_context_pct is None
 
 
@@ -246,10 +234,12 @@ def test_measured_gauge_still_wins_over_the_estimate():
     char estimate would scream: the provider's number is authoritative."""
     rt = _runtime()
     rt._messages = _convo(10)
-    rt._last_context_pct = 20.0  # provider says plenty of room
+    rt._last_context_pct = 20.0
     from unittest.mock import patch
 
-    with patch("gideon.model_windows.model_context_window", return_value=2000):
+    with patch(
+        "gideon.integrations.model_windows.model_context_window", return_value=2000
+    ):
         before = len(rt._messages)
         rt._maybe_compact()
-    assert len(rt._messages) == before  # measured gauge ruled; no compaction
+    assert len(rt._messages) == before

@@ -15,8 +15,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from gideon.acp.client import CLIENT_NAME, AcpClient
-from gideon.acp.types import METHOD_SET_MODE
+from gideon.integrations.acp.client import CLIENT_NAME, AcpClient
+from gideon.integrations.acp.types import METHOD_SET_MODE
 
 
 class _FakeSession:
@@ -33,13 +33,13 @@ def _make_client(agent: str, tmp_path) -> AcpClient:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("agent", [CLIENT_NAME, "ops", "code-reviewer", "my-custom-agent"])
+@pytest.mark.parametrize(
+    "agent", [CLIENT_NAME, "ops", "code-reviewer", "my-custom-agent"]
+)
 async def test_set_mode_called_for_all_agents(agent, tmp_path):
     """session/set_mode (activate-agent) must be sent regardless of agent name."""
     client = _make_client(agent, tmp_path)
 
-    # Fake connection: initialize returns no special caps; new_session returns a fake
-    # session; send_request records every dialect request written during the handshake.
     conn = MagicMock()
     conn.initialize = AsyncMock(return_value={})
     conn.agent_capabilities = {}
@@ -51,7 +51,9 @@ async def test_set_mode_called_for_all_agents(agent, tmp_path):
 
     await client._initialize_session()
 
-    set_mode_calls = [c for c in conn.send_request.call_args_list if c.args[0] == METHOD_SET_MODE]
+    set_mode_calls = [
+        c for c in conn.send_request.call_args_list if c.args[0] == METHOD_SET_MODE
+    ]
     assert (
         len(set_mode_calls) == 1
     ), f"set_mode not sent for agent={agent!r}; calls: {conn.send_request.call_args_list}"

@@ -27,9 +27,9 @@ import asyncio
 
 import pytest
 
-from gideon.action_providers.base import ActionContext
-from gideon.browse import target as bt
-from gideon.config.loader import AppConfig, BrowseConfig
+from gideon.core.config.loader import AppConfig, BrowseConfig
+from gideon.integrations.action_providers.base import ActionContext
+from gideon.integrations.browse import target as bt
 
 GATEWAY_URL = "ws://127.0.0.1:9222/devtools/page/GATEWAYPROFILE"
 USER_URL = "ws://127.0.0.1:9333/devtools/page/MYOWNBROWSER"
@@ -77,8 +77,8 @@ class _Probe:
         self.connected: list[str] = []
 
     def install(self, monkeypatch, *, ok: bool = True):
-        import gideon.action_providers.browse_provider as bp
-        from gideon.browse.loop import BrowseLoopResult
+        import gideon.integrations.action_providers.browse_provider as bp
+        from gideon.integrations.browse.loop import BrowseLoopResult
 
         async def _open(_self, _cfg, _ctx, *, cdp_url: str):
             self.connected.append(cdp_url)
@@ -92,7 +92,9 @@ class _Probe:
         monkeypatch.setattr(
             bp,
             "run_browse_loop",
-            lambda **kw: _done(BrowseLoopResult(goal=kw["goal"], ok=ok, final_url=kw["start_url"])),
+            lambda **kw: _done(
+                BrowseLoopResult(goal=kw["goal"], ok=ok, final_url=kw["start_url"])
+            ),
         )
         return bp
 
@@ -117,8 +119,8 @@ def auto_grant(monkeypatch):
     BEFORE any grant is requested, and an auto-approving gate would not mask a fall-through
     (the run would then succeed and their `success is False` assertions would trip).
     """
-    from gideon.agents.native.approval import APPROVE, ApprovalGate
-    from gideon.browse import grant as grant_mod
+    from gideon.engine.agents.native.approval import APPROVE, ApprovalGate
+    from gideon.integrations.browse import grant as grant_mod
 
     class _InstantYes(ApprovalGate):
         async def request(self, request_id: str, *, timeout: float = 300.0) -> str:
@@ -128,7 +130,7 @@ def auto_grant(monkeypatch):
 
 
 def _execute(cfg: dict):
-    import gideon.action_providers.browse_provider as bp
+    import gideon.integrations.action_providers.browse_provider as bp
 
     return _run(bp.BrowseActionProvider().execute(cfg, ActionContext(event="manual")))
 
@@ -144,9 +146,6 @@ def _observable(result) -> dict:
         "reversal": result.reversal,
         "agent_error": result.agent_error.to_dict() if result.agent_error else None,
     }
-
-
-# ── clause 1: the default is `gateway`, and it behaves identically ────────────
 
 
 class TestTheDefaultTargetIsGateway:
@@ -169,15 +168,22 @@ class TestTheDefaultTargetIsGateway:
             False,
         ],
     )
-    def test_the_gateway_endpoint_is_the_same_string_the_provider_read_before(self, raw):
+    def test_the_gateway_endpoint_is_the_same_string_the_provider_read_before(
+        self, raw
+    ):
         """The pre-BA-7 provider computed `str(action_config.get("cdp_url") or "").strip()`
         inline in `_open`. `resolve_cdp_url` is now the only reader, so the two must agree on
         every shape that expression tolerated — including the falsy non-strings a config file
         can legally hold."""
         cfg = {"cdp_url": raw}
-        assert bt.resolve_cdp_url(bt.TARGET_GATEWAY, cfg) == str(cfg.get("cdp_url") or "").strip()
+        assert (
+            bt.resolve_cdp_url(bt.TARGET_GATEWAY, cfg)
+            == str(cfg.get("cdp_url") or "").strip()
+        )
 
-    def test_absent_empty_and_explicit_gateway_produce_an_IDENTICAL_result(self, monkeypatch):
+    def test_absent_empty_and_explicit_gateway_produce_an_IDENTICAL_result(
+        self, monkeypatch
+    ):
         """Three spellings of the default, one observable outcome.
 
         Compares the connected endpoint AND every branchable `ActionResult` field. A `target`
@@ -198,7 +204,9 @@ class TestTheDefaultTargetIsGateway:
         assert seen[0][1]["success"] is True
         assert seen[0][1]["outcome"] == ""
 
-    def test_a_gateway_task_with_no_cdp_url_still_returns_the_same_typed_refusal(self, monkeypatch):
+    def test_a_gateway_task_with_no_cdp_url_still_returns_the_same_typed_refusal(
+        self, monkeypatch
+    ):
         """The shipped `ERR_BROWSE_NO_TARGET` sentence is unchanged: the resolution moved, the
         refusal did not."""
         probe = _Probe()
@@ -209,7 +217,9 @@ class TestTheDefaultTargetIsGateway:
         assert result.agent_error.code == "ERR_BROWSE_NO_TARGET"
         assert probe.connected == [""]
 
-    def test_an_unknown_target_is_refused_and_NOT_read_as_the_default(self, monkeypatch):
+    def test_an_unknown_target_is_refused_and_NOT_read_as_the_default(
+        self, monkeypatch
+    ):
         probe = _Probe()
         probe.install(monkeypatch)
         result = _execute(
@@ -223,17 +233,15 @@ class TestTheDefaultTargetIsGateway:
         assert result.success is False
         assert result.agent_error is not None
         assert result.agent_error.code == "ERR_BROWSE_TARGET_UNKNOWN"
-        # The whole point: a typo did NOT silently run on the gateway profile.
         assert probe.connected == []
         with pytest.raises(bt.UnknownBrowseTarget):
             bt.resolve_target({"target": "USER_BROWSER"})
 
 
-# ── clause 2: no silent fallback ──────────────────────────────────────────────
-
-
 class TestAnUnconnectedUserBrowserTaskSkipsAndNeverFallsBack:
-    def test_the_switch_being_off_skips_with_a_typed_actionable_reason(self, monkeypatch, switch):
+    def test_the_switch_being_off_skips_with_a_typed_actionable_reason(
+        self, monkeypatch, switch
+    ):
         switch(False)
         probe = _Probe()
         probe.install(monkeypatch)
@@ -246,10 +254,10 @@ class TestAnUnconnectedUserBrowserTaskSkipsAndNeverFallsBack:
             }
         )
         assert result.outcome == "skip"
-        assert result.success is True  # a skip is not a failure; the engine maps it to NO_CHANGE
+        assert result.success is True
         assert result.agent_error is not None
         assert result.agent_error.code == "ERR_BROWSE_USER_BROWSER_DISCONNECTED"
-        assert result.agent_error.fix  # actionable, not just typed
+        assert result.agent_error.fix
         assert "switched off" in result.agent_error.what
 
     def test_the_switch_on_but_nothing_attached_skips_with_the_OTHER_reason(
@@ -259,14 +267,18 @@ class TestAnUnconnectedUserBrowserTaskSkipsAndNeverFallsBack:
         switch(True)
         probe = _Probe()
         probe.install(monkeypatch)
-        result = _execute({"goal": "reply", "start_url": START_URL, "target": "user_browser"})
+        result = _execute(
+            {"goal": "reply", "start_url": START_URL, "target": "user_browser"}
+        )
         assert result.outcome == "skip"
         assert result.agent_error is not None
         assert result.agent_error.code == "ERR_BROWSE_USER_BROWSER_DISCONNECTED"
         assert "no browser is connected" in result.agent_error.what
         assert probe.connected == []
 
-    def test_it_NEVER_reaches_the_gateway_endpoint_on_the_same_config(self, monkeypatch, switch):
+    def test_it_NEVER_reaches_the_gateway_endpoint_on_the_same_config(
+        self, monkeypatch, switch
+    ):
         """The security-relevant half. The config carries a perfectly usable gateway endpoint;
         the task asked for the operator's browser; the gateway profile is a different cookie and
         credential context, so it must not be touched."""
@@ -283,14 +295,16 @@ class TestAnUnconnectedUserBrowserTaskSkipsAndNeverFallsBack:
         )
         assert probe.connected == []
         assert GATEWAY_URL not in (result.stdout + result.stderr + (result.error or ""))
-        # Structural, not merely observed: the resolver cannot read the config key on this branch.
-        assert bt.resolve_cdp_url(bt.TARGET_USER_BROWSER, {"cdp_url": GATEWAY_URL}) == ""
+        assert (
+            bt.resolve_cdp_url(bt.TARGET_USER_BROWSER, {"cdp_url": GATEWAY_URL}) == ""
+        )
 
     def test_VACUITY_a_CONNECTED_user_browser_task_runs_the_same_path_and_does_not_skip(
         self, monkeypatch, switch, auto_grant
     ):
         """The leg that proves the two assertions above are not vacuous: the same provider, the
-        same config shape, the same `_open` seam — and it neither skips nor uses GATEWAY_URL."""
+        same config shape, the same `_open` seam — and it neither skips nor uses GATEWAY_URL.
+        """
         switch(True)
         bt.register_connector(device_id="my-mac", cdp_url=USER_URL)
         probe = _Probe()
@@ -313,7 +327,11 @@ class TestAnUnconnectedUserBrowserTaskSkipsAndNeverFallsBack:
         assert bt.connector_status().connected is False
         bt.register_connector(device_id="my-mac", cdp_url=USER_URL)
         status = bt.connector_status()
-        assert (status.connected, status.device_id, status.cdp_url) == (True, "my-mac", USER_URL)
+        assert (status.connected, status.device_id, status.cdp_url) == (
+            True,
+            "my-mac",
+            USER_URL,
+        )
         bt.clear_connector()
         assert bt.connector_status().connected is False
 
@@ -326,26 +344,22 @@ class TestAnUnconnectedUserBrowserTaskSkipsAndNeverFallsBack:
         assert bt.connector_status().connected is False
 
 
-# ── clause 3: never unattended ────────────────────────────────────────────────
-
-
 class TestTheUserBrowserTargetCanNeverRunUnattended:
     def test_permits_unattended_is_a_closed_allowlist(self):
         assert bt.permits_unattended(bt.TARGET_GATEWAY) is True
         assert bt.permits_unattended(bt.TARGET_USER_BROWSER) is False
-        # A future third target must opt in, not inherit permission from a negated comparison.
         assert bt.permits_unattended("some_future_target") is False
 
     def test_the_rung_ladder_can_never_promote_browse_to_an_unattended_rung(self):
         """Consumes AUTONOMY-GUARDRAILS' ladder rather than inventing a second floor: if a later
         session raises `action.browse`'s ceiling to `auto_with_undo` or `autonomous`, this reds —
         which is the only way this floor could be undermined from the outside."""
-        from gideon.guardrails.autonomy import (
+        from gideon.security.guardrails.autonomy import (
             RUNG_ONE_TAP,
             action_type_for_provider,
             rung_rank,
         )
-        from gideon.guardrails.rungs import ensure_core_action_types
+        from gideon.security.guardrails.rungs import ensure_core_action_types
 
         ensure_core_action_types()
         spec = action_type_for_provider("browse")
@@ -353,45 +367,59 @@ class TestTheUserBrowserTargetCanNeverRunUnattended:
         assert rung_rank(spec.ceiling) <= rung_rank(RUNG_ONE_TAP)
         assert rung_rank(spec.floor) <= rung_rank(RUNG_ONE_TAP)
 
-    def test_the_provider_refuses_under_the_background_writing_surface(self, monkeypatch, switch):
+    def test_the_provider_refuses_under_the_background_writing_surface(
+        self, monkeypatch, switch
+    ):
         """The call-site floor. `gateway._background_write_surface` wraps EVERY store-trigger
-        dispatch in this surface, so this is the posture a cron fire actually presents."""
-        from gideon.durability.state_history import SURFACE_BACKGROUND, writing_surface
+        dispatch in this surface, so this is the posture a cron fire actually presents.
+        """
+        from gideon.operations.durability.state_history import (
+            SURFACE_BACKGROUND,
+            writing_surface,
+        )
 
         switch(True)
         bt.register_connector(device_id="my-mac", cdp_url=USER_URL)
         probe = _Probe()
         probe.install(monkeypatch)
         with writing_surface(SURFACE_BACKGROUND):
-            result = _execute({"goal": "reply", "start_url": START_URL, "target": "user_browser"})
+            result = _execute(
+                {"goal": "reply", "start_url": START_URL, "target": "user_browser"}
+            )
         assert result.success is False
         assert result.agent_error is not None
         assert result.agent_error.code == "ERR_BROWSE_TARGET_UNATTENDED"
-        # It outranks a CONNECTED connector: attachment is not a substitute for a person.
         assert probe.connected == []
 
     def test_VACUITY_the_same_call_is_permitted_attended_and_for_the_gateway_target(
         self, monkeypatch, switch, auto_grant
     ):
-        from gideon.durability.state_history import SURFACE_BACKGROUND, writing_surface
+        from gideon.operations.durability.state_history import (
+            SURFACE_BACKGROUND,
+            writing_surface,
+        )
 
         switch(True)
         bt.register_connector(device_id="my-mac", cdp_url=USER_URL)
         probe = _Probe()
         probe.install(monkeypatch)
-        # (a) attended + user_browser: runs.
-        attended = _execute({"goal": "reply", "start_url": START_URL, "target": "user_browser"})
+        attended = _execute(
+            {"goal": "reply", "start_url": START_URL, "target": "user_browser"}
+        )
         assert attended.success is True
         assert probe.connected == [USER_URL]
-        # (b) unattended + gateway: still runs — the floor is per-TARGET, not a browse-wide ban.
         probe.connected.clear()
         with writing_surface(SURFACE_BACKGROUND):
-            unattended = _execute({"goal": "read", "start_url": START_URL, "cdp_url": GATEWAY_URL})
+            unattended = _execute(
+                {"goal": "read", "start_url": START_URL, "cdp_url": GATEWAY_URL}
+            )
         assert unattended.success is True
         assert probe.connected == [GATEWAY_URL]
 
-    def test_an_unreadable_surface_is_not_taken_as_evidence_of_a_human(self, monkeypatch, switch):
-        import gideon.durability.state_history as sh
+    def test_an_unreadable_surface_is_not_taken_as_evidence_of_a_human(
+        self, monkeypatch, switch
+    ):
+        import gideon.operations.durability.state_history as sh
 
         def _boom() -> str:
             raise RuntimeError("contextvar gone")
@@ -400,14 +428,10 @@ class TestTheUserBrowserTargetCanNeverRunUnattended:
         assert bt.unattended_origin() != ""
 
 
-# ── clause 3, registration half ───────────────────────────────────────────────
-
-
 def _store(tmp_path):
-    from gideon.triggers.store import TriggerStore
+    from gideon.automation.triggers.store import TriggerStore
 
     store = TriggerStore(base_dir=tmp_path)
-    # The redirect, asserted rather than assumed: nothing in this file may reach the real home.
     assert str(store.path).startswith(str(tmp_path))
     return store
 
@@ -421,7 +445,7 @@ def _browse_workflow(target: str | None) -> dict:
 
 class TestASchedulePlanNamingUserBrowserIsRefusedAtRegistration:
     def test_create_refuses_and_saves_NOTHING(self, tmp_path):
-        from gideon.triggers import tools
+        from gideon.automation.triggers import tools
 
         store = _store(tmp_path)
         result = tools.create(
@@ -435,11 +459,10 @@ class TestASchedulePlanNamingUserBrowserIsRefusedAtRegistration:
         assert result.ok is False
         assert result.data["error"]["code"] == "ERR_BROWSE_TARGET_UNATTENDED"
         assert result.data["error"]["fix"]
-        # Refused at REGISTRATION means the row does not exist — not that it exists and fails.
         assert store.list_triggers() == []
 
     def test_VACUITY_the_same_cron_saves_with_the_default_target(self, tmp_path):
-        from gideon.triggers import tools
+        from gideon.automation.triggers import tools
 
         store = _store(tmp_path)
         for target in (None, "gateway"):
@@ -455,7 +478,7 @@ class TestASchedulePlanNamingUserBrowserIsRefusedAtRegistration:
         assert len(store.list_triggers()) == 2
 
     def test_update_cannot_walk_around_the_create_check(self, tmp_path):
-        from gideon.triggers import tools
+        from gideon.automation.triggers import tools
 
         store = _store(tmp_path)
         created = tools.create(
@@ -470,17 +493,18 @@ class TestASchedulePlanNamingUserBrowserIsRefusedAtRegistration:
         trigger_id = created.data["trigger"]["id"]
 
         refused = tools.update(
-            store, trigger_id=trigger_id, patch={"workflow": _browse_workflow("user_browser")}
+            store,
+            trigger_id=trigger_id,
+            patch={"workflow": _browse_workflow("user_browser")},
         )
         assert refused.ok is False
         assert refused.data["error"]["code"] == "ERR_BROWSE_TARGET_UNATTENDED"
-        # And the stored row is untouched, not half-patched.
         row = store.get(trigger_id)
         assert row is not None
         assert row.trigger.workflow["inline"]["config"]["target"] == "gateway"
 
     def test_an_unknown_target_is_refused_at_registration_too(self, tmp_path):
-        from gideon.triggers import tools
+        from gideon.automation.triggers import tools
 
         store = _store(tmp_path)
         result = tools.create(
@@ -498,16 +522,16 @@ class TestASchedulePlanNamingUserBrowserIsRefusedAtRegistration:
     def test_a_NON_browse_automation_is_untouched_by_the_check(self, tmp_path):
         """The refusal is one provider-name comparison on the normal path, and it must not
         acquire an opinion about anything else."""
-        from gideon.triggers import tools
+        from gideon.automation.triggers import tools
 
         store = _store(tmp_path)
-        assert tools.unattended_action_refusal({"provider": "notify", "config": {}}) is None
+        assert (
+            tools.unattended_action_refusal({"provider": "notify", "config": {}})
+            is None
+        )
         assert tools.unattended_action_refusal({}) is None
         assert tools.unattended_action_refusal(None) is None
-        # The literal that keeps a ~1s import chain (`browse.extraction` →
-        # `knowledge.connectors.web_url`) off every trigger create/update cannot drift from the
-        # provider it names.
-        from gideon.action_providers.browse_provider import PROVIDER_NAME
+        from gideon.integrations.action_providers.browse_provider import PROVIDER_NAME
 
         assert tools._BROWSE_PROVIDER == PROVIDER_NAME
         result = tools.create(
@@ -521,21 +545,18 @@ class TestASchedulePlanNamingUserBrowserIsRefusedAtRegistration:
         assert result.ok is True
 
 
-# ── the config round trip's uncovered point ───────────────────────────────────
-
-
 class TestTheConnectorToggleHasAWritePath:
     def test_it_is_in_the_PATCH_allowlist(self):
         """`test_config_roundtrip.py` covers dataclass/_meta, `load()` and `to_dict()`, but
         provably NOT the `_EDITABLE_CONFIG` allowlist — a field missing from it leaves that file
         fully green while the Settings control silently 400s."""
-        from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+        from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
         assert _EDITABLE_CONFIG["browse.user_browser_enabled"] == {"type": "bool"}
 
     def test_the_allowlisted_value_coerces_the_way_the_toggle_sends_it(self):
-        from gideon.config.edit_spec import coerce_edit_value
-        from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+        from gideon.core.config.edit_spec import coerce_edit_value
+        from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
         spec = _EDITABLE_CONFIG["browse.user_browser_enabled"]
         assert coerce_edit_value("browse.user_browser_enabled", True, spec) is True
@@ -546,7 +567,7 @@ class TestTheConnectorToggleHasAWritePath:
         assert AppConfig().to_dict()["browse"] == {"user_browser_enabled": False}
 
     def test_every_new_code_is_in_the_append_only_registry(self):
-        from gideon.errors import ERROR_CODES
+        from gideon.core.errors import ERROR_CODES
 
         for code in (
             "ERR_BROWSE_TARGET_UNKNOWN",

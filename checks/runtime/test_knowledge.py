@@ -7,23 +7,29 @@ import sys
 
 import pytest
 
-from gideon.knowledge.extractor import EntityExtractor
-from gideon.knowledge.readers import FileReader
-from gideon.knowledge.retrieval import HybridRetriever, _attach_locator, _bytes_to_floats
-from gideon.knowledge.store import KnowledgeStore, SimpleDiGraph, normalize_url
+from gideon.cognition.knowledge.extractor import EntityExtractor
+from gideon.cognition.knowledge.readers import FileReader
+from gideon.cognition.knowledge.retrieval import (
+    HybridRetriever,
+    _attach_locator,
+    _bytes_to_floats,
+)
+from gideon.cognition.knowledge.store import (
+    KnowledgeStore,
+    SimpleDiGraph,
+    normalize_url,
+)
 
 
 def test_compose_item_text_is_title_and_summary_only():
     """KL-9 clean break: the whole-item vector text is title + summary ONLY. The old
     1000-char body top-up is retired — body-level recall now lives in the chunk index —
     so ``content`` is accepted (stable signature) but never appended."""
-    from gideon.knowledge.embedder import compose_item_text as c
+    from gideon.cognition.knowledge.embedder import compose_item_text as c
 
-    # Body is NOT appended even when the summary is thin/absent.
     assert c("Meeting notes", None, "quantum dot solar coating") == "Meeting notes"
     rich = "x" * 90
     assert c("T", rich, "body text") == f"T {rich}"
-    # A huge body cannot bloat the item vector text; empties collapse cleanly.
     assert c("t", None, "z" * 5000) == "t"
     assert c("", "", "") == "" and c("Only", None, None) == "Only"
 
@@ -34,20 +40,19 @@ def test_unified_embedder_exposes_model_name(monkeypatch):
     UnifiedEmbedder wraps an embed_fn and must expose `model_name` (from the active
     embedding selection) instead. `.model` used to AttributeError → /api/knowledge/
     stats 500 → the FE header showed 'semantic search off' even with embeddings live."""
-    import gideon.embedding_providers.registry as emb_reg
-    from gideon.knowledge.embedder import UnifiedEmbedder
+    import gideon.integrations.embedding_providers.registry as emb_reg
+    from gideon.cognition.knowledge.embedder import UnifiedEmbedder
 
-    # A bound embedding selection → model_name is the bare model id (prefix stripped).
     monkeypatch.setattr(
-        emb_reg, "_active_embedding_spec", lambda: ("sentence-transformers", "all-MiniLM-L6-v2")
+        emb_reg,
+        "_active_embedding_spec",
+        lambda: ("sentence-transformers", "all-MiniLM-L6-v2"),
     )
     e = UnifiedEmbedder(embed_fn=lambda t: [0.1, 0.2], dim_hint=2)
     assert e.model_name == "all-MiniLM-L6-v2"
     assert e.is_available() is True
-    # Nothing bound → empty label, never an AttributeError.
     monkeypatch.setattr(emb_reg, "_active_embedding_spec", lambda: None)
     assert e.model_name == ""
-    # The attribute the 500 came from must NOT exist (forces callers onto model_name).
     assert not hasattr(e, "model")
 
 
@@ -58,17 +63,17 @@ def test_normalize_url_canonicalizes_for_dedup():
     assert n("https://example.com/") == "https://example.com"
     assert n("https://Example.COM") == "https://example.com"
     assert n("https://example.com/?utm_source=x&id=5") == "https://example.com?id=5"
-    assert n("https://example.com:443/p/") == "https://example.com/p/"  # sub-path slash kept
+    assert n("https://example.com:443/p/") == "https://example.com/p/"
     assert n("https://example.com/a?b=2&a=1#frag") == "https://example.com/a?a=1&b=2"
-    # Non-http inputs and junk pass through untouched.
     assert n("mailto:x@y.com") == "mailto:x@y.com"
     assert n("not a url") == "not a url"
     assert n("") == ""
-    # Idempotent.
     assert n(n("https://example.com/?fbclid=z")) == n("https://example.com/?fbclid=z")
 
 
-def mk(store, title, content, item_type="note", *, summary="", tags=None, embedding=None):
+def mk(
+    store, title, content, item_type="note", *, summary="", tags=None, embedding=None
+):
     """Create one logical-document item (the only ingestion shape). Replaces the
     removed legacy add_item chunk-inserter. Embedding is set post-create."""
     iid = store.create_typed_item(
@@ -79,14 +84,11 @@ def mk(store, title, content, item_type="note", *, summary="", tags=None, embedd
         tags=tags or [],
     )
     if embedding is not None:
-        store.db.execute("UPDATE items SET embedding = ? WHERE id = ?", (embedding, iid))
+        store.db.execute(
+            "UPDATE items SET embedding = ? WHERE id = ?", (embedding, iid)
+        )
         store.db.commit()
     return iid
-
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture()
@@ -111,11 +113,6 @@ def store_factory(tmp_path):
         s.close()
 
 
-# ---------------------------------------------------------------------------
-# 1. KnowledgeStore
-# ---------------------------------------------------------------------------
-
-
 class TestKnowledgeStore:
     def test_create_and_get_item(self, store):
         item_id = mk(
@@ -132,7 +129,6 @@ class TestKnowledgeStore:
         assert item["content"] == "JWT tokens with 1h expiry"
         assert item["item_type"] == "design_doc"
         assert item["summary"] == "Auth overview"
-        # P6b: the API serializes tags as a JSON ARRAY (not a string) + exposes `type`.
         assert item["tags"] == ["auth", "jwt"]
         assert item["type"] == "design_doc"
 
@@ -159,17 +155,17 @@ class TestKnowledgeStore:
         e2 = store.add_entity("DeployService", "service")
         r1 = store.add_entity_relation(e1, e2, "uses", description="deploy")
         r2 = store.add_entity_relation(e1, e2, "uses", description="deploy again")
-        assert r1 == r2  # same edge returned, not a new one
+        assert r1 == r2
         n = store.db.execute(
             "SELECT COUNT(*) FROM entity_relations WHERE source_id=? AND target_id=? AND relation_type='uses'",  # noqa: E501
             (e1, e2),
         ).fetchone()[0]
         assert n == 1
-        # A different relation type between the same pair is still distinct.
         store.add_entity_relation(e1, e2, "depends_on")
         assert (
             store.db.execute(
-                "SELECT COUNT(*) FROM entity_relations WHERE source_id=? AND target_id=?", (e1, e2)
+                "SELECT COUNT(*) FROM entity_relations WHERE source_id=? AND target_id=?",
+                (e1, e2),
             ).fetchone()[0]
             == 2
         )
@@ -186,7 +182,6 @@ class TestKnowledgeStore:
         assert e2 in node_ids
         assert e3 in node_ids
         assert len(sg["edges"]) == 2
-        # Verify D3.js format: nodes have id/name/type, edges have source/target/type
         for n in sg["nodes"]:
             assert "id" in n and "name" in n and "type" in n
         for e in sg["edges"]:
@@ -204,7 +199,6 @@ class TestKnowledgeStore:
         assert "embedding" not in got, "raw vector must not ride in responses"
         assert got["has_embedding"] is True
 
-        # An item with no vector reports has_embedding False (no key surprises).
         iid2 = mk(store, "NoVec", "body2", "note")
         assert store.get_item(iid2)["has_embedding"] is False
 
@@ -213,7 +207,6 @@ class TestKnowledgeStore:
         assert store.get_item(item_id) is not None
         store.delete_item(item_id)
         assert store.get_item(item_id) is None
-        # FTS should also be clean
         assert store.search_items_fts("deleted") == []
 
     def test_find_entity_case_insensitive(self, store):
@@ -232,24 +225,16 @@ class TestKnowledgeStore:
 
         store.merge_entities(e_keep, e_merge)
 
-        # Merged entity should be gone
         assert store.find_entity("Auth Service") is None
-        # Relation should point to kept entity
         rels = store.db.execute(
             "SELECT * FROM entity_relations WHERE source_id = ?", (e_keep,)
         ).fetchall()
         assert len(rels) == 1
         assert rels[0]["target_id"] == e_other
-        # Mention should reference kept entity
         mentions = store.db.execute(
             "SELECT * FROM mentions WHERE entity_id = ?", (e_keep,)
         ).fetchall()
         assert len(mentions) == 1
-
-
-# ---------------------------------------------------------------------------
-# 3. FileReader
-# ---------------------------------------------------------------------------
 
 
 class TestFileReader:
@@ -278,19 +263,26 @@ class TestFileReader:
         text, meta = FileReader().read(str(f))
         assert meta["format"] == "html"
         assert "Doc Title" in text and "Real document body." in text
-        assert "Skip to content" not in text and "Sign in" not in text and "Site" not in text
+        assert (
+            "Skip to content" not in text
+            and "Sign in" not in text
+            and "Site" not in text
+        )
 
     def test_read_csv_renders_markdown_table(self, tmp_path):
         """A .csv is a 'sheet'-type item — read it as a markdown table (like .xlsx) with a
-        row_count, not raw comma text. Quoted commas stay one cell; embedded pipes escape."""
+        row_count, not raw comma text. Quoted commas stay one cell; embedded pipes escape.
+        """
         f = tmp_path / "people.csv"
-        f.write_text('Name,Role\n"Smith, Alice",Engineer\nBob,"a | b"\n', encoding="utf-8")
+        f.write_text(
+            'Name,Role\n"Smith, Alice",Engineer\nBob,"a | b"\n', encoding="utf-8"
+        )
         text, meta = FileReader().read(str(f))
         assert meta["format"] == "csv" and meta["content_type"] == "markdown"
         assert meta["row_count"] == 3
         assert "| Name | Role |" in text and "| --- | --- |" in text
-        assert "Smith, Alice" in text  # quoted comma kept in one cell
-        assert "a \\| b" in text  # embedded pipe escaped
+        assert "Smith, Alice" in text
+        assert "a \\| b" in text
 
     def test_read_tsv_uses_tab_delimiter(self, tmp_path):
         """A .tsv is the tab-separated sibling of .csv — rendered as a markdown table with
@@ -301,23 +293,24 @@ class TestFileReader:
         assert meta["format"] == "tsv" and meta["content_type"] == "markdown"
         assert meta["row_count"] == 3
         assert "| Name | Note |" in text
-        assert "hello, world" in text  # the comma is data, not a delimiter → one cell
+        assert "hello, world" in text
 
     def test_read_csv_caps_large_table(self, tmp_path):
         """A large CSV renders a capped table (content/embedding don't bloat) but reports
         the true total row_count."""
         f = tmp_path / "big.csv"
-        f.write_text("n\n" + "\n".join(str(i) for i in range(600)) + "\n", encoding="utf-8")
+        f.write_text(
+            "n\n" + "\n".join(str(i) for i in range(600)) + "\n", encoding="utf-8"
+        )
         text, meta = FileReader().read(str(f))
-        assert meta["row_count"] == 601  # header + 600 data rows
-        assert "more rows" in text  # truncation note present
-        assert text.count("\n| ") < 600  # not every row rendered
+        assert meta["row_count"] == 601
+        assert "more rows" in text
+        assert text.count("\n| ") < 600
 
     def test_read_unsupported(self, tmp_path):
         f = tmp_path / "data.xyz"
         f.write_text("binary-ish", encoding="utf-8")
         reader = FileReader()
-        # Unsupported extension still falls through to _read_text
         text, meta = reader.read(str(f))
         assert "binary-ish" in text
 
@@ -329,13 +322,15 @@ class TestFileReader:
     def test_pdf_reader_dependency_present(self):
         """pdfplumber is a declared core dep (#71): the PDF path must NOT
         degrade to the format:'error' missing-dependency sentinel."""
-        import gideon.knowledge.readers as rd
+        import gideon.cognition.knowledge.readers as rd
 
-        assert rd.pdfplumber is not None, "pdfplumber missing — PDF upload silently yields 0 items"
+        assert (
+            rd.pdfplumber is not None
+        ), "pdfplumber missing — PDF upload silently yields 0 items"
 
     def test_read_xlsx_as_markdown_tables(self, tmp_path):
         """A spreadsheet extracts as markdown tables (one per sheet), not binary text."""
-        import gideon.knowledge.readers as rd
+        import gideon.cognition.knowledge.readers as rd
 
         if rd._load_workbook is None:
             import pytest as _pytest
@@ -353,14 +348,13 @@ class TestFileReader:
         text, meta = FileReader().read(str(p))
         assert meta["format"] == "xlsx" and meta["sheet_count"] == 1
         assert "## Sales" in text and "| product | qty |" in text and "widget" in text
-        assert "PK" not in text[:4]  # not raw zip bytes
+        assert "PK" not in text[:4]
 
     def test_xlsx_in_dispatch_and_supported(self):
         reader = FileReader()
         assert ".xlsx" in reader.SUPPORTED and ".xlsx" in reader._DISPATCH
 
     def test_read_pdf(self, tmp_path):
-        # Minimal hand-crafted single-page PDF with extractable text.
         pdf = (
             b"%PDF-1.4\n"
             b"1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
@@ -398,16 +392,20 @@ class TestFileReader:
 
     def test_pptx_and_html_readers_present(self):
         """python-pptx + html2text are declared core deps (#71)."""
-        import gideon.knowledge.readers as rd
+        import gideon.cognition.knowledge.readers as rd
 
-        assert rd.Presentation is not None, "python-pptx missing — .pptx upload yields 0 items"
-        assert rd._html2text_mod is not None, "html2text missing — HTML extraction degrades"
+        assert (
+            rd.Presentation is not None
+        ), "python-pptx missing — .pptx upload yields 0 items"
+        assert (
+            rd._html2text_mod is not None
+        ), "html2text missing — HTML extraction degrades"
 
     def test_missing_reader_dep_surfaces_error(self, tmp_path, monkeypatch):
         """When a reader dependency is genuinely absent, the reader must return a
         format:'error' sentinel (which the ingest handler turns into a visible
         sync_error) rather than a silent empty/0-item result."""
-        import gideon.knowledge.readers as rd
+        import gideon.cognition.knowledge.readers as rd
 
         monkeypatch.setattr(rd, "pdfplumber", None)
         f = tmp_path / "x.pdf"
@@ -415,11 +413,6 @@ class TestFileReader:
         _text, meta = FileReader().read(str(f))
         assert meta["format"] == "error"
         assert "pdfplumber" in meta.get("error", "")
-
-
-# ---------------------------------------------------------------------------
-# 4. EntityExtractor
-# ---------------------------------------------------------------------------
 
 
 class TestEntityExtractor:
@@ -438,10 +431,11 @@ class TestEntityExtractor:
 
     def test_extract_caps_content_sent_to_llm(self):
         """A large document's full text must not flood the extraction prompt (context-window
-        blowout → empty graph). extract() sends only the leading _MAX_CHARS to the model."""
+        blowout → empty graph). extract() sends only the leading _MAX_CHARS to the model.
+        """
         import asyncio
 
-        from gideon.knowledge.extractor import _MAX_CHARS
+        from gideon.cognition.knowledge.extractor import _MAX_CHARS
 
         sent = {}
 
@@ -450,16 +444,19 @@ class TestEntityExtractor:
                 sent["prompt"] = prompt
                 return '{"entities": [], "relations": [], "category": "document", "summary": ""}'
 
-        # Use a sentinel char absent from the prompt template so the count is exact.
         big = "é" * (_MAX_CHARS * 3)
-        asyncio.get_event_loop().run_until_complete(EntityExtractor(pool=_Pool()).extract(big))
-        assert sent["prompt"].count("é") == _MAX_CHARS  # capped, not the full 3× body
+        asyncio.get_event_loop().run_until_complete(
+            EntityExtractor(pool=_Pool()).extract(big)
+        )
+        assert sent["prompt"].count("é") == _MAX_CHARS
 
     def test_parse_json_response(self):
         ext = EntityExtractor()
         raw = json.dumps(
             {
-                "entities": [{"name": "Svc", "type": "service", "description": "A service"}],
+                "entities": [
+                    {"name": "Svc", "type": "service", "description": "A service"}
+                ],
                 "relations": [],
                 "category": "design_doc",
                 "summary": "A service doc.",
@@ -508,21 +505,19 @@ class TestEntityExtractor:
             {"name": "Redis"},
             {"name": "Kafka", "type": "technology"},
         ]
-        assert result["relations"] == [{"source": "Kafka", "target": "MongoDB", "type": "feeds"}]
-        # Every surviving entity is a dict with a usable name (no downstream AttributeError).
+        assert result["relations"] == [
+            {"source": "Kafka", "target": "MongoDB", "type": "feeds"}
+        ]
         assert all(isinstance(e, dict) and e.get("name") for e in result["entities"])
 
     def test_parse_tolerates_non_list_entities(self):
         """A model returning entities/relations as a non-list (e.g. null or a string) must
         normalize to [] — never crash the parse."""
         ext = EntityExtractor()
-        result = ext._parse_response('{"entities": "MongoDB", "relations": null, "summary": "s"}')
+        result = ext._parse_response(
+            '{"entities": "MongoDB", "relations": null, "summary": "s"}'
+        )
         assert result["entities"] == [] and result["relations"] == []
-
-
-# ---------------------------------------------------------------------------
-# 5. HybridRetriever
-# ---------------------------------------------------------------------------
 
 
 class TestHybridRetriever:
@@ -545,7 +540,6 @@ class TestHybridRetriever:
         )
         retriever = HybridRetriever(store)
         assert any(r["id"] == iid for r in retriever.search("flibberprotocol"))
-        # Archive it → gone from search.
         store.update_item(iid, is_archived=1)
         store.db.commit()
         assert not any(r["id"] == iid for r in retriever.search("flibberprotocol"))
@@ -562,10 +556,10 @@ class TestHybridRetriever:
         store.update_item(iid, is_archived=1)
         store.db.commit()
         retriever = HybridRetriever(store)
-        # Default: archived item is hidden.
         assert not any(r["id"] == iid for r in retriever.search("zarquon"))
-        # include_archived=True (the Archived view's search): now found.
-        assert any(r["id"] == iid for r in retriever.search("zarquon", include_archived=True))
+        assert any(
+            r["id"] == iid for r in retriever.search("zarquon", include_archived=True)
+        )
 
     def test_vector_search_skips_dimension_mismatch(self, store):
         """A stored vector from a DIFFERENT embedding model (different dimension) must be
@@ -576,32 +570,36 @@ class TestHybridRetriever:
         def _bytes(vec):
             return struct.pack(f"{len(vec)}f", *vec)
 
-        # Two items: one embedded with the CURRENT model (4-dim), one with an OLD model
-        # (6-dim) whose text is otherwise identical so only the vector path differs.
-        cur = mk(store, "Current model doc", "alpha bravo", embedding=_bytes([1.0, 0.0, 0.0, 0.0]))
+        cur = mk(
+            store,
+            "Current model doc",
+            "alpha bravo",
+            embedding=_bytes([1.0, 0.0, 0.0, 0.0]),
+        )
         old = mk(
             store,
             "Old model doc",
             "charlie delta",
             embedding=_bytes([1.0, 0.0, 0.0, 0.0, 9.9, 9.9]),
         )
-        # Query embedder returns a 4-dim vector aligned with the current-model item.
         retriever = HybridRetriever(store, embedder=lambda q: [1.0, 0.0, 0.0, 0.0])
         vec = retriever._vector_search("anything", limit=10)
         ids = {iid for iid, _ in (vec or [])}
-        assert cur in ids  # current-dimension item is vector-matched
-        assert old not in ids  # mismatched-dimension item is skipped (not prefix-scored)
+        assert cur in ids
+        assert old not in ids
 
     def test_search_is_or_not_and(self, store):
-        # A conversational query must match a doc that contains only SOME terms
-        # (OR semantics) — not require every word (the old implicit-AND default).
-        mk(store, "Auth Design", "Access tokens expire; refresh tokens rotate.", "design_doc")
+        mk(
+            store,
+            "Auth Design",
+            "Access tokens expire; refresh tokens rotate.",
+            "design_doc",
+        )
         retriever = HybridRetriever(store)
         results = retriever.search("how do we rotate refresh tokens")
         assert any(r["title"] == "Auth Design" for r in results)
 
     def test_search_prefix_matches_word_variants(self, store):
-        # Prefix matching: "token" should hit "tokens" / "tokenize".
         mk(store, "Caching", "We tokenize the request and cache it.", "note")
         retriever = HybridRetriever(store)
         assert any(r["title"] == "Caching" for r in retriever.search("token"))
@@ -610,14 +608,12 @@ class TestHybridRetriever:
         """An item whose TITLE is the query must rank above a long document that merely
         mentions the terms in passing — title match is a top relevance signal that raw
         BM25 (favoring term-dense long docs) otherwise buries."""
-        # A long doc that mentions 'widget config' deep in a wall of other text.
         mk(
             store,
             "Platform Engineering Handbook",
             "intro " * 200 + " the widget config lives in settings " + "more " * 200,
             "document",
         )
-        # A short item literally titled for the query.
         mk(store, "Widget Config", "see the dashboard", "note")
         retriever = HybridRetriever(store)
         results = retriever.search("widget config")
@@ -627,16 +623,12 @@ class TestHybridRetriever:
         ), f"title match should rank first, got {[r['title'] for r in results]}"
 
     def test_graph_search_matches_multiword_entity(self, store):
-        # A 3-word entity name must be found via the graph (its words may not all
-        # appear in any single item's text) — the candidate set includes the full query.
         iid = mk(store, "Doc", "content here", "note")
         eid = store.add_entity("MAPLE Payments team", "org")
         store.add_mention(iid, eid)
         results = HybridRetriever(store).search("MAPLE Payments team")
         hit = next((r for r in results if r["id"] == iid), None)
         assert hit is not None and "graph" in hit["match_type"]
-
-    # ── P12 per-item citation locator (source_type/section/line_range/deep_link) ──
 
     def test_search_result_carries_citation_locator(self, store):
         """Every hit gains the four locator fields; for a doc with a markdown header
@@ -651,23 +643,23 @@ class TestHybridRetriever:
         hit = next((r for r in results if r["title"] == "Runbook"), None)
         assert hit is not None
         assert hit["source_type"] == "document"
-        assert hit["section"] == "Rollback Procedure"  # nearest header above the match
+        assert hit["section"] == "Rollback Procedure"
         assert hit["line_range"] and len(hit["line_range"]) == 2
         assert hit["deep_link"].startswith(f"/knowledge/items/{hit['id']}")
         assert "loc=L" in hit["deep_link"]
 
     def test_locator_is_honest_null_for_structureless_item(self):
-        # A structureless item (image, no content) never fabricates a section/line —
-        # the fields are null and the deep-link is a bare item route.
-        loc = _attach_locator({"id": "img1", "item_type": "image", "content": ""}, {"cat"})
+        loc = _attach_locator(
+            {"id": "img1", "item_type": "image", "content": ""}, {"cat"}
+        )
         assert loc["section"] is None and loc["line_range"] is None
         assert loc["source_type"] == "image"
         assert loc["deep_link"] == "/knowledge/items/img1"
 
     def test_locator_no_query_match_yields_no_line_range(self):
-        # Content exists but no query term hits any line → no fabricated span.
         loc = _attach_locator(
-            {"id": "n1", "item_type": "note", "content": "alpha beta\ngamma delta"}, {"zeta"}
+            {"id": "n1", "item_type": "note", "content": "alpha beta\ngamma delta"},
+            {"zeta"},
         )
         assert loc["line_range"] is None and loc["section"] is None
         assert loc["deep_link"] == "/knowledge/items/n1"
@@ -677,15 +669,8 @@ class TestHybridRetriever:
         list_b = [("item2", 1), ("item3", 2), ("item4", 3)]
         fused = HybridRetriever._rrf_fuse(list_a, list_b, None, k=60)
         ids = [item_id for item_id, _ in fused]
-        # item2 appears in both lists at good ranks, should be top
         assert ids[0] == "item2"
-        # All 4 items should be present
         assert set(ids) == {"item1", "item2", "item3", "item4"}
-
-
-# ---------------------------------------------------------------------------
-# 6. SimpleDiGraph
-# ---------------------------------------------------------------------------
 
 
 class TestSimpleDiGraph:
@@ -721,7 +706,7 @@ class TestSimpleDiGraph:
         g.add_node("c")
         g.add_edge("a", "b")
         g.add_edge("c", "a")
-        assert g.degree("a") == 2  # 1 outgoing + 1 incoming
+        assert g.degree("a") == 2
         assert g.degree("b") == 1
 
     def test_nodes_iteration_and_subscript(self):
@@ -751,17 +736,11 @@ class TestSimpleDiGraph:
         assert list(g.nodes) == []
 
 
-# ---------------------------------------------------------------------------
-# 7. KnowledgeStore -- additional coverage
-# ---------------------------------------------------------------------------
-
-
 class TestKnowledgeStoreExtended:
     def test_update_item_fts_sync(self, store):
         item_id = mk(store, "Original", "old content about cats", "doc")
         assert len(store.search_items_fts("cats")) == 1
         store.update_item(item_id, title="Updated", content="new content about dogs")
-        # After update, new content should be searchable
         assert len(store.search_items_fts("dogs")) == 1
         item = store.get_item(item_id)
         assert item["title"] == "Updated"
@@ -769,7 +748,7 @@ class TestKnowledgeStoreExtended:
 
     def test_update_item_no_fields(self, store):
         item_id = mk(store, "Doc", "content", "doc")
-        store.update_item(item_id)  # no-op, should not crash
+        store.update_item(item_id)
 
     def test_update_item_non_fts_field(self, store):
         item_id = mk(store, "Doc", "content", "doc")
@@ -785,10 +764,8 @@ class TestKnowledgeStoreExtended:
         e3 = store.add_entity("C", "svc")
         store.add_entity_relation(e1, e2, "calls")
         store.add_entity_relation(e2, e3, "calls")
-        # depth=1 should get B only
         n1 = store.get_neighbors(e1, depth=1)
         assert {n["id"] for n in n1} == {e2}
-        # depth=2 should get B and C
         n2 = store.get_neighbors(e1, depth=2)
         assert {n["id"] for n in n2} == {e2, e3}
 
@@ -796,7 +773,6 @@ class TestKnowledgeStoreExtended:
         e1 = store.add_entity("A", "svc")
         e2 = store.add_entity("B", "svc")
         store.add_entity_relation(e2, e1, "calls")
-        # e1 has no outgoing but has incoming from e2
         neighbors = store.get_neighbors(e1, depth=1)
         assert {n["id"] for n in neighbors} == {e2}
 
@@ -812,13 +788,19 @@ class TestKnowledgeStoreExtended:
     def test_backfill_entity_description_only_when_empty(self, store):
         """An entity first extracted without a description can gain one later; an
         existing description is never clobbered."""
-        # No description → backfill writes.
         eid = store.add_entity("Cachemere", "technology")
-        assert store.backfill_entity_description(eid, "An internal caching layer") is True
-        assert store.find_entity("Cachemere")["description"] == "An internal caching layer"
-        # Already has one → never overwritten; blank backfill is a no-op.
-        assert store.backfill_entity_description(eid, "a worse later description") is False
-        assert store.find_entity("Cachemere")["description"] == "An internal caching layer"
+        assert (
+            store.backfill_entity_description(eid, "An internal caching layer") is True
+        )
+        assert (
+            store.find_entity("Cachemere")["description"] == "An internal caching layer"
+        )
+        assert (
+            store.backfill_entity_description(eid, "a worse later description") is False
+        )
+        assert (
+            store.find_entity("Cachemere")["description"] == "An internal caching layer"
+        )
         assert store.backfill_entity_description(eid, "   ") is False
 
     def test_delete_item_cleans_mentions(self, store):
@@ -827,7 +809,9 @@ class TestKnowledgeStoreExtended:
         store.add_mention(item_id, eid, context="test")
         store.delete_item(item_id)
         assert (
-            store.db.execute("SELECT * FROM mentions WHERE item_id = ?", (item_id,)).fetchone()
+            store.db.execute(
+                "SELECT * FROM mentions WHERE item_id = ?", (item_id,)
+            ).fetchone()
             is None
         )
 
@@ -848,7 +832,7 @@ class TestKnowledgeStoreExtended:
         store.update_item(arch, is_archived=1)
         store.db.commit()
         tags = store.all_tags()
-        assert tags[0] == "caching"  # appears twice → first
+        assert tags[0] == "caching"
         assert set(tags) == {"caching", "python", "redis"}
         assert "archived-only" not in tags
 
@@ -862,7 +846,7 @@ class TestKnowledgeStoreExtended:
         store.db.commit()
         ov = store.corpus_overview()
         assert ov["total"] == 1
-        assert ov["by_type"] == {"note": 1}  # archived gist excluded
+        assert ov["by_type"] == {"note": 1}
         assert [t["tag"] for t in ov["top_tags"]] == ["live"]
         assert "stale" not in [t["tag"] for t in ov["top_tags"]]
 
@@ -870,20 +854,26 @@ class TestKnowledgeStoreExtended:
         """A bookmark's URL is canonicalized at storage, and find_active_by_url
         normalizes its lookup — so trailing-slash and tracking-param variants of one
         page dedup against the original instead of creating duplicates."""
-        iid = store.create_typed_item(item_type="bookmark", title="Ex", url="https://example.com")
-        # Trailing slash, host casing, and a tracking param all resolve to the same item.
+        iid = store.create_typed_item(
+            item_type="bookmark", title="Ex", url="https://example.com"
+        )
         assert store.find_active_by_url("https://example.com/")["id"] == iid
-        assert store.find_active_by_url("https://Example.com/?utm_source=news")["id"] == iid
-        # A genuinely different path does NOT dedup.
+        assert (
+            store.find_active_by_url("https://Example.com/?utm_source=news")["id"]
+            == iid
+        )
         assert store.find_active_by_url("https://example.com/other") is None
-        # The stored URL is the canonical form.
         assert store.get_item(iid)["url"] == "https://example.com"
 
     def test_corpus_overview_counts_active_library(self, store):
         """corpus_overview reports the live library: total, by-type, top-tags (active,
         non-archived only)."""
-        store.create_typed_item(item_type="note", title="d1", content="x", tags=["shared"])
-        store.create_typed_item(item_type="gist", title="a1", content="y", tags=["alpha"])
+        store.create_typed_item(
+            item_type="note", title="d1", content="x", tags=["shared"]
+        )
+        store.create_typed_item(
+            item_type="gist", title="a1", content="y", tags=["alpha"]
+        )
         store.db.commit()
         ov = store.corpus_overview()
         assert ov["total"] == 2
@@ -913,11 +903,6 @@ class TestKnowledgeStoreExtended:
         assert s2.graph.has_node(e1)
         assert s2.graph.has_edge(e1, e2)
         s2.close()
-
-
-# ---------------------------------------------------------------------------
-# 8. HybridRetriever -- additional coverage
-# ---------------------------------------------------------------------------
 
 
 class TestHybridRetrieverExtended:
@@ -959,13 +944,24 @@ class TestHybridRetrieverExtended:
     def test_vector_search_drops_below_similarity_floor(self, store):
         """A near-orthogonal item (weak cosine) is dropped, so a precise query isn't
         polluted by semantic noise; a strongly-similar item is kept."""
-        # Item A is orthogonal to the query (sim 0), item B is identical (sim 1).
-        mk(store, "Orthogonal", "x", "doc", embedding=struct.pack("4f", 0.0, 1.0, 0.0, 0.0))
-        b = mk(store, "Aligned", "y", "doc", embedding=struct.pack("4f", 1.0, 0.0, 0.0, 0.0))
+        mk(
+            store,
+            "Orthogonal",
+            "x",
+            "doc",
+            embedding=struct.pack("4f", 0.0, 1.0, 0.0, 0.0),
+        )
+        b = mk(
+            store,
+            "Aligned",
+            "y",
+            "doc",
+            embedding=struct.pack("4f", 1.0, 0.0, 0.0, 0.0),
+        )
         retriever = HybridRetriever(store, embedder=lambda q: [1.0, 0.0, 0.0, 0.0])
         results = retriever._vector_search("query")
         ids = [r[0] for r in results]
-        assert b in ids and len(ids) == 1  # orthogonal one dropped by the floor
+        assert b in ids and len(ids) == 1
 
     def test_cosine_similarity_identical(self):
         assert HybridRetriever._cosine_similarity([1, 0], [1, 0]) == pytest.approx(1.0)
@@ -984,7 +980,6 @@ class TestHybridRetrieverExtended:
         retriever = HybridRetriever(store, embedder=lambda q: [1.0, 0.0, 0.0, 0.0])
         results = retriever.search("JWT")
         assert len(results) >= 1
-        # Should have multiple match types
         mt = results[0]["match_type"]
         assert "keyword" in mt
 
@@ -1007,14 +1002,8 @@ class TestHybridRetrieverExtended:
         assert _bytes_to_floats(None) == []
 
     def test_bytes_to_floats_invalid(self):
-        # Too short / not a clean multiple of 4 bytes → no decode.
         assert _bytes_to_floats(b"not json") == []
         assert _bytes_to_floats(b"abc") == []
-
-
-# ---------------------------------------------------------------------------
-# 9. EntityExtractor -- additional coverage
-# ---------------------------------------------------------------------------
 
 
 class TestEntityExtractorExtended:
@@ -1038,7 +1027,9 @@ class TestEntityExtractorExtended:
             async def send(self, prompt, timeout=60.0):
                 return json.dumps(
                     {
-                        "entities": [{"name": "Svc", "type": "service", "description": "A"}],
+                        "entities": [
+                            {"name": "Svc", "type": "service", "description": "A"}
+                        ],
                         "relations": [],
                         "category": "design_doc",
                         "summary": "test",
@@ -1105,11 +1096,6 @@ class TestEntityExtractorExtended:
         assert result["category"] == "runbook"
 
 
-# ---------------------------------------------------------------------------
-# 11. FileReader -- additional coverage
-# ---------------------------------------------------------------------------
-
-
 class TestFileReaderExtended:
     def test_read_html_without_html2text(self, tmp_path):
         """Test HTML reading (exercises html2text or regex fallback)."""
@@ -1139,9 +1125,9 @@ class TestPysqlite3Fallback:
     """Verify modules fall back to stdlib sqlite3 when pysqlite3 is unavailable."""
 
     _MODULES = (
-        "gideon.knowledge.store",
-        "gideon.knowledge.retrieval",
-        "gideon.snapshot",
+        "gideon.cognition.knowledge.store",
+        "gideon.cognition.knowledge.retrieval",
+        "gideon.workspace.snapshot",
     )
 
     def _reload_without_pysqlite3(self, module_name: str):
@@ -1161,16 +1147,13 @@ class TestPysqlite3Fallback:
 
         parent_name, _, leaf = module_name.rpartition(".")
         parent_mod = sys.modules.get(parent_name) if parent_name else None
-        saved_parent_attr = getattr(parent_mod, leaf, None) if parent_mod is not None else None
+        saved_parent_attr = (
+            getattr(parent_mod, leaf, None) if parent_mod is not None else None
+        )
 
         evicted: dict[str, object] = {}
         saved_pysqlite3 = sys.modules.pop("pysqlite3", None)
-        # The driver choice now lives in `gideon.sqlite_compat` (PR-1), which the
-        # consumer imports `sqlite3` FROM. It's cached in sys.modules bound to whatever
-        # resolved at first import, so evict it too — otherwise reimporting the consumer
-        # with pysqlite3 blocked would still get the cached (pysqlite3) binding and the
-        # fallback would never be exercised.
-        saved_compat = sys.modules.pop("gideon.sqlite_compat", None)
+        saved_compat = sys.modules.pop("gideon.core.sqlite_compat", None)
         for mod in list(sys.modules):
             if mod == module_name or mod.startswith(module_name + "."):
                 evicted[mod] = sys.modules.pop(mod)
@@ -1183,31 +1166,24 @@ class TestPysqlite3Fallback:
             del sys.modules["pysqlite3"]
             if saved_pysqlite3 is not None:
                 sys.modules["pysqlite3"] = saved_pysqlite3
-            # Drop the reloaded copies, then restore the original objects (including
-            # the original sqlite_compat, so later tests see the real driver binding).
             for mod in list(sys.modules):
                 if mod == module_name or mod.startswith(module_name + "."):
                     sys.modules.pop(mod)
-            sys.modules.pop("gideon.sqlite_compat", None)
+            sys.modules.pop("gideon.core.sqlite_compat", None)
             if saved_compat is not None:
-                sys.modules["gideon.sqlite_compat"] = saved_compat
+                sys.modules["gideon.core.sqlite_compat"] = saved_compat
             sys.modules.update(evicted)
             if parent_mod is not None and saved_parent_attr is not None:
                 setattr(parent_mod, leaf, saved_parent_attr)
 
     def test_store_falls_back_to_stdlib_sqlite3(self):
-        self._reload_without_pysqlite3("gideon.knowledge.store")
+        self._reload_without_pysqlite3("gideon.cognition.knowledge.store")
 
     def test_retrieval_falls_back_to_stdlib_sqlite3(self):
-        self._reload_without_pysqlite3("gideon.knowledge.retrieval")
+        self._reload_without_pysqlite3("gideon.cognition.knowledge.retrieval")
 
     def test_snapshot_falls_back_to_stdlib_sqlite3(self):
-        self._reload_without_pysqlite3("gideon.snapshot")
-
-
-# ---------------------------------------------------------------------------
-# 13. FileReader -- .docx content_type metadata
-# ---------------------------------------------------------------------------
+        self._reload_without_pysqlite3("gideon.workspace.snapshot")
 
 
 class TestDocxContentType:
@@ -1217,7 +1193,6 @@ class TestDocxContentType:
             from docx import Document
         except ImportError:
             pytest.skip("python-docx not installed")
-        # Create a minimal .docx
         doc = Document()
         doc.add_heading("Test Heading", level=1)
         doc.add_paragraph("Some content here.")
@@ -1236,16 +1211,6 @@ class TestDocxContentType:
         assert ".docx" in reader._DISPATCH
 
 
-# ---------------------------------------------------------------------------
-# 14. Chunk-level vector arm (KL-10)
-# ---------------------------------------------------------------------------
-
-
-#: Deterministic 4-dim fixture vectors. No embedding model is involved anywhere in this
-#: section: vectors are written straight into the ``items.embedding`` / ``chunks.embedding``
-#: BLOBs so the arithmetic under test (cosine, the similarity floor, the roll-up, RRF and
-#: the cliff cut) is exactly reproducible on every machine. A test that could not embed
-#: would prove nothing about ranking.
 def _v(*vals):
     return struct.pack(f"{len(vals)}f", *vals)
 
@@ -1291,13 +1256,8 @@ def _fixed_corpus(store):
     }
 
 
-#: The exact ``search("token")`` ranking on ``_fixed_corpus`` — captured on the tree
-#: BEFORE the chunk arm landed and unchanged by it. Pinning the scores (not just the
-#: order) is what makes this a fusion regression test: any change to ``_rrf_fuse``, its
-#: ``k``, the title boost or the cliff cut moves these numbers.
 _PINNED_TOKEN_RANKING = [("B", 0.048916), ("A", 0.048660), ("C", 0.048395)]
 
-#: The result dict's keys. The atom must not add, drop or rename a field.
 _PINNED_RESULT_KEYS = {
     "content",
     "deep_link",
@@ -1324,11 +1284,11 @@ class TestVectorArmUnchangedOnFixedCorpus:
         retriever = HybridRetriever(store, embedder=lambda q: [1.0, 0.0, 0.0, 0.0])
         results = retriever.search("token", limit=10)
 
-        assert [names[r["id"]] for r in results] == [n for n, _ in _PINNED_TOKEN_RANKING]
+        assert [names[r["id"]] for r in results] == [
+            n for n, _ in _PINNED_TOKEN_RANKING
+        ]
         for got, (_, expected) in zip(results, _PINNED_TOKEN_RANKING):
             assert got["score"] == pytest.approx(expected, abs=1e-6)
-        # Item shape: exactly the same fields, and every one of them still an item field
-        # (ids are ITEM ids, never chunk ids).
         for r in results:
             assert set(r.keys()) == _PINNED_RESULT_KEYS
             assert r["id"] in names
@@ -1339,9 +1299,9 @@ class TestVectorArmUnchangedOnFixedCorpus:
         the vector list, and the 0.60 one does."""
         ids = _fixed_corpus(store)
         names = {v: k for k, v in ids.items()}
-        vec = HybridRetriever(store, embedder=lambda q: [1.0, 0.0, 0.0, 0.0])._vector_search(
-            "token", limit=20
-        )
+        vec = HybridRetriever(
+            store, embedder=lambda q: [1.0, 0.0, 0.0, 0.0]
+        )._vector_search("token", limit=20)
         assert [names[i] for i, _ in vec] == ["A", "B", "C"]
         assert [rank for _, rank in vec] == [1, 2, 3]
 
@@ -1355,7 +1315,7 @@ class TestVectorArmUnchangedOnFixedCorpus:
 
 def _chunk(store, item_id, *, section, line_start, line_end, vec, text="passage"):
     """Write ONE chunk row with a hand-written embedding, via the real store API."""
-    from gideon.knowledge.chunking import Chunk
+    from gideon.cognition.knowledge.chunking import Chunk
 
     existing = store.get_chunks(item_id)
     store.replace_chunks(
@@ -1387,8 +1347,6 @@ def _chunk(store, item_id, *, section, line_start, line_end, vec, text="passage"
 class TestChunkVectorArm:
     """The vector arm searches chunk vectors and rolls chunk hits up to their item."""
 
-    #: A document whose query term appears TWICE: once in passing under the first heading,
-    #: once in the passage that actually answers the question.
     _DOC = (
         "# Overview\n"
         "The vault is mentioned here in passing.\n"
@@ -1402,16 +1360,29 @@ class TestChunkVectorArm:
         """A chunk hit must surface as ONE item-shaped result carrying the ITEM's id — a
         chunk id must never reach fusion or the caller, and three chunks of one document
         must not become three results."""
-        iid = mk(store, "Platform runbook", self._DOC, "design_doc", embedding=_v(0.6, 0.8, 0, 0))
+        iid = mk(
+            store,
+            "Platform runbook",
+            self._DOC,
+            "design_doc",
+            embedding=_v(0.6, 0.8, 0, 0),
+        )
         for i in range(3):
-            _chunk(store, iid, section=f"S{i}", line_start=1, line_end=2, vec=(1.0, 0.0, 0.0, 0.0))
+            _chunk(
+                store,
+                iid,
+                section=f"S{i}",
+                line_start=1,
+                line_end=2,
+                vec=(1.0, 0.0, 0.0, 0.0),
+            )
         retriever = HybridRetriever(store, embedder=lambda q: [1.0, 0.0, 0.0, 0.0])
 
         vec = retriever._vector_search("credentials", limit=20)
-        assert vec == [(iid, 1)]  # three chunks → one item at rank 1
+        assert vec == [(iid, 1)]
         results = retriever.search("credentials", limit=10)
         assert [r["id"] for r in results] == [iid]
-        assert set(results[0].keys()) == _PINNED_RESULT_KEYS  # item shape unchanged
+        assert set(results[0].keys()) == _PINNED_RESULT_KEYS
 
     def test_chunk_locator_is_at_least_as_specific_as_the_item_level_one(self, store):
         """The substantive win, asserted as a BEFORE/AFTER comparison on one corpus.
@@ -1425,10 +1396,15 @@ class TestChunkVectorArm:
         on the passage that matched, at the identical ±1-line window width, and names the
         right heading. Never coarser, and pointed at the right place.
         """
-        iid = mk(store, "Platform runbook", self._DOC, "design_doc", embedding=_v(1.0, 0, 0, 0))
+        iid = mk(
+            store,
+            "Platform runbook",
+            self._DOC,
+            "design_doc",
+            embedding=_v(1.0, 0, 0, 0),
+        )
         retriever = HybridRetriever(store, embedder=lambda q: [1.0, 0.0, 0.0, 0.0])
 
-        # BEFORE: item vector only, no chunk rows.
         before_semantic = retriever.search("credentials", limit=10)[0]
         assert before_semantic["section"] is None
         assert before_semantic["line_range"] is None
@@ -1437,7 +1413,6 @@ class TestChunkVectorArm:
         assert before_term["section"] == "Overview"
         assert before_term["line_range"] == [1, 3]
 
-        # AFTER: the "Credential rotation" passage (lines 4-6) carries a stronger vector.
         _chunk(
             store,
             iid,
@@ -1448,14 +1423,22 @@ class TestChunkVectorArm:
             text="The vault agent cycles secrets every ninety days.\nRotation is automatic.",
         )
         after_semantic = retriever.search("credentials", limit=10)[0]
-        assert after_semantic["section"] == "Credential rotation"  # was None
-        assert after_semantic["line_range"] == [4, 6]  # was None
+        assert after_semantic["section"] == "Credential rotation"
+        assert after_semantic["line_range"] == [4, 6]
         assert after_semantic["deep_link"].endswith("?loc=L4-6")
         after_term = retriever.search("vault", limit=10)[0]
-        assert after_term["section"] == "Credential rotation"  # was the passing "Overview"
-        assert after_term["line_range"] == [4, 6]  # was [1, 3] — same width, right passage
+        assert (
+            after_term["section"] == "Credential rotation"
+        )  # was the passing "Overview"
+        assert after_term["line_range"] == [
+            4,
+            6,
+        ]  # was [1, 3] — same width, right passage
         # Specificity is monotone: the span never widens.
-        for before, after in ((before_term, after_term), (before_semantic, after_semantic)):
+        for before, after in (
+            (before_term, after_term),
+            (before_semantic, after_semantic),
+        ):
             if before["line_range"]:
                 b = before["line_range"][1] - before["line_range"][0]
                 assert (after["line_range"][1] - after["line_range"][0]) <= b
@@ -1490,7 +1473,9 @@ class TestChunkVectorArm:
         """A partially-chunked library (the mid-backfill state) must degrade, never break:
         the chunked item is found through its chunk, the unchunked one through its
         whole-item vector, in the same search."""
-        chunked = mk(store, "Chunked doc", self._DOC, "design_doc", embedding=_v(0, 1.0, 0, 0))
+        chunked = mk(
+            store, "Chunked doc", self._DOC, "design_doc", embedding=_v(0, 1.0, 0, 0)
+        )
         _chunk(
             store,
             chunked,
@@ -1506,29 +1491,47 @@ class TestChunkVectorArm:
             "note",
             embedding=_v(0.9, 0.436, 0.0, 0.0),
         )
-        # A third item has chunk ROWS but no chunk vectors (embedder unavailable at ingest)
-        # — it must still be reachable through its whole-item vector.
         vectorless = mk(
-            store, "Vectorless chunks", "Body text here.", "note", embedding=_v(0.8, 0.6, 0.0, 0.0)
+            store,
+            "Vectorless chunks",
+            "Body text here.",
+            "note",
+            embedding=_v(0.8, 0.6, 0.0, 0.0),
         )
         _chunk(store, vectorless, section=None, line_start=1, line_end=1, vec=None)
 
         retriever = HybridRetriever(store, embedder=lambda q: [1.0, 0.0, 0.0, 0.0])
         ranked = retriever._vector_search("anything", limit=20)
         assert [i for i, _ in ranked] == [chunked, plain, vectorless]
-        # The chunked item's score came from its chunk (its own vector is orthogonal, 0.0,
-        # which the floor would have dropped), so chunks genuinely added recall here.
-        assert {r["id"] for r in retriever.search("anything", limit=10)} >= {chunked, plain}
+        assert {r["id"] for r in retriever.search("anything", limit=10)} >= {
+            chunked,
+            plain,
+        }
 
-    def test_rollup_is_max_so_many_mediocre_chunks_never_beat_one_strong_one(self, store):
+    def test_rollup_is_max_so_many_mediocre_chunks_never_beat_one_strong_one(
+        self, store
+    ):
         """Falsifies sum/count aggregation: six 0.5-similarity chunks must not outrank one
-        1.0-similarity chunk. Under a summing roll-up the six would score 3.0 and win."""
+        1.0-similarity chunk. Under a summing roll-up the six would score 3.0 and win.
+        """
         strong = mk(store, "Strong single passage", "a", "note")
-        _chunk(store, strong, section="S", line_start=1, line_end=1, vec=(1.0, 0.0, 0.0, 0.0))
+        _chunk(
+            store,
+            strong,
+            section="S",
+            line_start=1,
+            line_end=1,
+            vec=(1.0, 0.0, 0.0, 0.0),
+        )
         many = mk(store, "Many mediocre passages", "b", "note")
         for i in range(6):
             _chunk(
-                store, many, section=f"M{i}", line_start=1, line_end=1, vec=(0.5, 0.866, 0.0, 0.0)
+                store,
+                many,
+                section=f"M{i}",
+                line_start=1,
+                line_end=1,
+                vec=(0.5, 0.866, 0.0, 0.0),
             )
         retriever = HybridRetriever(store, embedder=lambda q: [1.0, 0.0, 0.0, 0.0])
         assert [i for i, _ in retriever._vector_search("q", limit=20)] == [strong, many]
@@ -1538,46 +1541,58 @@ class TestChunkVectorArm:
         every chunk is below the floor gets no vector hit from them, and a below-floor chunk
         can never become the cited passage of an item that matched some other way."""
         iid = mk(store, "Weak chunks only", "line one\nline two\nline three", "note")
-        _chunk(store, iid, section="Noise", line_start=3, line_end=3, vec=(0.0, 1.0, 0.0, 0.0))
+        _chunk(
+            store,
+            iid,
+            section="Noise",
+            line_start=3,
+            line_end=3,
+            vec=(0.0, 1.0, 0.0, 0.0),
+        )
         retriever = HybridRetriever(store, embedder=lambda q: [1.0, 0.0, 0.0, 0.0])
         assert retriever._vector_search("q", limit=20) == []
-        # Reachable by keyword; its locator must NOT come from the near-orthogonal chunk.
         hit = retriever.search("three", limit=10)[0]
-        assert hit["id"] == iid and hit["section"] is None and hit["line_range"] == [2, 3]
+        assert (
+            hit["id"] == iid and hit["section"] is None and hit["line_range"] == [2, 3]
+        )
 
-    def test_chunk_vectors_from_another_model_are_skipped_not_prefix_scored(self, store):
+    def test_chunk_vectors_from_another_model_are_skipped_not_prefix_scored(
+        self, store
+    ):
         """The dimension guard covers chunk vectors too. A half-re-embedded library has
         old-model chunk rows; comparing them via zip()-truncated cosine would score a
         meaningless prefix. The item's own current-model vector still carries it."""
-        iid = mk(store, "Half re-embedded", "body", "note", embedding=_v(1.0, 0.0, 0.0, 0.0))
+        iid = mk(
+            store, "Half re-embedded", "body", "note", embedding=_v(1.0, 0.0, 0.0, 0.0)
+        )
         _chunk(
-            store, iid, section="Old", line_start=1, line_end=1, vec=(1.0, 0.0, 0.0, 0.0, 9.9, 9.9)
+            store,
+            iid,
+            section="Old",
+            line_start=1,
+            line_end=1,
+            vec=(1.0, 0.0, 0.0, 0.0, 9.9, 9.9),
         )
         retriever = HybridRetriever(store, embedder=lambda q: [1.0, 0.0, 0.0, 0.0])
         assert retriever._vector_search("q", limit=20) == [(iid, 1)]
-        # The 6-dim chunk did not win, so it supplied no locator.
         assert retriever.search("q", limit=10)[0]["section"] is None
 
     def test_archived_and_inactive_items_chunks_are_excluded(self, store):
         """The chunk arm honours the same visibility rails as the item arm — a chunk cannot
         smuggle an archived item into a default search."""
         iid = mk(store, "Archived doc", "secret body", "note")
-        _chunk(store, iid, section="S", line_start=1, line_end=1, vec=(1.0, 0.0, 0.0, 0.0))
+        _chunk(
+            store, iid, section="S", line_start=1, line_end=1, vec=(1.0, 0.0, 0.0, 0.0)
+        )
         store.update_item(iid, is_archived=1)
         store.db.commit()
         retriever = HybridRetriever(store, embedder=lambda q: [1.0, 0.0, 0.0, 0.0])
         assert retriever._vector_search("q", limit=20) == []
-        assert retriever._vector_search("q", limit=20, include_archived=True) == [(iid, 1)]
+        assert retriever._vector_search("q", limit=20, include_archived=True) == [
+            (iid, 1)
+        ]
 
 
-# ── KL-11: the chunk ANN index (sqlite-vec) ────────────────────────────────────
-#
-# The stated recall tolerance. The ANN path is a CANDIDATE GENERATOR: `_consider` still does
-# the scoring, so ANN and the exact scan cannot disagree on a similarity value — the only way
-# they can differ is candidate truncation. 0.95 is the contract this task promises; the design
-# is expected to do better than that (the tests below assert the observed 1.00 as well, so a
-# regression to a merely-tolerable 0.96 still fails), and the plan's sharpest named risk is a
-# silent recall regression, so the looser number is a floor, never a target.
 _ANN_RECALL_TOLERANCE = 0.95
 
 
@@ -1597,12 +1612,12 @@ def _collapsing_corpus(store, *, items=40, per_item=12):
     so a single-shot ANN query cannot fill a 20-item request. Returns the item ids in
     descending best-chunk similarity, i.e. the exact scan's expected ranking.
     """
-    from gideon.knowledge.chunking import Chunk
+    from gideon.cognition.knowledge.chunking import Chunk
 
     ordered = []
     for i in range(items):
         iid = mk(store, f"doc {i}", f"body of document {i}", "note")
-        top = 0.99 - i * 0.015  # 0.99 down to 0.405 — every one above the 0.25 floor
+        top = 0.99 - i * 0.015
         store.replace_chunks(
             iid,
             [
@@ -1633,7 +1648,7 @@ def _recall(ann: list, exact: list, k: int) -> float:
 def clean_vec_probe():
     """The sqlite-vec capability probe is cached process-wide and its INFO log fires once, so
     every test that touches either resets both sides."""
-    from gideon.knowledge import vector_index
+    from gideon.cognition.knowledge import vector_index
 
     vector_index.reset_probe()
     yield vector_index
@@ -1651,7 +1666,9 @@ class TestChunkAnnIndex:
         assert cap.available, f"sqlite-vec did not load: {cap.reason}"
         assert cap.version
 
-    def test_the_index_is_built_and_covers_every_embedded_chunk(self, store, clean_vec_probe):
+    def test_the_index_is_built_and_covers_every_embedded_chunk(
+        self, store, clean_vec_probe
+    ):
         """The index lives in the SAME database file and is written through by the store."""
         _collapsing_corpus(store, items=3, per_item=4)
         cov = store.vec_index.coverage()
@@ -1665,7 +1682,9 @@ class TestChunkAnnIndex:
         ]
         assert names == ["chunk_vec_4"], "the ANN index must live inside knowledge.db"
 
-    def test_ann_matches_the_exact_scan_within_the_stated_tolerance(self, store, clean_vec_probe):
+    def test_ann_matches_the_exact_scan_within_the_stated_tolerance(
+        self, store, clean_vec_probe
+    ):
         """THE recall gate. ANN vs exact on a corpus built to collapse the candidate set, and
         the escalation is asserted to have actually fired — an ANN run that never escalated
         would agree with exact trivially and prove nothing."""
@@ -1684,22 +1703,22 @@ class TestChunkAnnIndex:
         store.vec_index.candidate_chunk_ids = real
 
         assert len(calls) > 1, f"the candidate set never escalated (k tried: {calls})"
-        # The exact scan, from the same store with the index refused.
         store.vec_index.candidate_chunk_ids = lambda blob, dim, k: None
         exact = retriever._vector_search("q", limit=20)
         store.vec_index.candidate_chunk_ids = real
 
-        assert [i for i, _ in exact] == ordered[:20], "the exact scan itself must rank by cosine"
+        assert [i for i, _ in exact] == ordered[
+            :20
+        ], "the exact scan itself must rank by cosine"
         for k in (1, 5, 10, 20):
             assert _recall(ann, exact, k) >= _ANN_RECALL_TOLERANCE
-        # Stronger than the tolerance, and asserted so a regression to "merely tolerable" fails.
         assert ann == exact
 
     def test_without_escalation_the_same_corpus_loses_recall(self, store, monkeypatch):
         """The escalation is load-bearing, not decoration: capped at one ANN query the SAME
         corpus falls below the tolerance. This is the truncation failure mode the tolerance
         test exists to catch, made visible."""
-        from gideon.knowledge import retrieval as retr
+        from gideon.cognition.knowledge import retrieval as retr
 
         _collapsing_corpus(store)
         retriever = HybridRetriever(store, embedder=lambda q: [1.0, 0.0, 0.0, 0.0])
@@ -1732,19 +1751,20 @@ class TestChunkAnnIndex:
         clean_vec_probe.reset_probe()
         degraded = store_factory("degraded.db")
         assert degraded.vec_index.enabled is False
-        _collapsing_corpus(degraded, items=12, per_item=4)  # writes must not raise either
-        exact = HybridRetriever(degraded, embedder=lambda q: [1.0, 0.0, 0.0, 0.0])._vector_search(
-            "q", limit=10
-        )
+        _collapsing_corpus(
+            degraded, items=12, per_item=4
+        )  # writes must not raise either
+        exact = HybridRetriever(
+            degraded, embedder=lambda q: [1.0, 0.0, 0.0, 0.0]
+        )._vector_search("q", limit=10)
         assert [r for _, r in exact] == [r for _, r in with_ann]
         assert len(exact) == 10
-        # Same corpus shape, so the same TITLES come back in the same order (ids differ per DB).
         assert [degraded.get_item(i)["title"] for i, _ in exact] == [
             store.get_item(i)["title"] for i, _ in with_ann
         ]
-        assert [store.get_item(i)["title"] for i, _ in with_ann][0] == store.get_item(ordered[0])[
-            "title"
-        ]
+        assert [store.get_item(i)["title"] for i, _ in with_ann][0] == store.get_item(
+            ordered[0]
+        )["title"]
 
     def test_the_probe_is_cached_and_the_degradation_logs_once(
         self, store_factory, monkeypatch, caplog, clean_vec_probe
@@ -1759,7 +1779,7 @@ class TestChunkAnnIndex:
 
         monkeypatch.setattr(clean_vec_probe, "_load_extension", no_extension)
         clean_vec_probe.reset_probe()
-        with caplog.at_level("INFO", logger="gideon.knowledge.vector_index"):
+        with caplog.at_level("INFO", logger="gideon.cognition.knowledge.vector_index"):
             store = store_factory("cached_probe.db")
             _collapsing_corpus(store, items=4, per_item=3)
             retriever = HybridRetriever(store, embedder=lambda q: [1.0, 0.0, 0.0, 0.0])
@@ -1769,7 +1789,8 @@ class TestChunkAnnIndex:
         lines = [
             r
             for r in caplog.records
-            if r.name == "gideon.knowledge.vector_index" and r.levelname == "INFO"
+            if r.name == "gideon.cognition.knowledge.vector_index"
+            and r.levelname == "INFO"
         ]
         assert len(lines) == 1, [r.getMessage() for r in lines]
         assert "exact scan" in lines[0].getMessage()
@@ -1778,7 +1799,7 @@ class TestChunkAnnIndex:
         """Staleness in the other costume: a re-chunk mints new chunk ids, so an index that
         only removed the ids it just wrote would keep every previous generation as an orphan
         candidate."""
-        from gideon.knowledge.chunking import Chunk
+        from gideon.cognition.knowledge.chunking import Chunk
 
         ids = _collapsing_corpus(store, items=3, per_item=4)
         dims = lambda: store.vec_index.coverage()["dimensions"]["4"]  # noqa: E731
@@ -1808,22 +1829,26 @@ class TestChunkAnnIndex:
         """The pre-KL-11 / wrote-while-degraded case: chunk rows with no index entries. The
         first search must rebuild rather than quietly return fewer results."""
         _collapsing_corpus(store, items=6, per_item=4)
-        store.db.execute("DELETE FROM chunk_vec_4 WHERE chunk_id IN (SELECT id FROM chunks)")
+        store.db.execute(
+            "DELETE FROM chunk_vec_4 WHERE chunk_id IN (SELECT id FROM chunks)"
+        )
         store.vec_index._synced.clear()
         assert store.vec_index.coverage()["dimensions"]["4"]["indexed"] == 0
         retriever = HybridRetriever(store, embedder=lambda q: [1.0, 0.0, 0.0, 0.0])
-        with caplog.at_level("INFO", logger="gideon.knowledge.vector_index"):
+        with caplog.at_level("INFO", logger="gideon.cognition.knowledge.vector_index"):
             found = retriever._vector_search("q", limit=6)
         assert len(found) == 6
-        assert store.vec_index.coverage()["dimensions"]["4"] == {"indexed": 24, "live": 24}
+        assert store.vec_index.coverage()["dimensions"]["4"] == {
+            "indexed": 24,
+            "live": 24,
+        }
         assert any("rebuilding" in r.getMessage() for r in caplog.records)
 
     def test_a_stale_extra_candidate_is_dropped_rather_than_returned(self, store):
         """An index entry whose chunk row is gone must not become a result — the reader joins
-        candidates back to the live table, so a stale EXTRA costs a slot, never correctness."""
+        candidates back to the live table, so a stale EXTRA costs a slot, never correctness.
+        """
         ids = _collapsing_corpus(store, items=3, per_item=2)
-        # Delete the chunk rows behind the index's back (no drop_item), then pin the count so
-        # reconciliation does not repair it before the read path is exercised.
         store.db.execute("DELETE FROM chunks WHERE item_id = ?", (ids[0],))
         store.db.commit()
         store.vec_index._synced.add(4)
@@ -1836,7 +1861,7 @@ class TestChunkAnnIndex:
         """A half-re-embedded library keeps one self-consistent index per dimension, matching
         the reader's dimension guard: a 6-dim chunk is unscoreable against a 4-dim query
         either way, so it must not be indexed alongside one."""
-        from gideon.knowledge.chunking import Chunk
+        from gideon.cognition.knowledge.chunking import Chunk
 
         ids = _collapsing_corpus(store, items=2, per_item=2)
         store.replace_chunks(
@@ -1862,20 +1887,27 @@ class TestChunkAnnIndex:
         import pathlib
         import re
 
-        text = (pathlib.Path(__file__).resolve().parents[1] / "pyproject.toml").read_text()
+        text = (
+            pathlib.Path(__file__).resolve().parents[2] / "pyproject.toml"
+        ).read_text()
 
         def requirements(block: str) -> list[str]:
             """The REQUIREMENT strings of a dependency block, with comment lines dropped —
             both blocks explain in prose why faiss is not core, and a substring scan that
-            counted that prose would fail on the very comment that documents the rule."""
+            counted that prose would fail on the very comment that documents the rule.
+            """
             body = re.search(rf"^{block} = \[(.*?)^\]", text, re.S | re.M).group(1)
             return [
-                line.strip() for line in body.splitlines() if line.strip().startswith(('"', "'"))
+                line.strip()
+                for line in body.splitlines()
+                if line.strip().startswith(('"', "'"))
             ]
 
         core = requirements("dependencies")
         assert any(r.startswith('"sqlite-vec>=0.1,<1"') for r in core)
-        assert not any("faiss" in r for r in core), "faiss must stay in the [embeddings] extra"
+        assert not any(
+            "faiss" in r for r in core
+        ), "faiss must stay in the [embeddings] extra"
         assert any("faiss" in r for r in requirements("embeddings"))
 
 
@@ -1885,7 +1917,7 @@ class TestDoctorVectorIndexLine:
     def _run(self, home):
         import asyncio
 
-        from gideon.resilience.doctor import (
+        from gideon.operations.resilience.doctor import (
             DoctorContext,
             _probe_knowledge_vector_index,
         )
@@ -1913,15 +1945,11 @@ class TestDoctorVectorIndexLine:
         monkeypatch.setattr(clean_vec_probe, "_load_extension", no_extension)
         clean_vec_probe.reset_probe()
         res = self._run(tmp_path)
-        # Degraded is NOT failed: a correct-but-slower search must not read as an outage.
         assert res.ok is True
         assert res.evidence["degraded"] is True
         assert res.evidence["extension_available"] is False
         assert "exact scan" in res.detail
         assert "sqlite-vec" in res.evidence["remedy"]
-
-
-# ── KL-12: the resumable chunk backfill ────────────────────────────────────────
 
 
 class _ChunkEmb:
@@ -1979,7 +2007,8 @@ def _long_doc(marker: str, *, needle_section: int | None = None, parts: int = 5)
 
 def _prechunk_corpus(store, *, items=6, needle_at=3):
     """A pre-KL-9 library: items with content and a whole-item vector but NO chunk rows.
-    The marked passage sits mid-document in item index *needle_at*. Returns the item ids."""
+    The marked passage sits mid-document in item index *needle_at*. Returns the item ids.
+    """
     ids = []
     for i in range(items):
         iid = mk(
@@ -2002,19 +2031,21 @@ class TestChunkBacklogQuery:
     """The backfill's resume state IS this query — so it is tested on its own."""
 
     def test_counts_only_active_content_bearing_unchunked_items(self, store):
-        from gideon.knowledge.chunking import Chunk
+        from gideon.cognition.knowledge.chunking import Chunk
 
         live = mk(store, "live", "some real content", "note")
         blank = mk(store, "blank", "", "note")
         whitespace = mk(store, "ws", "\n\n \t\r\n", "note")
         archived = mk(store, "archived", "content in an archived item", "note")
         store.update_item(archived, is_archived=1)
-        assert store.count_items_missing_chunks() == 1, "only the one live, content-bearing item"
+        assert (
+            store.count_items_missing_chunks() == 1
+        ), "only the one live, content-bearing item"
 
-        store.replace_chunks(live, [Chunk(text="x", section=None, line_start=1, line_end=1)])
+        store.replace_chunks(
+            live, [Chunk(text="x", section=None, line_start=1, line_end=1)]
+        )
         assert store.count_items_missing_chunks() == 0
-        # The blank ones are excluded by the SAME whitespace set `chunk_text` strips, so the
-        # chunker can never decline an item the backlog insists still needs work.
         assert (blank, whitespace) and store.items_missing_chunks(limit=10) == []
 
     def test_the_batch_cursor_walks_forward_and_bounds_the_fetch(self, store):
@@ -2024,14 +2055,16 @@ class TestChunkBacklogQuery:
         assert all(r["content"].startswith("content ") for r in first)
         second = store.items_missing_chunks(limit=3, after_id=first[-1]["id"])
         assert [r["id"] for r in second] == ids[3:6]
-        assert [r["id"] for r in store.items_missing_chunks(limit=3, after_id=ids[5])] == ids[6:]
+        assert [
+            r["id"] for r in store.items_missing_chunks(limit=3, after_id=ids[5])
+        ] == ids[6:]
 
 
 class TestChunkBackfill:
     """H1.5 — resumable, batched, progress-reporting, and idempotent."""
 
     def _run(self, store, emb, **kw):
-        from gideon.knowledge.chunk_backfill import backfill_item_chunks
+        from gideon.cognition.knowledge.chunk_backfill import backfill_item_chunks
 
         return backfill_item_chunks(store, emb, **kw)
 
@@ -2039,22 +2072,31 @@ class TestChunkBackfill:
         ids = _prechunk_corpus(store, items=6)
         seen = []
         res = self._run(
-            store, _ChunkEmb(), batch_size=2, on_progress=lambda d, t: seen.append((d, t))
+            store,
+            _ChunkEmb(),
+            batch_size=2,
+            on_progress=lambda d, t: seen.append((d, t)),
         )
         assert res["chunked"] == 6 and res["failed"] == 0 and res["unchanged"] == 0
         assert res["remaining"] == 0 and res["total"] == 6
-        # Progress fires once per item with a stable total, like reembed_all's contract.
         assert seen == [(i, 6) for i in range(1, 7)]
         for iid in ids:
             chunks = store.get_chunks(iid, with_embedding=True)
-            assert len(chunks) > 1, "a multi-section document must produce several chunks"
+            assert (
+                len(chunks) > 1
+            ), "a multi-section document must produce several chunks"
             assert [c["chunk_index"] for c in chunks] == list(range(len(chunks)))
-            assert all(c["embedding"] for c in chunks), "backfilled chunks carry vectors"
-            assert any(c["section"] for c in chunks), "structural sections are preserved"
+            assert all(
+                c["embedding"] for c in chunks
+            ), "backfilled chunks carry vectors"
+            assert any(
+                c["section"] for c in chunks
+            ), "structural sections are preserved"
 
     def test_it_leaves_the_items_own_whole_item_vectors_alone(self, store):
         """Amendment Design (c) keeps re-embed a separate, migration-level concern. The
-        backfill adds the chunk layer BENEATH the item vectors; it must not rewrite them."""
+        backfill adds the chunk layer BENEATH the item vectors; it must not rewrite them.
+        """
         ids = _prechunk_corpus(store, items=3)
         before = {
             r["id"]: r["embedding"]
@@ -2094,7 +2136,9 @@ class TestChunkBackfill:
         assert emb.calls == 0, "a no-op backfill must not even call the embedding model"
         assert _chunk_ids_by_item(store, ids) == before
 
-    def test_an_interrupted_backfill_resumes_without_duplicating_or_skipping(self, store):
+    def test_an_interrupted_backfill_resumes_without_duplicating_or_skipping(
+        self, store
+    ):
         """The central rail. Kill the run mid-batch (a KeyboardInterrupt out of the embedder,
         which no ``except Exception`` in the path catches), then restart it. The items already
         committed must keep their EXACT chunk rows — an id change would mean duplicated work,
@@ -2109,16 +2153,15 @@ class TestChunkBackfill:
         assert store.count_items_missing_chunks() == 6 - len(partial)
 
         res = self._run(store, _ChunkEmb(), batch_size=2)
-        assert res["chunked"] == 6 - len(partial), "resume does exactly the remaining work"
-        # No skipping: every item is chunked, densely, exactly once.
+        assert res["chunked"] == 6 - len(
+            partial
+        ), "resume does exactly the remaining work"
         assert store.count_items_missing_chunks() == 0
         for iid in ids:
             got = store.get_chunks(iid)
             assert got, f"{iid} was skipped by the resume"
             assert [c["chunk_index"] for c in got] == list(range(len(got)))
-        # No duplicating: the pre-interrupt rows are untouched, not re-chunked.
         assert _chunk_ids_by_item(store, partial) == committed
-        # And the whole thing equals a single clean run over the same corpus.
         assert (
             sum(len(v) for v in _chunk_ids_by_item(store, ids).values())
             == store.db.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
@@ -2130,7 +2173,7 @@ class TestChunkBackfill:
         _prechunk_corpus(store, items=3)
 
         class _NoEmbed:
-            def embed_for_item(self, *a):  # the item-vector method is not enough
+            def embed_for_item(self, *a):
                 return [1.0, 0.0, 0.0, 0.0]
 
         res = self._run(store, _NoEmbed())
@@ -2152,9 +2195,6 @@ class TestChunkBackfill:
             res = self._run(store, emb, batch_size=2)
         finally:
             store.replace_chunks = real
-        # ``unchanged``, not ``failed``: the ingest chunk unit swallows its own faults by
-        # design (a chunk hiccup must not fail an ingest), so the backfill sees "wrote no
-        # rows". What matters is that the run continued AND the item stayed pending.
         assert res["chunked"] == 3 and res["unchanged"] == 1 and res["remaining"] == 1
         assert self._run(store, _ChunkEmb())["chunked"] == 1
 
@@ -2169,32 +2209,34 @@ class TestChunkBackfill:
         ).fetchone()[0]
         assert live > 6
         cov = store.vec_index.coverage()["dimensions"]
-        assert cov == {"4": {"indexed": live, "live": live}}, "every backfilled vector is indexed"
+        assert cov == {
+            "4": {"indexed": live, "live": live}
+        }, "every backfilled vector is indexed"
 
 
 class TestMidBackfillSearch:
     """A half-backfilled library must degrade to whole-item vectors, never to zero."""
 
     def _retriever(self, store, emb):
-        from gideon.knowledge.retrieval import HybridRetriever
+        from gideon.cognition.knowledge.retrieval import HybridRetriever
 
         return HybridRetriever(store, embedder=emb.embed)
 
     def test_search_stays_non_empty_and_sane_at_every_stage(self, store):
-        from gideon.knowledge.chunk_backfill import backfill_item_chunks
+        from gideon.cognition.knowledge.chunk_backfill import backfill_item_chunks
 
         ids = _prechunk_corpus(store, items=6, needle_at=3)
         emb = _ChunkEmb()
         retriever = self._retriever(store, emb)
 
-        assert retriever.search("needle", limit=10), "an unbackfilled library still answers"
+        assert retriever.search(
+            "needle", limit=10
+        ), "an unbackfilled library still answers"
 
         backfill_item_chunks(store, emb, batch_size=2, max_items=2)
         assert store.count_items_missing_chunks() == 4
         mid = retriever.search("needle", limit=10)
         assert mid, "mid-backfill search must never return zero"
-        # Both kinds of item are still reachable: the chunked ones and the ones that still
-        # have only a whole-item vector.
         chunked = {i for i in ids if store.get_chunks(i)}
         found = {r["id"] for r in mid}
         assert found & chunked and found - chunked
@@ -2203,25 +2245,31 @@ class TestMidBackfillSearch:
         backfill_item_chunks(store, emb, batch_size=2)
         after = retriever.search("needle", limit=10)
         assert after, "a fully backfilled library answers off chunk vectors"
-        # And once the needle's own item is chunked, the deep-middle passage wins outright.
         assert after[0]["id"] == ids[3]
 
-    def test_the_needle_item_gains_a_section_locator_only_after_it_is_chunked(self, store):
+    def test_the_needle_item_gains_a_section_locator_only_after_it_is_chunked(
+        self, store
+    ):
         """The user-visible payload: the answer buried mid-document becomes retrievable AND
-        citable to its section — which is precisely what a pre-chunking library cannot do."""
-        from gideon.knowledge.chunk_backfill import backfill_item_chunks
+        citable to its section — which is precisely what a pre-chunking library cannot do.
+        """
+        from gideon.cognition.knowledge.chunk_backfill import backfill_item_chunks
 
         ids = _prechunk_corpus(store, items=4, needle_at=2)
         emb = _ChunkEmb()
         retriever = self._retriever(store, emb)
 
         before = {r["id"]: r for r in retriever.search("needle", limit=10)}[ids[2]]
-        assert before["section"] is None and before["line_range"] is None, "the honest null"
+        assert (
+            before["section"] is None and before["line_range"] is None
+        ), "the honest null"
 
         backfill_item_chunks(store, emb)
         after = {r["id"]: r for r in retriever.search("needle", limit=10)}[ids[2]]
         assert "Part 3" in (after["section"] or ""), after["section"]
-        assert after["line_range"][0] > 4, "cited to the middle, not the top of the document"
+        assert (
+            after["line_range"][0] > 4
+        ), "cited to the middle, not the top of the document"
         assert after["deep_link"].endswith(
             f"?loc=L{after['line_range'][0]}-{after['line_range'][1]}"
         )

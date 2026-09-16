@@ -22,7 +22,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from gideon.net import policy as pol
+from gideon.security.net import policy as pol
 
 
 @pytest.fixture(autouse=True)
@@ -48,7 +48,9 @@ def _seed(monkeypatch, egress):
     """
     cfg = SimpleNamespace(security=SimpleNamespace(egress=egress))
     monkeypatch.setattr(
-        "gideon.config.loader.AppConfig.load", staticmethod(lambda: cfg), raising=False
+        "gideon.core.config.loader.AppConfig.load",
+        staticmethod(lambda: cfg),
+        raising=False,
     )
 
 
@@ -57,7 +59,7 @@ def _break(monkeypatch):
         raise RuntimeError("config.json is being rewritten")
 
     monkeypatch.setattr(
-        "gideon.config.loader.AppConfig.load", staticmethod(boom), raising=False
+        "gideon.core.config.loader.AppConfig.load", staticmethod(boom), raising=False
     )
 
 
@@ -65,23 +67,25 @@ def test_a_denied_host_stays_denied_when_the_next_config_read_fails(monkeypatch)
     """The defect, directly: seed a denial, break the read, assert it still denies."""
     _seed(monkeypatch, _Egress(deny=("evil.test",)))
     first = pol.egress_policy_for(pol.STRICT)
-    assert "evil.test" in first.deny_hosts, "the seeded deny list never landed (vacuous fixture)"
+    assert (
+        "evil.test" in first.deny_hosts
+    ), "the seeded deny list never landed (vacuous fixture)"
 
     _break(monkeypatch)
     after = pol.egress_policy_for(pol.STRICT)
-    assert "evil.test" in after.deny_hosts, "a config error un-denied an explicitly denied host"
+    assert (
+        "evil.test" in after.deny_hosts
+    ), "a config error un-denied an explicitly denied host"
 
 
 def test_the_denial_still_refuses_at_the_guard_after_a_config_error(monkeypatch):
     """Asserted at the CALL SITE: a policy tuple proves nothing if the guard never reads it."""
-    from gideon.net import guard
+    from gideon.security.net import guard
 
     _seed(monkeypatch, _Egress(deny=("evil.test",)))
     pol.egress_policy_for(pol.STRICT)
     _break(monkeypatch)
 
-    # An injected resolver so the assertion is about the DENY rule, not about DNS for a
-    # .test domain — a NXDOMAIN would deny for the wrong reason and read as a pass.
     decision = guard.evaluate(
         "https://evil.test/x",
         pol.egress_policy_for(pol.STRICT),
@@ -102,7 +106,9 @@ def test_the_permissive_half_is_still_dropped_on_error(monkeypatch):
     _break(monkeypatch)
     after = pol.egress_policy_for(pol.STRICT)
     assert "lan.test" not in after.allow_hosts, "a failed read kept an allowance"
-    assert after.allow_private == pol.STRICT.allow_private, "a failed read kept allow_private"
+    assert (
+        after.allow_private == pol.STRICT.allow_private
+    ), "a failed read kept allow_private"
     assert "evil.test" in after.deny_hosts, "…but the denial must survive"
 
 
@@ -117,7 +123,7 @@ def test_the_fallback_is_logged_rather_than_swallowed(monkeypatch, caplog):
     _seed(monkeypatch, _Egress(deny=("evil.test",)))
     pol.egress_policy_for(pol.STRICT)
     _break(monkeypatch)
-    with caplog.at_level(logging.WARNING, logger="gideon.net.policy"):
+    with caplog.at_level(logging.WARNING, logger="gideon.security.net.policy"):
         pol.egress_policy_for(pol.STRICT)
     assert any(
         "deny list" in r.message or "unreadable" in r.message for r in caplog.records
@@ -127,5 +133,4 @@ def test_the_fallback_is_logged_rather_than_swallowed(monkeypatch, caplog):
 def test_the_broad_catch_still_keeps_net_importable(monkeypatch):
     """The behaviour the catch exists for, pinned so a future fix cannot quietly remove it."""
     _break(monkeypatch)
-    # No raise, and a usable policy back — that is the whole contract of the best-effort read.
     assert isinstance(pol.egress_policy_for(pol.STRICT), pol.EgressPolicy)

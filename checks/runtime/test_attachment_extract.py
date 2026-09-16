@@ -7,8 +7,11 @@ import asyncio
 
 import pytest
 
-from gideon.dashboard.attachment_extract import AttachmentExtractor, display_name
-from gideon.knowledge.extract import extract_file_content
+from gideon.cognition.knowledge.extract import extract_file_content
+from gideon.interfaces.dashboard.attachment_extract import (
+    AttachmentExtractor,
+    display_name,
+)
 
 
 def _run(coro):
@@ -33,18 +36,13 @@ class TestExtractFileContent:
         assert _run(extract_file_content("/no/such/file.txt", "text/plain")) == ""
 
     def test_image_no_ocr_yields_structural_descriptor(self, tmp_path):
-        # A tiny PNG with no text → no OCR/vision configured → graceful structural
-        # descriptor (dimensions/format/size) instead of a content-less blank.
         png = tmp_path / "pic.png"
-        # 1×1 transparent PNG
         png.write_bytes(
             b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
             b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00"
             b"\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
         )
         text = _run(extract_file_content(str(png), "image/png"))
-        # Either real OCR text (if a model is configured) or the structural fallback;
-        # on a no-OCR box it must be the descriptor, never empty.
         assert text != ""
         assert "pic.png" in text or "Image" in text
 
@@ -69,7 +67,6 @@ class TestAttachmentExtractor:
         ex.start(str(f), "text/plain")
         text = await ex.get(str(f), "text/plain")
         assert "hello attachment world" in text
-        # second get returns the same cached task result
         assert await ex.get(str(f), "text/plain") == text
 
     @pytest.mark.asyncio
@@ -77,7 +74,7 @@ class TestAttachmentExtractor:
         f = tmp_path / "doc2.txt"
         f.write_text("late start content")
         ex = AttachmentExtractor()
-        text = await ex.get(str(f), "text/plain")  # no start() first
+        text = await ex.get(str(f), "text/plain")
         assert "late start content" in text
 
 
@@ -93,20 +90,25 @@ class TestAttachmentInjectionRoots:
 
     class _Session:
         def __init__(self, files):
-            self.messages = [{"role": "user", "content": "look", "meta": {"files": files}}]
+            self.messages = [
+                {"role": "user", "content": "look", "meta": {"files": files}}
+            ]
 
     def _inject(self, monkeypatch, tmp_path, files, texts):
-        from gideon.dashboard import chat_runner
+        from gideon.interfaces.dashboard import chat_runner
 
         class _FakeExtractor:
             async def get(self, path, mime=None):
                 return texts.get(path, "")
 
-        monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+        monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
         monkeypatch.setattr(
-            "gideon.dashboard.attachment_extract.get_extractor", lambda: _FakeExtractor()
+            "gideon.interfaces.dashboard.attachment_extract.get_extractor",
+            lambda: _FakeExtractor(),
         )
-        return _run(chat_runner._inject_attachment_content(self._Session(files), "look"))
+        return _run(
+            chat_runner._inject_attachment_content(self._Session(files), "look")
+        )
 
     def test_upload_and_native_screenshot_are_both_inlined(self, monkeypatch, tmp_path):
         (tmp_path / "uploads").mkdir()
@@ -132,19 +134,20 @@ class TestAttachmentInjectionRoots:
         assert out == "look"
 
     def test_sibling_dir_is_not_an_attachment_root(self, monkeypatch, tmp_path):
-        # A prefix match without the separator would treat `uploads-old/` as `uploads/`.
         (tmp_path / "uploads").mkdir()
         (tmp_path / "uploads-old").mkdir()
         stray = str(tmp_path / "uploads-old" / "x.png")
         out = self._inject(monkeypatch, tmp_path, [stray], {stray: "STRAY TEXT"})
         assert out == "look"
 
-    def test_native_screenshot_runs_the_real_extraction_graph(self, monkeypatch, tmp_path):
+    def test_native_screenshot_runs_the_real_extraction_graph(
+        self, monkeypatch, tmp_path
+    ):
         """End-to-end through the REAL extractor: a PNG in screenshots/ reaches the
         turn. With no vision/OCR model bound the graph yields the structural
         descriptor rather than OCR text — so "OCR'd content" is a property of the
         configured model, not of this wiring."""
-        from gideon.dashboard import chat_runner
+        from gideon.interfaces.dashboard import chat_runner
 
         shots = tmp_path / "screenshots"
         shots.mkdir()
@@ -154,9 +157,11 @@ class TestAttachmentInjectionRoots:
             b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00"
             b"\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
         )
-        monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+        monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
         out = _run(
-            chat_runner._inject_attachment_content(self._Session([str(png)]), "what is this")
+            chat_runner._inject_attachment_content(
+                self._Session([str(png)]), "what is this"
+            )
         )
         assert "screenshot_1.png" in out
         assert "(No extractable text content.)" not in out

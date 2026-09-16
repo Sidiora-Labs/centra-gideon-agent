@@ -23,14 +23,18 @@ import asyncio
 
 import pytest
 
-from gideon.workflows import defs as defs_mod
-from gideon.workflows import service
+from gideon.automation.workflows import defs as defs_mod
+from gideon.automation.workflows import service
 
 ROOT = {
     "kind": "sequence",
     "id": "s",
     "children": [
-        {"kind": "action", "id": "a", "config": {"provider": "bash", "with": {"command": "true"}}}
+        {
+            "kind": "action",
+            "id": "a",
+            "config": {"provider": "bash", "with": {"command": "true"}},
+        }
     ],
 }
 NOW = 1_700_000_000.0
@@ -77,7 +81,9 @@ def provider():
 
 
 async def _author(name: str, metadata: dict) -> dict:
-    return await service.author_def(name=name, root=ROOT, metadata=metadata, strict=False)
+    return await service.author_def(
+        name=name, root=ROOT, metadata=metadata, strict=False
+    )
 
 
 async def _rows(*, now: float = NOW) -> tuple[list[dict], dict]:
@@ -91,13 +97,12 @@ async def _rows(*, now: float = NOW) -> tuple[list[dict], dict]:
     return [r for r in out["defs"] if r.get("provider") == "wiring-mem"], out
 
 
-# ── the metadata WRITE path ──
-
-
 def test_surfacing_metadata_can_be_SET_through_the_API(provider):
     """The measured gap: `author_def` had no `metadata` parameter at all, so a def's surfacing
     configuration was unreachable except by hand-editing a file on disk."""
-    result = asyncio.run(_author("backup", {"surface_mode": "passive", "cadence_days": 7}))
+    result = asyncio.run(
+        _author("backup", {"surface_mode": "passive", "cadence_days": 7})
+    )
     assert result["ok"] is True
     saved = provider._defs["backup"]["metadata"]
     assert saved["surface_mode"] == "passive"
@@ -106,7 +111,8 @@ def test_surfacing_metadata_can_be_SET_through_the_API(provider):
 
 def test_the_write_path_COERCES_like_the_read_path(provider):
     """Coercing on read alone would store a value the next reader silently reinterprets — the def
-    file would say `vibes` while every surface showed `off`, and nobody could explain the gap."""
+    file would say `vibes` while every surface showed `off`, and nobody could explain the gap.
+    """
     asyncio.run(_author("typo", {"surface_mode": "vibes", "cadence_days": -3}))
     saved = provider._defs["typo"]["metadata"]
     assert saved["surface_mode"] == "off"
@@ -115,7 +121,10 @@ def test_the_write_path_COERCES_like_the_read_path(provider):
 
 def test_authoring_WITHOUT_metadata_still_works(provider):
     """The parameter is optional: a caller that never passed metadata must not now fail."""
-    assert asyncio.run(service.author_def(name="plain", root=ROOT, strict=False))["ok"] is True
+    assert (
+        asyncio.run(service.author_def(name="plain", root=ROOT, strict=False))["ok"]
+        is True
+    )
 
 
 def test_every_declared_field_survives_the_write(provider):
@@ -142,9 +151,6 @@ def test_every_declared_field_survives_the_write(provider):
     assert saved["hands_off_to"][0]["target_def"] == "bug-fix"
 
 
-# ── the surfacing READ projection ──
-
-
 def test_the_thin_list_still_DROPS_metadata(provider):
     """Pinning the measured fact that motivated a second route: `list_defs` returns a deliberately
     thin projection, so it cannot be what the templates UX reads."""
@@ -155,7 +161,11 @@ def test_the_thin_list_still_DROPS_metadata(provider):
 
 
 def test_the_surfacing_list_EXPOSES_the_fields(provider):
-    asyncio.run(_author("backup", {"surface_mode": "passive", "cadence_days": 7, "packs": ["ci"]}))
+    asyncio.run(
+        _author(
+            "backup", {"surface_mode": "passive", "cadence_days": 7, "packs": ["ci"]}
+        )
+    )
     row = asyncio.run(_rows())[0][0]
     assert row["surface_mode"] == "passive"
     assert row["cadence_days"] == 7
@@ -218,7 +228,9 @@ def test_the_list_exposes_the_HANDOFF_edges(provider):
 def test_an_edge_pointing_NOWHERE_is_not_rendered(provider):
     """A suggestion the user cannot accept is a dead affordance."""
     asyncio.run(
-        _author("bad", {"surface_mode": "passive", "match_text": "x", "hands_off_to": [{}]})
+        _author(
+            "bad", {"surface_mode": "passive", "match_text": "x", "hands_off_to": [{}]}
+        )
     )
     assert asyncio.run(_rows())[0][0]["hands_off_to"] == []
 
@@ -231,13 +243,10 @@ def test_a_provider_with_NO_defs_contributes_nothing(provider):
     assert rows == []
 
 
-# ── the route is registered, and BEFORE the wildcard ──
-
-
 def test_the_surfacing_route_is_MOUNTED():
     from aiohttp import web
 
-    from gideon.workflows.handlers import register_workflow_routes
+    from gideon.automation.workflows.handlers import register_workflow_routes
 
     app = web.Application()
     register_workflow_routes(app)
@@ -251,15 +260,14 @@ def test_the_literal_route_precedes_the_NAME_wildcard():
     hazard `register_workflow_routes`' own docstring records for `/runs`."""
     from aiohttp import web
 
-    from gideon.workflows.handlers import register_workflow_routes
+    from gideon.automation.workflows.handlers import register_workflow_routes
 
     app = web.Application()
     register_workflow_routes(app)
     order = [r.resource.canonical for r in app.router.routes() if r.resource]
-    assert order.index("/api/workflows/surfacing") < order.index("/api/workflows/{name}")
-
-
-# ── the TaskComplete emission ──
+    assert order.index("/api/workflows/surfacing") < order.index(
+        "/api/workflows/{name}"
+    )
 
 
 def _fake_store(fired: list) -> object:
@@ -273,12 +281,15 @@ def _fake_store(fired: list) -> object:
 
 def test_completing_a_task_FIRES_the_lifecycle_hook(tmp_path, monkeypatch):
     """The measured gap: `TaskComplete` is declared, allowlisted and rendered by the hook UI, and no
-    call site in the repo fired it — so a configured "when a task finishes" hook never ran."""
+    call site in the repo fired it — so a configured "when a task finishes" hook never ran.
+    """
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     fired: list = []
-    monkeypatch.setattr("gideon.hooks.get_global_hook_store", lambda: _fake_store(fired))
+    monkeypatch.setattr(
+        "gideon.engine.hooks.get_global_hook_store", lambda: _fake_store(fired)
+    )
 
-    from gideon.tasks.registry import create_task, update_task
+    from gideon.engine.tasks.registry import create_task, update_task
 
     async def go():
         task = await create_task("native", title="Ship it")
@@ -292,9 +303,11 @@ def test_completing_a_task_FIRES_the_lifecycle_hook(tmp_path, monkeypatch):
 def test_a_NON_completion_edit_fires_nothing(tmp_path, monkeypatch):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     fired: list = []
-    monkeypatch.setattr("gideon.hooks.get_global_hook_store", lambda: _fake_store(fired))
+    monkeypatch.setattr(
+        "gideon.engine.hooks.get_global_hook_store", lambda: _fake_store(fired)
+    )
 
-    from gideon.tasks.registry import create_task, update_task
+    from gideon.engine.tasks.registry import create_task, update_task
 
     async def go():
         task = await create_task("native", title="x")
@@ -310,9 +323,11 @@ def test_RE_SAVING_a_done_task_does_NOT_re_fire(tmp_path, monkeypatch):
     tasks (§1), so level-triggering would emit one hook per rebuild."""
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     fired: list = []
-    monkeypatch.setattr("gideon.hooks.get_global_hook_store", lambda: _fake_store(fired))
+    monkeypatch.setattr(
+        "gideon.engine.hooks.get_global_hook_store", lambda: _fake_store(fired)
+    )
 
-    from gideon.tasks.registry import create_task, update_task
+    from gideon.engine.tasks.registry import create_task, update_task
 
     async def go():
         task = await create_task("native", title="x")
@@ -327,9 +342,11 @@ def test_REOPENING_then_completing_fires_AGAIN(tmp_path, monkeypatch):
     """A genuine second completion is a second event — the edge rule must not latch."""
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     fired: list = []
-    monkeypatch.setattr("gideon.hooks.get_global_hook_store", lambda: _fake_store(fired))
+    monkeypatch.setattr(
+        "gideon.engine.hooks.get_global_hook_store", lambda: _fake_store(fired)
+    )
 
-    from gideon.tasks.registry import create_task, update_task
+    from gideon.engine.tasks.registry import create_task, update_task
 
     async def go():
         task = await create_task("native", title="x")
@@ -343,16 +360,17 @@ def test_REOPENING_then_completing_fires_AGAIN(tmp_path, monkeypatch):
 
 def test_a_BROKEN_hook_does_not_fail_the_task_write(tmp_path, monkeypatch):
     """A hook is an OBSERVER of a task edit, not a participant: a user's broken script must not turn
-    a successful `PUT /api/tasks/{id}` into a 500, and the task is already written by then."""
+    a successful `PUT /api/tasks/{id}` into a 500, and the task is already written by then.
+    """
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
 
     class _Boom:
         async def fire(self, event, context=""):
             raise RuntimeError("hook script exploded")
 
-    monkeypatch.setattr("gideon.hooks.get_global_hook_store", lambda: _Boom())
+    monkeypatch.setattr("gideon.engine.hooks.get_global_hook_store", lambda: _Boom())
 
-    from gideon.tasks.registry import create_task, get_task, update_task
+    from gideon.engine.tasks.registry import create_task, get_task, update_task
 
     async def go():
         task = await create_task("native", title="x")
@@ -367,9 +385,9 @@ def test_a_BROKEN_hook_does_not_fail_the_task_write(tmp_path, monkeypatch):
 def test_NO_hook_store_is_not_an_error(tmp_path, monkeypatch):
     """The store is absent in plenty of contexts (CLI, tests, a bare provider import)."""
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    monkeypatch.setattr("gideon.hooks.get_global_hook_store", lambda: None)
+    monkeypatch.setattr("gideon.engine.hooks.get_global_hook_store", lambda: None)
 
-    from gideon.tasks.registry import create_task, update_task
+    from gideon.engine.tasks.registry import create_task, update_task
 
     async def go():
         task = await create_task("native", title="x")
@@ -382,9 +400,11 @@ def test_the_fired_context_carries_workflow_PROVENANCE(tmp_path, monkeypatch):
     """A hook reacting to a workflow-projected task should be able to tell which run produced it."""
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     fired: list = []
-    monkeypatch.setattr("gideon.hooks.get_global_hook_store", lambda: _fake_store(fired))
+    monkeypatch.setattr(
+        "gideon.engine.hooks.get_global_hook_store", lambda: _fake_store(fired)
+    )
 
-    from gideon.tasks.registry import create_task, update_task
+    from gideon.engine.tasks.registry import create_task, update_task
 
     async def go():
         task = await create_task(

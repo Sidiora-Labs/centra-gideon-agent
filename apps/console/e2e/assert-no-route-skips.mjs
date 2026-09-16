@@ -1,20 +1,3 @@
-// ── "every authenticated route is axe-scanned in CI" — asserted, not assumed ─────────────
-// A SKIP reads exactly like a PASS in a green job. `npx playwright test e2e/a11y.spec.ts`
-// exits 0 whether it scanned 116 routes or skipped 116 of them, so the CI step alone proves
-// the job RAN, not that anything was measured. This reads the JSON report back and holds it
-// to the manifest:
-//
-//   · every route-level scan that ran must have PASSED or been retried — never skipped; and
-//   · the NUMBER of route-level scans must equal (every declared route) × (every theme).
-//
-// The expected count is DERIVED from web/e2e/routes.ts rather than hard-coded, so deleting a
-// route list — the one edit that would silently shrink the gate's coverage while leaving it
-// green — reds here instead of passing quietly. That is the same failure mode
-// `routeManifestParity.test.ts` guards on the authoring side; this is the executing side.
-//
-// Deliberately NOT a *.spec.ts: it is a report checker, not a test. (`_specs()` in
-// tests/test_e2e_specs_are_executed.py globs `*.spec.ts`, so this file is correctly invisible
-// to the every-spec-runs-in-CI rail.)
 import { readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -23,9 +6,6 @@ const HERE = dirname(fileURLToPath(import.meta.url))
 
 const reportPath = resolve(process.argv[2] ?? 'a11y-report.json')
 
-/** Route-level scan titles carry the route in parentheses: `Home (#/dashboard)`. The
- *  interaction tier (`command palette [opened]`) deliberately does NOT, because those MAY
- *  legitimately skip when a fresh home has no row to open — the spec says so itself. */
 const ROUTE_TITLE = /\(#\//
 
 function fail(message) {
@@ -33,7 +13,6 @@ function fail(message) {
   process.exit(1)
 }
 
-// ── expected: what the manifest declares ────────────────────────────────────────────────
 function literalBlock(src, header) {
   const block = src.match(new RegExp(`${header}[\\s\\S]*?\\n\\]`))
   if (!block) fail(`could not locate ${header} in web/e2e/routes.ts — re-point this checker`)
@@ -56,8 +35,6 @@ const counts = {
   ].length,
 }
 
-// THEMES is a one-line literal, so it needs its own match rather than literalBlock's
-// multi-line shape.
 const themesLiteral = routesSrc.match(/export const THEMES = \[(.*?)\]/)
 if (!themesLiteral) fail('could not locate THEMES in web/e2e/routes.ts — re-point this checker')
 const themes = [...themesLiteral[1].matchAll(/'\w+'/g)].length
@@ -69,7 +46,6 @@ for (const [name, n] of Object.entries({ ...counts, THEMES: themes })) {
 const declared = Object.values(counts).reduce((a, b) => a + b, 0)
 const expected = declared * themes
 
-// ── actual: what the run reported ───────────────────────────────────────────────────────
 let report
 try {
   report = JSON.parse(readFileSync(reportPath, 'utf8'))

@@ -27,8 +27,6 @@ def _fake_home(tmp_path: Path) -> Path:
 def _armed(root: Path) -> int:
     """Mimic pytest_sessionstart: take the timestamp, then let mtimes advance."""
     since = time.time_ns()
-    # Filesystem mtimes must be strictly newer than the arm point for the writes
-    # below; a short sleep keeps this honest on coarse-grained filesystems.
     time.sleep(0.01)
     return since
 
@@ -97,7 +95,6 @@ def test_a_metadata_preserving_copy_is_caught(tmp_path: Path) -> None:
     root = _fake_home(tmp_path)
     tracked = root / "config.json"
     tracked.write_text('{"pre":"migration"}\n')
-    # Age the source a day, exactly as an already-existing config would be.
     day_ago = time.time() - 86_400
     os.utime(tracked, (day_ago, day_ago))
     since = _armed(root)
@@ -110,13 +107,13 @@ def test_a_metadata_preserving_copy_is_caught(tmp_path: Path) -> None:
         "detector must compare max(mtime, ctime)."
     )
     assert caught["config.json.bak"] == "metadata-preserving-write"
-    # The premise of the test: mtime really was back-dated, so this is not passing because
-    # copy2 happened to move the mtime on this filesystem.
     assert (root / "config.json.bak").stat().st_mtime_ns <= since, (
         "copy2 did not preserve the source mtime here, so this test is not exercising the "
         "shape it names"
     )
-    assert "metadata-preserving-write" in format_report(root, list(scan_changes(root, since)))
+    assert "metadata-preserving-write" in format_report(
+        root, list(scan_changes(root, since))
+    )
 
 
 def test_reading_the_tree_does_not_red_the_rail(tmp_path: Path) -> None:
@@ -159,7 +156,8 @@ def test_scan_does_not_create_or_touch_the_root(tmp_path: Path) -> None:
     """The detector stats; it never writes. Its own walk must not move any mtime."""
     root = _fake_home(tmp_path)
     before = {
-        p: p.stat().st_mtime_ns for p in [root, root / "sessions", root / "sessions" / "s1.json"]
+        p: p.stat().st_mtime_ns
+        for p in [root, root / "sessions", root / "sessions" / "s1.json"]
     }
     scan_changes(root, time.time_ns())
     assert {p: p.stat().st_mtime_ns for p in before} == before
@@ -188,7 +186,9 @@ def test_residue_allowance_is_empty_and_exact(tmp_path: Path) -> None:
     and keeps a glob from silently covering a whole subtree.
     """
     assert real_home_guard.ALLOWED_RESIDUE == frozenset()
-    assert not any(ch in entry for entry in real_home_guard.ALLOWED_RESIDUE for ch in "*?[")
+    assert not any(
+        ch in entry for entry in real_home_guard.ALLOWED_RESIDUE for ch in "*?["
+    )
 
     root = _fake_home(tmp_path)
     since = _armed(root)
@@ -197,7 +197,9 @@ def test_residue_allowance_is_empty_and_exact(tmp_path: Path) -> None:
 
 
 def test_change_renders_with_path_kind_and_size() -> None:
-    rendered = str(HomeChange(path="security_events.jsonl", kind="modified", size=27318621))
+    rendered = str(
+        HomeChange(path="security_events.jsonl", kind="modified", size=27318621)
+    )
     assert "security_events.jsonl" in rendered
     assert "modified" in rendered
     assert "27318621" in rendered

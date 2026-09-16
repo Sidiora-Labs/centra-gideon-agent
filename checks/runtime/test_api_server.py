@@ -10,19 +10,19 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.dashboard.server import _register_mcp_routes
-from gideon.dashboard.state import DashboardState
+from gideon.interfaces.dashboard.server import _register_mcp_routes
+from gideon.interfaces.dashboard.state import ConsoleState
 
 
 def _make_state(tmp_path, **kwargs):
-    """DashboardState with mocked services (mirrors --headless init)."""
+    """ConsoleState with mocked services (mirrors --headless init)."""
     monkeypatch_dir = tmp_path
-    import gideon.dashboard.state as _st
+    import gideon.interfaces.dashboard.state as _st
 
     orig = _st.config_dir
     _st.config_dir = lambda: monkeypatch_dir
     try:
-        state = DashboardState(
+        state = ConsoleState(
             sessions=MagicMock(count=0),
             start_time=0.0,
             **kwargs,
@@ -32,7 +32,7 @@ def _make_state(tmp_path, **kwargs):
     return state
 
 
-def _make_api_app(state: DashboardState) -> web.Application:
+def _make_api_app(state: ConsoleState) -> web.Application:
     """Minimal app using only _register_mcp_routes (same as start_api_server)."""
     app = web.Application()
     app["state"] = state
@@ -113,7 +113,9 @@ class TestApiServerSpawn:
         mock_mgr.cancel_fanout = AsyncMock(return_value=3)
         state = _make_state(tmp_path, subagents=mock_mgr)
         async with TestClient(TestServer(_make_api_app(state))) as client:
-            resp = await client.post("/api/spawn/cancel-fanout", json={"parent_session": "orch"})
+            resp = await client.post(
+                "/api/spawn/cancel-fanout", json={"parent_session": "orch"}
+            )
             assert resp.status == 200
             data = await resp.json()
             assert data["cancelled"] == 3
@@ -165,9 +167,9 @@ class TestApiServerSendMessage:
 
     @pytest.mark.asyncio
     async def test_send_message_without_channel(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        # No channel connected → channel_delivery is None (default); delivery falls
-        # back to a dashboard notification, never a hard failure.
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         async with TestClient(TestServer(_make_api_app(state))) as client:
             resp = await client.post("/api/send-message", json={"text": "hello"})
@@ -213,12 +215,14 @@ class TestStartApiServerWiring:
     """Integration test: start_api_server installs middleware and hook store."""
 
     @pytest.mark.asyncio
-    async def test_server_has_audit_middleware_and_hook_store(self, tmp_path, monkeypatch):
-        import gideon.dashboard.state as _st
+    async def test_server_has_audit_middleware_and_hook_store(
+        self, tmp_path, monkeypatch
+    ):
+        import gideon.interfaces.dashboard.state as _st
 
         monkeypatch.setattr(_st, "config_dir", lambda: tmp_path)
 
-        from gideon.dashboard.server import start_api_server
+        from gideon.interfaces.dashboard.server import start_api_server
 
         runner, state = await start_api_server(
             sessions=MagicMock(count=0),
@@ -231,12 +235,12 @@ class TestStartApiServerWiring:
             await runner.cleanup()
 
 
-class TestApiPersonalclawConfig:
+class TestApiGideonConfig:
     """Tests for PUT /api/config/gideon inline validation."""
 
     @staticmethod
     def _make_app(tmp_path):
-        from gideon.dashboard import handlers
+        from gideon.interfaces.dashboard import handlers
 
         app = web.Application()
         app.router.add_get("/api/config/gideon", handlers.api_gideon_config)
@@ -246,9 +250,11 @@ class TestApiPersonalclawConfig:
     @pytest.mark.asyncio
     async def test_put_happy_path(self, tmp_path, monkeypatch):
         monkeypatch.setattr(
-            "gideon.config.loader.config_path", lambda: tmp_path / "config.json"
+            "gideon.core.config.loader.config_path", lambda: tmp_path / "config.json"
         )
-        monkeypatch.setattr("gideon.dashboard.handlers.sel", lambda: MagicMock())
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.handlers.sel", lambda: MagicMock()
+        )
         (tmp_path / "config.json").write_text('{"agent": {"max_subagents": 3}}')
         async with TestClient(TestServer(self._make_app(tmp_path))) as c:
             resp = await c.put(
@@ -259,14 +265,16 @@ class TestApiPersonalclawConfig:
 
             saved = json.loads((tmp_path / "config.json").read_text())
             assert saved["agent"]["subagent_max_turns"] == 50
-            assert saved["agent"]["max_subagents"] == 3  # preserved
+            assert saved["agent"]["max_subagents"] == 3
 
     @pytest.mark.asyncio
     async def test_put_rejects_bool(self, tmp_path, monkeypatch):
         monkeypatch.setattr(
-            "gideon.config.loader.config_path", lambda: tmp_path / "config.json"
+            "gideon.core.config.loader.config_path", lambda: tmp_path / "config.json"
         )
-        monkeypatch.setattr("gideon.dashboard.handlers.sel", lambda: MagicMock())
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.handlers.sel", lambda: MagicMock()
+        )
         (tmp_path / "config.json").write_text('{"agent": {}}')
         async with TestClient(TestServer(self._make_app(tmp_path))) as c:
             resp = await c.put(
@@ -277,24 +285,32 @@ class TestApiPersonalclawConfig:
     @pytest.mark.asyncio
     async def test_put_rejects_out_of_range(self, tmp_path, monkeypatch):
         monkeypatch.setattr(
-            "gideon.config.loader.config_path", lambda: tmp_path / "config.json"
+            "gideon.core.config.loader.config_path", lambda: tmp_path / "config.json"
         )
-        monkeypatch.setattr("gideon.dashboard.handlers.sel", lambda: MagicMock())
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.handlers.sel", lambda: MagicMock()
+        )
         (tmp_path / "config.json").write_text('{"agent": {}}')
         async with TestClient(TestServer(self._make_app(tmp_path))) as c:
-            resp = await c.put("/api/config/gideon", json={"agent": {"max_subagents": 17}})
+            resp = await c.put(
+                "/api/config/gideon", json={"agent": {"max_subagents": 17}}
+            )
             assert resp.status == 400
 
     @pytest.mark.asyncio
     async def test_put_accepts_zero_max_subagents_as_auto(self, tmp_path, monkeypatch):
         """max_subagents=0 is the 'auto-size from host' sentinel — accepted + saved."""
         monkeypatch.setattr(
-            "gideon.config.loader.config_path", lambda: tmp_path / "config.json"
+            "gideon.core.config.loader.config_path", lambda: tmp_path / "config.json"
         )
-        monkeypatch.setattr("gideon.dashboard.handlers.sel", lambda: MagicMock())
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.handlers.sel", lambda: MagicMock()
+        )
         (tmp_path / "config.json").write_text('{"agent": {}}')
         async with TestClient(TestServer(self._make_app(tmp_path))) as c:
-            resp = await c.put("/api/config/gideon", json={"agent": {"max_subagents": 0}})
+            resp = await c.put(
+                "/api/config/gideon", json={"agent": {"max_subagents": 0}}
+            )
             assert resp.status == 200
             import json
 
@@ -303,7 +319,9 @@ class TestApiPersonalclawConfig:
 
     @pytest.mark.asyncio
     async def test_put_rejects_non_dict_agent(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.handlers.sel", lambda: MagicMock())
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.handlers.sel", lambda: MagicMock()
+        )
         async with TestClient(TestServer(self._make_app(tmp_path))) as c:
             resp = await c.put("/api/config/gideon", json={"agent": "not a dict"})
             assert resp.status == 400
@@ -311,9 +329,11 @@ class TestApiPersonalclawConfig:
     @pytest.mark.asyncio
     async def test_put_corrupt_config_returns_500(self, tmp_path, monkeypatch):
         monkeypatch.setattr(
-            "gideon.config.loader.config_path", lambda: tmp_path / "config.json"
+            "gideon.core.config.loader.config_path", lambda: tmp_path / "config.json"
         )
-        monkeypatch.setattr("gideon.dashboard.handlers.sel", lambda: MagicMock())
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.handlers.sel", lambda: MagicMock()
+        )
         (tmp_path / "config.json").write_text("NOT JSON{{{")
         async with TestClient(TestServer(self._make_app(tmp_path))) as c:
             resp = await c.put(
@@ -324,10 +344,14 @@ class TestApiPersonalclawConfig:
     @pytest.mark.asyncio
     async def test_put_rejects_unrecognized_keys(self, tmp_path, monkeypatch):
         monkeypatch.setattr(
-            "gideon.config.loader.config_path", lambda: tmp_path / "config.json"
+            "gideon.core.config.loader.config_path", lambda: tmp_path / "config.json"
         )
-        monkeypatch.setattr("gideon.dashboard.handlers.sel", lambda: MagicMock())
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.handlers.sel", lambda: MagicMock()
+        )
         (tmp_path / "config.json").write_text('{"agent": {}}')
         async with TestClient(TestServer(self._make_app(tmp_path))) as c:
-            resp = await c.put("/api/config/gideon", json={"agent": {"unknown_key": 42}})
+            resp = await c.put(
+                "/api/config/gideon", json={"agent": {"unknown_key": 42}}
+            )
             assert resp.status == 400

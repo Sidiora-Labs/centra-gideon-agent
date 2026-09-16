@@ -1,0 +1,463 @@
+"""CLI setup subcommand — interactive credential and config wizard."""
+
+import json
+import os
+import socket
+import sys
+from pathlib import Path
+
+from gideon.cognition.orchestrator_skill import generate_orchestrator_skill
+from gideon.core.atomic_write import atomic_write
+from gideon.core.config import AppConfig
+from gideon.core.config import loader as config_loader
+from gideon.core.config.loader import (
+    _WORKSPACE_DIR_NAME,
+    DASHBOARD_PORT,
+    _default_workspace_base,
+    _workspace_dir_file,
+    env_path,
+)
+from gideon.core.constants import DATA_WARNING
+from gideon.core.env import browser_available
+from gideon.extensions.app_cli import run_app_setup_steps
+from gideon.extensions.skills import ProcedureLibrary
+from gideon.interfaces.cli.chat import _ensure_default_agent_in_config
+
+
+def config_dir() -> Path:
+    """The active home, re-resolved per call — see :func:`gideon.core.config.loader.config_dir`.
+
+    DEFINED here rather than imported: this module can be imported lazily, and an
+    import-time binding captures whatever the name pointed at on first use (#2443).
+    """
+    return config_loader.config_dir()
+
+
+def config_path() -> Path:
+    """The active home, re-resolved per call — see :func:`gideon.core.config.loader.config_path`.
+
+    DEFINED here rather than imported: this module can be imported lazily, and an
+    import-time binding captures whatever the name pointed at on first use (#2443).
+    """
+    return config_loader.config_path()
+
+
+def _ask(prompt: str) -> str:
+    """Read one wizard answer, or ``""`` when stdin is not a terminal.
+
+    Every ``setup`` prompt prints its default (or its skip behaviour) before
+    asking, so a blank answer always means "take what you just showed me". A
+    non-interactive stdin — a pipe, a redirect, a Dockerfile ``RUN``, CI —
+    therefore accepts those defaults instead of aborting the wizard with a raw
+    ``EOFError`` traceback partway through. `gideon setup` is the first
+    command the getting-started guide hands a newcomer; it must not crash when
+    it cannot prompt.
+    """
+    if not sys.stdin.isatty():
+        print(f"{prompt}(non-interactive stdin — taking the default)")
+        return ""
+    try:
+        return input(prompt).strip()
+    except EOFError:
+        print()
+        return ""
+
+
+def _fix_shell_profiles() -> None:
+    """Remove stale Gideon PATH entries from shell profiles."""
+    home = Path.home()
+    profiles = [
+        home / ".zshrc",
+        home / ".bashrc",
+        home / ".bash_profile",
+        home / ".profile",
+    ]
+    stale_markers = [
+        ".gideon-app",
+        "Gideon/src/Gideon/bin",
+        "Gideon/build/",
+        "workspaces/Gideon",
+    ]
+    cleaned_profiles: list[str] = []
+    for profile in profiles:
+        if not profile.is_file():
+            continue
+        try:
+            lines = profile.read_text(encoding="utf-8").splitlines(keepends=True)
+            cleaned = []
+            removed = False
+            for line in lines:
+                if any(m in line for m in stale_markers) and "PATH" in line:
+                    removed = True
+                    continue
+                cleaned.append(line)
+            if removed:
+                profile.write_text("".join(cleaned), encoding="utf-8")
+                print(f"  🔧 Cleaned stale Gideon PATH from {profile.name}")
+                cleaned_profiles.append(profile.name)
+        except OSError:
+            pass
+    if cleaned_profiles:
+        sources = " or ".join(f"`source ~/{p}`" for p in cleaned_profiles)
+        print(
+            f"  ⚠️  Run {sources} or open a new terminal for PATH changes to take effect."
+        )
+
+
+def _print_dashboard_pointer() -> None:
+    """Point at the dashboard's guided first run — one line (ONBOARDING-UX T1.4).
+
+    The dashboard is the canonical onboarding surface: it installs a model provider,
+    binds a chat model and runs a real first success without leaving the flow. This
+    wizard stays credentials-first and unchanged — the plan's open question ("should
+    ``setup`` gain full parity?") is answered "no, the dashboard owns it" — so setup
+    does not duplicate that flow, it says where the flow is.
+
+    Printed only where a browser can actually reach it: on a headless remote box the
+    line would be an instruction the user cannot follow, so it is suppressed there and
+    the ``doctor``/``gateway`` next-step line stands on its own.
+    """
+    if browser_available():
+        print(
+            "  Guided first run — model provider, then a first success — is in the dashboard."
+        )
+
+
+def _setup(
+    agent_only: bool = False,
+    clean: bool = False,
+    mode: str = "",
+    provider: str = "",
+    credential: str = "",
+    only_app: str = "",
+) -> None:
+    """Install agent config and optionally configure credentials.
+
+    ``mode`` selects the deployment model: ``service`` (systemd/launchd, default),
+    ``docker`` (Compose-based), or ``none`` (manual / CI).
+    ``provider`` wires a named registry entry as the default chat provider.
+    ``credential`` registers a named credential in the credential store.
+    ``only_app`` runs ONLY that installed app's ``cli.setup`` step, skipping the
+    core steps and every other app (``gideon setup --app <name>``).
+    """
+    if only_app:
+        run_app_setup_steps(only_app=only_app)
+        return
+
+    from gideon.engine.agent import (
+        rebuild_agent_config,  # circular import: agent imports cli
+    )
+    from gideon.interfaces.cli.main import (
+        _project_dir_file,  # circular import: cli -> cli_setup -> cli
+    )
+
+    print("Gideon Setup\n")
+    print(f"  {DATA_WARNING.replace(chr(10), chr(10) + '  ')}\n")
+
+    if mode or provider or credential:
+        _setup_noninteractive(mode=mode, provider=provider, credential=credential)
+        if not agent_only:
+            return
+
+    proj = os.environ.get("GIDEON_PROJECT_DIR")
+    if proj:
+        _project_dir_file().parent.mkdir(parents=True, exist_ok=True)
+        _project_dir_file().write_text(proj + "\n", encoding="utf-8")
+        print(f"  ✅ Project dir saved: {proj}")
+
+    if not agent_only:
+        _setup_workspace_dir()
+
+    print("Installing agent config...")
+    agent_path = rebuild_agent_config(clean=clean)
+    print(f"  ✅ Agent installed: {agent_path}")
+
+    _ensure_default_agent_in_config()
+
+    try:
+        cfg = AppConfig.load()
+        if cfg.agent.orchestrator_skill:
+            generate_orchestrator_skill(ProcedureLibrary())
+            print("  ✅ Orchestrator skill generated")
+        else:
+            for legacy in ("orchestrator", "conductor"):
+                skill_path = ProcedureLibrary()._dir / legacy / "SKILL.md"
+                if skill_path.exists():
+                    skill_path.unlink()
+    except Exception as exc:
+        print(f"  ⚠️  Orchestrator skill generation failed: {exc}")
+
+    if agent_only:
+        print("\nDone! Try: gideon gateway")
+        _print_dashboard_pointer()
+        return
+
+    run_app_setup_steps()
+
+    _setup_timezone()
+
+    _maybe_setup_dashboard_url()
+
+    _maybe_setup_custom_domain()
+
+    print("\nDone! Try: gideon doctor && gideon gateway")
+    _print_dashboard_pointer()
+
+
+def _setup_noninteractive(
+    mode: str = "",
+    provider: str = "",
+    credential: str = "",
+) -> None:
+    """Apply non-interactive setup flags (R8.8, R12.1).
+
+    ``--mode docker`` prints a ``docker compose up`` quick-start hint.
+    ``--mode service`` prints a ``gideon service install`` hint.
+    ``--mode none`` skips all deployment hints.
+    ``--provider <name>`` wires a registry entry as the default chat provider
+    in config.json (the entry must already be declared in the config).
+    ``--credential <name=value>`` stores a named credential via the
+    credential store.
+    """
+    if mode == "docker":
+        print(
+            "  Deployment mode: docker\n"
+            "  Quick-start:\n"
+            "    cp .env.example .env   # fill in secrets\n"
+            "    docker compose up -d\n"
+        )
+    elif mode == "service":
+        print(
+            "  Deployment mode: service\n"
+            "  Quick-start:\n"
+            "    gideon service install\n"
+        )
+    elif mode == "none":
+        pass
+    elif mode:
+        print(f"  ⚠️  Unknown --mode {mode!r}. Valid values: docker, service, none")
+
+    if provider:
+        cfg_file = config_path()
+        try:
+            data: dict = {}
+            if cfg_file.exists():
+                data = json.loads(cfg_file.read_text(encoding="utf-8"))
+            data.setdefault("agent", {})["provider"] = provider
+            atomic_write(cfg_file, json.dumps(data, indent=2) + "\n")
+            print(f"  ✅ Provider set: {provider}")
+        except Exception as exc:
+            print(f"  ❌ Could not set provider: {exc}")
+
+    if credential:
+        if "=" in credential:
+            cred_name, _, cred_val = credential.partition("=")
+        else:
+            cred_name = credential
+            cred_val = os.environ.get(cred_name, "")
+        if cred_name and cred_val:
+            try:
+                from gideon.integrations.llm.credentials import CredentialStore
+
+                store = CredentialStore(config_dir())
+                descriptors = {k: dict(v) for k, v in store._descriptors.items()}
+                descriptors[cred_name] = {"type": "api_key", "value": cred_val}
+                store.save(descriptors)
+                print(f"  ✅ Credential stored: {cred_name}")
+            except Exception as exc:
+                print(f"  ❌ Could not store credential {cred_name!r}: {exc}")
+        elif cred_name:
+            print(
+                f"  ⚠️  --credential {cred_name!r}: no value provided and env var not set"
+            )
+
+
+def _setup_workspace_dir() -> None:
+    """Prompt user for workspace directory, falling back to platform default."""
+    platform_default = _default_workspace_base() / _WORKSPACE_DIR_NAME
+    default = platform_default
+    label = "Default"
+    if _workspace_dir_file().is_file():
+        configured = _workspace_dir_file().read_text(encoding="utf-8").strip()
+        if configured:
+            default = Path(configured)
+            label = "Configured"
+    print("── Workspace Directory ──\n")
+    print("  LLM sessions and task output are stored in a workspace directory.")
+    print(f"  {label}: {default}\n")
+    answer = _ask(f"  Workspace path [{default}]: ")
+    chosen = (
+        default if answer.lower() in ("", "y", "yes") else Path(answer).expanduser()
+    )
+    try:
+        chosen.mkdir(parents=True, exist_ok=True)
+        _workspace_dir_file().parent.mkdir(parents=True, exist_ok=True)
+        _workspace_dir_file().write_text(str(chosen) + "\n", encoding="utf-8")
+        print(f"  ✅ Workspace: {chosen}\n")
+    except OSError as e:
+        print(f"  ❌ Cannot create {chosen}: {e}")
+        print(f"  Falling back to platform default: {platform_default}\n")
+
+
+_CUSTOM_DOMAIN = "gideon.localhost"
+
+
+def _detect_system_timezone() -> str:
+    """This machine's IANA zone name, or "" — through the one owner (#2520).
+
+    This used to be its own `/etc/localtime` reader, and it returned `TZ` unvalidated: a
+    `TZ=PDT` shell was "detected" as `PDT`, offered as the default, and then refused by the
+    retry loop below. `timezones.machine_zone_name` validates every candidate through
+    `ZoneInfo` first, so what is offered here is always something that can be saved.
+    """
+    from gideon.core.timezones import machine_zone_name
+
+    return machine_zone_name()
+
+
+def _setup_timezone() -> None:
+    """Auto-detect timezone and save to config.json."""
+    cfg_file = config_path()
+
+    data: dict = {}
+    if cfg_file.exists():
+        try:
+            data = json.loads(cfg_file.read_text(encoding="utf-8"))
+        except Exception as exc:
+            print(f"  ⚠️  Could not read {cfg_file}: {exc}")
+            return
+    current = data.get("timezone", "")
+
+    detected = _detect_system_timezone()
+
+    print("── Timezone ──\n")
+    if current:
+        print(f"  Current: {current}")
+        answer = _ask(f"  Timezone [{current}]: ")
+        if not answer:
+            print(f"  ✅ Keeping: {current}\n")
+            return
+        tz_val = answer
+    elif detected:
+        print(f"  Detected: {detected}")
+        answer = _ask(f"  Timezone [{detected}]: ")
+        tz_val = answer or detected
+    else:
+        tz_val = _ask("  IANA timezone (e.g. America/Los_Angeles): ")
+        if not tz_val:
+            print("  ⏭  Skipped — schedules fall back to UTC; `gideon doctor` warns.\n")
+            return
+
+    abbrev_to_iana: dict[str, str] = {
+        "PST": "America/Los_Angeles",
+        "PDT": "America/Los_Angeles",
+        "MST": "America/Denver",
+        "MDT": "America/Denver",
+        "CST": "America/Chicago",
+        "CDT": "America/Chicago",
+        "EST": "America/New_York",
+        "EDT": "America/New_York",
+        "GMT": "Etc/GMT",
+        "BST": "Europe/London",
+        "CET": "Europe/Berlin",
+        "CEST": "Europe/Berlin",
+        "IST": "Asia/Kolkata",
+        "JST": "Asia/Tokyo",
+        "AEST": "Australia/Sydney",
+        "AEDT": "Australia/Sydney",
+        "NZST": "Pacific/Auckland",
+        "NZDT": "Pacific/Auckland",
+    }
+    from gideon.core.timezones import is_known_zone
+
+    max_retries = 3
+    for attempt in range(max_retries):
+        if is_known_zone(tz_val):
+            break
+        suggestion = abbrev_to_iana.get(tz_val.upper())
+        if suggestion:
+            print(f"  ❌ '{tz_val}' is an abbreviation, not an IANA timezone.")
+            print(f"     Did you mean: {suggestion}?")
+        else:
+            print(f"  ❌ Unknown timezone '{tz_val}'.")
+            print("     Use IANA format, e.g. America/Los_Angeles, Europe/London")
+        if attempt < max_retries - 1:
+            tz_val = _ask("  Timezone: ")
+            if not tz_val:
+                print("  ⏭  Skipped.\n")
+                return
+        else:
+            print("  ⏭  Skipped after too many attempts.\n")
+            return
+
+    data["timezone"] = tz_val
+    atomic_write(cfg_file, json.dumps(data, indent=2) + "\n")
+    print(f"  ✅ Timezone saved: {tz_val}\n")
+
+
+def _maybe_setup_dashboard_url() -> None:
+    """Prompt for dashboard.url when running on a remote host with a channel
+    configured (remote token auth is delivered through a channel — without one
+    the dashboard is local-only, so no URL is needed)."""
+
+    cfg_file = config_path()
+    cfg = AppConfig.load()
+    creds = cfg.load_credentials()
+    has_channel = bool(creds.get("SLACK_APP_TOKEN") and creds.get("SLACK_BOT_TOKEN"))
+
+    if not has_channel:
+        return
+
+    try:
+        ip = socket.gethostbyname(socket.gethostname())
+        is_remote = not ip.startswith("127.")
+    except OSError:
+        is_remote = False
+
+    if not is_remote and not cfg.dashboard.url:
+        return
+
+    current = cfg.dashboard.url
+    hostname = socket.gethostname()
+
+    print("── Dashboard URL (remote access) ──\n")
+    if is_remote:
+        print(f"  This host ({hostname}) appears to be a remote machine.")
+        print(
+            "  Setting a dashboard URL enables direct browser access with token auth."
+        )
+        print("  Leave blank for localhost-only (SSH tunnel required).\n")
+    else:
+        print("  Configure a custom dashboard URL for remote access.")
+        print("  Leave blank for localhost-only.\n")
+
+    hint = f" [{current}]" if current else ""
+    answer = _ask(f"  Dashboard URL (e.g. http://{hostname}:{DASHBOARD_PORT}){hint}: ")
+
+    if answer == "" and current:
+        print(f"  ✅ Keeping: {current}\n")
+        return
+    if answer == "" and not current:
+        print("  ⏭  Skipped. Dashboard will bind to localhost only.\n")
+        return
+
+    try:
+        data: dict = {}
+        if cfg_file.exists():
+            data = json.loads(cfg_file.read_text(encoding="utf-8"))
+        dashboard = data.setdefault("dashboard", {})
+        dashboard["url"] = answer
+        atomic_write(cfg_file, json.dumps(data, indent=2) + "\n")
+        print(f"  ✅ Dashboard URL saved: {answer}")
+        print("  Token auth will be required for all requests.\n")
+    except Exception as e:
+        print(f"  ❌ Failed to save: {e}\n")
+
+
+def _maybe_setup_custom_domain() -> None:
+    """Inform user about gideon.localhost dashboard URL."""
+    print("\n── Custom Domain ──\n")
+    print(f"  Dashboard available at http://{_CUSTOM_DOMAIN}:{DASHBOARD_PORT}")
+    print(
+        "  (*.localhost resolves to 127.0.0.1 per RFC 6761 — no /etc/hosts edit needed)\n"
+    )

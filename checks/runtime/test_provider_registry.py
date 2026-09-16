@@ -9,9 +9,13 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from gideon.llm.base import EVENT_COMPLETE, LLMEvent, ModelProvider
-from gideon.llm.capabilities import Capability, ProviderCapability
-from gideon.llm.registry import ProviderEntry, ProviderRegistry, ProviderResolutionError
+from gideon.integrations.llm.base import EVENT_COMPLETE, LLMEvent, ModelProvider
+from gideon.integrations.llm.capabilities import Capability, ProviderCapability
+from gideon.integrations.llm.registry import (
+    ProviderEntry,
+    ProviderRegistry,
+    ProviderResolutionError,
+)
 
 
 class _FakeProvider(ModelProvider):
@@ -46,7 +50,9 @@ class _FakeProvider(ModelProvider):
 
 def _make_capability(
     type_: str = "fake",
-    capabilities: frozenset[Capability] = frozenset({Capability.CHAT, Capability.STREAMING}),
+    capabilities: frozenset[Capability] = frozenset(
+        {Capability.CHAT, Capability.STREAMING}
+    ),
 ) -> ProviderCapability:
     return ProviderCapability(
         type=type_,
@@ -77,15 +83,10 @@ class TestProviderRegistry:
         assert reg.get_entry("fake-default") is entry
 
     def test_register_entry_unknown_type_is_stored(self) -> None:
-        # An entry whose type isn't registered YET must still be stored, not
-        # rejected: the app that owns the type can load AFTER
-        # sync_entries_from_config in some boot paths (the boot-order race that
-        # produced "unknown provider entry 'bedrock'; known entries: []"). The
-        # entry is kept so the type is available by inference time.
         reg = ProviderRegistry()
         entry = ProviderEntry(name="a", type="not-registered", model="m")
 
-        reg.register_entry(entry)  # must not raise
+        reg.register_entry(entry)
 
         assert [e.name for e in reg.list_entries()] == ["a"]
 
@@ -100,7 +101,6 @@ class TestProviderRegistry:
             name="bad",
             type="fake",
             model="m",
-            # EMBEDDING is not in the type's capability set.
             declared_capabilities=frozenset({Capability.CHAT, Capability.EMBEDDING}),
         )
 
@@ -154,8 +154,6 @@ class TestProviderRegistry:
         with pytest.raises(ProviderResolutionError, match="missing"):
             reg.build("missing")
 
-    # ── Defensive duplicate guards ────────────────────────────────────
-
     def test_duplicate_type_registration_raises(self) -> None:
         reg = ProviderRegistry()
         cap = _make_capability()
@@ -165,11 +163,6 @@ class TestProviderRegistry:
             reg.register_type(cap, _FakeProvider)
 
     def test_duplicate_entry_name_registration_is_idempotent(self) -> None:
-        # Re-registering the same name is a no-op, not an error:
-        # sync_entries_from_config runs once at boot, but the embedding path calls it
-        # again lazily to self-heal an unresolvable provider (embedding_providers/
-        # registry.py), so a second pass must not crash. The first registration wins;
-        # the entry set is unchanged.
         reg = ProviderRegistry()
         cap = _make_capability()
         reg.register_type(cap, _FakeProvider)
@@ -181,11 +174,9 @@ class TestProviderRegistry:
             declared_capabilities=frozenset({Capability.CHAT}),
         )
         reg.register_entry(entry)
-        reg.register_entry(entry)  # must not raise
+        reg.register_entry(entry)
 
         assert [e.name for e in reg.list_entries()] == ["dup"]
-
-    # ── Insertion order ───────────────────────────────────────────────
 
     def test_list_entries_returns_insertion_order(self) -> None:
         reg = ProviderRegistry()

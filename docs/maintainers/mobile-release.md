@@ -1,7 +1,9 @@
+> Ported upstream reference. Dated release, audit, and publication claims describe the donor project and do not certify this Gideon implementation.
+
 # Mobile release runbook (TestFlight + Play internal track)
 
 How to take a clean checkout to an installable **iOS TestFlight build** and an
-**Android Play internal-track build** of the companion shell (`mobile/`).
+**Android Play internal-track build** of the companion shell (`apps/mobile/`).
 Written like the [release runbook](release-runbook.md): where a number, path, or
 flag appears here it came from running the tool or reading its source, not from
 memory. Steps that need Xcode, an Android SDK, or a store console could not be
@@ -18,13 +20,13 @@ can do.
 There is no CI job and no tag trigger: both stores require locally signed
 uploads, so this is a maintainer-machine procedure. The committed inputs are
 small and the native projects are **regenerated, never committed**
-(`mobile/.gitignore`):
+(`apps/mobile/.gitignore`):
 
 | Committed | Generated per release |
 |---|---|
-| `mobile/capacitor.config.json`, `mobile/www/` — the shell itself | `mobile/ios/`, `mobile/android/` — via `cap add` |
-| `mobile/assets/` — the five images `@capacitor/assets` consumes, built by `mobile/scripts/generate_store_assets.py` from the brand assets | every AppIcon slot, adaptive-icon layer, and splash density — via `@capacitor/assets generate` |
-| `mobile/store/PrivacyInfo.xcprivacy`, `mobile/store/play-data-safety.md` — the truthful no-data-collection declarations | — |
+| `apps/mobile/capacitor.config.json`, `apps/mobile/www/` — the shell itself | `apps/mobile/ios/`, `apps/mobile/android/` — via `cap add` |
+| `apps/mobile/assets/` — the five images `@capacitor/assets` consumes, built by `apps/mobile/scripts/generate_store_assets.py` from the brand assets | every AppIcon slot, adaptive-icon layer, and splash density — via `@capacitor/assets generate` |
+| `apps/mobile/store/PrivacyInfo.xcprivacy`, `apps/mobile/store/play-data-safety.md` — the truthful no-data-collection declarations | — |
 
 The consequence of "regenerated, never committed": every manual step you
 perform inside `ios/` or `android/` (privacy manifest, push capability, version
@@ -42,13 +44,13 @@ deliberately few and are the checklists below.
 
 ## Versioning — where the version lives
 
-The shell's version of record is `mobile/package.json` → `version`. The native
+The shell's version of record is `apps/mobile/package.json` → `version`. The native
 projects regenerate with template defaults — verified: iOS
 `MARKETING_VERSION = 1.0` / `CURRENT_PROJECT_VERSION = 1` in
 `ios/App/App.xcodeproj`, Android `versionName "1.0"` / `versionCode 1` in
 `android/app/build.gradle` — so stamping is a per-release step:
 
-| Platform | User-facing version (set to `mobile/package.json`) | Build number (monotonic per upload) |
+| Platform | User-facing version (set to `apps/mobile/package.json`) | Build number (monotonic per upload) |
 |---|---|---|
 | iOS | `MARKETING_VERSION` (Xcode → App target → General → Version) | `CURRENT_PROJECT_VERSION` (→ Build) |
 | Android | `versionName` in `android/app/build.gradle` | `versionCode` in the same block |
@@ -56,7 +58,7 @@ projects regenerate with template defaults — verified: iOS
 Both stores refuse a reused build number (App Store Connect lists uploaded
 builds per version; Play rejects a duplicate `versionCode` outright), so "last
 uploaded + 1" is recoverable from the consoles if you lose count. Bump
-`mobile/package.json` in the PR that changes the shell, not during the build.
+`apps/mobile/package.json` in the PR that changes the shell, not during the build.
 
 ## From a clean checkout (both platforms)
 
@@ -65,17 +67,17 @@ npm ci                                 # repo root — single-root lockfile
 npm run test:mobile                    # the shell's own gate, node only
 ```
 
-The five source images in `mobile/assets/` are committed; regenerate them
+The five source images in `apps/mobile/assets/` are committed; regenerate them
 **only when the brand assets changed**, and commit the result:
 
 ```bash
-.venv/bin/python mobile/scripts/generate_store_assets.py
+.venv/bin/python apps/mobile/scripts/generate_store_assets.py
 ```
 
 ## iOS → TestFlight
 
 ```bash
-npm run add:ios --workspace mobile     # generates mobile/ios/ (gitignored)
+npm run add:ios --workspace mobile     # generates apps/mobile/ios/ (gitignored)
 npm run assets:ios --workspace mobile  # icons + splash into the Xcode asset catalog
 ```
 
@@ -86,7 +88,7 @@ into `ios/App/App/Assets.xcassets/`.
 
 Then the regeneration checklist — the manual steps a fresh `ios/` loses:
 
-1. **Privacy manifest.** Copy `mobile/store/PrivacyInfo.xcprivacy` to
+1. **Privacy manifest.** Copy `apps/mobile/store/PrivacyInfo.xcprivacy` to
    `ios/App/App/PrivacyInfo.xcprivacy`, then in Xcode (`npm run open:ios
    --workspace mobile`) File → *Add Files to "App"* → select it with **App
    target membership** checked. The generated project ships without one
@@ -113,7 +115,7 @@ Archive and upload — Xcode is the primary path **(not exercised)**:
 
 **OWNER — App Store Connect.** Register the bundle id, create the app record,
 answer App Privacy with **Data Not Collected** (the walk-through in
-[`mobile/store/play-data-safety.md`](../../mobile/store/play-data-safety.md)
+[`apps/mobile/store/play-data-safety.md`](../../apps/mobile/store/play-data-safety.md)
 is store-agnostic — same facts, same answer), add an internal TestFlight group.
 Internal testing needs no App Review. Setting
 `ITSAppUsesNonExemptEncryption = NO` in `ios/App/App/Info.plist` (the app uses
@@ -123,7 +125,7 @@ regeneration-checklist item if you adopt it.
 ## Android → Play internal track
 
 ```bash
-npm run add:android --workspace mobile     # generates mobile/android/ (gitignored)
+npm run add:android --workspace mobile     # generates apps/mobile/android/ (gitignored)
 npm run assets:android --workspace mobile  # icons + splash into android/app/src/main/res/
 ```
 
@@ -135,7 +137,7 @@ Regeneration checklist:
 
 1. **Push (optional).** Drop the owner-held `google-services.json` (Firebase
    console → the Android app with package `dev.gideon.companion`) into
-   `mobile/android/app/`. The generated `app/build.gradle` applies the
+   `apps/mobile/android/app/`. The generated `app/build.gradle` applies the
    `google-services` plugin only when that file is present, and logs *"Push
    Notifications won't work"* when it is absent (verified in the generated
    gradle). Keep the file out of the repo.
@@ -165,7 +167,7 @@ go on the command line as `--keystorepass`/`--keystorealiaspass`, but letting
 gradle prompt keeps them out of shell history).
 
 **OWNER — Play Console.** Create the app, fill **App content → Data safety**
-by transcribing [`mobile/store/play-data-safety.md`](../../mobile/store/play-data-safety.md)
+by transcribing [`apps/mobile/store/play-data-safety.md`](../../apps/mobile/store/play-data-safety.md)
 (answer: no collection, no sharing), create an **Internal testing** release,
 upload the `.aab`, add testers by email, and share the opt-in link. Internal
 testing propagates in minutes and needs no review.
@@ -175,9 +177,9 @@ testing propagates in minutes and needs no review.
 The store build is what finally exercises MC-9's on-device vendor leg (no rail
 in this repo can): shell registers via `@capacitor/push-notifications` → the
 served companion POSTs the token to the user's gateway
-(`/api/push/relay-register`, `web/src/app/nativePush.ts`) → the gateway's
+(`/api/push/relay-register`, `apps/console/src/app/nativePush.ts`) → the gateway's
 `relay` backend forwards **ids-only** pings through the user-configured
-`mobile.relay_url` (`tests/test_mc9_relay_push.py` proves the envelope is
+`mobile.relay_url` (`checks/runtime/test_mc9_relay_push.py` proves the envelope is
 content-free). Record the first real handset round-trip in
 MOBILE-COMPANION's validation log when it happens.
 
@@ -187,7 +189,7 @@ Walked on 2026-09-05 against Capacitor **8.5.0** from a clean worktree, macOS,
 no CocoaPods installed: root `npm ci`, `npm run test:mobile`,
 `cap add ios` (SPM project, push plugin detected), `cap add android`,
 `@capacitor/assets generate` for both platforms (7 iOS + 74 Android resources
-from `mobile/assets/`), the asset-source regeneration script, and
+from `apps/mobile/assets/`), the asset-source regeneration script, and
 `cap build --help` for the exact flag names. Confirmed by inspection: the iOS
 template carries no app-level privacy manifest; the Android template's
 `google-services.json` guard; both templates' version-field defaults.

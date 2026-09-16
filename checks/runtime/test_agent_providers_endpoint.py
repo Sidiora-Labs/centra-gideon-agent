@@ -20,13 +20,13 @@ import json
 import pytest
 from aiohttp.test_utils import make_mocked_request
 
-from gideon.dashboard.handlers.providers import api_agent_providers_list
-from gideon.llm.acp_agent import ACP_AGENT_CAPABILITY
-from gideon.llm.registry import (
+from gideon.integrations.llm.acp_agent import ACP_AGENT_CAPABILITY
+from gideon.integrations.llm.registry import (
     ProviderEntry,
     get_default_registry,
     reset_default_registry,
 )
+from gideon.interfaces.dashboard.handlers.providers import api_agent_providers_list
 
 
 @pytest.fixture(autouse=True)
@@ -41,12 +41,12 @@ def _restore_registry_singletons():
     """
     import sys
 
-    import gideon.llm as _llm_pkg
-    from gideon.agents import registry as _agent_reg
-    from gideon.llm import registry as _model_reg
+    import gideon.integrations.llm as _llm_pkg
+    from gideon.engine.agents import registry as _agent_reg
+    from gideon.integrations.llm import registry as _model_reg
 
     saved_registry = _model_reg._default_registry
-    saved_module = sys.modules.get("gideon.llm.acp_agent")
+    saved_module = sys.modules.get("gideon.integrations.llm.acp_agent")
     saved_pkg_attr = getattr(_llm_pkg, "acp_agent", None)
     saved_agent_providers = dict(_agent_reg._providers)
     try:
@@ -54,7 +54,7 @@ def _restore_registry_singletons():
     finally:
         _model_reg.set_default_registry(saved_registry)
         if saved_module is not None:
-            sys.modules["gideon.llm.acp_agent"] = saved_module
+            sys.modules["gideon.integrations.llm.acp_agent"] = saved_module
             _llm_pkg.acp_agent = saved_pkg_attr
         _agent_reg._providers.clear()
         _agent_reg._providers.update(saved_agent_providers)
@@ -67,13 +67,15 @@ def _fresh_registry():
     reset_default_registry()
     import importlib
 
-    import gideon.llm.acp_agent as _acp_agent
+    import gideon.integrations.llm.acp_agent as _acp_agent
 
     importlib.reload(_acp_agent)
 
 
 def _call(query: str = "") -> dict:
-    req = make_mocked_request("GET", "/api/agent-providers" + (f"?{query}" if query else ""))
+    req = make_mocked_request(
+        "GET", "/api/agent-providers" + (f"?{query}" if query else "")
+    )
     resp = asyncio.run(api_agent_providers_list(req))
     return json.loads(resp.body.decode())
 
@@ -82,8 +84,8 @@ def test_pool_warmed_runtime_answered_without_probe(monkeypatch):
     """A runtime with a live warmed pool connection is reported ready INSTANTLY —
     probe_readiness is never called (this is what kept /api/agent-providers fast
     so the chat picker's discovered section appears immediately)."""
-    from gideon.acp import connection_pool as cp
-    from gideon.agents.registry import get_agent_provider_class
+    from gideon.engine.agents.registry import get_agent_provider_class
+    from gideon.integrations.acp import connection_pool as cp
 
     _fresh_registry()
     try:
@@ -106,12 +108,18 @@ def test_pool_warmed_runtime_answered_without_probe(monkeypatch):
         cp.set_acp_pool(_FakePool())
 
         async def boom(cls, options):
-            raise AssertionError("probe_readiness must NOT run for a pool-warmed runtime")
+            raise AssertionError(
+                "probe_readiness must NOT run for a pool-warmed runtime"
+            )
 
-        monkeypatch.setattr(get_agent_provider_class("acp"), "probe_readiness", classmethod(boom))
+        monkeypatch.setattr(
+            get_agent_provider_class("acp"), "probe_readiness", classmethod(boom)
+        )
 
         data = _call()
-        row = next(r for r in data["agent_providers"] if r["provider_id"] == "acp:test-cli")
+        row = next(
+            r for r in data["agent_providers"] if r["provider_id"] == "acp:test-cli"
+        )
         assert row["ready"] is True and row["state"] == "ready"
     finally:
         cp.set_acp_pool(None)
@@ -121,15 +129,15 @@ def test_pool_warmed_runtime_answered_without_probe(monkeypatch):
 def test_readiness_cache_avoids_reprobe(monkeypatch):
     """A not-pooled runtime is probed once, then served from the readiness cache
     on subsequent calls (so codex's slow-failing probe isn't re-paid each time)."""
-    from gideon.acp import connection_pool as cp
-    from gideon.agents.provider import ReadinessStatus
-    from gideon.agents.registry import get_agent_provider_class
-    from gideon.dashboard.handlers import providers as prov_mod
+    from gideon.engine.agents.provider import ReadinessStatus
+    from gideon.engine.agents.registry import get_agent_provider_class
+    from gideon.integrations.acp import connection_pool as cp
+    from gideon.interfaces.dashboard.handlers import providers as prov_mod
 
     _fresh_registry()
     try:
         prov_mod._readiness_cache.clear()
-        cp.set_acp_pool(None)  # nothing pooled → must probe
+        cp.set_acp_pool(None)
         registry = get_default_registry()
         registry.register_entry(
             ProviderEntry(
@@ -153,8 +161,7 @@ def test_readiness_cache_avoids_reprobe(monkeypatch):
 
         _call()
         _call()
-        assert calls["n"] == 1  # second call served from cache
-        # ?refresh=1 bypasses the cache → a fresh probe runs (post-sign-in re-check).
+        assert calls["n"] == 1
         _call("refresh=1")
         assert calls["n"] == 2
     finally:
@@ -172,13 +179,13 @@ def test_native_row_always_present_and_ready():
         assert native["ready"] is True
         assert native["state"] == "ready"
         assert native["extension"] == "native-agents"
-        assert native["login_command"] is None  # in-process, no sign-in
+        assert native["login_command"] is None
     finally:
         reset_default_registry()
 
 
 def _call_agents(runtime_id: str, query: str = "") -> tuple[int, dict]:
-    from gideon.dashboard.handlers.providers import api_agent_provider_agents
+    from gideon.interfaces.dashboard.handlers.providers import api_agent_provider_agents
 
     path = f"/api/agent-providers/{runtime_id}/agents" + (f"?{query}" if query else "")
     req = make_mocked_request("GET", path, match_info={"id": runtime_id})
@@ -187,7 +194,7 @@ def _call_agents(runtime_id: str, query: str = "") -> tuple[int, dict]:
 
 
 def test_discovery_native_returns_empty():
-    """native has no discovered agents (its agents are PClaw's own definitions)."""
+    """native has no discovered agents (its agents are Gideon's own definitions)."""
     _fresh_registry()
     try:
         status, data = _call_agents("native")
@@ -208,9 +215,9 @@ def test_discovery_unknown_runtime_404():
 
 def test_discovery_lists_agents_and_caches(monkeypatch):
     """Discovery surfaces discover_agents output + caches it (2nd call cached)."""
-    from gideon.agents.provider import DiscoveredAgent
-    from gideon.agents.registry import get_agent_provider_class
-    from gideon.dashboard.handlers import providers as prov_mod
+    from gideon.engine.agents.provider import DiscoveredAgent
+    from gideon.engine.agents.registry import get_agent_provider_class
+    from gideon.interfaces.dashboard.handlers import providers as prov_mod
 
     _fresh_registry()
     try:
@@ -231,7 +238,7 @@ def test_discovery_lists_agents_and_caches(monkeypatch):
         async def fake_discover(cls, options):
             calls["n"] += 1
             assert options.get("runtime_id") == "acp:test-cli"
-            assert options.get("runtime_label") == "Test Cli"  # title-cased label
+            assert options.get("runtime_label") == "Test Cli"
             return [
                 DiscoveredAgent(
                     id="acp:test-cli/gpu-dev",
@@ -242,8 +249,6 @@ def test_discovery_lists_agents_and_caches(monkeypatch):
                 )
             ]
 
-        # Patch the class the handler actually resolves (acp_agent was reloaded by
-        # _fresh_registry, so a stale import would miss).
         acp_cls = get_agent_provider_class("acp")
         monkeypatch.setattr(acp_cls, "discover_agents", classmethod(fake_discover))
 
@@ -252,12 +257,10 @@ def test_discovery_lists_agents_and_caches(monkeypatch):
         assert [a["id"] for a in data["agents"]] == ["acp:test-cli/gpu-dev"]
         assert calls["n"] == 1
 
-        # 2nd call served from cache — discover_agents NOT called again.
         status, data2 = _call_agents("acp:test-cli")
         assert data2["cached"] is True and calls["n"] == 1
         assert [a["id"] for a in data2["agents"]] == ["acp:test-cli/gpu-dev"]
 
-        # refresh=1 bypasses the cache.
         status, data3 = _call_agents("acp:test-cli", query="refresh=1")
         assert data3["cached"] is False and calls["n"] == 2
     finally:
@@ -268,9 +271,9 @@ def test_discovery_lists_agents_and_caches(monkeypatch):
 def test_discovery_uses_pool_snapshot_without_spawn(monkeypatch):
     """When a warmed pool connection holds a live snapshot, discovery maps it
     directly (agents_from_snapshot) and never calls the spawning discover_agents."""
-    from gideon.acp import connection_pool as cp
-    from gideon.agents.registry import get_agent_provider_class
-    from gideon.dashboard.handlers import providers as prov_mod
+    from gideon.engine.agents.registry import get_agent_provider_class
+    from gideon.integrations.acp import connection_pool as cp
+    from gideon.interfaces.dashboard.handlers import providers as prov_mod
 
     _fresh_registry()
     try:
@@ -287,23 +290,27 @@ def test_discovery_uses_pool_snapshot_without_spawn(monkeypatch):
             )
         )
 
-        # A fake pool that serves a live snapshot for the runtime.
         class _FakePool:
             def snapshot(self, runtime_id):
                 if runtime_id == "acp:test-cli":
                     return {
-                        "modes": {"availableModes": [{"id": "gpu-dev", "name": "gpu-dev"}]},
+                        "modes": {
+                            "availableModes": [{"id": "gpu-dev", "name": "gpu-dev"}]
+                        },
                         "models": {"availableModels": [{"modelId": "auto"}]},
                     }
                 return None
 
         cp.set_acp_pool(_FakePool())
 
-        # discover_agents (the spawning path) must NOT be called.
         async def boom(cls, options):
-            raise AssertionError("discover_agents should not spawn when pool snapshot exists")
+            raise AssertionError(
+                "discover_agents should not spawn when pool snapshot exists"
+            )
 
-        monkeypatch.setattr(get_agent_provider_class("acp"), "discover_agents", classmethod(boom))
+        monkeypatch.setattr(
+            get_agent_provider_class("acp"), "discover_agents", classmethod(boom)
+        )
 
         status, data = _call_agents("acp:test-cli")
         assert status == 200
@@ -326,7 +333,6 @@ def test_acp_entry_provider_id_is_entry_name_not_basename():
                 name="acp:claude-code",
                 type="acp_agent",
                 model="claude-opus-4-8",
-                # command[0] basename is the ADAPTER, deliberately != the cli id.
                 options={
                     "command": ["/usr/local/bin/claude-agent-acp"],
                     "dialect": "claude-code",
@@ -340,7 +346,6 @@ def test_acp_entry_provider_id_is_entry_name_not_basename():
         data = _call()
         rows = {r["provider_id"]: r for r in data["agent_providers"]}
         assert "acp:claude-code" in rows
-        # NOT the adapter basename:
         assert "acp:claude-agent-acp" not in rows
         row = rows["acp:claude-code"]
         assert row["name"] == "acp:claude-code"

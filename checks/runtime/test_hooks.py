@@ -2,7 +2,7 @@
 
 import pytest
 
-from gideon.hooks import (
+from gideon.engine.hooks import (
     HOOK_INJECT_CONTEXT,
     HOOK_MODIFY,
     HOOK_PASSTHROUGH,
@@ -49,7 +49,9 @@ class TestMessageHooks:
         assert result.action == HOOK_PASSTHROUGH
 
     def test_auto_reply_exact(self):
-        cfg = HooksConfig(auto_replies=[AutoReplyHook(pattern="ping", reply="pong", exact=True)])
+        cfg = HooksConfig(
+            auto_replies=[AutoReplyHook(pattern="ping", reply="pong", exact=True)]
+        )
         mgr = HookManager(cfg)
         assert mgr.on_message("ping").action == HOOK_REPLY
         assert mgr.on_message("ping").text == "pong"
@@ -63,7 +65,9 @@ class TestMessageHooks:
         assert mgr.on_message("I need help please").action == HOOK_REPLY
 
     def test_transform(self):
-        cfg = HooksConfig(transforms=[TransformHook(pattern="deploy", prefix="[DEPLOY MODE]")])
+        cfg = HooksConfig(
+            transforms=[TransformHook(pattern="deploy", prefix="[DEPLOY MODE]")]
+        )
         mgr = HookManager(cfg)
         result = mgr.on_message("deploy my app")
         assert result.action == HOOK_MODIFY
@@ -151,22 +155,27 @@ class TestToolHooks:
         cfg = HooksConfig(auto_approve_tools=["Running: *"])
         mgr = HookManager(cfg)
         assert (
-            mgr.on_tool_call("Running: export PATH=x && npm run test").action == TOOL_AUTO_APPROVE
+            mgr.on_tool_call("Running: export PATH=x && npm run test").action
+            == TOOL_AUTO_APPROVE
         )
         assert mgr.on_tool_call("Running: ls -la").action == TOOL_AUTO_APPROVE
-        # MCP tools without prefix should NOT match
         assert mgr.on_tool_call("TrackerCreateIssue").action == TOOL_ALLOW
 
     def test_reading_prefix_pattern_auto_approves(self):
         """'Reading *' matches file-read tools whose title starts with 'Reading '."""
         cfg = HooksConfig(auto_approve_tools=["Reading *"])
         mgr = HookManager(cfg)
-        assert mgr.on_tool_call("Reading /workplace/src/file.py").action == TOOL_AUTO_APPROVE
+        assert (
+            mgr.on_tool_call("Reading /workplace/src/file.py").action
+            == TOOL_AUTO_APPROVE
+        )
         assert mgr.on_tool_call("TrackerCreateIssue").action == TOOL_ALLOW
 
     def test_mixed_prefix_and_name_patterns(self):
         """Both prefix-based and tool-name patterns should work in the same config."""
-        cfg = HooksConfig(auto_approve_tools=["Running: *", "Reading *", "*TrackerGetIssue*"])
+        cfg = HooksConfig(
+            auto_approve_tools=["Running: *", "Reading *", "*TrackerGetIssue*"]
+        )
         mgr = HookManager(cfg)
         assert mgr.on_tool_call("Running: npm run test").action == TOOL_AUTO_APPROVE
         assert mgr.on_tool_call("Reading /tmp/file.txt").action == TOOL_AUTO_APPROVE
@@ -180,12 +189,9 @@ class TestToolHooks:
             auto_deny_tools=["Running: rm *"],
         )
         mgr = HookManager(cfg)
-        # "Running: rm -rf /" should be DENIED even though "Running: *" would approve
         result = mgr.on_tool_call("Running: rm -rf /")
         assert result.action == TOOL_DENY
-        # Non-denied prefixed tools still auto-approve
         assert mgr.on_tool_call("Running: ls -la").action == TOOL_AUTO_APPROVE
-        # Plain tool name deny still works via normalized
         assert mgr.on_tool_call("Running: rm foo").action == TOOL_DENY
 
 
@@ -205,7 +211,9 @@ class TestHooksConfigFromDict:
                 "auto_replies": [{"pattern": "ping", "reply": "pong", "exact": True}],
                 "transforms": [{"pattern": "deploy", "prefix": "[DEPLOY]"}],
                 "auto_approve_subagent_spawn": True,
-                "context_rules": [{"triggers": ["pipeline"], "context": "Use pipeline tool."}],
+                "context_rules": [
+                    {"triggers": ["pipeline"], "context": "Use pipeline tool."}
+                ],
             }
         )
         assert len(cfg.auto_approve_tools) == 1
@@ -213,7 +221,7 @@ class TestHooksConfigFromDict:
         assert cfg.auto_replies[0].exact is True
         assert len(cfg.context_rules) == 1
         assert cfg.auto_approve_subagent_spawn is True
-        assert cfg.auto_approve_subagent_tools is False  # independent flag, not inherited
+        assert cfg.auto_approve_subagent_tools is False
 
     def test_subagent_tools_independent_of_spawn(self):
         cfg = HooksConfig.from_dict(
@@ -236,14 +244,14 @@ class TestHooksConfigFromDict:
         assert cfg.auto_approve_subagent_tools is True
 
     def test_hook_manager_auto_approve_subagent_tools_property(self):
-        from gideon.hooks import HookManager
+        from gideon.engine.hooks import HookManager
 
         cfg = HooksConfig.from_dict({"auto_approve_subagent_tools": True})
         mgr = HookManager(cfg)
         assert mgr.auto_approve_subagent_tools is True
 
     def test_hook_manager_auto_approve_subagent_tools_default(self):
-        from gideon.hooks import HookManager
+        from gideon.engine.hooks import HookManager
 
         cfg = HooksConfig.from_dict({})
         mgr = HookManager(cfg)
@@ -256,7 +264,9 @@ class TestHookReload:
         assert mgr.on_message("ping").action == HOOK_PASSTHROUGH
 
         mgr.reload(
-            HooksConfig(auto_replies=[AutoReplyHook(pattern="ping", reply="pong", exact=True)])
+            HooksConfig(
+                auto_replies=[AutoReplyHook(pattern="ping", reply="pong", exact=True)]
+            )
         )
         assert mgr.on_message("ping").action == HOOK_REPLY
 

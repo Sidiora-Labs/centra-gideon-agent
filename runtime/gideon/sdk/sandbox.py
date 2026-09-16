@@ -6,7 +6,7 @@ host path-sandbox + resource-ceiling primitives Gideon already applies. The app 
 through the ``sandbox`` provider type (``providers/registry.py::SandboxTypeHandler``).
 """
 
-from gideon.sandbox_providers.base import (  # noqa: F401
+from gideon.integrations.sandbox_providers.base import (
     SandboxHandle,
     SandboxProvider,
     SandboxSpec,

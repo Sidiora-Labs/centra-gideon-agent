@@ -36,9 +36,10 @@ def mcp_env(tmp_path: Path):
     )
 
     with (
-        patch("gideon.dashboard.handlers.mcp._GLOBAL_MCP_JSON", mcp_json),
+        patch("gideon.interfaces.dashboard.handlers.mcp._GLOBAL_MCP_JSON", mcp_json),
         patch(
-            "gideon.dashboard.handlers.agents._installed_agent_config", return_value=agent_cfg
+            "gideon.interfaces.dashboard.handlers.agents._installed_agent_config",
+            return_value=agent_cfg,
         ),
     ):
         yield agent_cfg, mcp_json
@@ -51,7 +52,7 @@ def _load(path: Path) -> dict:
 class TestSyncMcpToAgent:
     def test_enable_adds_server_and_tool_refs(self, mcp_env):
         agent_cfg, _ = mcp_env
-        from gideon.dashboard.handlers.mcp import _sync_mcp_to_agent
+        from gideon.interfaces.dashboard.handlers.mcp import _sync_mcp_to_agent
 
         _sync_mcp_to_agent("generic-mcp", enabled=True)
         cfg = _load(agent_cfg)
@@ -61,7 +62,7 @@ class TestSyncMcpToAgent:
 
     def test_enable_preserves_existing_server(self, mcp_env):
         agent_cfg, _ = mcp_env
-        from gideon.dashboard.handlers.mcp import _sync_mcp_to_agent
+        from gideon.interfaces.dashboard.handlers.mcp import _sync_mcp_to_agent
 
         _sync_mcp_to_agent("my-mcp-server", enabled=True)
         cfg = _load(agent_cfg)
@@ -72,7 +73,7 @@ class TestSyncMcpToAgent:
         d = json.loads(mcp_json.read_text())
         d["mcpServers"]["generic-mcp"]["disabled"] = True
         mcp_json.write_text(json.dumps(d))
-        from gideon.dashboard.handlers.mcp import _sync_mcp_to_agent
+        from gideon.interfaces.dashboard.handlers.mcp import _sync_mcp_to_agent
 
         _sync_mcp_to_agent("generic-mcp", enabled=True)
         cfg = _load(agent_cfg)
@@ -80,7 +81,7 @@ class TestSyncMcpToAgent:
 
     def test_enable_noop_when_already_present(self, mcp_env):
         agent_cfg, _ = mcp_env
-        from gideon.dashboard.handlers.mcp import _sync_mcp_to_agent
+        from gideon.interfaces.dashboard.handlers.mcp import _sync_mcp_to_agent
 
         _sync_mcp_to_agent("my-mcp-server", enabled=True)
         cfg = _load(agent_cfg)
@@ -88,7 +89,7 @@ class TestSyncMcpToAgent:
 
     def test_disable_removes_tool_refs(self, mcp_env):
         agent_cfg, _ = mcp_env
-        from gideon.dashboard.handlers.mcp import _sync_mcp_to_agent
+        from gideon.interfaces.dashboard.handlers.mcp import _sync_mcp_to_agent
 
         _sync_mcp_to_agent("my-mcp-server", enabled=False)
         cfg = _load(agent_cfg)
@@ -97,7 +98,7 @@ class TestSyncMcpToAgent:
 
     def test_remove_deletes_server_entry(self, mcp_env):
         agent_cfg, _ = mcp_env
-        from gideon.dashboard.handlers.mcp import _sync_mcp_to_agent
+        from gideon.interfaces.dashboard.handlers.mcp import _sync_mcp_to_agent
 
         _sync_mcp_to_agent("my-mcp-server", enabled=False, remove=True)
         cfg = _load(agent_cfg)
@@ -106,7 +107,7 @@ class TestSyncMcpToAgent:
     def test_enable_returns_early_on_missing_mcp_json(self, mcp_env):
         agent_cfg, mcp_json = mcp_env
         mcp_json.unlink()
-        from gideon.dashboard.handlers.mcp import _sync_mcp_to_agent
+        from gideon.interfaces.dashboard.handlers.mcp import _sync_mcp_to_agent
 
         _sync_mcp_to_agent("generic-mcp", enabled=True)
         cfg = _load(agent_cfg)
@@ -116,7 +117,7 @@ class TestSyncMcpToAgent:
 class TestSyncMcpToAgentBatch:
     def test_enable_adds_multiple_servers(self, mcp_env):
         agent_cfg, _ = mcp_env
-        from gideon.dashboard.handlers.mcp import _sync_mcp_to_agent_batch
+        from gideon.interfaces.dashboard.handlers.mcp import _sync_mcp_to_agent_batch
 
         _sync_mcp_to_agent_batch(["generic-mcp", "email-mcp"], enabled=True)
         cfg = _load(agent_cfg)
@@ -127,7 +128,7 @@ class TestSyncMcpToAgentBatch:
 
     def test_disable_removes_multiple_tool_refs(self, mcp_env):
         agent_cfg, _ = mcp_env
-        from gideon.dashboard.handlers.mcp import _sync_mcp_to_agent_batch
+        from gideon.interfaces.dashboard.handlers.mcp import _sync_mcp_to_agent_batch
 
         _sync_mcp_to_agent_batch(["my-mcp-server"], enabled=False)
         cfg = _load(agent_cfg)
@@ -137,11 +138,10 @@ class TestSyncMcpToAgentBatch:
         """Post #15 fix: existing servers get tool refs even when mcp.json missing."""
         agent_cfg, mcp_json = mcp_env
         mcp_json.unlink()
-        from gideon.dashboard.handlers.mcp import _sync_mcp_to_agent_batch
+        from gideon.interfaces.dashboard.handlers.mcp import _sync_mcp_to_agent_batch
 
         _sync_mcp_to_agent_batch(["my-mcp-server"], enabled=True)
         cfg = _load(agent_cfg)
-        # my-mcp-server already in mcpServers, should still get tool ref
         assert "@my-mcp-server" in cfg["tools"]
 
     def test_enable_skips_invalid_spec(self, mcp_env):
@@ -149,7 +149,7 @@ class TestSyncMcpToAgentBatch:
         d = json.loads(mcp_json.read_text())
         d["mcpServers"]["bad-server"] = "not-a-dict"
         mcp_json.write_text(json.dumps(d))
-        from gideon.dashboard.handlers.mcp import _sync_mcp_to_agent_batch
+        from gideon.interfaces.dashboard.handlers.mcp import _sync_mcp_to_agent_batch
 
         _sync_mcp_to_agent_batch(["bad-server"], enabled=True)
         cfg = _load(agent_cfg)
@@ -157,7 +157,7 @@ class TestSyncMcpToAgentBatch:
 
     def test_noop_returns_without_write(self, mcp_env):
         agent_cfg, _ = mcp_env
-        from gideon.dashboard.handlers.mcp import _sync_mcp_to_agent_batch
+        from gideon.interfaces.dashboard.handlers.mcp import _sync_mcp_to_agent_batch
 
         _sync_mcp_to_agent_batch(["my-mcp-server"], enabled=True)
         cfg = _load(agent_cfg)

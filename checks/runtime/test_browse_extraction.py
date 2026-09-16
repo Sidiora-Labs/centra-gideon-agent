@@ -10,7 +10,7 @@ Pure over an HTML string — no network, no home touched.
 
 from __future__ import annotations
 
-from gideon.browse.extraction import (
+from gideon.integrations.browse.extraction import (
     MAX_TEXT_CHARS,
     ElementRef,
     extract_page,
@@ -55,8 +55,8 @@ def test_extract_returns_structured_representation():
     assert page.url == "https://example.com/"
     assert "genuine article body" in page.text
     assert len(page.text) <= MAX_TEXT_CHARS
-    assert page.links  # Links DSL source present
-    assert page.forms  # Forms DSL source present
+    assert page.links
+    assert page.forms
 
 
 def test_text_is_capped_at_4000_chars():
@@ -66,8 +66,6 @@ def test_text_is_capped_at_4000_chars():
 
 
 def test_text_body_has_no_base64_from_images():
-    # An <img src="data:image/...;base64,..."> must NOT leak into the text body — it becomes
-    # an [IMAGE: alt] placeholder (the §1.1 rule that keeps base64 out of context).
     page = extract_page(_PAGE, url="https://example.com/")
     assert "base64" not in page.text
     assert "[IMAGE: a diagram]" in page.text
@@ -86,7 +84,6 @@ def test_links_filtered_and_labelled():
     assert "/pricing" in targets
     assert "https://docs.example.com/intro" in targets
     assert "Documentation" in labels
-    # Filtered out: fragment-only, asset extension, javascript: scheme.
     assert not any(t.startswith("#") for t in targets)
     assert "/logo.png" not in targets
     assert not any(t.startswith("javascript:") for t in targets)
@@ -96,7 +93,7 @@ def test_link_tracking_params_stripped():
     html = '<a href="/results?q=cats&utm_source=news&ref=abc">Search cats</a>'
     page = extract_page(html)
     (link,) = page.links
-    assert link.target == "/results?q=cats"  # utm_source/ref dropped, q kept
+    assert link.target == "/results?q=cats"
 
 
 def test_long_url_rejected():
@@ -115,9 +112,7 @@ def test_forms_dsl_captures_fields_and_types():
     assert "required" in login_fields["email"].note
     assert login_fields["remember"].role == "checkbox"
     assert login_fields["remember"].state == "unchecked"
-    # submit button is captured as a button role
     assert any(e.role == "button" for e in forms["login"].fields)
-    # <button>Go</button> inner text becomes its label
     assert any(e.label == "Go" for e in forms["search"].fields)
 
 
@@ -145,8 +140,6 @@ def test_forms_dsl_render_shape():
     assert "## Forms" in dsl
 
 
-# ── The load-bearing property: ElementRef stability across an unrelated DOM mutation ──
-
 _BEFORE = """
 <body>
   <main><p>original intro paragraph with several words here.</p></main>
@@ -158,9 +151,6 @@ _BEFORE = """
 </body>
 """
 
-# Same login form; an UNRELATED part of the page changed (new banner + a new nav link + the
-# intro text rewritten). A positional-index scheme would renumber the form's fields; identity
-# refs must not move.
 _AFTER = """
 <body>
   <div class="banner">Flash sale! 40% off today only.</div>
@@ -187,7 +177,6 @@ def _field_refs(html: str) -> dict[str, str]:
 def test_element_refs_survive_unrelated_dom_mutation():
     before = _field_refs(_BEFORE)
     after = _field_refs(_AFTER)
-    # Every login field present before is still present after WITH THE SAME REF.
     assert before, "fixture produced no fields"
     for key, ref in before.items():
         assert key in after, f"element {key} disappeared after mutation"
@@ -195,14 +184,17 @@ def test_element_refs_survive_unrelated_dom_mutation():
 
 
 def test_ref_is_pure_identity_not_position():
-    # Two forms; adding a field to the FIRST form must not change the SECOND form's field ref.
     a = '<form name="a"><input name="x" type="text"></form><form name="b"><input name="y"></form>'
     b = (
         '<form name="a"><input name="new" type="text"><input name="x" type="text"></form>'
         '<form name="b"><input name="y"></form>'
     )
-    ref_a = next(e.ref for f in extract_page(a).forms if f.name == "b" for e in f.fields)
-    ref_b = next(e.ref for f in extract_page(b).forms if f.name == "b" for e in f.fields)
+    ref_a = next(
+        e.ref for f in extract_page(a).forms if f.name == "b" for e in f.fields
+    )
+    ref_b = next(
+        e.ref for f in extract_page(b).forms if f.name == "b" for e in f.fields
+    )
     assert ref_a == ref_b
 
 
@@ -211,7 +203,7 @@ def test_same_ref_for_identical_element_across_calls():
     r2 = extract_page(_BEFORE)
     refs1 = [e.ref for f in r1.forms for e in f.fields]
     refs2 = [e.ref for f in r2.forms for e in f.fields]
-    assert refs1 == refs2  # deterministic
+    assert refs1 == refs2
 
 
 def test_empty_html():
@@ -232,7 +224,7 @@ def test_elementref_is_frozen():
     e = ElementRef(ref="abc", role="link", label="x")
     try:
         e.ref = "y"  # type: ignore[misc]
-    except Exception as exc:  # frozen dataclass raises FrozenInstanceError
+    except Exception as exc:
         assert "cannot assign" in str(exc) or "frozen" in str(exc).lower()
     else:
         raise AssertionError("ElementRef should be frozen")

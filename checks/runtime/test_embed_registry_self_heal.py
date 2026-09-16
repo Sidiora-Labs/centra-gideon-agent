@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.embedding_providers import registry as reg
-from gideon.llm.registry import ProviderResolutionError
+from gideon.integrations.embedding_providers import registry as reg
+from gideon.integrations.llm.registry import ProviderResolutionError
 
 
 class _FakeProvider:
@@ -65,7 +65,7 @@ def wired(monkeypatch):
 
     def _wire(*, sync_adds: bool = True) -> _Registry:
         r = _Registry(sync_adds=sync_adds)
-        import gideon.llm.registry as llm_reg
+        import gideon.integrations.llm.registry as llm_reg
 
         monkeypatch.setattr(llm_reg, "get_default_registry", lambda: r)
         monkeypatch.setattr(llm_reg, "sync_entries_from_config", r.sync)
@@ -112,13 +112,15 @@ def test_a_failing_sync_degrades_to_none_rather_than_raising(wired, monkeypatch)
     def _boom() -> int:
         raise OSError("config unreadable")
 
-    import gideon.llm.registry as llm_reg
+    import gideon.integrations.llm.registry as llm_reg
 
     monkeypatch.setattr(llm_reg, "sync_entries_from_config", _boom)
     assert reg._llm_embed_fn("Ollama", "m") is None
 
 
-def test_a_provider_without_embed_is_rejected_after_a_successful_sync(wired, monkeypatch):
+def test_a_provider_without_embed_is_rejected_after_a_successful_sync(
+    wired, monkeypatch
+):
     """Syncing can make a provider resolvable that still cannot embed. That must
     report "doesn't support embeddings", not hand back a broken fn."""
     r = wired()
@@ -130,7 +132,9 @@ def test_a_provider_without_embed_is_rejected_after_a_successful_sync(wired, mon
     def _build(name: str, **kw: object) -> object:
         r.build_calls += 1
         if name not in r._entries:
-            raise ProviderResolutionError(f"unknown provider entry {name!r}; known entries: []")
+            raise ProviderResolutionError(
+                f"unknown provider entry {name!r}; known entries: []"
+            )
         return _NoEmbed()
 
     monkeypatch.setattr(r, "build", _build)

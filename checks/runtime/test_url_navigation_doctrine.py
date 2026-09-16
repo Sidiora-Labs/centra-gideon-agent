@@ -16,11 +16,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-_PAGES = Path("web/src/pages")
-_ROUTER = Path("web/src/app/useHashRoute.ts")
+_PAGES = Path("apps/console/src/pages")
+_ROUTER = Path("apps/console/src/app/useHashRoute.ts")
 
-# Raw URL/history mutations that bypass the router. The router file itself is the
-# ONLY place allowed to touch these (it owns the push/replace mechanics).
 _BYPASS_RE = re.compile(
     r"location\.hash\s*=|history\.(pushState|replaceState)\b|location\.replace\s*\(",
 )
@@ -44,8 +42,13 @@ def _uncommented(line: str) -> str:
         elif c in "\"'`":
             quote = c
             out.append(c)
-        elif c == "/" and i + 1 < n and line[i + 1] == "/" and (i == 0 or line[i - 1] != ":"):
-            break  # real line comment (`:` guard keeps https:// URLs intact)
+        elif (
+            c == "/"
+            and i + 1 < n
+            and line[i + 1] == "/"
+            and (i == 0 or line[i - 1] != ":")
+        ):
+            break
         else:
             out.append(c)
         i += 1
@@ -108,9 +111,21 @@ def test_replace_keys_use_replace_semantics():
     pass `{ replace: true }`; otherwise it defaults to PUSH and every toggle spams a
     history entry (so Back rewinds filter changes instead of leaving the page). The
     push keys (open/edit/panel/entity/intent/dir) are intentionally absent here."""
-    replace_keys = ("q", "tab", "view", "filter", "sort", "scope", "list", "include", "src", "tag")
-    # useQueryParam(<q>, <sq>, 'KEY'  … ) — capture through end of line to see opts.
-    call_re = re.compile(r"useQueryParam\([^,]+,[^,]+,\s*'(" + "|".join(replace_keys) + r")'")
+    replace_keys = (
+        "q",
+        "tab",
+        "view",
+        "filter",
+        "sort",
+        "scope",
+        "list",
+        "include",
+        "src",
+        "tag",
+    )
+    call_re = re.compile(
+        r"useQueryParam\([^,]+,[^,]+,\s*'(" + "|".join(replace_keys) + r")'"
+    )
     offenders: list[str] = []
     for f in _PAGES.rglob("*.tsx"):
         for lineno, raw in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
@@ -131,13 +146,19 @@ def test_tasks_deep_links_use_a_key_the_tasks_route_reads():
     Tasks list with no detail panel open — a dead deep link with no error anywhere.
     The reader's key set is DERIVED from TasksSection.tsx rather than duplicated
     here, so renaming the contract can't leave this guard asserting a stale name."""
-    reader = Path("web/src/pages/tasks/TasksSection.tsx").read_text(encoding="utf-8")
+    reader = Path("apps/console/src/pages/tasks/TasksSection.tsx").read_text(
+        encoding="utf-8"
+    )
     read_keys = set(re.findall(r"query\.([a-zA-Z_]+)", reader))
-    assert "open" in read_keys, "TasksSection should still read the ?open=<id> deep link"
+    assert (
+        "open" in read_keys
+    ), "TasksSection should still read the ?open=<id> deep link"
     offenders: list[str] = []
     for f in _PAGES.rglob("*.tsx"):
         for lineno, raw in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
-            for key in re.findall(r"navigate\(`tasks\?([a-zA-Z_]+)=", _uncommented(raw)):
+            for key in re.findall(
+                r"navigate\(`tasks\?([a-zA-Z_]+)=", _uncommented(raw)
+            ):
                 if key not in read_keys:
                     offenders.append(f"{f}:{lineno}  tasks?{key}=")
     assert not offenders, (

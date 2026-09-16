@@ -7,7 +7,7 @@ auth/transport outages **park** instead) and surfaces in the Runs inbox."*
 
 1. **`triggers/autopause.py` was imported by NO production module.** Thirteen functions implementing
    the whole decision — typed exits, the 5-failure budget, parking for transport outages, immediate
-   pause for config errors, the attention card — reachable only from tests.
+   pause for config errors, the attention card — reachable only from checks.runtime.
 2. **The fire path DISCARDED the provider's result.** `await provider.execute(...)` threw its return
    value away, so nothing knew whether a fire succeeded.
 3. **No ledger row was written per fire.** `_record_run` died with `ScheduleService` (S112) and
@@ -30,12 +30,13 @@ from __future__ import annotations
 import asyncio
 import types
 
-import gideon.action_providers as AP
-from gideon.gateway import GatewayOrchestrator
-from gideon.schedule_history import ScheduleRunStore
-from gideon.triggers import autopause
-from gideon.triggers.models import Trigger, TriggerState
-from gideon.triggers.store import TriggerStore
+import gideon.integrations.action_providers as AP
+from gideon.automation.schedule_history import ExecutionJournal
+from gideon.automation.triggers import autopause
+from gideon.automation.triggers.models import Trigger, TriggerState
+from gideon.automation.triggers.store import TriggerStore
+from gideon.engine.gateway import RuntimeCoordinator
+from gideon.engine.trigger_dispatch import TriggerDispatch
 
 
 class _Provider:
@@ -53,7 +54,7 @@ class _Provider:
 
 def _drive(tmp_path, monkeypatch, sequence: list[str], tid: str = "clock:f") -> Trigger:
     """Fire `sequence` through the REAL dispatch and return the trigger's final state."""
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     store = TriggerStore(base_dir=tmp_path)
     store.upsert(
         Trigger(
@@ -70,18 +71,17 @@ def _drive(tmp_path, monkeypatch, sequence: list[str], tid: str = "clock:f") -> 
     real = AP.get_action_provider
     try:
         AP.get_action_provider = lambda name: provider
-        orch = object.__new__(GatewayOrchestrator)
+        orch = object.__new__(RuntimeCoordinator)
         for mode in sequence:
             provider.mode = mode
-            asyncio.run(orch._fire_store_trigger(store.get(tid).trigger, {"trigger_id": tid}))
+            asyncio.run(
+                orch._fire_store_trigger(store.get(tid).trigger, {"trigger_id": tid})
+            )
     finally:
         AP.get_action_provider = real
     row = store.get(tid)
     assert row is not None
     return row.trigger
-
-
-# ── the budget ──
 
 
 def test_FIVE_true_failures_autopause(tmp_path, monkeypatch):
@@ -110,13 +110,11 @@ def test_the_budget_matches_the_DECLARED_constant():
     assert autopause.FAILURE_BUDGET == 5
 
 
-# ── consecutive means consecutive ──
-
-
 def test_a_SUCCESS_RESETS_the_streak(tmp_path, monkeypatch):
     """🔴 §3.7's own words: "four failures then a success then one failure is not five". A
     counter that
-    only ever climbed would eventually pause every long-lived automation that had one bad week."""
+    only ever climbed would eventually pause every long-lived automation that had one bad week.
+    """
     trigger = _drive(tmp_path, monkeypatch, ["fail"] * 4 + ["ok"] + ["fail"])
     assert trigger.enabled is True
 
@@ -131,9 +129,6 @@ def test_a_CLEAN_run_records_success(tmp_path, monkeypatch):
     trigger = _drive(tmp_path, monkeypatch, ["ok"] * 3)
     assert trigger.health_status == "ok"
     assert trigger.last_success_at != ""
-
-
-# ── parking: an outage is not a failure ──
 
 
 def test_a_TRANSPORT_outage_PARKS_and_stays_ENABLED(tmp_path, monkeypatch):
@@ -158,33 +153,29 @@ def test_a_transport_exception_classifies_as_PARKING():
     assert autopause.classify_exception(ConnectionError("x")) in autopause.PARKING_EXITS
 
 
-# ── the ledger row that makes the counter possible ──
-
-
 def test_each_fire_writes_a_LEDGER_ROW(tmp_path, monkeypatch):
     """🔴 The third dead layer. The counter derives from the run ledger, and this path wrote no row —
     so the count was permanently 0. This is also why parking worked while the budget did
     not: parking
     is stateless, the budget is not."""
     _drive(tmp_path, monkeypatch, ["fail"] * 3)
-    _runs, total = asyncio.run(ScheduleRunStore(tmp_path).list_for_job("clock:f", 0, 20))
+    _runs, total = asyncio.run(
+        ExecutionJournal(tmp_path).list_for_job("clock:f", 0, 20)
+    )
     assert total == 3
 
 
 def test_the_row_carries_the_TYPED_exit(tmp_path, monkeypatch):
     _drive(tmp_path, monkeypatch, ["fail"])
-    runs, _total = asyncio.run(ScheduleRunStore(tmp_path).list_for_job("clock:f", 0, 5))
+    runs, _total = asyncio.run(ExecutionJournal(tmp_path).list_for_job("clock:f", 0, 5))
     assert runs[0]["trigger"] in {e.value for e in autopause.ExitType}
     assert runs[0]["status"] == "failure"
 
 
 def test_a_clean_fire_records_SUCCESS_status(tmp_path, monkeypatch):
     _drive(tmp_path, monkeypatch, ["ok"])
-    runs, _total = asyncio.run(ScheduleRunStore(tmp_path).list_for_job("clock:f", 0, 5))
+    runs, _total = asyncio.run(ExecutionJournal(tmp_path).list_for_job("clock:f", 0, 5))
     assert runs[0]["status"] == "success"
-
-
-# ── the derived counter ──
 
 
 def test_the_counter_STOPS_at_a_clean_exit():
@@ -206,7 +197,12 @@ def test_the_counter_SKIPS_a_suppressed_fire():
 
 
 def test_the_counter_is_ZERO_when_the_newest_run_succeeded():
-    assert autopause.consecutive_failures_from([{"status": "success"}, {"status": "failure"}]) == 0
+    assert (
+        autopause.consecutive_failures_from(
+            [{"status": "success"}, {"status": "failure"}]
+        )
+        == 0
+    )
 
 
 def test_the_counter_handles_an_EMPTY_ledger():
@@ -216,22 +212,24 @@ def test_the_counter_handles_an_EMPTY_ledger():
 def test_the_counter_is_DERIVED_not_stored():
     """`LEGACY_FIELD_MAP` says so outright: "autopause counter is derived from fire
     records". A copy on
-    the trigger row would be a second truth that can disagree with the ledger it summarises."""
+    the trigger row would be a second truth that can disagree with the ledger it summarises.
+    """
     import dataclasses
 
-    assert not [f for f in dataclasses.fields(Trigger) if f.name == "consecutive_failures"]
-
-
-# ── the wiring, and its safety ──
+    assert not [
+        f for f in dataclasses.fields(Trigger) if f.name == "consecutive_failures"
+    ]
 
 
 def test_the_fire_path_RECORDS_the_outcome():
     """A recorder nothing calls is the state this session found."""
     import inspect
 
-    src = inspect.getsource(GatewayOrchestrator._fire_store_trigger)
+    src = inspect.getsource(TriggerDispatch.execute)
     assert "_record_fire_outcome" in src
-    assert "result = await provider.execute" in src, "the result must be CAPTURED, not discarded"
+    assert (
+        "result = await action.provider.execute" in src
+    ), "the result must be CAPTURED, not discarded"
 
 
 def test_a_RECORDING_FAILURE_does_not_crash_the_fire(tmp_path, monkeypatch):
@@ -239,11 +237,13 @@ def test_a_RECORDING_FAILURE_does_not_crash_the_fire(tmp_path, monkeypatch):
     happened,
     and losing the record beats losing the loop."""
     monkeypatch.setattr(
-        "gideon.schedule_history.ScheduleRunStore.append",
+        "gideon.automation.schedule_history.ExecutionJournal.append",
         lambda *a, **k: (_ for _ in ()).throw(OSError("disk gone")),
     )
     trigger = _drive(tmp_path, monkeypatch, ["fail"] * 5)
-    assert trigger.enabled is True, "no state change is possible, but nothing raised either"
+    assert (
+        trigger.enabled is True
+    ), "no state change is possible, but nothing raised either"
 
 
 def test_a_QUARANTINED_trigger_is_never_resumed_by_a_clean_run(tmp_path, monkeypatch):
@@ -254,9 +254,6 @@ def test_a_QUARANTINED_trigger_is_never_resumed_by_a_clean_run(tmp_path, monkeyp
         exit_type=autopause.ExitType.OK.value, consecutive_failures=0, quarantined=True
     )
     assert decision.state == TriggerState.QUARANTINED.value
-
-
-# ── criterion 3's second clause: "and surfaces in the Runs inbox" (S141) ──
 
 
 class _State:
@@ -270,12 +267,14 @@ class _State:
         self.sent: list[dict] = []
 
     def notify(self, *, kind, title, body, meta=None):
-        self.sent.append({"kind": kind, "title": title, "body": body, "meta": meta or {}})
+        self.sent.append(
+            {"kind": kind, "title": title, "body": body, "meta": meta or {}}
+        )
         return True
 
 
 def _fire_with_state(tmp_path, monkeypatch, sequence, tid="clock:f") -> _State:
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     store = TriggerStore(base_dir=tmp_path)
     store.upsert(
         Trigger(
@@ -293,7 +292,7 @@ def _fire_with_state(tmp_path, monkeypatch, sequence, tid="clock:f") -> _State:
     real = AP.get_action_provider
     try:
         AP.get_action_provider = lambda name: provider
-        orch = object.__new__(GatewayOrchestrator)
+        orch = object.__new__(RuntimeCoordinator)
         orch.dashboard_state = state
         for mode in sequence:
             provider.mode = mode
@@ -305,7 +304,9 @@ def _fire_with_state(tmp_path, monkeypatch, sequence, tid="clock:f") -> _State:
 
 
 def _cards(state: _State) -> list[dict]:
-    return [n for n in state.sent if n["meta"].get("event") == "automation.needs_attention"]
+    return [
+        n for n in state.sent if n["meta"].get("event") == "automation.needs_attention"
+    ]
 
 
 def test_an_AUTOPAUSED_trigger_surfaces_a_CARD(tmp_path, monkeypatch):
@@ -361,7 +362,9 @@ def test_the_card_goes_through_STATE_NOTIFY():
     """R18: no second notification path, so a muted channel stays muted."""
     import inspect
 
-    src = inspect.getsource(GatewayOrchestrator._surface_attention_card)
+    from gideon.engine.trigger_outcomes import TriggerPublication
+
+    src = inspect.getsource(TriggerPublication.attention)
     assert "state.notify" in src
 
 
@@ -371,10 +374,9 @@ def test_the_PAUSE_still_happens_without_a_dashboard(tmp_path, monkeypatch):
     assert trigger.enabled is False
 
 
-# ── 🔴 the evidence slot repeated the lifecycle reason (S162) ──
-
-
-def test_last_error_summary_holds_the_ERROR_not_the_LIFECYCLE_REASON(tmp_path, monkeypatch):
+def test_last_error_summary_holds_the_ERROR_not_the_LIFECYCLE_REASON(
+    tmp_path, monkeypatch
+):
     """🔴 THE DEFECT. `_record_fire_outcome` stored `decision.reason` in `last_error_summary`, so
     the field held "failure 3 of 5" — and `_surface_attention_card` passes that same field into
     `attention_card`'s `last_error` slot, producing:
@@ -402,7 +404,9 @@ def test_the_ATTENTION_CARD_carries_the_real_cause(tmp_path, monkeypatch):
         last_error=trigger.last_error_summary,
     )
     assert "RuntimeError: boom" in card.body
-    assert card.body.count("consecutive failures") == 1, "the reason must appear once, not twice"
+    assert (
+        card.body.count("consecutive failures") == 1
+    ), "the reason must appear once, not twice"
 
 
 def test_a_success_FALSE_result_uses_its_error_STRING(tmp_path, monkeypatch):
@@ -414,10 +418,11 @@ def test_a_success_FALSE_result_uses_its_error_STRING(tmp_path, monkeypatch):
 
 def test_an_EMPTY_error_falls_back_to_the_lifecycle_reason(tmp_path, monkeypatch):
     """A blank evidence line would be worse than a redundant one: the user would see "Last error: "
-    and learn nothing. The fallback keeps the card informative when nothing better exists."""
-    import gideon.action_providers as _AP
+    and learn nothing. The fallback keeps the card informative when nothing better exists.
+    """
+    import gideon.integrations.action_providers as _AP
 
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     store = TriggerStore(base_dir=tmp_path)
     store.upsert(
         Trigger(
@@ -438,7 +443,7 @@ def test_an_EMPTY_error_falls_back_to_the_lifecycle_reason(tmp_path, monkeypatch
     real = _AP.get_action_provider
     try:
         _AP.get_action_provider = lambda name: _Blank()
-        orch = object.__new__(GatewayOrchestrator)
+        orch = object.__new__(RuntimeCoordinator)
         asyncio.run(
             orch._fire_store_trigger(
                 store.get("clock:blank").trigger, {"trigger_id": "clock:blank"}
@@ -448,7 +453,9 @@ def test_an_EMPTY_error_falls_back_to_the_lifecycle_reason(tmp_path, monkeypatch
         _AP.get_action_provider = real
     summary = store.get("clock:blank").trigger.last_error_summary
     assert summary, "the evidence line must never be empty"
-    assert "failure" in summary, f"expected the lifecycle reason as fallback, got {summary!r}"
+    assert (
+        "failure" in summary
+    ), f"expected the lifecycle reason as fallback, got {summary!r}"
 
 
 def test_a_SUCCESS_writes_no_error_summary(tmp_path, monkeypatch):

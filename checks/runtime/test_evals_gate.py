@@ -28,13 +28,13 @@ from pathlib import Path
 
 import pytest
 
-from gideon.eval.scenario import AssertionType, load_scenario
-from gideon.evals import gate as gate_mod
-from gideon.evals import runner as runner_mod
-from gideon.evals import scenarios as scenario_lib
-from gideon.evals import store
-from gideon.evals.child import render_result_line
-from gideon.evals.matrix import (
+from gideon.assurance.eval.scenario import AssertionType, load_scenario
+from gideon.assurance.evals import gate as gate_mod
+from gideon.assurance.evals import runner as runner_mod
+from gideon.assurance.evals import scenarios as scenario_lib
+from gideon.assurance.evals import store
+from gideon.assurance.evals.child import render_result_line
+from gideon.assurance.evals.matrix import (
     FAILED,
     PASSED,
     CellResult,
@@ -42,19 +42,19 @@ from gideon.evals.matrix import (
     MatrixSpec,
     aggregate,
 )
-from gideon.evals.overlay import OverlayRefusedError
-from gideon.guardrails.budgets import SpendMeter
-
-# ── the isolated, pinnable home every section runs in ─────────────────────────
+from gideon.assurance.evals.overlay import OverlayRefusedError
+from gideon.security.guardrails.budgets import SpendMeter
 
 FORBIDDEN = "FORBIDDEN-PHRASE"
 
 
-def _write_home(home: Path, *, model: str = "Acme:m1", enabled: bool = True, budget: float = 1.0):
+def _write_home(
+    home: Path, *, model: str = "Acme:m1", enabled: bool = True, budget: float = 1.0
+):
     """A home the gate can PIN a run against: a config, a model binding, a scenario library.
 
     Written as files through the real resolution paths, so the pin these tests exercise is the
-    one :func:`gideon.evals.pinning.compute_pin_for_subject` really computes.
+    one :func:`gideon.assurance.evals.pinning.compute_pin_for_subject` really computes.
     """
     (home / "config.json").write_text(
         json.dumps(
@@ -65,7 +65,9 @@ def _write_home(home: Path, *, model: str = "Acme:m1", enabled: bool = True, bud
         ),
         encoding="utf-8",
     )
-    (home / "active_models.json").write_text(json.dumps({"chat": [model]}), encoding="utf-8")
+    (home / "active_models.json").write_text(
+        json.dumps({"chat": [model]}), encoding="utf-8"
+    )
     return home
 
 
@@ -77,7 +79,11 @@ def _scenario(
     assertions: list[dict] | None = None,
     version: int = 1,
 ) -> dict:
-    body = assertions if assertions is not None else [{"type": "not_contains", "value": FORBIDDEN}]
+    body = (
+        assertions
+        if assertions is not None
+        else [{"type": "not_contains", "value": FORBIDDEN}]
+    )
     return {
         "name": name,
         "version": version,
@@ -97,7 +103,9 @@ def _install(home: Path, *scenarios: dict) -> None:
     d = home / "evals" / "scenarios"
     d.mkdir(parents=True, exist_ok=True)
     for data in scenarios:
-        (d / f"{data['name']}.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
+        (d / f"{data['name']}.json").write_text(
+            json.dumps(data, indent=2), encoding="utf-8"
+        )
     scenario_lib.install_library()
 
 
@@ -151,7 +159,9 @@ class _ScoringMatrix:
         self._tokens_recorded = tokens_recorded
 
     def __call__(self, spec: MatrixSpec, *, matrix_id: str, artifact_arm=None, **_kw):
-        self.calls.append((spec.subject, None if artifact_arm is None else artifact_arm.label))
+        self.calls.append(
+            (spec.subject, None if artifact_arm is None else artifact_arm.label)
+        )
         staged = {} if artifact_arm is None else dict(artifact_arm.files)
         response = "\n".join(text for _name, text in sorted(staged.items()))
 
@@ -179,10 +189,6 @@ class _ScoringMatrix:
                         "spend": {
                             "observed": True,
                             "attempts": 1,
-                            # What a real child writes since #2540. `cell_spend` treats an ABSENT
-                            # `tokens_recorded` as unrecorded on purpose — an artifact that never
-                            # recorded whether its provider reported usage cannot vouch for its
-                            # own token count either — so this fake has to carry it.
                             "tokens_recorded": self._tokens_recorded,
                             "unrecorded_attempts": 0 if self._tokens_recorded else 1,
                             "tokens": self._tokens if self._tokens_recorded else None,
@@ -210,9 +216,6 @@ def _arms(before: dict[str, str], after: dict[str, str]):
         gate_mod.ArtifactArm(label=gate_mod.ARM_BEFORE, files=before),
         gate_mod.ArtifactArm(label=gate_mod.ARM_AFTER, files=after),
     )
-
-
-# ══ CLAUSE 1 — a curated dozen, FAST, assertion-heavy ════════════════════════
 
 
 def test_the_shipped_library_declares_exactly_twelve_gate_scenarios():
@@ -244,7 +247,9 @@ def test_every_shipped_gate_scenario_is_fast_and_assertion_heavy():
         assert gate_mod.hard_assertion_count(data) >= 1, path.stem
 
 
-def test_a_shipped_scenario_that_joined_the_tier_bumped_its_version(tmp_path, monkeypatch):
+def test_a_shipped_scenario_that_joined_the_tier_bumped_its_version(
+    tmp_path, monkeypatch
+):
     """The backfill is version-keyed, so joining a tier without a version bump would never install.
 
     Measured as the real backfill: an installed copy at the OLD version must be replaced by the
@@ -254,7 +259,9 @@ def test_a_shipped_scenario_that_joined_the_tier_bumped_its_version(tmp_path, mo
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     _write_home(tmp_path)
     shipped = json.loads(
-        (scenario_lib.packaged_library_dir() / "smoke_test.json").read_text(encoding="utf-8")
+        (scenario_lib.packaged_library_dir() / "smoke_test.json").read_text(
+            encoding="utf-8"
+        )
     )
     assert gate_mod.GATE_TIER in scenario_lib.tiers_of(shipped)
     assert int(shipped["version"]) > 1
@@ -263,12 +270,16 @@ def test_a_shipped_scenario_that_joined_the_tier_bumped_its_version(tmp_path, mo
     stale["version"] = 1
     _install(tmp_path, stale)
     reinstalled = json.loads(
-        (tmp_path / "evals" / "scenarios" / "smoke_test.json").read_text(encoding="utf-8")
+        (tmp_path / "evals" / "scenarios" / "smoke_test.json").read_text(
+            encoding="utf-8"
+        )
     )
     assert gate_mod.GATE_TIER in scenario_lib.tiers_of(reinstalled)
 
 
-def test_the_manifest_records_the_tier_so_membership_is_answerable_from_the_home(gate_home):
+def test_the_manifest_records_the_tier_so_membership_is_answerable_from_the_home(
+    gate_home,
+):
     manifest = scenario_lib.read_manifest() or {}
     row = (manifest.get("scenarios") or {}).get("gate_probe") or {}
     assert row.get("tiers") == ["gate"]
@@ -278,10 +289,10 @@ def test_only_tagged_scenarios_are_selected(gate_home):
     _install(gate_home, _scenario("not_tagged"))
     subset = gate_mod.gate_subset()
     assert subset.names == ["gate_probe"]
-    # VACUITY FLOOR: the untagged scenario really is installed and really is otherwise eligible,
-    # so its absence is the tag doing work and not a missing file.
     installed = json.loads(
-        (gate_home / "evals" / "scenarios" / "not_tagged.json").read_text(encoding="utf-8")
+        (gate_home / "evals" / "scenarios" / "not_tagged.json").read_text(
+            encoding="utf-8"
+        )
     )
     assert gate_mod.turn_count(installed) <= gate_mod.MAX_GATE_TURNS
     assert gate_mod.hard_assertion_count(installed) >= 1
@@ -297,7 +308,9 @@ def test_a_tagged_scenario_over_the_turn_ceiling_is_excluded_with_a_reason(gate_
     assert str(gate_mod.MAX_GATE_TURNS) in reasons["slow_probe"]
 
 
-def test_a_tagged_judge_only_scenario_is_excluded_because_it_would_score_a_fake_one(gate_home):
+def test_a_tagged_judge_only_scenario_is_excluded_because_it_would_score_a_fake_one(
+    gate_home,
+):
     """ "Judge-light" is not a style preference — it is the difference between a score and a lie.
 
     The child runs ``EvalRunner(judge_enabled=False)``, which FILTERS judge assertions out of the
@@ -317,9 +330,7 @@ def test_a_tagged_judge_only_scenario_is_excluded_because_it_would_score_a_fake_
     assert "judge_only" not in subset.names
     assert "judge" in dict(subset.excluded)["judge_only"]
 
-    # The mechanism behind the refusal, measured rather than asserted: the real scorer really does
-    # publish 1.0 for a scenario with no scoreable assertion.
-    from gideon.evals.child import result_from_scenario
+    from gideon.assurance.evals.child import result_from_scenario
 
     fabricated = result_from_scenario(
         types.SimpleNamespace(total_assertions=0, passed_assertions=0, passed=True)
@@ -335,7 +346,6 @@ def test_the_subset_is_capped_cheapest_first_and_deterministic(gate_home):
     )
     subset = gate_mod.gate_subset()
     assert len(subset.names) == gate_mod.GATE_SUBSET_MAX
-    # Cheapest first: the 1-turn scenario is never the one dropped for the cap.
     assert "cheap_one" in subset.names
     assert gate_mod.gate_subset().names == subset.names
     assert any("cap" in reason for _n, reason in subset.excluded)
@@ -362,12 +372,9 @@ def test_the_gate_runs_every_member_of_the_subset_over_both_arms(gate_home):
     ]
 
 
-# ══ CLAUSE 2 — a planted regression shows a drop on its own card ══════════════
-
-
 def _skill_proposal(gate_home, procedure: str):
     """File a REAL skill-promotion proposal through the real queue. Returns its id."""
-    from gideon.learning import skill_promotion
+    from gideon.cognition.learning import skill_promotion
 
     promotion = skill_promotion.promote(
         name="Gate Probe Procedure",
@@ -384,7 +391,7 @@ def test_a_planted_regression_shows_a_score_drop_on_the_proposal_card(gate_home)
 
     A real skill-promotion proposal whose candidate procedure contains the phrase the gate
     scenario forbids. The candidate is rendered by the REAL install rail
-    (``skill_promotion.candidate_files`` → ``SkillsLoader.create_auto_skill``), staged as the
+    (``skill_promotion.candidate_files`` → ``ProcedureLibrary.create_auto_skill``), staged as the
     ``after`` arm, and scored by the REAL ``Assertion.check``. The drop is produced by the plant,
     not by a hardcoded number.
 
@@ -393,7 +400,9 @@ def test_a_planted_regression_shows_a_score_drop_on_the_proposal_card(gate_home)
     """
     pid = _skill_proposal(gate_home, f"Always mention {FORBIDDEN} in your answer.")
     fake = _ScoringMatrix()
-    report = gate_mod.gate_proposal(pid, run_matrix=fake, meter=SpendMeter(config_dir=gate_home))
+    report = gate_mod.gate_proposal(
+        pid, run_matrix=fake, meter=SpendMeter(config_dir=gate_home)
+    )
 
     assert report is not None
     assert report.state == gate_mod.GATE_GATED
@@ -402,13 +411,11 @@ def test_a_planted_regression_shows_a_score_drop_on_the_proposal_card(gate_home)
     assert report.delta == -1.0
     assert report.regressed is True
 
-    # The candidate really was rendered through the rail, and it really is what got staged.
     staged = fake.calls
     assert ("gate_probe", "after") in staged and ("gate_probe", "before") in staged
 
-    # ── and it is on the CARD, before the user accepts ──
-    from gideon.learning import proposals as queue
-    from gideon.learning.inbox import row_from_proposal
+    from gideon.cognition.learning import proposals as queue
+    from gideon.cognition.learning.inbox import row_from_proposal
 
     prop = queue.get(pid)
     assert prop is not None and prop.status == "pending"
@@ -417,7 +424,6 @@ def test_a_planted_regression_shows_a_score_drop_on_the_proposal_card(gate_home)
     assert row["gate"]["before"] == 1.0
     assert row["gate"]["after"] == 0.0
     assert row["gate"]["regressed"] is True
-    # {before, after, PIN} — the pin identifies what produced the pair.
     assert row["gate"]["pin"]["model_fp"]
     assert row["gate"]["pin"]["scenario_sha256"] == gate_mod.gate_subset().sha256()
 
@@ -444,9 +450,9 @@ def test_the_candidate_comes_from_the_real_install_rail(gate_home):
     approximation would drift from the frontmatter that decides whether the skill is even
     surfaced, so the gate would be scoring a file that never ships.
     """
-    from gideon.learning import proposals as queue
-    from gideon.learning import skill_promotion
-    from gideon.skills.loader import skills_dir
+    from gideon.cognition.learning import proposals as queue
+    from gideon.cognition.learning import skill_promotion
+    from gideon.extensions.skills.loader import skills_dir
 
     pid = _skill_proposal(gate_home, "Answer briefly.")
     prop = queue.get(pid)
@@ -461,8 +467,8 @@ def test_the_candidate_comes_from_the_real_install_rail(gate_home):
 
 def test_before_reads_the_live_artifact_and_after_the_candidate(gate_home):
     """Both arms name the SAME paths, so the two runs differ only in the bytes at them."""
-    from gideon.learning import proposals as queue
-    from gideon.skills.loader import skills_dir
+    from gideon.cognition.learning import proposals as queue
+    from gideon.extensions.skills.loader import skills_dir
 
     pid = _skill_proposal(gate_home, "Answer briefly.")
     prop = queue.get(pid)
@@ -474,8 +480,14 @@ def test_before_reads_the_live_artifact_and_after_the_candidate(gate_home):
 
     before, after = gate_mod.arms_for_proposal(prop.to_dict())
     assert set(before.files) == set(after.files)
-    assert before.files["skills/auto/gate-probe-procedure/SKILL.md"] == "the incumbent body"
-    assert "the incumbent body" not in after.files["skills/auto/gate-probe-procedure/SKILL.md"]
+    assert (
+        before.files["skills/auto/gate-probe-procedure/SKILL.md"]
+        == "the incumbent body"
+    )
+    assert (
+        "the incumbent body"
+        not in after.files["skills/auto/gate-probe-procedure/SKILL.md"]
+    )
 
 
 def test_a_gate_run_writes_a_pinned_ledger_row_with_before_in_score_old(gate_home):
@@ -486,15 +498,13 @@ def test_a_gate_run_writes_a_pinned_ledger_row_with_before_in_score_old(gate_hom
     assert rows[0]["score_old"] == "1.0"
     assert rows[0]["score_new"] == "0.0"
     assert rows[0]["verdict"] == "regression"
-    # Pinned, from the pin and not from the caller.
     assert rows[0]["model_fp"]
     assert rows[0]["scenario_id"] == gate_mod.GATE_KIND
 
 
-# ══ CLAUSE 3 — bounded and metered via SpendMeter ═════════════════════════════
-
-
-def test_an_unbudgeted_gate_is_ungated_not_unbounded(tmp_path, monkeypatch, no_shipped_library):
+def test_an_unbudgeted_gate_is_ungated_not_unbounded(
+    tmp_path, monkeypatch, no_shipped_library
+):
     """``budget_usd == 0`` means UNLIMITED to ``Budget``, which is the one thing a gate must not be.
 
     So the refusal is structural: no ceiling ⇒ no run ⇒ ``ungated`` with a reason naming the knob.
@@ -506,7 +516,7 @@ def test_an_unbudgeted_gate_is_ungated_not_unbounded(tmp_path, monkeypatch, no_s
     report = gate_mod.run_gate(run_id="r1", arms=_arms({}, {"a": "b"}), run_matrix=fake)
     assert report.state == gate_mod.GATE_UNGATED
     assert "budget" in report.reason
-    assert fake.calls == []  # nothing was called
+    assert fake.calls == []
 
 
 def test_the_childs_reported_spend_is_charged_to_the_meter(gate_home):
@@ -518,7 +528,6 @@ def test_the_childs_reported_spend_is_charged_to_the_meter(gate_home):
         meter=meter,
     )
     totals = meter.run_totals(f"{gate_mod.GATE_KIND}:r1")
-    # Two arms × one scenario × $0.01.
     assert totals.dollars == pytest.approx(0.02)
     assert totals.tokens == 200
 
@@ -534,13 +543,15 @@ def test_the_budget_STOPS_the_sweep_and_names_what_did_not_run(gate_home):
     meter = SpendMeter(config_dir=gate_home)
     fake = _ScoringMatrix(dollars_per_cell=0.30)
     report = gate_mod.run_gate(
-        run_id="r1", arms=_arms({}, {"a": "b"}), run_matrix=fake, meter=meter, budget_usd=1.0
+        run_id="r1",
+        arms=_arms({}, {"a": "b"}),
+        run_matrix=fake,
+        meter=meter,
+        budget_usd=1.0,
     )
     assert report.bound["halted"] is True
     assert report.bound["not_run"]
-    assert len(fake.calls) < 12  # 6 scenarios × 2 arms would be 12
-    # VACUITY FLOOR: the same sweep with a ceiling it cannot reach runs every cell, so the short
-    # sweep above is the bound biting and not a selection bug.
+    assert len(fake.calls) < 12
     roomy = _ScoringMatrix(dollars_per_cell=0.30)
     ok = gate_mod.run_gate(
         run_id="r2",
@@ -556,16 +567,17 @@ def test_the_budget_STOPS_the_sweep_and_names_what_did_not_run(gate_home):
 def test_an_unobserved_spend_is_not_reported_as_zero(gate_home):
     """ "No cell reported a spend" and "the run was free" are the same number, different facts."""
     report = gate_mod.run_gate(
-        run_id="r1", arms=_arms({}, {"a": "b"}), run_matrix=_ScoringMatrix(dollars_per_cell=0.0)
+        run_id="r1",
+        arms=_arms({}, {"a": "b"}),
+        run_matrix=_ScoringMatrix(dollars_per_cell=0.0),
     )
-    # The stand-in DOES report a spend block (of zero), so `observed` is true and the dollars are
-    # a real zero.
     assert report.spend["observed"] is True
-    # With no cell artifact at all, the absence is carried instead.
     assert gate_mod.cell_spend("no-such-matrix")["observed"] is False
 
 
-def test_a_cell_whose_provider_reported_no_usage_makes_the_token_total_unrecorded(gate_home):
+def test_a_cell_whose_provider_reported_no_usage_makes_the_token_total_unrecorded(
+    gate_home,
+):
     """#2540 at the gate, which is the OTHER reader of the cell spend dict.
 
     `total["tokens"] += int(spend.get("tokens") or 0)` turned the cell's `None` into a measured
@@ -584,11 +596,9 @@ def test_a_cell_whose_provider_reported_no_usage_makes_the_token_total_unrecorde
     assert report.spend["tokens_recorded"] is False
     assert report.spend["tokens"] is None
     assert report.spend["tokens"] != 0
-    assert report.spend["unrecorded_attempts"] == 2  # two arms × one scenario
+    assert report.spend["unrecorded_attempts"] == 2
     assert report.spend["dollars_est"] == pytest.approx(0.02)
 
-    # VACUITY FLOOR: the same sweep with a REPORTING provider sums to a real number, so the `None`
-    # above is the guard biting and not the accumulator being broken.
     ok = gate_mod.run_gate(
         run_id="r2",
         arms=_arms({}, {"a": "b"}),
@@ -633,22 +643,18 @@ def test_one_unrecorded_matrix_makes_the_whole_runs_token_total_unrecorded(gate_
     assert spend["attempts"] == 2
 
 
-# ══ CLAUSE 4 — "ungated" is honest, and never blocks ═════════════════════════
-
-
 def test_a_proposal_with_no_gate_run_projects_to_ungated_with_a_reason(gate_home):
     """The ROW is the surface a reviewer decides from, so the absence has to be legible THERE."""
-    from gideon.learning import proposals as queue
-    from gideon.learning.inbox import row_from_proposal
+    from gideon.cognition.learning import proposals as queue
+    from gideon.cognition.learning.inbox import row_from_proposal
 
     pid = _skill_proposal(gate_home, "Answer briefly.")
     prop = queue.get(pid)
     assert prop is not None
-    assert prop.gate == {}  # nothing ran
+    assert prop.gate == {}
     row = row_from_proposal(prop).to_dict()
     assert row["gate"]["state"] == gate_mod.GATE_UNGATED
     assert row["gate"]["reason"]
-    # Never a zero standing in for a measurement that never happened.
     assert row["gate"]["before"] is None
     assert row["gate"]["after"] is None
     assert row["gate"]["delta"] is None
@@ -657,11 +663,13 @@ def test_a_proposal_with_no_gate_run_projects_to_ungated_with_a_reason(gate_home
 def test_accept_succeeds_with_no_gate_run(gate_home):
     """🔑 NEVER BLOCKS. A gate that failed closed on its own absence would stop a user shipping a
     change because the GATE broke."""
-    from gideon.learning import proposals as queue
+    from gideon.cognition.learning import proposals as queue
 
     pid = _skill_proposal(gate_home, "Answer briefly.")
     installed: list[str] = []
-    accepted = queue.accept(pid, installer=lambda p: installed.append(p.id), actor="user")
+    accepted = queue.accept(
+        pid, installer=lambda p: installed.append(p.id), actor="user"
+    )
     assert accepted.status == "accepted"
     assert installed == [pid]
 
@@ -669,7 +677,7 @@ def test_accept_succeeds_with_no_gate_run(gate_home):
 def test_accept_succeeds_with_a_REGRESSED_gate(gate_home):
     """The columns inform the decision; they do not take it. The user may know something the
     twelve scenarios do not."""
-    from gideon.learning import proposals as queue
+    from gideon.cognition.learning import proposals as queue
 
     pid = _skill_proposal(gate_home, f"Always mention {FORBIDDEN}.")
     report = gate_mod.gate_proposal(pid, run_matrix=_ScoringMatrix())
@@ -678,7 +686,9 @@ def test_accept_succeeds_with_a_REGRESSED_gate(gate_home):
     assert accepted.status == "accepted"
 
 
-def test_evals_off_is_ungated_and_calls_nothing(tmp_path, monkeypatch, no_shipped_library):
+def test_evals_off_is_ungated_and_calls_nothing(
+    tmp_path, monkeypatch, no_shipped_library
+):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     _write_home(tmp_path, enabled=False)
     _install(tmp_path, _scenario("gate_probe", tiers=["gate"]))
@@ -711,11 +721,15 @@ def test_an_unpinnable_home_is_ungated_and_INVENTS_NO_FINGERPRINT(
     assert fake.calls == []
 
 
-def test_an_empty_subset_is_ungated_not_a_silent_pass(tmp_path, monkeypatch, no_shipped_library):
+def test_an_empty_subset_is_ungated_not_a_silent_pass(
+    tmp_path, monkeypatch, no_shipped_library
+):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     _write_home(tmp_path)
     _install(tmp_path, _scenario("untagged_only"))
-    report = gate_mod.run_gate(run_id="r1", arms=_arms({}, {"a": "b"}), run_matrix=_ScoringMatrix())
+    report = gate_mod.run_gate(
+        run_id="r1", arms=_arms({}, {"a": "b"}), run_matrix=_ScoringMatrix()
+    )
     assert report.state == gate_mod.GATE_UNGATED
     assert "tagged" in report.reason
 
@@ -723,10 +737,13 @@ def test_an_empty_subset_is_ungated_not_a_silent_pass(tmp_path, monkeypatch, no_
 def test_an_ungateable_KIND_is_ungated_and_says_which_kind(gate_home):
     """A ``lesson_batch`` declares no candidate artifact. The absence names the kind rather than
     reading as a passing gate."""
-    from gideon.learning import proposals as queue
+    from gideon.cognition.learning import proposals as queue
 
     _verdict, prop = queue.enqueue(
-        kind="lesson_batch", title="three lessons", body="always use uv", provenance="human"
+        kind="lesson_batch",
+        title="three lessons",
+        body="always use uv",
+        provenance="human",
     )
     assert prop is not None
     report = gate_mod.gate_proposal(prop.id, run_matrix=_ScoringMatrix())
@@ -738,7 +755,7 @@ def test_an_ungateable_KIND_is_ungated_and_says_which_kind(gate_home):
 def test_attaching_a_report_is_not_a_decision(gate_home):
     """A measurement must not re-sort the queue: ``attach_gate`` leaves status and the timestamp
     alone, because bumping them would look like the user did something."""
-    from gideon.learning import proposals as queue
+    from gideon.cognition.learning import proposals as queue
 
     pid = _skill_proposal(gate_home, "Answer briefly.")
     before = queue.get(pid)
@@ -753,9 +770,6 @@ def test_attaching_a_report_is_not_a_decision(gate_home):
 
 def test_a_missing_proposal_is_None_not_a_fabricated_report(gate_home):
     assert gate_mod.gate_proposal("no-such-proposal") is None
-
-
-# ══ the child-side seam, against the REAL code ════════════════════════════════
 
 
 def test_the_arm_reaches_the_CHILD_env_and_never_the_parents(gate_home, monkeypatch):
@@ -774,16 +788,21 @@ def test_the_arm_reaches_the_CHILD_env_and_never_the_parents(gate_home, monkeypa
         )
 
     monkeypatch.setattr(runner_mod.subprocess, "run", fake_run)
-    arm = gate_mod.ArtifactArm(label="after", files={"skills/auto/x/SKILL.md": "candidate body"})
+    arm = gate_mod.ArtifactArm(
+        label="after", files={"skills/auto/x/SKILL.md": "candidate body"}
+    )
     runner_mod.run_matrix(
-        MatrixSpec(subject="gate_probe", trial_count=1), matrix_id="m1", artifact_arm=arm
+        MatrixSpec(subject="gate_probe", trial_count=1),
+        matrix_id="m1",
+        artifact_arm=arm,
     )
     assert len(calls) == 1
     assert "candidate body" in calls[0][gate_mod.ARM_ENV]
     assert gate_mod.ARM_ENV not in os.environ
-    # And the retained descriptor records WHICH arm, so a surprising cell is attributable.
     descriptor = json.loads(
-        (store.matrix_dir("m1") / "cell-0000" / "descriptor.json").read_text(encoding="utf-8")
+        (store.matrix_dir("m1") / "cell-0000" / "descriptor.json").read_text(
+            encoding="utf-8"
+        )
     )
     assert descriptor["arm"] == "after"
 
@@ -793,7 +812,9 @@ def test_apply_in_child_stages_into_the_throwaway_home(tmp_path, monkeypatch):
     arm = gate_mod.ArtifactArm(label="after", files={"skills/auto/x/SKILL.md": "body"})
     written = gate_mod.apply_in_child(arm)
     assert written == ["skills/auto/x/SKILL.md"]
-    assert (tmp_path / "cell" / "skills" / "auto" / "x" / "SKILL.md").read_text() == "body"
+    assert (
+        tmp_path / "cell" / "skills" / "auto" / "x" / "SKILL.md"
+    ).read_text() == "body"
 
 
 def test_apply_in_child_REFUSES_the_real_home(monkeypatch):
@@ -836,12 +857,11 @@ def test_a_garbage_arm_env_runs_the_cell_unmodified(monkeypatch):
 
 def test_spawn_env_for_never_mutates_its_input():
     base = {"PATH": "/bin"}
-    out = gate_mod.spawn_env_for(base, gate_mod.ArtifactArm(label="after", files={"a": "b"}))
+    out = gate_mod.spawn_env_for(
+        base, gate_mod.ArtifactArm(label="after", files={"a": "b"})
+    )
     assert base == {"PATH": "/bin"}
     assert gate_mod.ARM_ENV in out
-
-
-# ══ the report shape ═════════════════════════════════════════════════════════
 
 
 def test_an_absent_report_summarizes_as_ungated_with_the_not_run_reason():
@@ -854,7 +874,9 @@ def test_an_absent_report_summarizes_as_ungated_with_the_not_run_reason():
 
 def test_an_unrecognized_state_reads_as_ungated():
     """A record from a build that spelled the state differently must not read as gated."""
-    assert gate_mod.summary({"state": "probably_fine"})["state"] == gate_mod.GATE_UNGATED
+    assert (
+        gate_mod.summary({"state": "probably_fine"})["state"] == gate_mod.GATE_UNGATED
+    )
 
 
 def test_delta_is_None_not_zero_when_an_arm_never_scored():
@@ -878,7 +900,7 @@ def test_a_tie_is_not_a_regression():
 
 def test_the_cli_prints_not_measured_and_never_a_zero(capsys):
     """The CLI says the same word about the same absence as the Learning panels do."""
-    from gideon.cli_commands import _print_gate_report
+    from gideon.interfaces.cli.commands import _print_gate_report
 
     report = gate_mod.GateReport(state=gate_mod.GATE_GATED, run_id="r1")
     _print_gate_report(report)

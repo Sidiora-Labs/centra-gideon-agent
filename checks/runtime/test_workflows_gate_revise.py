@@ -30,12 +30,16 @@ import json
 
 import pytest
 
-from gideon.workflows import human_input as HI
-from gideon.workflows import introspection
-from gideon.workflows import journal as J
-from gideon.workflows import revision, store
-from gideon.workflows.controller import EngineServices, RunController, _parse_revise
-from gideon.workflows.models import InstanceState, RunStatus, WorkflowRun
+from gideon.automation.workflows import human_input as HI
+from gideon.automation.workflows import introspection
+from gideon.automation.workflows import journal as J
+from gideon.automation.workflows import revision, store
+from gideon.automation.workflows.controller import (
+    EngineServices,
+    RunController,
+    _parse_revise,
+)
+from gideon.automation.workflows.models import InstanceState, RunStatus, WorkflowRun
 
 pytestmark = pytest.mark.anyio
 
@@ -49,7 +53,7 @@ def anyio_backend() -> str:
 def _isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
     return home
 
 
@@ -62,11 +66,19 @@ def _spec() -> dict:
             "kind": "sequence",
             "id": "s",
             "children": [
-                {"kind": "transform", "id": "draft", "config": {"expr": {"v": 1}, "prompt": "w"}},
+                {
+                    "kind": "transform",
+                    "id": "draft",
+                    "config": {"expr": {"v": 1}, "prompt": "w"},
+                },
                 {
                     "kind": "gate",
                     "id": "approve",
-                    "config": {"kind": "approval", "prompt": "Ship it?", "timeout_secs": 0},
+                    "config": {
+                        "kind": "approval",
+                        "prompt": "Ship it?",
+                        "timeout_secs": 0,
+                    },
                 },
             ],
         },
@@ -87,17 +99,21 @@ def _revise(step_ref: str, comment: str) -> dict:
     return {"revise": {"step_ref": step_ref, "comment": comment}}
 
 
-# ── the grammar ──────────────────────────────────────────────────────────────
-
-
 class TestGrammar:
     def test_the_nested_and_flat_spellings_both_parse(self) -> None:
         """`answer` is untyped by contract, so both shapes a caller reaches for are read."""
-        assert _parse_revise({"revise": {"step_ref": "a", "comment": "b"}}) == ("a", "b")
-        assert _parse_revise({"revise": True, "step_ref": "a", "comment": "b"}) == ("a", "b")
+        assert _parse_revise({"revise": {"step_ref": "a", "comment": "b"}}) == (
+            "a",
+            "b",
+        )
+        assert _parse_revise({"revise": True, "step_ref": "a", "comment": "b"}) == (
+            "a",
+            "b",
+        )
 
     @pytest.mark.parametrize(
-        "answer", [True, False, "some prose about revising the plan", {"approved": True}, None]
+        "answer",
+        [True, False, "some prose about revising the plan", {"approved": True}, None],
     )
     def test_an_ordinary_answer_is_not_a_revise(self, answer) -> None:
         """Recognised structurally, by the key. Sniffing for the WORD would hijack a text
@@ -126,12 +142,18 @@ class TestStepRefResolution:
         root = {
             "kind": "sequence",
             "id": "s",
-            "children": [{"kind": "transform", "id": "w"}, {"kind": "transform", "id": "w"}],
+            "children": [
+                {"kind": "transform", "id": "w"},
+                {"kind": "transform", "id": "w"},
+            ],
         }
         assert revision.resolve_step_ref(root, "w")[1] == "WF_REVISE_AMBIGUOUS_STEP"
 
     def test_an_empty_ref_is_refused(self) -> None:
-        assert revision.resolve_step_ref(_spec()["root"], "  ")[1] == "WF_REVISE_NO_STEP_REF"
+        assert (
+            revision.resolve_step_ref(_spec()["root"], "  ")[1]
+            == "WF_REVISE_NO_STEP_REF"
+        )
 
 
 class TestCommentPatch:
@@ -141,7 +163,7 @@ class TestCommentPatch:
         patch = revision.comment_patch(_spec()["root"], "draft", "be terser")
         assert patch is not None and patch.op == "replace"
         assert "be terser" in patch.node["config"]["prompt"]
-        assert patch.node["config"]["prompt"].startswith("w")  # the original survives
+        assert patch.node["config"]["prompt"].startswith("w")
 
     def test_the_comment_is_marked_so_it_reads_as_a_correction(self) -> None:
         patch = revision.comment_patch(_spec()["root"], "draft", "be terser")
@@ -152,8 +174,6 @@ class TestCommentPatch:
         no-op dressed as an edit."""
         patch = revision.comment_patch(_spec()["root"], "approve", "ask more clearly")
         assert patch is not None
-        # The gate's own `prompt` is the QUESTION it asks, not an instruction a worker
-        # follows, so it is left exactly as authored.
         assert patch.node["config"]["prompt"] == "Ship it?"
         assert patch.node["extra"]["review_notes"][0]["comment"] == "ask more clearly"
 
@@ -161,17 +181,15 @@ class TestCommentPatch:
         assert revision.comment_patch(_spec()["root"], "draft", "   ") is None
 
 
-# ── the resume path ──────────────────────────────────────────────────────────
-
-
 class TestReviseOnAWaitingGate:
-    async def test_a_revise_patches_one_step_and_leaves_the_rest_untouched(self) -> None:
+    async def test_a_revise_patches_one_step_and_leaves_the_rest_untouched(
+        self,
+    ) -> None:
         c, token = await _blocked()
         result = c.resume(token, _revise("draft", "be terser"))
         assert result["ok"] and result["revised"] and result["step_ref"] == "draft"
         children = c.spec["root"]["children"]
         assert "be terser" in children[0]["config"]["prompt"]
-        # The gate itself — the node nobody complained about — is byte-identical.
         assert children[1] == _spec()["root"]["children"][1]
 
     async def test_a_revise_is_not_an_approval(self) -> None:
@@ -209,14 +227,18 @@ class TestReviseOnAWaitingGate:
         c.resume(token, _revise("draft", "be terser"))
         revised = [e for e in J.ledger(c.run.id) if e.get("kind") == J.GATE_REVISED]
         assert len(revised) == 1
-        assert revised[0]["step_ref"] == "draft" and revised[0]["comment"] == "be terser"
+        assert (
+            revised[0]["step_ref"] == "draft" and revised[0]["comment"] == "be terser"
+        )
 
     async def test_a_second_revise_off_one_ask_is_refused(self) -> None:
         """A revise answers the gate as surely as an approval does; a live token would let
         the second land on an already-revised step."""
         c, token = await _blocked()
         assert c.resume(token, _revise("draft", "a"))["ok"]
-        assert c.resume(token, _revise("draft", "b"))["code"] == "WF_RESUME_UNKNOWN_TOKEN"
+        assert (
+            c.resume(token, _revise("draft", "b"))["code"] == "WF_RESUME_UNKNOWN_TOKEN"
+        )
 
 
 class TestARejectedReviseKeepsTheToken:
@@ -250,7 +272,9 @@ class TestARejectedReviseKeepsTheToken:
     async def test_an_unknown_token_is_refused_before_any_spec_write(self) -> None:
         c, _token = await _blocked()
         before = store.read_spec(c.run.id)
-        assert c.resume("nope", _revise("draft", "x"))["code"] == "WF_RESUME_UNKNOWN_TOKEN"
+        assert (
+            c.resume("nope", _revise("draft", "x"))["code"] == "WF_RESUME_UNKNOWN_TOKEN"
+        )
         assert store.read_spec(c.run.id) == before
 
 
@@ -264,7 +288,6 @@ class TestWhatRunsMatchesWhatWasRecorded:
         on_disk = store.read_spec(c.run.id)
         assert on_disk == c.spec
         assert "be terser" in on_disk["root"]["children"][0]["config"]["prompt"]
-        # And the tree the scheduler walks is the same document, not a stale parse.
         assert "be terser" in c.root.children[0].config["prompt"]
 
     async def test_the_recorded_ops_hash_the_spec_that_landed(self) -> None:
@@ -274,7 +297,9 @@ class TestWhatRunsMatchesWhatWasRecorded:
         c.resume(token, _revise("draft", "be terser"))
         record = json.loads(
             (
-                store.run_dir(c.run.id) / "spec_history" / f"v{c.run.spec_version:03d}.json"
+                store.run_dir(c.run.id)
+                / "spec_history"
+                / f"v{c.run.spec_version:03d}.json"
             ).read_text(encoding="utf-8")
         )
         assert record["spec_hash"] == J.hash_value(store.read_spec(c.run.id))
@@ -292,14 +317,16 @@ class TestWhatRunsMatchesWhatWasRecorded:
         it would be an edit no template ever learns from."""
         c, token = await _blocked()
         c.resume(token, _revise("draft", "be terser"))
-        edits = [e for e in J.ledger(c.run.id) if e.get("kind") == J.USER_EDITED_MID_FLIGHT]
+        edits = [
+            e for e in J.ledger(c.run.id) if e.get("kind") == J.USER_EDITED_MID_FLIGHT
+        ]
         assert len(edits) == 1 and edits[0]["ops"][0]["node_id"] == "draft"
 
     async def test_the_revised_step_does_not_serve_its_cached_output(self) -> None:
         """The re-armed-gate risk, answered by a test: the cache key hashes the node's own
         spec region, and the revision changed it — so the old entry cannot match."""
         c, token = await _blocked()
-        from gideon.workflows.journal import spec_region_hash
+        from gideon.automation.workflows.journal import spec_region_hash
 
         before = spec_region_hash(c.root.children[0].to_dict())
         c.resume(token, _revise("draft", "be terser"))

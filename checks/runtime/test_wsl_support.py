@@ -1,7 +1,7 @@
 """WSL support: _is_wsl detection, WSL-aware dashboard auto-open, doctor note.
 
 Covers PR-7 (PLATFORM-REACH Track B). The auto-open helper lives in
-``gideon.gateway`` and is exercised in isolation with ``webbrowser.open``,
+``gideon.engine.gateway`` and is exercised in isolation with ``webbrowser.open``,
 ``subprocess.run`` and ``_is_wsl`` monkeypatched; the gateway wiring around it
 (the ``_no_open`` / ``_skip_open`` short-circuits) is covered by the existing
 gateway tests, which is why they are re-run as part of this PR's gate.
@@ -9,9 +9,8 @@ gateway tests, which is why they are re-run as part of this PR's gate.
 
 from unittest.mock import patch
 
-from gideon import env, gateway
-
-# ── _is_wsl ──────────────────────────────────────────────────────────────────
+from gideon.core import env
+from gideon.engine import gateway
 
 
 def test_is_wsl_true_when_microsoft_in_proc_version(tmp_path, monkeypatch):
@@ -36,12 +35,9 @@ def test_is_wsl_false_on_normal_linux(tmp_path, monkeypatch):
 
 
 def test_is_wsl_false_when_proc_version_absent(tmp_path, monkeypatch):
-    # Non-Linux (macOS/Windows): /proc/version does not exist → False, no raise.
     monkeypatch.setattr(env, "_PROC_VERSION", str(tmp_path / "does-not-exist"))
     assert env._is_wsl() is False
 
-
-# ── _open_dashboard / _wslview_open ─────────────────────────────────────────
 
 URL = "http://localhost:10000/?token=abc"
 
@@ -65,7 +61,6 @@ def test_normal_linux_open_does_not_call_wslview(monkeypatch, capsys):
     gateway._open_dashboard(URL)
 
     assert calls == {"web": 1, "wsl": 0}
-    # URL is always printed prominently.
     assert URL in capsys.readouterr().out
 
 
@@ -124,7 +119,7 @@ def test_webbrowser_raises_falls_back_to_wslview(monkeypatch):
 
     monkeypatch.setattr("subprocess.run", fake_run)
 
-    gateway._open_dashboard(URL)  # must not raise
+    gateway._open_dashboard(URL)
     assert calls["wsl"] == 1
 
 
@@ -138,7 +133,7 @@ def test_missing_wslview_does_not_raise(monkeypatch, capsys):
 
     monkeypatch.setattr("subprocess.run", fake_run)
 
-    gateway._open_dashboard(URL)  # must not raise
+    gateway._open_dashboard(URL)
     assert URL in capsys.readouterr().out
 
 
@@ -168,17 +163,17 @@ def test_wslview_open_returns_false_when_missing(monkeypatch):
     assert gateway._wslview_open(URL) is False
 
 
-# ── doctor WSL note ──────────────────────────────────────────────────────────
-
-
 def _run_doctor_capture(capsys):
     """Run _doctor() with everything but the WSL branch stubbed, return stdout."""
     import urllib.error
 
-    from gideon.cli_doctor import _doctor
+    from gideon.interfaces.cli.doctor import _doctor
 
     with (
-        patch("gideon.cli_doctor.shutil.which", side_effect=lambda b: f"/usr/local/bin/{b}"),
+        patch(
+            "gideon.interfaces.cli.doctor.shutil.which",
+            side_effect=lambda b: f"/usr/local/bin/{b}",
+        ),
         patch(
             "subprocess.run",
             return_value=type(
@@ -192,8 +187,10 @@ def _run_doctor_capture(capsys):
                 },
             )(),
         ),
-        patch("urllib.request.urlopen", side_effect=urllib.error.URLError("no gateway")),
-        patch("gideon.cli_doctor.is_local_bind", return_value=True),
+        patch(
+            "urllib.request.urlopen", side_effect=urllib.error.URLError("no gateway")
+        ),
+        patch("gideon.interfaces.cli.doctor.is_local_bind", return_value=True),
     ):
         try:
             _doctor()
@@ -203,21 +200,24 @@ def _run_doctor_capture(capsys):
 
 
 def test_doctor_shows_wsl_note_when_wsl(monkeypatch, capsys):
-    from gideon.service.common import Platform
+    from gideon.operations.service.common import Platform
 
-    monkeypatch.setattr("gideon.env._is_wsl", lambda: True)
-    monkeypatch.setattr("gideon.service.common.current_platform", lambda: Platform.SYSTEMD)
+    monkeypatch.setattr("gideon.core.env._is_wsl", lambda: True)
+    monkeypatch.setattr(
+        "gideon.operations.service.common.current_platform", lambda: Platform.SYSTEMD
+    )
     out = _run_doctor_capture(capsys)
     assert "WSL detected" in out
     assert "systemd active" in out
 
 
 def test_doctor_wsl_note_warns_without_systemd(monkeypatch, capsys):
-    from gideon.service.common import Platform
+    from gideon.operations.service.common import Platform
 
-    monkeypatch.setattr("gideon.env._is_wsl", lambda: True)
+    monkeypatch.setattr("gideon.core.env._is_wsl", lambda: True)
     monkeypatch.setattr(
-        "gideon.service.common.current_platform", lambda: Platform.UNSUPPORTED
+        "gideon.operations.service.common.current_platform",
+        lambda: Platform.UNSUPPORTED,
     )
     out = _run_doctor_capture(capsys)
     assert "WSL detected" in out
@@ -226,6 +226,6 @@ def test_doctor_wsl_note_warns_without_systemd(monkeypatch, capsys):
 
 
 def test_doctor_no_wsl_note_on_normal_linux(monkeypatch, capsys):
-    monkeypatch.setattr("gideon.env._is_wsl", lambda: False)
+    monkeypatch.setattr("gideon.core.env._is_wsl", lambda: False)
     out = _run_doctor_capture(capsys)
     assert "WSL detected" not in out

@@ -4,7 +4,7 @@ The atom's done-when, restated as the two things these tests must be able to fai
 driving a non-allowlisted app refuses, and typing or set-value into a secure/password field
 refuses. Both refusals are raised BY the policy — the SEL gate downstream records, it does
 not decide — so every assertion here is on a raised
-:class:`~gideon.computer_use.policy.ComputerUsePolicyRefusal` and the stable code it
+:class:`~gideon.integrations.computer_use.policy.ComputerUsePolicyRefusal` and the stable code it
 carries, never on a log line.
 
 Three deliberate anti-vacuity choices, because a policy suite is the easiest place in a
@@ -25,12 +25,15 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.computer_use import enable_state, policy
+from gideon.integrations.computer_use import enable_state, policy
 
 TOOL = "computer_type"
 
-#: An ordinary, obviously-safe destination: the shape every refusal case is a mutation of.
-ORDINARY_FIELD = {"role": "AXTextField", "label": "Subject", "value": "Lunch on Tuesday"}
+ORDINARY_FIELD = {
+    "role": "AXTextField",
+    "label": "Subject",
+    "value": "Lunch on Tuesday",
+}
 
 
 @pytest.fixture(autouse=True)
@@ -42,7 +45,9 @@ def _isolated_enable_path(tmp_path, monkeypatch):
     to build an error message is one edit away from a suite that writes there. The override
     short-circuits before ``config_dir`` is even imported.
     """
-    monkeypatch.setenv(enable_state.ENABLE_PATH_ENV, str(tmp_path / "computer_use.enable.json"))
+    monkeypatch.setenv(
+        enable_state.ENABLE_PATH_ENV, str(tmp_path / "computer_use.enable.json")
+    )
     return tmp_path / "computer_use.enable.json"
 
 
@@ -56,16 +61,15 @@ def _allow(monkeypatch, *apps: str) -> None:
     (``allowed_apps() -> tuple[str, ...]``, empty meaning nothing may be driven), and it keeps
     pinning it once the real implementation is underneath.
     """
-    monkeypatch.setattr(enable_state, "allowed_apps", lambda: tuple(apps), raising=False)
+    monkeypatch.setattr(
+        enable_state, "allowed_apps", lambda: tuple(apps), raising=False
+    )
 
 
 def _refusal(callable_, *args, **kwargs) -> policy.ComputerUsePolicyRefusal:
     with pytest.raises(policy.ComputerUsePolicyRefusal) as excinfo:
         callable_(*args, **kwargs)
     return excinfo.value
-
-
-# ── check_app: the allowlist ───────────────────────────────────────────────────────────
 
 
 def test_allowlisted_app_returns_cleanly(monkeypatch):
@@ -82,8 +86,6 @@ def test_non_allowlisted_app_refuses(monkeypatch):
 
     assert err.code == policy.ERR_APP_NOT_ALLOWED
     assert "Terminal" in err.what
-    # The refusal lists what WOULD have been accepted, so a corrected retry is possible
-    # without a second round trip through the operator.
     assert err.suggestions == ("TextEdit",)
 
 
@@ -113,12 +115,12 @@ def test_empty_allowlist_refuses_gideon_itself(monkeypatch):
 @pytest.mark.parametrize(
     "nearby",
     [
-        "TextEditor",  # a longer name that CONTAINS the allowed one → substring match
-        "extEdi",  # a shorter name CONTAINED BY it → reversed substring match
-        "textedit",  # same letters, wrong case → casefolded match
+        "TextEditor",
+        "extEdi",
+        "textedit",
         "TEXTEDIT",
         "Text Edit",
-        "TextEdit.app",  # the bundle name, not the application name
+        "TextEdit.app",
         "TextEdit2",
     ],
 )
@@ -126,7 +128,10 @@ def test_nearby_app_name_refuses(monkeypatch, nearby):
     """A rail proving only the positive case cannot detect a match that is too generous."""
     _allow(monkeypatch, "TextEdit")
 
-    assert _refusal(policy.check_app, nearby, tool=TOOL).error.code == policy.ERR_APP_NOT_ALLOWED
+    assert (
+        _refusal(policy.check_app, nearby, tool=TOOL).error.code
+        == policy.ERR_APP_NOT_ALLOWED
+    )
 
 
 @pytest.mark.parametrize("blank", ["", "   ", None, 0, [], {"name": "TextEdit"}])
@@ -134,7 +139,10 @@ def test_unnamed_app_refuses(monkeypatch, blank):
     """An unnamed or non-string target is an unknown one, and unknown means no."""
     _allow(monkeypatch, "TextEdit")
 
-    assert _refusal(policy.check_app, blank, tool=TOOL).error.code == policy.ERR_APP_NOT_ALLOWED
+    assert (
+        _refusal(policy.check_app, blank, tool=TOOL).error.code
+        == policy.ERR_APP_NOT_ALLOWED
+    )
 
 
 def test_surrounding_whitespace_is_not_a_different_app(monkeypatch):
@@ -154,16 +162,13 @@ def test_allowlist_is_read_at_decision_time_not_cached(monkeypatch):
     _allow(monkeypatch, "TextEdit")
     assert policy.check_app("TextEdit", tool=TOOL) is None
 
-    _allow(monkeypatch)  # the operator emptied the list
+    _allow(monkeypatch)
     assert _refusal(policy.check_app, "TextEdit", tool=TOOL).error.code == (
         policy.ERR_APP_NOT_ALLOWED
     )
 
-    _allow(monkeypatch, "TextEdit")  # ...and put it back
+    _allow(monkeypatch, "TextEdit")
     assert policy.check_app("TextEdit", tool=TOOL) is None
-
-
-# ── check_input_target: secure fields, unknown shapes, sensitive text ──────────────────
 
 
 def test_ordinary_text_field_passes():
@@ -171,13 +176,16 @@ def test_ordinary_text_field_passes():
     assert policy.check_input_target({"role": "AXTextArea"}, tool=TOOL) is None
     assert (
         policy.check_input_target(
-            {"role": "AXTextField", "subrole": "AXSearchField", "label": "Search"}, tool=TOOL
+            {"role": "AXTextField", "subrole": "AXSearchField", "label": "Search"},
+            tool=TOOL,
         )
         is None
     )
-    # The raw AX spellings screen identically to the mapped ones.
     assert (
-        policy.check_input_target({"AXRole": "AXTextField", "AXTitle": "Note"}, tool=TOOL) is None
+        policy.check_input_target(
+            {"AXRole": "AXTextField", "AXTitle": "Note"}, tool=TOOL
+        )
+        is None
     )
 
 
@@ -186,7 +194,11 @@ def test_ordinary_text_field_passes():
     [
         {"role": "AXTextField", "subrole": "AXSecureTextField"},
         {"role": "AXTextField", "AXSubrole": "AXSecureTextField"},
-        {"AXRole": "AXTextField", "AXSubrole": "AXSecureTextField", "AXTitle": "Password"},
+        {
+            "AXRole": "AXTextField",
+            "AXSubrole": "AXSecureTextField",
+            "AXTitle": "Password",
+        },
     ],
 )
 def test_secure_field_refuses(target):
@@ -230,7 +242,7 @@ def test_secret_bearing_label_refuses_without_a_secure_subrole(label):
         "Search",
         "Subject",
         "Message body",
-        "Pinned messages",  # 'pin' as a substring must not be a match
+        "Pinned messages",
         "Shipping address",
         "Spinner value",
         "To",
@@ -240,7 +252,10 @@ def test_secret_bearing_label_refuses_without_a_secure_subrole(label):
 )
 def test_ordinary_label_is_not_refused(label):
     """A screen that refuses everything is as useless as one that refuses nothing."""
-    assert policy.check_input_target({"role": "AXTextField", "label": label}, tool=TOOL) is None
+    assert (
+        policy.check_input_target({"role": "AXTextField", "label": label}, tool=TOOL)
+        is None
+    )
 
 
 @pytest.mark.parametrize(
@@ -258,12 +273,13 @@ def test_ordinary_label_is_not_refused(label):
         ("a role this build has never seen", {"role": "AXFutureWidget"}),
         ("a non-string role", {"role": 5}),
         ("a role that is a list", {"role": ["AXTextField"]}),
-        ("an unrecognised subrole", {"role": "AXTextField", "subrole": "AXFutureSubrole"}),
+        (
+            "an unrecognised subrole",
+            {"role": "AXTextField", "subrole": "AXFutureSubrole"},
+        ),
         ("a non-string subrole", {"role": "AXTextField", "subrole": 7}),
         ("a non-string label", {"role": "AXTextField", "label": 3}),
         ("a non-string value", {"role": "AXTextField", "value": []}),
-        # Both spellings present and disagreeing: screening whichever came first would let the
-        # caller pick which of its two claims gets enforced.
         ("contradictory role spellings", {"role": "AXTextField", "AXRole": "AXButton"}),
         (
             "contradictory subrole spellings",
@@ -294,7 +310,7 @@ def test_unrecognised_or_malformed_target_refuses(shape, target):
 )
 def test_field_already_holding_credential_shaped_text_refuses(existing):
     """The 'sensitive text' leg, screened with the repo's ONE definition of a credential-shaped
-    string (:func:`gideon.security.redact_credentials`) rather than a second vocabulary
+    string (:func:`gideon.security.security.redact_credentials`) rather than a second vocabulary
     invented here. A string the system redacts on the way OUT is one this tool will not type
     INTO."""
     target = {"role": "AXTextField", "label": "Value", "value": existing}
@@ -303,7 +319,6 @@ def test_field_already_holding_credential_shaped_text_refuses(existing):
 
     assert err.code == policy.ERR_SECURE_FIELD
     assert "credential-shaped" in err.what
-    # The refusal must not quote the secret it just refused to touch.
     assert existing not in err.render()
 
 
@@ -329,13 +344,14 @@ def test_secure_field_inside_an_allowlisted_app_still_refuses(monkeypatch):
     _allow(monkeypatch, "Safari")
     assert policy.check_app("Safari", tool=TOOL) is None
 
-    target = {"role": "AXTextField", "subrole": "AXSecureTextField", "label": "Password"}
+    target = {
+        "role": "AXTextField",
+        "subrole": "AXSecureTextField",
+        "label": "Password",
+    }
     assert _refusal(policy.check_input_target, target, tool=TOOL).error.code == (
         policy.ERR_SECURE_FIELD
     )
-
-
-# ── the message contract, and the vacuity floor ────────────────────────────────────────
 
 
 def _refusals(monkeypatch):
@@ -356,7 +372,6 @@ def test_every_refusal_carries_what_why_fix(monkeypatch):
         assert err.what.strip(), err.code
         assert err.why.strip(), err.code
         assert err.fix.strip(), err.code
-        # The rendered form is what a model actually reads.
         rendered = err.render()
         for label in ("WHAT:", "WHY:", "FIX:"):
             assert label in rendered, (err.code, label)
@@ -372,7 +387,6 @@ def test_every_fix_names_the_out_of_band_file(monkeypatch, _isolated_enable_path
         assert "settings screen" not in err.fix.lower(), err.code
 
     app_err, _ = _refusals(monkeypatch)
-    # The app refusal additionally has to say HOW to add an app, or the operator is stuck.
     assert policy.ALLOWLIST_KEY in app_err.fix
     assert enable_state.ENABLE_PATH_ENV in app_err.fix
 
@@ -387,7 +401,6 @@ def test_error_codes_are_distinct_and_non_empty():
         assert code
         assert code == code.upper()
         assert code.startswith("ERR_COMPUTER_USE_")
-    # ...and distinct from the keystone's code, which is a different refusal entirely.
     assert enable_state.ERR_DISABLED not in codes
 
 

@@ -12,9 +12,8 @@ import json
 
 import pytest
 
-from gideon.action_providers.base import ActionContext
-from gideon.knowledge import consolidation as cons
-from gideon.knowledge.consolidation import (
+from gideon.cognition.knowledge import consolidation as cons
+from gideon.cognition.knowledge.consolidation import (
     CONSOLIDATION_DOCTRINE,
     MAX_REFLECTION_COUNT,
     TOKEN_CLUSTER_SIMILARITY,
@@ -34,10 +33,8 @@ from gideon.knowledge.consolidation import (
     synthesis_prompt,
     token_similarity,
 )
+from gideon.integrations.action_providers.base import ActionContext
 
-#: Six human paraphrases of ONE fact — the actual consolidation target, and the input that
-#: exposed the threshold bug. Deliberately not near-identical strings: those are the pre-dedup
-#: tier's job, and testing clustering with them measures the wrong thing.
 PARAPHRASES = [
     "Cold start latency measured 4.2 seconds on the M2 after a fresh boot of the machine",
     "On the M2 we saw cold starts around 4.1s following a cold boot of the host machine",
@@ -69,16 +66,13 @@ def body(result):
 def home(tmp_path, monkeypatch):
     """An isolated home. Never the developer's own — consolidation ARCHIVES rows."""
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     return tmp_path
 
 
 @pytest.fixture
 def ctx():
     return ActionContext(event="workflow_node", payload={"node_id": "n-1"})
-
-
-# ── the gate stack ──
 
 
 def test_contention_is_checked_before_anything_else():
@@ -112,9 +106,6 @@ def test_gates_pass_when_there_is_real_work():
     assert check_gates(unprocessed=50, hours_since_last=24)
 
 
-# ── pre-dedup ──
-
-
 def test_punctuation_and_case_are_not_differences():
     assert fuzzy_hash("The Fed held rates!") == fuzzy_hash("the fed held rates")
 
@@ -143,13 +134,11 @@ def test_a_protected_item_wins_its_pair_regardless_of_order(order):
     assert merges == [("user", "agent")]
 
 
-# ── clustering: the threshold's number space ──
-
-
 def test_paraphrases_of_one_fact_cluster_together():
     """The bug this exists to prevent: the plan's 0.75 is an EMBEDDING threshold, and applying
     it to token overlap clustered nothing at all — a pass that ran, reported success, and
-    consolidated zero items every single time. Measured, these six score 0.12-0.36 pairwise."""
+    consolidated zero items every single time. Measured, these six score 0.12-0.36 pairwise.
+    """
     clusters = cluster_items(items_from(PARAPHRASES))
     assert clusters
     assert clusters[0].size >= 5
@@ -202,21 +191,20 @@ def test_the_largest_cluster_wins_the_per_pass_cap():
     happened to form first."""
     big = items_from(PARAPHRASES)
     small = [
-        Item(id=f"s{n}", content=f"unrelated {n} " + "filler word here " * 3) for n in range(3)
+        Item(id=f"s{n}", content=f"unrelated {n} " + "filler word here " * 3)
+        for n in range(3)
     ]
     clusters = cluster_items(big + small, min_size=2, max_clusters=1)
     assert clusters[0].size >= 5
     assert not set(clusters[0].ids) & {i.id for i in small}
 
 
-# ── the plan (dry-run artifact) ──
-
-
 def test_protected_items_are_excluded_from_the_plan():
     """`source.origin: user` is never archived or demoted: an agent's discovery is
     re-derivable, a user's decision is not."""
     plan = plan_consolidation(
-        items_from(PARAPHRASES) + [Item(id="gold", content="the user decided this", origin="user")]
+        items_from(PARAPHRASES)
+        + [Item(id="gold", content="the user decided this", origin="user")]
     )
     assert plan.skipped_protected == ["gold"]
     assert all("gold" not in c.ids for c in plan.clusters)
@@ -231,9 +219,6 @@ def test_the_plan_serializes_for_review():
 
 def test_an_empty_store_plans_nothing():
     assert plan_consolidation([]).empty
-
-
-# ── the synthesis prompt ──
 
 
 def test_the_prompt_carries_the_doctrine():
@@ -266,9 +251,6 @@ def test_the_compression_ratio_exposes_a_pointless_pass():
     assert cluster.compression_ratio(200) < cluster.compression_ratio(4000)
 
 
-# ── health ──
-
-
 def test_a_short_but_specific_item_is_not_a_stub():
     """Measured: the plan's 100-char floor flagged "Cold start latency measured 4.2s on the M2
     after a fresh boot" (83 chars) — a complete, useful fact. Six real items reported as six
@@ -277,12 +259,18 @@ def test_a_short_but_specific_item_is_not_a_stub():
     assert report.stubs == []
 
 
-@pytest.mark.parametrize("text", ["", "tiny", "See notes", "It depends on the situation somewhat"])
+@pytest.mark.parametrize(
+    "text", ["", "tiny", "See notes", "It depends on the situation somewhat"]
+)
 def test_a_short_and_unspecific_item_is_a_stub(text):
-    assert check_health([Item(id="a", content=text, inbound_relations=1)]).stubs == ["a"]
+    assert check_health([Item(id="a", content=text, inbound_relations=1)]).stubs == [
+        "a"
+    ]
 
 
-@pytest.mark.parametrize("text", ["Uses /etc/hosts", "Version 2.1 shipped", "In KnowledgeStore"])
+@pytest.mark.parametrize(
+    "text", ["Uses /etc/hosts", "Version 2.1 shipped", "In KnowledgeStore"]
+)
 def test_a_short_item_making_a_claim_is_not_a_stub(text):
     """A number, a path, an identifier — the things a short knowledge item exists to record."""
     assert check_health([Item(id="a", content=text, inbound_relations=1)]).stubs == []
@@ -292,7 +280,9 @@ def test_orphans_are_flagged_never_deleted():
     """An item nothing links to may be the only record of something. "Unreferenced" is not
     "worthless", and auto-deletion here would be irreversible on the basis of a graph property
     that says nothing about content."""
-    report = check_health([Item(id="lonely", content=PARAPHRASES[0], inbound_relations=0)])
+    report = check_health(
+        [Item(id="lonely", content=PARAPHRASES[0], inbound_relations=0)]
+    )
     assert report.orphans == ["lonely"]
 
 
@@ -323,9 +313,6 @@ def test_archived_items_are_not_reported():
     assert check_health([Item(id="a", content="tiny", is_archived=True)]).clean
 
 
-# ── differential refresh ──
-
-
 def test_only_changed_sections_are_refreshed():
     stored = {"intro": "a" * 16, "body": "b" * 16}
     fresh = {"intro": "a" * 16, "body": "c" * 16}
@@ -352,9 +339,6 @@ def test_a_truncated_hash_compared_to_a_full_one_reports_changed():
 def test_chunk_hashes_are_one_canonical_form():
     hashes = chunk_hashes({"a": "text one", "b": "text two"})
     assert len({len(h) for h in hashes.values()}) == 1
-
-
-# ── phantom hubs ──
 
 
 def test_a_referenced_but_unwritten_entity_is_a_gap():
@@ -386,9 +370,6 @@ def test_repeat_references_from_one_item_do_not_count_twice():
     assert hubs == []
 
 
-# ── lint cadence ──
-
-
 def test_lint_waits_for_health_to_be_clean():
     """Linting a stub spends a model call to discover it is a stub, which the zero-cost pass
     already knew."""
@@ -403,17 +384,14 @@ def test_lint_is_cadenced_by_writes_not_time():
     assert lint_due(persists_since_last=12, every_n=12, health_clean=True)[0]
 
 
-# ── the providers ──
-
-
 def test_the_maintenance_providers_are_registered_and_allowlisted():
     """A provider in the registry but not the hook allowlist validates, saves, and fails only at
     run time."""
-    from gideon.action_providers.registry import (
+    from gideon.assurance.validation import ALLOWED_HOOK_PROVIDERS
+    from gideon.integrations.action_providers.registry import (
         _ensure_default_providers_registered,
         get_action_provider,
     )
-    from gideon.validation import ALLOWED_HOOK_PROVIDERS
 
     _ensure_default_providers_registered()
     for name in ("knowledge-health", "knowledge-consolidate", "knowledge-gaps"):
@@ -422,7 +400,7 @@ def test_the_maintenance_providers_are_registered_and_allowlisted():
 
 
 def _seed(home, ctx, texts, **extra):
-    from gideon.action_providers.knowledge_persist_provider import (
+    from gideon.integrations.action_providers.knowledge_persist_provider import (
         KnowledgePersistActionProvider,
     )
 
@@ -430,13 +408,19 @@ def _seed(home, ctx, texts, **extra):
     for index, text in enumerate(texts):
         run(
             persist.execute(
-                {"kind": "fact", "title": f"Cold starts {index}", "content": text, **extra}, ctx
+                {
+                    "kind": "fact",
+                    "title": f"Cold starts {index}",
+                    "content": text,
+                    **extra,
+                },
+                ctx,
             )
         )
 
 
 def _health():
-    from gideon.action_providers.knowledge_maintain_provider import (
+    from gideon.integrations.action_providers.knowledge_maintain_provider import (
         KnowledgeHealthActionProvider,
     )
 
@@ -444,7 +428,7 @@ def _health():
 
 
 def _consolidate():
-    from gideon.action_providers.knowledge_maintain_provider import (
+    from gideon.integrations.action_providers.knowledge_maintain_provider import (
         KnowledgeConsolidateActionProvider,
     )
 
@@ -452,7 +436,7 @@ def _consolidate():
 
 
 def _gaps():
-    from gideon.action_providers.knowledge_maintain_provider import (
+    from gideon.integrations.action_providers.knowledge_maintain_provider import (
         KnowledgeGapsActionProvider,
     )
 
@@ -547,13 +531,19 @@ def test_an_archived_original_keeps_a_back_reference(home, ctx):
         _consolidate().execute(
             {
                 "apply": True,
-                "summaries": [{"cluster": 0, "title": "T", "content": "c" * 60, "summary": "s"}],
+                "summaries": [
+                    {"cluster": 0, "title": "T", "content": "c" * 60, "summary": "s"}
+                ],
             },
             ctx,
         )
     )
     store = _open(home)
-    row = list(store.db.execute("SELECT file_metadata FROM items WHERE is_archived = 1 LIMIT 1"))[0]
+    row = list(
+        store.db.execute(
+            "SELECT file_metadata FROM items WHERE is_archived = 1 LIMIT 1"
+        )
+    )[0]
     meta = json.loads(row["file_metadata"])
     assert meta["archived_reason"] == "consolidated"
     assert meta["summary_of"]
@@ -561,19 +551,24 @@ def test_an_archived_original_keeps_a_back_reference(home, ctx):
 
 def test_the_lineage_reaches_the_row(home, ctx):
     """Measured: passing `metadata=` to the persist provider was silently DROPPED — it only
-    forwards a named allowlist — so the lineage the whole pass depends on never landed."""
+    forwards a named allowlist — so the lineage the whole pass depends on never landed.
+    """
     _seed(home, ctx, PARAPHRASES)
     run(
         _consolidate().execute(
             {
                 "apply": True,
-                "summaries": [{"cluster": 0, "title": "T", "content": "c" * 60, "summary": "s"}],
+                "summaries": [
+                    {"cluster": 0, "title": "T", "content": "c" * 60, "summary": "s"}
+                ],
             },
             ctx,
         )
     )
     store = _open(home)
-    row = list(store.db.execute("SELECT file_metadata FROM items WHERE kind = 'insight'"))[0]
+    row = list(
+        store.db.execute("SELECT file_metadata FROM items WHERE kind = 'insight'")
+    )[0]
     assert json.loads(row["file_metadata"])["parent_ids"]
 
 
@@ -583,7 +578,9 @@ def test_a_second_pass_is_gated_after_the_first(home, ctx):
         _consolidate().execute(
             {
                 "apply": True,
-                "summaries": [{"cluster": 0, "title": "T", "content": "c" * 60, "summary": "s"}],
+                "summaries": [
+                    {"cluster": 0, "title": "T", "content": "c" * 60, "summary": "s"}
+                ],
             },
             ctx,
         )
@@ -594,8 +591,13 @@ def test_a_second_pass_is_gated_after_the_first(home, ctx):
 
 def test_gaps_finds_wikilink_hubs(home, ctx):
     """A separate provider, not a `knowledge-retrieve` call with a clever query: the first draft
-    passed `min_mentions` AS the search query, which reads plausibly and searches for "3"."""
-    _seed(home, ctx, [t + " See [[Provisioned Concurrency]] for context." for t in PARAPHRASES])
+    passed `min_mentions` AS the search query, which reads plausibly and searches for "3".
+    """
+    _seed(
+        home,
+        ctx,
+        [t + " See [[Provisioned Concurrency]] for context." for t in PARAPHRASES],
+    )
     payload = body(run(_gaps().execute({"min_mentions": 3}, ctx)))
     assert [g["entity"] for g in payload["gaps"]] == ["Provisioned Concurrency"]
 
@@ -603,7 +605,9 @@ def test_gaps_finds_wikilink_hubs(home, ctx):
 def test_gaps_carries_excerpts_so_a_draft_is_grounded(home, ctx):
     """A model given a bare name writes what it already believes about it — which is exactly the
     invention this template exists to avoid."""
-    _seed(home, ctx, [t + " See [[Provisioned Concurrency]] here." for t in PARAPHRASES])
+    _seed(
+        home, ctx, [t + " See [[Provisioned Concurrency]] here." for t in PARAPHRASES]
+    )
     payload = body(run(_gaps().execute({"min_mentions": 3}, ctx)))
     assert payload["excerpts"]["Provisioned Concurrency"]
 
@@ -617,9 +621,6 @@ def test_gaps_never_writes(home, ctx):
     assert _count(home) == before
 
 
-# ── config wiring ──
-
-
 @pytest.mark.parametrize(
     "field_name",
     [
@@ -630,8 +631,8 @@ def test_gaps_never_writes(home, ctx):
     ],
 )
 def test_each_new_knob_completes_the_four_point_wiring(field_name):
-    from gideon.config.loader import AppConfig
-    from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+    from gideon.core.config.loader import AppConfig
+    from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
     cfg = AppConfig()
     assert hasattr(cfg.knowledge, field_name)
@@ -639,11 +640,8 @@ def test_each_new_knob_completes_the_four_point_wiring(field_name):
     assert field_name in cfg.to_dict()["knowledge"]
 
 
-# ── the bundled trio ──
-
-
 def test_the_maintenance_trio_ships():
-    from gideon.workflows.bundled_defs import template_names
+    from gideon.automation.workflows.bundled_defs import template_names
 
     for name in ("knowledge-health", "knowledge-lint", "gap-healing"):
         assert name in template_names(), name
@@ -652,22 +650,24 @@ def test_the_maintenance_trio_ships():
 def test_lint_runs_health_first():
     """ "Linting a stub wastes tokens" is the plan's rule, and the template has to encode it —
     a convention nothing enforces is a comment."""
-    from gideon.workflows.bundled_defs import read_template
-    from gideon.workflows.models import Node, walk
+    from gideon.automation.workflows.bundled_defs import read_template
+    from gideon.automation.workflows.models import Node, walk
 
     root = read_template("knowledge-lint").root
-    order = [n.id for _p, n in walk(root if isinstance(root, Node) else Node.from_dict(root))]
+    order = [
+        n.id for _p, n in walk(root if isinstance(root, Node) else Node.from_dict(root))
+    ]
     assert order.index("health") < order.index("plan")
 
 
 def test_the_lint_template_defaults_to_not_applying():
-    from gideon.workflows.bundled_defs import read_template
+    from gideon.automation.workflows.bundled_defs import read_template
 
     assert read_template("knowledge-lint").inputs["apply"].default is False
 
 
 def _open(home):
-    from gideon.knowledge.store import KnowledgeStore, knowledge_db_path
+    from gideon.cognition.knowledge.store import KnowledgeStore, knowledge_db_path
 
     return KnowledgeStore(db_path=str(knowledge_db_path()))
 

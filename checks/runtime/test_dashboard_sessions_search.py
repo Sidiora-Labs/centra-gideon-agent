@@ -4,14 +4,13 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.dashboard.handlers import api_sessions_search
-from gideon.history import ConversationLog
+from gideon.cognition.history import ConversationLog
+from gideon.interfaces.dashboard.handlers import api_sessions_search
 
 
 def _make_app(log: ConversationLog) -> web.Application:
-    # SimpleNamespace documents exactly which DashboardState attributes the
-    # handler depends on; adding a new one will raise a clear AttributeError
-    # instead of inheriting real DashboardState behavior via __new__.
+    # SimpleNamespace documents exactly which ConsoleState attributes the
+    # instead of inheriting real ConsoleState behavior via __new__.
     from types import SimpleNamespace
 
     state = SimpleNamespace(conversation_log=log)
@@ -66,7 +65,6 @@ class TestSessionsSearchHandler:
         log = ConversationLog(base_dir=tmp_path)
         log.append("alpha", "user", "hello world")
         async with TestClient(TestServer(_make_app(log))) as client:
-            # %00 is a null byte — sanitize_string strips control chars.
             resp = await client.get("/api/sessions/search?q=hello%00")
             assert resp.status == 200
             assert [s["key"] for s in (await resp.json())["sessions"]] == ["alpha"]
@@ -76,7 +74,6 @@ class TestSessionsSearchHandler:
         """LLM-generated titles must be sanitized through redact helpers."""
         log = ConversationLog(base_dir=tmp_path)
         log.append("alpha", "user", "matches query")
-        # Inject a title with a credential-like pattern via monkeypatch
         calls = []
 
         def _fake_redact_creds(text):
@@ -88,10 +85,12 @@ class TestSessionsSearchHandler:
             return (text, [])
 
         monkeypatch.setattr(
-            "gideon.dashboard.handlers.redact_credentials", _fake_redact_creds
+            "gideon.interfaces.dashboard.handlers.redact_credentials",
+            _fake_redact_creds,
         )
         monkeypatch.setattr(
-            "gideon.dashboard.handlers.redact_exfiltration_urls", _fake_redact_urls
+            "gideon.interfaces.dashboard.handlers.redact_exfiltration_urls",
+            _fake_redact_urls,
         )
         async with TestClient(TestServer(_make_app(log))) as client:
             resp = await client.get("/api/sessions/search?q=matches")

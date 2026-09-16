@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.identity import (
+from gideon.cognition.identity import (
     USERNAME_MAX_LEN,
     current_username,
     is_valid_username,
@@ -65,7 +65,7 @@ class TestSlugify:
     def test_is_valid_username_recognizes_canonical_form(self):
         assert is_valid_username("keyur-golani")
         assert not is_valid_username("Keyur Golani")
-        assert is_valid_username("")  # empty is canonical
+        assert is_valid_username("")
 
     def test_suggest_from_display_name(self):
         assert suggest_username("Keyur Golani") == "keyur-golani"
@@ -77,7 +77,7 @@ class TestConfigRoundTrip:
         records — load normalizes too, not just the write boundary."""
         import json
 
-        import gideon.config.loader as loader
+        import gideon.core.config.loader as loader
 
         monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
         (tmp_path / "config.json").write_text(
@@ -89,7 +89,7 @@ class TestConfigRoundTrip:
     def test_absent_username_defaults_to_empty(self, tmp_path, monkeypatch):
         import json
 
-        import gideon.config.loader as loader
+        import gideon.core.config.loader as loader
 
         monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
         (tmp_path / "config.json").write_text(json.dumps({"dashboard": {}}))
@@ -101,7 +101,9 @@ class TestConfigRoundTrip:
         def _boom(cls):
             raise RuntimeError("config exploded")
 
-        monkeypatch.setattr("gideon.config.loader.AppConfig.load", classmethod(_boom))
+        monkeypatch.setattr(
+            "gideon.core.config.loader.AppConfig.load", classmethod(_boom)
+        )
         assert current_username() == ""
 
 
@@ -110,32 +112,36 @@ class TestTaskAttribution:
 
     @pytest.mark.asyncio
     async def test_created_task_carries_the_owner_handle(self, tmp_path, monkeypatch):
-        import gideon.config.loader as loader
-        import gideon.tasks.native as native
+        import gideon.core.config.loader as loader
+        import gideon.engine.tasks.native as native
 
         monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
         monkeypatch.setattr(native, "config_dir", lambda: tmp_path, raising=False)
         monkeypatch.setattr(native, "_current_username", lambda: "keyur-golani")
         task = await native.NativeTaskProvider().create_task(title="Ship it")
         assert task.author == "keyur-golani"
-        assert task.assignee == ""  # author (who wrote it) != assignee (who does it)
+        assert task.assignee == ""
 
     @pytest.mark.asyncio
-    async def test_explicit_author_wins_over_the_owner_handle(self, tmp_path, monkeypatch):
-        import gideon.config.loader as loader
-        import gideon.tasks.native as native
+    async def test_explicit_author_wins_over_the_owner_handle(
+        self, tmp_path, monkeypatch
+    ):
+        import gideon.core.config.loader as loader
+        import gideon.engine.tasks.native as native
 
         monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
         monkeypatch.setattr(native, "config_dir", lambda: tmp_path, raising=False)
         monkeypatch.setattr(native, "_current_username", lambda: "owner")
-        task = await native.NativeTaskProvider().create_task(title="x", author="someone-else")
+        task = await native.NativeTaskProvider().create_task(
+            title="x", author="someone-else"
+        )
         assert task.author == "someone-else"
 
     @pytest.mark.asyncio
     async def test_no_handle_means_no_attribution(self, tmp_path, monkeypatch):
         """Today's behavior, unchanged, for an install that never sets a username."""
-        import gideon.config.loader as loader
-        import gideon.tasks.native as native
+        import gideon.core.config.loader as loader
+        import gideon.engine.tasks.native as native
 
         monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
         monkeypatch.setattr(native, "config_dir", lambda: tmp_path, raising=False)
@@ -144,13 +150,15 @@ class TestTaskAttribution:
         assert task.author == ""
 
     @pytest.mark.asyncio
-    async def test_preexisting_task_json_reads_back_without_author(self, tmp_path, monkeypatch):
+    async def test_preexisting_task_json_reads_back_without_author(
+        self, tmp_path, monkeypatch
+    ):
         """The additive contract: a task file written before this field existed
         loads cleanly with author == "" rather than raising."""
         import json
 
-        import gideon.config.loader as loader
-        import gideon.tasks.native as native
+        import gideon.core.config.loader as loader
+        import gideon.engine.tasks.native as native
 
         monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
         monkeypatch.setattr(native, "config_dir", lambda: tmp_path, raising=False)
@@ -171,8 +179,8 @@ class TestTaskAttribution:
         """#2847: with no configured handle a comment stamps the SAME author as its
         task — "" — not the retired "user" placeholder. The placeholder made every task
         and its comments disagree until ``dashboard.username`` was set."""
-        import gideon.config.loader as loader
-        import gideon.tasks.native as native
+        import gideon.core.config.loader as loader
+        import gideon.engine.tasks.native as native
 
         monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
         monkeypatch.setattr(native, "config_dir", lambda: tmp_path, raising=False)
@@ -181,9 +189,7 @@ class TestTaskAttribution:
         task = await provider.create_task(title="x")
         comment = await provider.add_comment(task.id, "a note")
         assert comment is not None
-        # The invariant: a task and its comments agree in the default no-handle state.
         assert comment.author == task.author == ""
-        # An explicit handle still flows through to the comment path unchanged.
         monkeypatch.setattr(native, "_current_username", lambda: "keyur-golani")
         second = await provider.add_comment(task.id, "another")
         assert second is not None and second.author == "keyur-golani"
@@ -194,8 +200,8 @@ class TestRenameSemantics:
     async def test_rename_affects_future_writes_only(self, tmp_path, monkeypatch):
         """Rewriting history to match a new handle would falsify the very record
         attribution exists to preserve."""
-        import gideon.config.loader as loader
-        import gideon.tasks.native as native
+        import gideon.core.config.loader as loader
+        import gideon.engine.tasks.native as native
 
         monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
         monkeypatch.setattr(native, "config_dir", lambda: tmp_path, raising=False)
@@ -206,7 +212,7 @@ class TestRenameSemantics:
         second = await provider.create_task(title="after rename")
         reloaded = await provider.get_task(first.id)
         assert reloaded is not None
-        assert reloaded.author == "old-name"  # untouched
+        assert reloaded.author == "old-name"
         assert second.author == "new-name"
 
 
@@ -218,7 +224,7 @@ class TestDashboardConfigEndpoint:
     def test_username_is_in_the_put_allowlist(self):
         from pathlib import Path
 
-        import gideon.dashboard.handlers.files as files_mod
+        import gideon.interfaces.dashboard.handlers.files as files_mod
 
         src = Path(files_mod.__file__).read_text(encoding="utf-8")
         allowlist_start = src.index("_allowed = {")
@@ -231,7 +237,7 @@ class TestDashboardConfigEndpoint:
     def test_username_is_returned_by_the_get(self):
         from pathlib import Path
 
-        import gideon.dashboard.handlers.files as files_mod
+        import gideon.interfaces.dashboard.handlers.files as files_mod
 
         src = Path(files_mod.__file__).read_text(encoding="utf-8")
         assert '"username": cfg.dashboard.username' in src

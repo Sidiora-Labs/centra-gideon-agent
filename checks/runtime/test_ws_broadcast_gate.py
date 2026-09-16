@@ -43,23 +43,23 @@ class _FakeWS:
 
 @pytest.fixture
 def state(monkeypatch, tmp_path):
-    """A DashboardState with the send path made synchronous and the real home untouched."""
+    """A ConsoleState with the send path made synchronous and the real home untouched."""
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.dashboard.state import DashboardState
+    from gideon.interfaces.dashboard.state import ConsoleState
 
-    st = DashboardState.__new__(DashboardState)
+    st = ConsoleState.__new__(ConsoleState)
     st._ws_clients = []
     st._ws_app = {}
     st._notification_log = []
-    # `_schedule_ws_send` normally hops onto the captured loop; here the coroutine is consumed
-    # inline so the assertion reads frames that were really handed to the socket.
     monkeypatch.setattr(
-        DashboardState,
+        ConsoleState,
         "_schedule_ws_send",
         lambda self, coro: (coro.close(), True)[1],
         raising=False,
     )
-    monkeypatch.setattr(DashboardState, "_remove_ws", lambda self, ws: None, raising=False)
+    monkeypatch.setattr(
+        ConsoleState, "_remove_ws", lambda self, ws: None, raising=False
+    )
     return st
 
 
@@ -74,7 +74,9 @@ def _app_socket(state, app: str, declared_events: list[str], monkeypatch):
             return event_type in declared_events
 
     monkeypatch.setattr(
-        "gideon.apps.permissions.checker_for", lambda _name: _Checker(), raising=False
+        "gideon.extensions.apps.permissions.checker_for",
+        lambda _name: _Checker(),
+        raising=False,
     )
     return ws
 
@@ -85,7 +87,9 @@ def test_an_always_on_frame_is_now_gated_for_an_app_socket(state, monkeypatch):
 
     state._broadcast({"_type": "sessions", "sessions": json.dumps([{"key": "s1"}])})
 
-    assert ws.types() == [], f"an undeclared always-on frame reached an app socket: {ws.types()}"
+    assert (
+        ws.types() == []
+    ), f"an undeclared always-on frame reached an app socket: {ws.types()}"
 
 
 def test_a_DECLARED_event_still_arrives(state, monkeypatch):
@@ -96,7 +100,9 @@ def test_a_DECLARED_event_still_arrives(state, monkeypatch):
         {"_type": "chat_message", "session": "s1", "role": "assistant", "content": "hi"}
     )
 
-    assert ws.types() == ["chat_message"], f"a declared event was filtered out: {ws.types()}"
+    assert ws.types() == [
+        "chat_message"
+    ], f"a declared event was filtered out: {ws.types()}"
     body = json.loads(ws.sent[0])
     assert body["data"]["content"] == "hi", "the frame arrived but lost its payload"
 
@@ -105,22 +111,28 @@ def test_the_owner_dashboard_socket_still_gets_everything(state, monkeypatch):
     """An unscoped (owner) connection is not an app and must not be filtered."""
     owner = _FakeWS()
     state._ws_clients.append(owner)
-    _app_socket(state, "an-app", [], monkeypatch)  # forces the slow, per-socket path
+    _app_socket(state, "an-app", [], monkeypatch)
 
     state._broadcast({"_type": "refresh", "kinds": "crons,cron_history"})
 
-    assert owner.types() == ["refresh"], f"the owner socket lost a frame: {owner.types()}"
+    assert owner.types() == [
+        "refresh"
+    ], f"the owner socket lost a frame: {owner.types()}"
 
 
-def test_an_unmapped_note_type_is_dropped_rather_than_shipped(state, monkeypatch, caplog):
+def test_an_unmapped_note_type_is_dropped_rather_than_shipped(
+    state, monkeypatch, caplog
+):
     """The `else:` half: a raw internal note must never reach a client as a notification."""
     import logging
 
     owner = _FakeWS()
     state._ws_clients.append(owner)
 
-    with caplog.at_level(logging.ERROR, logger="gideon.dashboard.state"):
-        state._broadcast({"_type": "definitely_not_a_type", "secret_internal_field": "leak-me"})
+    with caplog.at_level(logging.ERROR, logger="gideon.interfaces.dashboard.state"):
+        state._broadcast(
+            {"_type": "definitely_not_a_type", "secret_internal_field": "leak-me"}
+        )
 
     assert owner.sent == [], f"an unmapped note was broadcast anyway: {owner.sent}"
     assert any(
@@ -145,7 +157,12 @@ def test_the_sessions_envelope_keys_survive_the_refactor(state):
     state._ws_clients.append(owner)
 
     state._broadcast(
-        {"_type": "sessions", "sessions": json.dumps([]), "_yolo": True, "channelTrusted": True}
+        {
+            "_type": "sessions",
+            "sessions": json.dumps([]),
+            "_yolo": True,
+            "channelTrusted": True,
+        }
     )
 
     body = json.loads(owner.sent[0])
@@ -163,10 +180,16 @@ def test_extra_cannot_relabel_the_frame_a_client_receives(state, monkeypatch):
     """
     ws = _app_socket(state, "an-app", ["sessions"], monkeypatch)
 
-    state.broadcast_ws("sessions", [{"key": "s1"}], extra={"type": "chat_message", "yolo": True})
+    state.broadcast_ws(
+        "sessions", [{"key": "s1"}], extra={"type": "chat_message", "yolo": True}
+    )
 
-    assert ws.types() == ["sessions"], f"`extra` relabelled a delivered frame: {ws.types()}"
-    assert json.loads(ws.sent[0])["yolo"] is True, "a legitimate envelope key was dropped"
+    assert ws.types() == [
+        "sessions"
+    ], f"`extra` relabelled a delivered frame: {ws.types()}"
+    assert (
+        json.loads(ws.sent[0])["yolo"] is True
+    ), "a legitimate envelope key was dropped"
 
 
 def test_every_note_type_in_the_tree_is_mapped():
@@ -178,16 +201,16 @@ def test_every_note_type_in_the_tree_is_mapped():
     import re
     from pathlib import Path
 
-    from gideon.dashboard.state import BROADCAST_NOTE_TYPES
+    from gideon.interfaces.dashboard.state import BROADCAST_NOTE_TYPES
 
-    src = Path(__file__).resolve().parent.parent / "src"
+    src = Path(__file__).resolve().parent.parent.parent / "src"
     found: dict[str, str] = {}
     for path in src.rglob("*.py"):
-        for m in re.finditer(r'"_type":\s*"([a-z_]+)"', path.read_text(encoding="utf-8")):
+        for m in re.finditer(
+            r'"_type":\s*"([a-z_]+)"', path.read_text(encoding="utf-8")
+        ):
             found.setdefault(m.group(1), str(path.relative_to(src)))
     assert found, "the scan found no `_type` literals at all — it would pass vacuously"
     unmapped = {k: v for k, v in found.items() if k not in BROADCAST_NOTE_TYPES}
-    # `metadata` and `archive` are session-JSONL record types, not dashboard notes; they never
-    # reach `_broadcast`. Named here so the exemption is a decision on the record.
     unmapped = {k: v for k, v in unmapped.items() if k not in ("metadata", "archive")}
     assert not unmapped, f"note types no producer can translate: {unmapped}"

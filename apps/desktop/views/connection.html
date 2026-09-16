@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; form-action 'none'; base-uri 'none'">
+  <title>Gateways</title>
+  <style>
+    :root{color-scheme:dark;font:13px/1.5 Inter,system-ui,sans-serif;background:#0a1320;color:#eaf2ff}
+    *{box-sizing:border-box}body{margin:0;padding:26px}h1{font-size:24px;letter-spacing:-.04em;margin:0 0 6px}h2{font-size:14px;margin:0 0 14px}
+    p{margin:0;color:#94adc8}header{margin-bottom:24px}.section{padding:20px;border:1px solid #263c52;border-radius:14px;background:#101f30;margin-top:18px}
+    ul{padding:0;margin:0;list-style:none}.endpoint{display:grid;grid-template-columns:8px minmax(0,1fr) auto;gap:12px;align-items:center;padding:14px 0;border-bottom:1px solid #263c52}.endpoint:last-child{border:0}
+    .light{width:7px;height:7px;border-radius:50%;background:#536a81}.light.ok{background:#5ce0c1}.light.warn{background:#f5c56b}.light.act{background:#68a8ff}.light.bad{background:#ff919a}
+    .name{font-weight:600}.meta{color:#94adc8;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.badge{font-size:10px;color:#68a8ff;border:1px solid #375473;padding:1px 5px;border-radius:4px;margin-left:7px}
+    .controls{display:flex;gap:6px;flex-wrap:wrap}button{font:inherit;color:#d7e7fa;border:1px solid #375473;border-radius:8px;padding:7px 11px;background:#192e44;cursor:pointer}button:hover{background:#27445f}button:disabled{opacity:.45;cursor:default}
+    .primary{background:#68a8ff;color:#07111f;border-color:#68a8ff}.primary:hover{background:#8ebfff}.quiet{background:transparent;border-color:transparent;color:#94adc8}
+    label{display:block;color:#a8bed6;font-size:12px;margin-bottom:6px}input{width:100%;border:1px solid #375473;background:#071523;color:#eaf2ff;padding:11px;border-radius:9px;font:inherit;outline:none}input:focus{border-color:#68a8ff}
+    .toolbar{display:flex;justify-content:space-between;gap:8px;margin-top:12px}.banner{border-left:3px solid #f5c56b;background:#302919;padding:10px 13px;margin:10px 0;color:#f5d296}.banner.bad,.error{color:#ffb0b7}.banner.bad{border-color:#ff919a;background:#30202a}
+    dl{margin:0}dt{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#94adc8}dd{margin:2px 0 12px;overflow-wrap:anywhere}.warning{color:#f5c56b}.empty{padding:8px 0}.confirmation{padding-top:18px;margin-top:18px;border-top:1px solid #263c52}
+  </style>
+</head>
+<body>
+  <header><h1>Gateways</h1><p>Use the gateway on this computer, or connect to one you have paired with on your network or through your own tunnel.</p></header>
+  <div id="banners" role="status" aria-live="polite"></div>
+  <section class="section" aria-label="Saved gateways"><ul id="rows"></ul><p id="empty" class="empty" hidden>No gateways paired yet.</p></section>
+  <section class="section"><h2>Connect a gateway</h2><label for="input">Pairing link, or your gateway's address</label>
+    <input id="input" placeholder="http://gideon.local:10000/pair?code=…" autocomplete="off" spellcheck="false">
+    <div class="toolbar"><button id="check" class="primary">Check address</button><button id="refresh">Re-check all</button></div>
+    <div id="result" aria-live="polite"></div>
+  </section>
+  <script>
+    class GatewayChooser {
+      constructor(bridge) {
+        this.bridge = bridge;
+        this.elements = Object.fromEntries(['banners','rows','empty','input','check','refresh','result'].map(id => [id,document.getElementById(id)]));
+        this.elements.check.addEventListener('click', () => this.check());
+        this.elements.input.addEventListener('keydown', event => { if(event.key === 'Enter') this.check(); });
+        this.elements.refresh.addEventListener('click', () => this.perform(this.elements.refresh, async () => { await this.bridge.refresh(); await this.load(); }));
+        document.addEventListener('keydown', event => { if(event.key === 'Escape') window.close(); });
+      }
+      node(tag, text, style = '') {
+        const node = document.createElement(tag);
+        if(text !== undefined) node.textContent = String(text);
+        if(style) node.className = style;
+        return node;
+      }
+      notices(warnings = []) {
+        this.elements.banners.replaceChildren(...warnings.map(warning => this.node('div',warning.message || warning.code || '',
+          ['store_permissions','store_unparseable'].includes(warning.code) ? 'banner bad' : 'banner')));
+      }
+      async perform(button, operation) {
+        button.disabled = true;
+        try { await operation(); }
+        catch(error) { this.notices([{message:error?.message || 'That did not work. Try again.'}]); }
+        finally { button.disabled = false; }
+      }
+      button(label, operation, style = '') {
+        const button = this.node('button', label, style);
+        button.addEventListener('click', () => this.perform(button, operation));
+        return button;
+      }
+      async load() {
+        const payload = await this.bridge.list();
+        this.notices(payload.warnings);
+        const rows = payload.rows || [];
+        this.elements.empty.hidden = rows.length > 0;
+        this.elements.rows.replaceChildren(...rows.map(row => this.endpoint(row)));
+      }
+      endpoint(row) {
+        const item = this.node('li', undefined, 'endpoint');
+        const details = this.node('div');
+        const title = this.node('div', row.label, 'name');
+        if(row.active) title.append(this.node('span','active','badge'));
+        title.append(this.node('span',row.kind === 'local' ? 'this computer' : 'paired','badge'));
+        details.append(title,this.node('div',row.missingUrl ? 'no address recorded' : row.url,'meta'),
+          this.node('div',row.statusText + (row.version ? ' · v' + row.version : ''),'meta'));
+        const controls = this.node('div',undefined,'controls');
+        if(!row.active) controls.append(this.button('Switch',async () => {
+          const result = await this.bridge.switchTo(row.id);
+          if(!result?.ok) this.notices([{code:'switch_failed',message:result?.message || 'That gateway could not be opened.'}]);
+        }));
+        if(row.removable) controls.append(this.button('Forget',async () => { await this.bridge.forget(row.id); await this.load(); },'quiet'));
+        item.append(this.node('span',undefined,'light ' + row.statusTone),details,controls);
+        return item;
+      }
+      async check() {
+        await this.perform(this.elements.check,async () => this.confirmation(await this.bridge.prepare(this.elements.input.value)));
+      }
+      confirmation(plan) {
+        const host = this.elements.result;
+        host.replaceChildren();
+        if(!plan) return;
+        const section = this.node('div',undefined,'confirmation');
+        host.append(section);
+        if(!plan.ok) { section.append(this.node('p',plan.message || plan.code || 'That address cannot be used.','error')); return; }
+        const entries = [['Connecting to',plan.origin],['Network',{loopback:'This computer',private:'Your local network or tailnet'}[plan.trust] || 'The public internet, over TLS']];
+        if(plan.addresses?.length) entries.push(['Resolves to',plan.addresses.join(', ')]);
+        if(plan.schemeAssumed) entries.push(['Note','No scheme was typed, so http:// was assumed.','warning']);
+        if(plan.pairingCode) entries.push(['Pairing code','Present — the gateway’s own pairing page will redeem it.']);
+        if(plan.policy?.warning) entries.push(['Before you continue',plan.policy.warning,'warning']);
+        const facts = this.node('dl');
+        for(const [label,value,style] of entries) facts.append(this.node('dt',label),this.node('dd',value,style));
+        const label = this.node('label','Name for this gateway (optional)');
+        const name = this.node('input');
+        name.id = 'label'; label.htmlFor = name.id; name.placeholder = plan.host || '';
+        const controls = this.node('div',undefined,'toolbar');
+        controls.append(this.button(plan.policy?.requiresConfirmation ? 'I confirm — connect' : 'Connect',async () => {
+          const result = await this.bridge.confirm(this.elements.input.value,name.value);
+          if(!result?.ok) this.notices([{code:'connect_failed',message:result?.message || 'That gateway could not be opened.'}]);
+        },'primary'));
+        section.append(facts,label,name,controls);
+      }
+    }
+    const chooser = new GatewayChooser(window.gideonConnect);
+    chooser.load().catch(error => chooser.notices([{message:error.message}]));
+  </script>
+</body>
+</html>

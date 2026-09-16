@@ -16,14 +16,14 @@ import asyncio
 
 import pytest
 
-from gideon.triggers import chain, file_poll, idle_poll
-from gideon.triggers import ownership as OWN
-from gideon.triggers import provider, pull_on_view
-from gideon.triggers import registry as TREG
-from gideon.triggers import service as SVC
-from gideon.triggers import web_poll
-from gideon.triggers.models import Trigger, parse_trigger
-from gideon.triggers.store import LoadedTrigger, TriggerStore
+from gideon.automation.triggers import chain, file_poll, idle_poll
+from gideon.automation.triggers import ownership as OWN
+from gideon.automation.triggers import provider, pull_on_view
+from gideon.automation.triggers import registry as TREG
+from gideon.automation.triggers import service as SVC
+from gideon.automation.triggers import web_poll
+from gideon.automation.triggers.models import Trigger, parse_trigger
+from gideon.automation.triggers.store import LoadedTrigger, TriggerStore
 
 NOW = 1_800_000_000.0
 OWNER = "keyur"
@@ -68,15 +68,15 @@ def _trigger(tid="t1", *, next_at=0.0, kind="clock", author="", enabled=True, **
     return Trigger(**base)
 
 
-# ── the predicate ──
-
-
 @pytest.mark.parametrize(
     "author,expected",
     [
         (OWNER, True),
-        ("", True),  # unattributed reads as the owner's — every pre-TSE-4 row
-        ("  KEYUR  ", True),  # normalized at the boundary, so casing cannot mint a second author
+        ("", True),
+        (
+            "  KEYUR  ",
+            True,
+        ),
         ("alice", False),
         ("Alice", False),
     ],
@@ -102,9 +102,6 @@ def test_a_row_with_no_author_attribute_at_all_reads_as_the_owners():
     assert OWN.is_owner_authored(Bare()) is True
 
 
-# ── the state shape ──
-
-
 def test_author_survives_the_store_round_trip(store):
     store.upsert(_trigger("mine", author=OWNER))
     assert store.get("mine").trigger.author == OWNER
@@ -112,7 +109,8 @@ def test_author_survives_the_store_round_trip(store):
 
 def test_an_old_shape_row_with_no_author_key_parses_and_arms(store):
     """The ONE place an old-shape row is handled: `parse_trigger` defaults the absent key to `""`,
-    which the filter reads as the owner's. No migration, no dual read — the field is optional."""
+    which the filter reads as the owner's. No migration, no dual read — the field is optional.
+    """
     raw = _trigger("legacy", next_at=NOW - 5).to_dict()
     del raw["author"]
     row, issues = parse_trigger(raw)
@@ -123,12 +121,10 @@ def test_an_old_shape_row_with_no_author_key_parses_and_arms(store):
 
 def test_an_unknown_field_warning_does_not_fire_for_author(store):
     """`_known_fields` is derived from the dataclass, so `author` must be recognized rather than
-    reported as a typo — a warning chip on a field the store itself writes would be absurd."""
+    reported as a typo — a warning chip on a field the store itself writes would be absurd.
+    """
     _, issues = parse_trigger(_trigger(author=OWNER).to_dict())
     assert not [i for i in issues if i.path == "author"]
-
-
-# ── structural: the arm path never HOLDS a foreign row ──
 
 
 def test_armable_excludes_foreign_rows(store):
@@ -171,7 +167,8 @@ def test_the_owners_due_row_still_fires_beside_a_foreign_one(store):
 
 def test_boot_does_not_rearm_a_foreign_row(store):
     """Boot WRITES `next_fire_at`. Arming somebody else's automation on the owner's clock is the
-    exact thing the filter exists to prevent, so it has to bite here too and not only in `tick`."""
+    exact thing the filter exists to prevent, so it has to bite here too and not only in `tick`.
+    """
     store.save_all([_trigger("theirs", next_at=NOW - 60, author="alice")])
     report = SVC.boot(store, now=NOW, persist=True)
     assert report["rearmed"] == []
@@ -185,43 +182,73 @@ def test_boot_still_rearms_the_owners_row(store):
     assert [r["id"] for r in report["rearmed"]] == ["mine"]
 
 
-# ── the poll loops and the chain: every other way a row reaches a fire ──
-
-
 def test_the_poll_loops_and_chain_lookups_all_drop_foreign_rows(store):
     """One test over all six selection sites: each dispatches straight to the gateway's fire path,
-    so filtering only in `service.tick` would leave these kinds able to tick for somebody else."""
+    so filtering only in `service.tick` would leave these kinds able to tick for somebody else.
+    """
     store.save_all(
         [
             _trigger("f-mine", kind="file", author=OWNER, spec={"paths": ["/tmp/a"]}),
-            _trigger("f-theirs", kind="file", author="alice", spec={"paths": ["/tmp/a"]}),
+            _trigger(
+                "f-theirs", kind="file", author="alice", spec={"paths": ["/tmp/a"]}
+            ),
             _trigger("i-mine", kind="idle", author=OWNER, spec={"idle_secs": 60}),
             _trigger("i-theirs", kind="idle", author="alice", spec={"idle_secs": 60}),
-            _trigger("w-mine", kind="web_watch", author=OWNER, spec={"url": "https://x.test"}),
-            _trigger("w-theirs", kind="web_watch", author="alice", spec={"url": "https://x.test"}),
-            _trigger("v-mine", kind="view", author=OWNER, spec={"surface_binding": "home"}),
-            _trigger("v-theirs", kind="view", author="alice", spec={"surface_binding": "home"}),
-            _trigger("c-mine", kind="run_completed", author=OWNER, spec={"source_trigger": "up"}),
             _trigger(
-                "c-theirs", kind="run_completed", author="alice", spec={"source_trigger": "up"}
+                "w-mine", kind="web_watch", author=OWNER, spec={"url": "https://x.test"}
             ),
-            _trigger("d-mine", kind="run_completed", author=OWNER, spec={"source_def": "wf"}),
-            _trigger("d-theirs", kind="run_completed", author="alice", spec={"source_def": "wf"}),
+            _trigger(
+                "w-theirs",
+                kind="web_watch",
+                author="alice",
+                spec={"url": "https://x.test"},
+            ),
+            _trigger(
+                "v-mine", kind="view", author=OWNER, spec={"surface_binding": "home"}
+            ),
+            _trigger(
+                "v-theirs",
+                kind="view",
+                author="alice",
+                spec={"surface_binding": "home"},
+            ),
+            _trigger(
+                "c-mine",
+                kind="run_completed",
+                author=OWNER,
+                spec={"source_trigger": "up"},
+            ),
+            _trigger(
+                "c-theirs",
+                kind="run_completed",
+                author="alice",
+                spec={"source_trigger": "up"},
+            ),
+            _trigger(
+                "d-mine", kind="run_completed", author=OWNER, spec={"source_def": "wf"}
+            ),
+            _trigger(
+                "d-theirs",
+                kind="run_completed",
+                author="alice",
+                spec={"source_def": "wf"},
+            ),
         ]
     )
     assert [t.id for t in file_poll.file_triggers(store)] == ["f-mine"]
     assert [t.id for t in idle_poll.idle_triggers(store)] == ["i-mine"]
     assert [t.id for t in web_poll.web_watch_triggers(store)] == ["w-mine"]
-    assert [t.id for t in pull_on_view.bound_triggers(store, surface="home")] == ["v-mine"]
+    assert [t.id for t in pull_on_view.bound_triggers(store, surface="home")] == [
+        "v-mine"
+    ]
     assert [t.id for t in chain.chain_triggers(store, source_id="up")] == ["c-mine"]
-    assert [t.id for t in chain.chain_triggers_for_def(store, source_def="wf")] == ["d-mine"]
-
-
-# ── the provider seam ──
+    assert [t.id for t in chain.chain_triggers_for_def(store, source_def="wf")] == [
+        "d-mine"
+    ]
 
 
 def test_the_native_store_satisfies_the_seam():
-    from gideon.triggers.provider import TriggerStoreProvider
+    from gideon.automation.triggers.provider import TriggerStoreProvider
 
     assert issubclass(TriggerStore, TriggerStoreProvider)
 
@@ -281,7 +308,9 @@ def test_a_registered_providers_rows_join_the_listing_but_not_the_arm_path(store
     would either duplicate it into `triggers.json` or leave it permanently due.
     """
     store.save_all([_trigger("local", author=OWNER)])
-    TREG.register_trigger_store("team", _FakeProviderStore([_trigger("remote", author=OWNER)]))
+    TREG.register_trigger_store(
+        "team", _FakeProviderStore([_trigger("remote", author=OWNER)])
+    )
     assert sorted(r.trigger.id for r in provider.all_rows(store)) == ["local", "remote"]
     assert [t.id for t in provider.armable(store)] == ["local"]
 
@@ -303,22 +332,24 @@ def test_unregistering_removes_the_providers_rows(store):
     assert TREG.unregister_trigger_store("team") is False
 
 
-# ── the type handler (the #47 rule) ──
-
-
 def test_the_trigger_type_has_a_live_handler():
     """The other direction of the #47 rule is guarded suite-wide by
     `test_app_manifest.py::TestProviderTypesMatchHandlers`; this pins the specific pairing so a
     deletion of either half names THIS atom in the failure."""
-    from gideon.apps.manifest import PROVIDER_TYPES
-    from gideon.providers.registry import TriggerTypeHandler, get_provider_registry
+    from gideon.extensions.apps.manifest import PROVIDER_TYPES
+    from gideon.extensions.providers.registry import (
+        TriggerTypeHandler,
+        get_provider_registry,
+    )
 
     assert "trigger" in PROVIDER_TYPES
-    assert isinstance(get_provider_registry()._type_handlers.get("trigger"), TriggerTypeHandler)
+    assert isinstance(
+        get_provider_registry()._type_handlers.get("trigger"), TriggerTypeHandler
+    )
 
 
 def test_the_handler_registers_and_deregisters_a_store():
-    from gideon.providers.registry import TriggerTypeHandler
+    from gideon.extensions.providers.registry import TriggerTypeHandler
 
     handler = TriggerTypeHandler()
     inst = _FakeProviderStore([_trigger("remote")])
@@ -331,8 +362,9 @@ def test_the_handler_registers_and_deregisters_a_store():
 
 def test_the_handler_refuses_a_store_without_load():
     """Validated at REGISTER time, naming what is missing — the `DutyGateTypeHandler` precedent. A
-    store without `load` would sit in the registry looking live and contribute nothing."""
-    from gideon.providers.registry import TriggerTypeHandler
+    store without `load` would sit in the registry looking live and contribute nothing.
+    """
+    from gideon.extensions.providers.registry import TriggerTypeHandler
 
     class NoLoad:
         name = "team"

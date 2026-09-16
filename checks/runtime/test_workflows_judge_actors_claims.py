@@ -18,10 +18,9 @@ from __future__ import annotations
 import ast
 import pathlib
 
-SRC = pathlib.Path(__file__).resolve().parents[1] / "src" / "gideon"
-MODULE = SRC / "workflows" / "judge_actors.py"
+SRC = pathlib.Path(__file__).resolve().parents[2] / "runtime" / "gideon"
+MODULE = SRC / "automation" / "workflows" / "judge_actors.py"
 
-#: Functions whose live-caller count the docstring makes a claim about.
 _ENFORCED = ("plan_judge_session", "validate_judge_model")
 _AUTHORED = (
     "check_transition",
@@ -30,9 +29,6 @@ _AUTHORED = (
     "assemble_judge_evidence",
 )
 
-#: The phrase the docstring carried while `_AUTHORED` had no caller. It must be GONE now — if it
-#: reappears, either the wiring regressed or someone copied the old notice back in, and both mean
-#: the prose and the call graph have parted company again.
 _UNWIRED_MARKER = "AUTHORED, NOT ENFORCED"
 
 
@@ -66,7 +62,9 @@ def test_the_module_is_parseable_and_the_symbols_exist() -> None:
     """
     tree = ast.parse(MODULE.read_text(encoding="utf-8"))
     defined = {
-        n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+        n.name
+        for n in ast.walk(tree)
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
     }
     for name in _ENFORCED + _AUTHORED:
         assert name in defined, f"{name} is no longer defined in judge_actors"

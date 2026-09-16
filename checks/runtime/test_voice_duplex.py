@@ -8,7 +8,7 @@ individual reduction ``clean_for_speech`` performs.
 
 import pytest
 
-from gideon.voice.duplex import (
+from gideon.integrations.voice.duplex import (
     DEFAULT_CONFIRMATION_PHRASES,
     DEFAULT_EXIT_PHRASES,
     ECHO_MIN_RUN,
@@ -17,8 +17,6 @@ from gideon.voice.duplex import (
     is_echo,
     is_exit,
 )
-
-# ── confirmation gating ──
 
 
 @pytest.mark.parametrize(
@@ -47,10 +45,7 @@ def test_is_confirmation_matches_trailing_phrase(text):
         "what do you think",
         "doit",
         "execution plan",
-        # Tail-anchored: a confirmation buried at the head of a long dictation
-        # is part of the thought, not the trigger.
         "go ahead and tell me what you think about the deployment plan tomorrow",
-        # "do" and "it" present but not consecutive.
         "do you want it",
     ],
 )
@@ -83,18 +78,18 @@ def test_is_confirmation_tail_window_is_configurable():
 
 
 def test_is_confirmation_multiword_phrase_matches_a_short_tail():
-    # The window must stretch to hold a phrase longer than tail_words itself.
-    assert is_confirmation("go ahead", DEFAULT_CONFIRMATION_PHRASES, tail_words=1) is True
+    assert (
+        is_confirmation("go ahead", DEFAULT_CONFIRMATION_PHRASES, tail_words=1) is True
+    )
 
 
 def test_is_confirmation_rejects_non_string_input():
     assert is_confirmation(None) is False
 
 
-# ── exit gating ──
-
-
-@pytest.mark.parametrize("text", ["cancel", "Cancel.", "never mind", "forget it", "oh never mind"])
+@pytest.mark.parametrize(
+    "text", ["cancel", "Cancel.", "never mind", "forget it", "oh never mind"]
+)
 def test_is_exit_matches(text):
     assert is_exit(text) is True
 
@@ -111,9 +106,6 @@ def test_confirmation_and_exit_vocabularies_are_disjoint():
         assert is_exit(phrase) is False
 
 
-# ── echo filter: the three-consecutive-word threshold ──
-
-
 def test_echo_min_run_is_three():
     assert ECHO_MIN_RUN == 3
 
@@ -125,7 +117,6 @@ def test_is_echo_at_the_threshold():
 
 def test_is_echo_below_the_threshold():
     spoken = "I have finished the deployment and everything looks healthy"
-    # Two consecutive words in common ("the deployment") — not enough.
     assert is_echo("the deployment", spoken) is False
 
 
@@ -155,8 +146,8 @@ def test_is_echo_ignores_case_and_punctuation():
     [
         ("", "the build is green"),
         ("the build is green", ""),
-        ("yes", "yes please go on"),  # transcript shorter than the run
-        ("go on then", "no"),  # spoken shorter than the run
+        ("yes", "yes please go on"),
+        ("go on then", "no"),
         ("completely different words here", "the build is green"),
     ],
 )
@@ -178,9 +169,6 @@ def test_is_echo_rejects_non_string_input():
     assert is_echo("the build is green", None) is False
 
 
-# ── clean_for_speech ──
-
-
 def test_clean_for_speech_replaces_a_fenced_block_with_a_spoken_marker():
     out = clean_for_speech("Try this:\n```python\nprint('hi')\n```\nThat works.")
     assert "print" not in out
@@ -199,20 +187,30 @@ def test_clean_for_speech_drops_backticks_but_keeps_the_word():
 
 
 def test_clean_for_speech_reduces_a_url_to_its_domain():
-    out = clean_for_speech("See https://docs.example.com/guide/voice?x=1#frag for details.")
+    out = clean_for_speech(
+        "See https://docs.example.com/guide/voice?x=1#frag for details."
+    )
     assert out == "See docs.example.com for details."
 
 
 def test_clean_for_speech_strips_www_and_a_schemeless_url():
-    assert clean_for_speech("Visit www.example.com/a/b now.") == "Visit example.com now."
+    assert (
+        clean_for_speech("Visit www.example.com/a/b now.") == "Visit example.com now."
+    )
 
 
 def test_clean_for_speech_keeps_only_the_link_text():
-    assert clean_for_speech("Read [the guide](https://example.com/g).") == "Read the guide."
+    assert (
+        clean_for_speech("Read [the guide](https://example.com/g).")
+        == "Read the guide."
+    )
 
 
 def test_clean_for_speech_reduces_a_path_to_its_filename():
-    assert clean_for_speech("Edit src/gideon/voice/duplex.py now.") == "Edit duplex.py now."
+    assert (
+        clean_for_speech("Edit runtime/gideon/integrations/voice/duplex.py now.")
+        == "Edit duplex.py now."
+    )
 
 
 def test_clean_for_speech_reduces_an_absolute_and_a_home_path():
@@ -221,7 +219,10 @@ def test_clean_for_speech_reduces_an_absolute_and_a_home_path():
 
 
 def test_clean_for_speech_reduces_a_directory_path_to_its_last_segment():
-    assert clean_for_speech("Look in src/gideon/voice/ next.") == "Look in voice next."
+    assert (
+        clean_for_speech("Look in runtime/gideon/integrations/voice/ next.")
+        == "Look in voice next."
+    )
 
 
 def test_clean_for_speech_drops_cli_flags():
@@ -263,12 +264,13 @@ def test_clean_for_speech_empty_input(text):
 
 
 def test_clean_for_speech_returns_empty_for_wholly_unspeakable_text():
-    # A lone flag reduces to nothing; the caller decides what to do with that.
     assert clean_for_speech("--no-cov") == ""
 
 
 def test_clean_for_speech_is_idempotent():
-    src = "See https://example.com/a and run `pytest -n 0` on src/x/y.py.\n```\ncode\n```"
+    src = (
+        "See https://example.com/a and run `pytest -n 0` on src/x/y.py.\n```\ncode\n```"
+    )
     once = clean_for_speech(src)
     assert clean_for_speech(once) == once
 

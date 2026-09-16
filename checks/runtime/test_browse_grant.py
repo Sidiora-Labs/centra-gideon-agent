@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import asyncio
 
-from gideon.agents.native.approval import ApprovalGate
-from gideon.browse import grant
-from gideon.browse.loop import PARK_TAB_CLOSED, run_browse_loop
+from gideon.engine.agents.native.approval import ApprovalGate
+from gideon.integrations.browse import grant
+from gideon.integrations.browse.loop import PARK_TAB_CLOSED, run_browse_loop
 
 
 def _capture_sel(monkeypatch) -> list[dict]:
@@ -22,11 +22,8 @@ def _capture_sel(monkeypatch) -> list[dict]:
     def _fake(self, **kw):  # noqa: ANN001 — bound method signature
         rows.append(kw)
 
-    monkeypatch.setattr("gideon.sel.SecurityEventLog.log_api_access", _fake)
+    monkeypatch.setattr("gideon.security.sel.SecurityEventLog.log_api_access", _fake)
     return rows
-
-
-# ── fail-closed grant ─────────────────────────────────────────────────────────
 
 
 def test_gate_timeout_rejects_with_none_sentinel(monkeypatch) -> None:
@@ -35,7 +32,7 @@ def test_gate_timeout_rejects_with_none_sentinel(monkeypatch) -> None:
     rows = _capture_sel(monkeypatch)
 
     async def _run() -> grant.BrowserGrant:
-        gate = ApprovalGate()  # nothing ever resolves it
+        gate = ApprovalGate()
         return await grant.request_grant(
             task="Read my dashboard",
             scope=("example.com",),
@@ -46,8 +43,10 @@ def test_gate_timeout_rejects_with_none_sentinel(monkeypatch) -> None:
 
     g = asyncio.run(_run())
     assert g.granted is False
-    assert g.granted_at is None  # the None-sentinel discipline
-    assert any(r["operation"] == "browser_grant" and r["outcome"] == "rejected" for r in rows)
+    assert g.granted_at is None
+    assert any(
+        r["operation"] == "browser_grant" and r["outcome"] == "rejected" for r in rows
+    )
 
 
 def test_missing_channel_rejects(monkeypatch) -> None:
@@ -58,7 +57,9 @@ def test_missing_channel_rejects(monkeypatch) -> None:
     )
     assert g.granted is False
     assert g.granted_at is None
-    assert any(r["operation"] == "browser_grant" and r["outcome"] == "rejected" for r in rows)
+    assert any(
+        r["operation"] == "browser_grant" and r["outcome"] == "rejected" for r in rows
+    )
 
 
 def test_gate_exception_is_fail_closed(monkeypatch) -> None:
@@ -69,9 +70,13 @@ def test_gate_exception_is_fail_closed(monkeypatch) -> None:
         async def request(self, request_id, *, timeout=300.0):  # noqa: ANN001
             raise RuntimeError("gate exploded")
 
-    g = asyncio.run(grant.request_grant(task="t", scope=(), gate=_BoomGate(), request_id="b"))
+    g = asyncio.run(
+        grant.request_grant(task="t", scope=(), gate=_BoomGate(), request_id="b")
+    )
     assert g.granted is False
-    assert any(r["operation"] == "browser_grant" and r["outcome"] == "rejected" for r in rows)
+    assert any(
+        r["operation"] == "browser_grant" and r["outcome"] == "rejected" for r in rows
+    )
 
 
 def test_grant_emits_browser_grant(monkeypatch) -> None:
@@ -82,10 +87,14 @@ def test_grant_emits_browser_grant(monkeypatch) -> None:
         gate = ApprovalGate()
         task = asyncio.create_task(
             grant.request_grant(
-                task="Check prices", scope=("shop.example",), gate=gate, request_id="ok1", timeout=5
+                task="Check prices",
+                scope=("shop.example",),
+                gate=gate,
+                request_id="ok1",
+                timeout=5,
             )
         )
-        while not gate.approve("ok1"):  # False until request() has registered the future
+        while not gate.approve("ok1"):
             await asyncio.sleep(0.005)
         return await task
 
@@ -93,9 +102,12 @@ def test_grant_emits_browser_grant(monkeypatch) -> None:
     assert g.granted is True
     assert g.granted_at is not None
     assert g.group_name == "Check prices"
-    grants = [r for r in rows if r["operation"] == "browser_grant" and r["outcome"] == "granted"]
+    grants = [
+        r
+        for r in rows
+        if r["operation"] == "browser_grant" and r["outcome"] == "granted"
+    ]
     assert grants, "expected a granted browser_grant row"
-    # The audit row names the task + scope, never a secret.
     assert "shop.example" in grants[0]["resources"]
 
 
@@ -124,9 +136,6 @@ def test_revoke_emits_browser_revoked(monkeypatch) -> None:
     assert not rows, "a grant that was never granted must not emit a revoked row"
 
 
-# ── close-to-kill ───────────────────────────────────────────────────────────────
-
-
 def test_close_check_observes_disconnect() -> None:
     """make_close_check closes when the bound connector is gone / re-attached; fails toward stop."""
     g = grant.BrowserGrant(
@@ -142,7 +151,10 @@ def test_close_check_observes_disconnect() -> None:
 
     class _St:
         def __init__(
-            self, connected, device_id="dev1", cdp_url="ws://127.0.0.1:9222/devtools/page/A"
+            self,
+            connected,
+            device_id="dev1",
+            cdp_url="ws://127.0.0.1:9222/devtools/page/A",
         ):
             self.connected = connected
             self.device_id = device_id
@@ -152,7 +164,10 @@ def test_close_check_observes_disconnect() -> None:
     assert grant.make_close_check(g, status_reader=lambda: _St(False))()[0] is True
     assert (
         grant.make_close_check(
-            g, status_reader=lambda: _St(True, cdp_url="ws://127.0.0.1:9222/devtools/page/B")
+            g,
+            status_reader=lambda: _St(
+                True, cdp_url="ws://127.0.0.1:9222/devtools/page/B"
+            ),
         )()[0]
         is True
     )
@@ -160,7 +175,7 @@ def test_close_check_observes_disconnect() -> None:
     def _boom():
         raise RuntimeError("cannot read connector")
 
-    assert grant.make_close_check(g, status_reader=_boom)()[0] is True  # fail toward STOP
+    assert grant.make_close_check(g, status_reader=_boom)()[0] is True
 
 
 def test_close_to_kill_ends_run_in_one_step() -> None:
@@ -178,8 +193,10 @@ def test_close_to_kill_ends_run_in_one_step() -> None:
         async def navigate(self, url):
             return _Nav()
 
-    async def _decide(_prompt):  # must never be reached
-        raise AssertionError("close-to-kill must stop the run before the model is called")
+    async def _decide(_prompt):
+        raise AssertionError(
+            "close-to-kill must stop the run before the model is called"
+        )
 
     result = asyncio.run(
         run_browse_loop(

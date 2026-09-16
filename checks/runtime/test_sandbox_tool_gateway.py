@@ -38,8 +38,7 @@ from pathlib import Path
 
 import pytest
 
-from gideon.guardrails.policy import CODING, INTERACTIVE, REVIEW_ONLY, SafetyProfile
-from gideon.sandbox_providers.pclaw_tool import (
+from gideon.integrations.sandbox_providers.gideon_tool import (
     DEFAULT_REQUEST_FD,
     DEFAULT_RESPONSE_FD,
     ENV_OFFERED,
@@ -47,7 +46,7 @@ from gideon.sandbox_providers.pclaw_tool import (
     install_shim,
     shim_env,
 )
-from gideon.sandbox_providers.tool_gateway import (
+from gideon.integrations.sandbox_providers.tool_gateway import (
     DEFAULT_SURFACE,
     ERR_REFUSED,
     ERR_UNKNOWN_TOOL,
@@ -55,8 +54,13 @@ from gideon.sandbox_providers.tool_gateway import (
     ToolGateway,
     ToolSpec,
 )
+from gideon.security.guardrails.policy import (
+    CODING,
+    INTERACTIVE,
+    REVIEW_ONLY,
+    SafetyProfile,
+)
 
-#: Tokens that would mean a network hop exists somewhere in the transport.
 _NETWORK_TOKENS = (
     "import socket",
     "socket.socket",
@@ -72,7 +76,6 @@ _NETWORK_TOKENS = (
     "localhost",
 )
 
-#: Env key/value shapes that would mean a credential crossed into the sandbox.
 _SECRET_SHAPES = re.compile(
     r"(token|secret|password|passwd|api[_-]?key|credential|bearer|cookie|session[_-]?id)",
     re.IGNORECASE,
@@ -84,7 +87,7 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     target = tmp_path / "home"
     target.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("GIDEON_HOME", str(target))
-    from gideon.config.loader import config_dir
+    from gideon.core.config.loader import config_dir
 
     assert str(target) in str(config_dir()), (
         f"GIDEON_HOME redirect did not bind (config_dir={config_dir()}) — the gateway's "
@@ -94,10 +97,9 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _ctx(workspace: Path, *, sandbox: str = "none") -> ToolContext:
-    return ToolContext(workspace=str(workspace), session_key="sandbox:test", sandbox=sandbox)
-
-
-# ── (a) zero listening sockets, by construction ───────────────────────────────
+    return ToolContext(
+        workspace=str(workspace), session_key="sandbox:test", sandbox=sandbox
+    )
 
 
 def _network_hits(text: str) -> list[str]:
@@ -107,8 +109,9 @@ def _network_hits(text: str) -> list[str]:
 def test_the_shim_contains_no_network_transport_at_all() -> None:
     """No socket, no bind/listen/accept, no HTTP client, no URL, no loopback address."""
     assert _network_hits(SHIM_SOURCE) == [], _network_hits(SHIM_SOURCE)
-    # Vacuity floor: the scanner is not blind. A shim that DID open a loopback socket is caught.
-    planted = SHIM_SOURCE + "\nimport socket\ns = socket.socket()\ns.bind(('127.0.0.1', 0))\n"
+    planted = (
+        SHIM_SOURCE + "\nimport socket\ns = socket.socket()\ns.bind(('127.0.0.1', 0))\n"
+    )
     assert set(_network_hits(planted)) >= {"import socket", ".bind(", "127.0.0.1"}
 
 
@@ -116,18 +119,18 @@ def test_the_host_gateway_never_binds_or_listens() -> None:
     """The host end is a pipe reader/writer. A bind here would be a port on the host side of the
     same channel — no better than the in-container proxy §5.2 rejects."""
     source = Path(
-        str(__import__("gideon.sandbox_providers.tool_gateway", fromlist=["x"]).__file__)
+        str(
+            __import__(
+                "gideon.integrations.sandbox_providers.tool_gateway", fromlist=["x"]
+            ).__file__
+        )
     ).read_text(encoding="utf-8")
-    # Strip the module docstring: it DISCUSSES 127.0.0.1 and HTTP, and a text scanner reads
-    # comments as code unless the scope is narrowed to the code.
     body = source.split('"""', 2)[-1]
     hits = [t for t in _NETWORK_TOKENS if t in body]
     assert hits == [], hits
-    # Floor: the scanner still fires on the same body with a bind planted in it.
-    assert ".listen(" in [t for t in _NETWORK_TOKENS if t in body + "\nsock.listen(5)\n"]
-
-
-# ── (b) no credential material inside the sandbox ──────────────────────────────
+    assert ".listen(" in [
+        t for t in _NETWORK_TOKENS if t in body + "\nsock.listen(5)\n"
+    ]
 
 
 def test_the_shims_environment_carries_no_credential_material() -> None:
@@ -135,25 +138,26 @@ def test_the_shims_environment_carries_no_credential_material() -> None:
     for key, value in env.items():
         assert not _SECRET_SHAPES.search(key), key
         assert not _SECRET_SHAPES.search(str(value)), f"{key}={value}"
-    # It carries exactly what it needs and nothing else.
-    assert set(env) == {"PCLAW_TOOL_REQUEST_FD", "PCLAW_TOOL_RESPONSE_FD", ENV_OFFERED}
-    # Vacuity floor: the same check catches a planted secret.
+    assert set(env) == {
+        "GIDEON_TOOL_REQUEST_FD",
+        "GIDEON_TOOL_RESPONSE_FD",
+        ENV_OFFERED,
+    }
     planted = {**env, "GIDEON_API_KEY": "abc123"}
     assert any(_SECRET_SHAPES.search(k) for k in planted)
 
 
-def test_the_shim_reads_no_environment_beyond_the_channel_and_the_offered_list() -> None:
+def test_the_shim_reads_no_environment_beyond_the_channel_and_the_offered_list() -> (
+    None
+):
     """A shim that read a token out of the environment would defeat clause (b) even with a clean
     launch env, so the source is pinned to the three names it may read."""
     read_names = set(re.findall(r'os\.environ\.get\(\s*"([^"]+)"', SHIM_SOURCE))
     assert read_names == {
-        "PCLAW_TOOL_REQUEST_FD",
-        "PCLAW_TOOL_RESPONSE_FD",
-        "PCLAW_TOOL_OFFERED",
+        "GIDEON_TOOL_REQUEST_FD",
+        "GIDEON_TOOL_RESPONSE_FD",
+        "GIDEON_TOOL_OFFERED",
     }, read_names
-
-
-# ── (c) the host-side write-class refusal ─────────────────────────────────────
 
 
 def test_a_research_profile_is_refused_a_write_class_tool_and_a_coding_profile_is_not(
@@ -174,25 +178,30 @@ def test_a_research_profile_is_refused_a_write_class_tool_and_a_coding_profile_i
     assert refused["code"] == ERR_REFUSED, refused
     assert "write-class" in refused["error"]
 
-    # Vacuity floor: the identical request under a read_write profile is SERVED, so the refusal
-    # above is the profile doing work rather than the tool being broken.
     served = ToolGateway(profile=CODING, context=_ctx(ws)).handle_request(request)
     assert served["ok"], served
     assert "prefers tabs" in served["result"]
 
 
-def test_a_read_tool_is_served_under_the_research_profile(home: Path, tmp_path: Path) -> None:
+def test_a_read_tool_is_served_under_the_research_profile(
+    home: Path, tmp_path: Path
+) -> None:
     """Read-only does not mean useless: the same profile that refuses the write serves the read."""
     ws = tmp_path / "ws"
     ws.mkdir()
     gateway = ToolGateway(profile=REVIEW_ONLY, context=_ctx(ws))
-    response = gateway.handle_request({"protocol": 1, "id": "1", "tool": "memory_read", "args": {}})
+    response = gateway.handle_request(
+        {"protocol": 1, "id": "1", "tool": "memory_read", "args": {}}
+    )
     assert response["ok"], response
 
 
-def test_the_advertised_surface_matches_the_enforced_one(home: Path, tmp_path: Path) -> None:
+def test_the_advertised_surface_matches_the_enforced_one(
+    home: Path, tmp_path: Path
+) -> None:
     """A tool advertised but refused (or refused but advertised) is the drift that makes an agent
-    burn a turn discovering the policy. ``offered`` is derived from the same refusal function."""
+    burn a turn discovering the policy. ``offered`` is derived from the same refusal function.
+    """
     ws = tmp_path / "ws"
     ws.mkdir()
     research = ToolGateway(profile=REVIEW_ONLY, context=_ctx(ws))
@@ -201,21 +210,31 @@ def test_the_advertised_surface_matches_the_enforced_one(home: Path, tmp_path: P
     assert "memory_recall" in research.offered
     assert "memory_remember" in coding.offered
     for name in research.offered:
-        got = research.handle_request({"protocol": 1, "id": "x", "tool": name, "args": {}})
+        got = research.handle_request(
+            {"protocol": 1, "id": "x", "tool": name, "args": {}}
+        )
         assert got.get("code") != ERR_REFUSED, (name, got)
 
 
-def test_a_custom_grant_profile_is_bounded_by_its_allowlist(home: Path, tmp_path: Path) -> None:
+def test_a_custom_grant_profile_is_bounded_by_its_allowlist(
+    home: Path, tmp_path: Path
+) -> None:
     ws = tmp_path / "ws"
     ws.mkdir()
-    profile = SafetyProfile(name="narrow", tool_grants="custom", tool_allowlist=("memory_read",))
+    profile = SafetyProfile(
+        name="narrow", tool_grants="custom", tool_allowlist=("memory_read",)
+    )
     gateway = ToolGateway(profile=profile, context=_ctx(ws))
     assert gateway.offered == ("memory_read",)
-    denied = gateway.handle_request({"protocol": 1, "id": "1", "tool": "memory_recall", "args": {}})
+    denied = gateway.handle_request(
+        {"protocol": 1, "id": "1", "tool": "memory_recall", "args": {}}
+    )
     assert denied["code"] == ERR_REFUSED, denied
 
 
-def test_a_tool_not_on_the_surface_is_refused_by_name(home: Path, tmp_path: Path) -> None:
+def test_a_tool_not_on_the_surface_is_refused_by_name(
+    home: Path, tmp_path: Path
+) -> None:
     ws = tmp_path / "ws"
     ws.mkdir()
     gateway = ToolGateway(profile=INTERACTIVE, context=_ctx(ws))
@@ -223,17 +242,21 @@ def test_a_tool_not_on_the_surface_is_refused_by_name(home: Path, tmp_path: Path
     assert got["code"] == ERR_UNKNOWN_TOOL, got
 
 
-def test_a_protocol_mismatch_is_refused_rather_than_guessed(home: Path, tmp_path: Path) -> None:
+def test_a_protocol_mismatch_is_refused_rather_than_guessed(
+    home: Path, tmp_path: Path
+) -> None:
     ws = tmp_path / "ws"
     ws.mkdir()
     gateway = ToolGateway(profile=INTERACTIVE, context=_ctx(ws))
-    got = gateway.handle_request({"protocol": 99, "id": "1", "tool": "memory_read", "args": {}})
+    got = gateway.handle_request(
+        {"protocol": 99, "id": "1", "tool": "memory_read", "args": {}}
+    )
     assert not got["ok"] and "protocol" in got["error"]
 
 
 def test_every_gateway_call_writes_a_sel_row(home: Path, tmp_path: Path) -> None:
     """ "every call SEL-audited under the owning session key" — read back out of the log."""
-    from gideon.sel import sel
+    from gideon.security.sel import sel
 
     ws = tmp_path / "ws"
     ws.mkdir()
@@ -241,14 +264,13 @@ def test_every_gateway_call_writes_a_sel_row(home: Path, tmp_path: Path) -> None
     ToolGateway(profile=REVIEW_ONLY, context=_ctx(ws)).handle_request(
         {"protocol": 1, "id": "7", "tool": "memory_remember", "args": {"text": "x"}}
     )
-    rows = [r for r in sel().recent(limit=500) if r.get("operation") == "memory_remember"]
+    rows = [
+        r for r in sel().recent(limit=500) if r.get("operation") == "memory_remember"
+    ]
     assert len(sel().recent(limit=500)) > before
     assert rows, "the refused call wrote no SEL row"
     assert rows[-1]["outcome"] == "denied", rows[-1]
     assert rows[-1]["caller_identity"] == "sandbox:test"
-
-
-# ── the real shim over a real pipe pair ───────────────────────────────────────
 
 
 def _run_shim_against(
@@ -292,22 +314,23 @@ def _run_shim_against(
     return proc
 
 
-def test_pclaw_tool_memory_recall_succeeds_through_the_exec_channel(
+def test_gideon_tool_memory_recall_succeeds_through_the_exec_channel(
     home: Path, tmp_path: Path
 ) -> None:
     """Clause (a)'s companion: the tool call actually WORKS over the fd channel, with no socket
     anywhere. Driven through the installed shim as a subprocess, not through a mock."""
-    from gideon.sqlite_compat import probe
+    from gideon.core.sqlite_compat import probe
 
     if not probe().fts5:
-        pytest.skip("SQLite build has no FTS5, so memory_recall cannot return a hit here")
+        pytest.skip(
+            "SQLite build has no FTS5, so memory_recall cannot return a hit here"
+        )
 
     ws = tmp_path / "ws"
     ws.mkdir()
-    # Seed something recallable through the store's own writer.
-    from gideon.memory import MemoryStore
+    from gideon.cognition.memory import MemoryJournal
 
-    store = MemoryStore(ws)
+    store = MemoryJournal(ws)
     store.init()
     store.add_preference("the deploy runbook lives in docs/deploy.md")
 
@@ -317,15 +340,9 @@ def test_pclaw_tool_memory_recall_succeeds_through_the_exec_channel(
     gateway = ToolGateway(profile=REVIEW_ONLY, context=_ctx(ws))
     proc = _run_shim_against(gateway, shim, ["memory_recall", "--query", "runbook"])
     assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
-    # NOT `"runbook" in stdout`: the empty-result sentence is "No memory matched 'runbook'.",
-    # which contains the query and would read as a hit. Assert the SEEDED CONTENT instead, and
-    # assert the empty sentence is absent — a recall that found nothing must not pass for one
-    # that found something.
     assert "No memory matched" not in proc.stdout, proc.stdout
     assert "deploy.md" in proc.stdout, proc.stdout
 
-    # Vacuity floor for the pairing: a query that matches nothing DOES produce the empty
-    # sentence, so the assertion above is discriminating between two real outcomes.
     empty = _run_shim_against(
         ToolGateway(profile=REVIEW_ONLY, context=_ctx(ws)),
         shim,
@@ -335,7 +352,9 @@ def test_pclaw_tool_memory_recall_succeeds_through_the_exec_channel(
     assert "No memory matched" in empty.stdout, empty.stdout
 
 
-def test_pclaw_tool_reports_the_hosts_refusal_verbatim(home: Path, tmp_path: Path) -> None:
+def test_gideon_tool_reports_the_hosts_refusal_verbatim(
+    home: Path, tmp_path: Path
+) -> None:
     """A refusal reaches the agent as a coded, readable message rather than a hang or a crash."""
     ws = tmp_path / "ws"
     ws.mkdir()
@@ -369,13 +388,16 @@ def test_the_shim_default_fds_start_after_the_agents_own_stdio() -> None:
 
 def test_the_default_surface_declares_both_read_and_write_class_tools() -> None:
     """A read-only default surface would make the write refusal unreachable in production — a
-    control present but inert. Pinned so a later trim cannot quietly create that state."""
+    control present but inert. Pinned so a later trim cannot quietly create that state.
+    """
     kinds = {spec.name: spec.kind for spec in DEFAULT_SURFACE}
     assert "memory_remember" in kinds and kinds["memory_remember"] == "edit"
     assert any(k in ("read", "search") for k in kinds.values())
 
 
-def test_a_tool_handler_failure_is_data_not_a_gateway_crash(home: Path, tmp_path: Path) -> None:
+def test_a_tool_handler_failure_is_data_not_a_gateway_crash(
+    home: Path, tmp_path: Path
+) -> None:
     ws = tmp_path / "ws"
     ws.mkdir()
 
@@ -384,11 +406,15 @@ def test_a_tool_handler_failure_is_data_not_a_gateway_crash(home: Path, tmp_path
 
     surface = (ToolSpec(name="explode", kind="read", handler=_boom),)
     gateway = ToolGateway(profile=INTERACTIVE, context=_ctx(ws), surface=surface)
-    got = gateway.handle_request({"protocol": 1, "id": "1", "tool": "explode", "args": {}})
+    got = gateway.handle_request(
+        {"protocol": 1, "id": "1", "tool": "explode", "args": {}}
+    )
     assert not got["ok"] and "kaboom" in got["error"]
 
 
-def test_unparseable_input_on_the_channel_is_answered_not_fatal(home: Path, tmp_path: Path) -> None:
+def test_unparseable_input_on_the_channel_is_answered_not_fatal(
+    home: Path, tmp_path: Path
+) -> None:
     import io
 
     ws = tmp_path / "ws"

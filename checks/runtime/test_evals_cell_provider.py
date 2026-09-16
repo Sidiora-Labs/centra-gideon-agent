@@ -15,14 +15,17 @@ import json
 
 import pytest
 
-from gideon.evals import cell_provider
-from gideon.evals import overlay as overlay_lib
-from gideon.evals import runner as runner_mod
-from gideon.evals.matrix import MatrixSpec
-from gideon.evals.runner import run_matrix
-from gideon.llm import registry as registry_lib
-from gideon.llm.capabilities import Capability
-from tests.test_evals_matrix_runner import _FakeRun, write_pinnable_home  # noqa: F401
+from checks.runtime.test_evals_matrix_runner import (  # noqa: F401
+    _FakeRun,
+    write_pinnable_home,
+)
+from gideon.assurance.evals import cell_provider
+from gideon.assurance.evals import overlay as overlay_lib
+from gideon.assurance.evals import runner as runner_mod
+from gideon.assurance.evals.matrix import MatrixSpec
+from gideon.assurance.evals.runner import run_matrix
+from gideon.integrations.llm import registry as registry_lib
+from gideon.integrations.llm.capabilities import Capability
 
 AMBIENT_KEY = "OPENAI_API_KEY"
 
@@ -42,7 +45,11 @@ def bound_home(tmp_path, monkeypatch):
                         "model": "test-model",
                         "options": {"base_url": "http://127.0.0.1:9/v1"},
                     },
-                    {"name": "Other", "type": "openai_compatible", "model": "other-model"},
+                    {
+                        "name": "Other",
+                        "type": "openai_compatible",
+                        "model": "other-model",
+                    },
                 ]
             }
         ),
@@ -61,7 +68,9 @@ def clean_registry():
 
 def _spawn(monkeypatch, *, binding=None, subject="s"):
     """Run one cell through a faked ``subprocess.run`` and return the child env it got."""
-    fake = _FakeRun(behavior=lambda i: ("ok", {"ok": True, "passed": True, "score": 1.0}))
+    fake = _FakeRun(
+        behavior=lambda i: ("ok", {"ok": True, "passed": True, "score": 1.0})
+    )
     monkeypatch.setattr(runner_mod.subprocess, "run", fake)
     run_matrix(
         MatrixSpec(subject=subject, axes={}, trial_count=1),
@@ -72,15 +81,11 @@ def _spawn(monkeypatch, *, binding=None, subject="s"):
     return fake.calls[0]["env"]
 
 
-# ── the security claim: nothing crosses that was not declared ────────────────
-
-
 def test_ambient_credential_does_not_reach_an_unbound_cell(bound_home, monkeypatch):
     monkeypatch.setenv(AMBIENT_KEY, "sk-ambient-must-not-cross")
     env = _spawn(monkeypatch)
     assert AMBIENT_KEY not in env
     assert "sk-ambient-must-not-cross" not in json.dumps(env)
-    # And no binding / no forwarded secret either.
     assert cell_provider.BINDING_ENV not in env
     assert cell_provider.CELL_KEY_ENV not in env
 
@@ -112,9 +117,6 @@ def test_parent_env_never_mutated_by_a_binding(bound_home, monkeypatch):
     assert dict(os.environ) == before
 
 
-# ── the declared grant crosses, and only by name ─────────────────────────────
-
-
 def test_bound_cell_env_carries_the_binding_and_no_secret(bound_home, monkeypatch):
     binding = cell_provider.resolve_binding("LocalRuntime:test-model")
     env = _spawn(monkeypatch, binding=binding)
@@ -122,7 +124,6 @@ def test_bound_cell_env_carries_the_binding_and_no_secret(bound_home, monkeypatc
     assert decoded is not None
     assert decoded.model_ref() == "LocalRuntime:test-model"
     assert decoded.use_case == "chat"
-    # No key was named, so none was forwarded.
     assert cell_provider.CELL_KEY_ENV not in env
 
 
@@ -137,13 +138,15 @@ def test_a_named_key_variable_is_forwarded_and_only_that_one(monkeypatch):
     env = cell_provider.spawn_env_for({}, binding, source=source)
     assert env[cell_provider.CELL_KEY_ENV] == "sk-declared"
     assert AMBIENT_KEY not in env
-    # Under a CELL-SCOPED name — the provider's own variable is never set in the child.
     assert "CLOUDY_API_KEY" not in env
 
 
 def test_a_named_key_that_is_unset_forwards_nothing(monkeypatch):
     binding = cell_provider.CellProviderBinding(
-        use_case="chat", provider_name="Cloudy", model="m1", api_key_env="CLOUDY_API_KEY"
+        use_case="chat",
+        provider_name="Cloudy",
+        model="m1",
+        api_key_env="CLOUDY_API_KEY",
     )
     env = cell_provider.spawn_env_for({}, binding, source={})
     assert cell_provider.CELL_KEY_ENV not in env
@@ -153,22 +156,20 @@ def test_no_binding_adds_nothing_to_the_env():
     assert cell_provider.spawn_env_for({"A": "b"}, None) == {"A": "b"}
 
 
-# ── resolving a binding out of the invoking home ─────────────────────────────
-
-
 def test_resolve_binding_reads_only_the_named_entry(bound_home):
     binding = cell_provider.resolve_binding("LocalRuntime:test-model")
     assert binding.provider_name == "LocalRuntime"
     assert binding.model == "test-model"
     assert binding.base_url == "http://127.0.0.1:9/v1"
-    # The other configured provider contributed nothing.
     assert "Other" not in json.dumps(binding.to_dict())
 
 
 def test_resolve_binding_keeps_a_colon_in_the_model_id(bound_home):
     """A model id may contain a colon; only the FIRST one separates the provider."""
     (bound_home / "config.json").write_text(
-        json.dumps({"providers": [{"name": "LocalRuntime", "type": "openai_compatible"}]}),
+        json.dumps(
+            {"providers": [{"name": "LocalRuntime", "type": "openai_compatible"}]}
+        ),
         encoding="utf-8",
     )
     binding = cell_provider.resolve_binding("LocalRuntime:gemma4:12b")
@@ -201,7 +202,9 @@ def test_binding_round_trips_through_its_dict():
 
 def test_binding_rejects_an_unknown_use_case():
     with pytest.raises(ValueError):
-        cell_provider.CellProviderBinding(use_case="telepathy", provider_name="P", model="m")
+        cell_provider.CellProviderBinding(
+            use_case="telepathy", provider_name="P", model="m"
+        )
 
 
 def test_binding_rejects_an_unknown_protocol():
@@ -216,9 +219,6 @@ def test_garbage_in_the_env_leaves_the_cell_unbound():
     assert cell_provider.from_env({}) is None
 
 
-# ── the child side ───────────────────────────────────────────────────────────
-
-
 def test_apply_in_child_without_a_binding_writes_nothing(tmp_path, monkeypatch):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     assert cell_provider.apply_in_child(None) == []
@@ -231,12 +231,16 @@ def test_apply_in_child_refuses_the_operators_real_home(monkeypatch):
     written into the real home is a permanent edit by a run that promised to touch
     nothing."""
     monkeypatch.delenv("GIDEON_HOME", raising=False)
-    binding = cell_provider.CellProviderBinding(use_case="chat", provider_name="P", model="m")
+    binding = cell_provider.CellProviderBinding(
+        use_case="chat", provider_name="P", model="m"
+    )
     with pytest.raises(cell_provider.CellBindingError):
         cell_provider.apply_in_child(binding)
 
 
-def test_apply_in_child_binds_one_use_case_and_one_entry(tmp_path, monkeypatch, clean_registry):
+def test_apply_in_child_binds_one_use_case_and_one_entry(
+    tmp_path, monkeypatch, clean_registry
+):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     binding = cell_provider.CellProviderBinding(
         use_case="chat",
@@ -245,7 +249,7 @@ def test_apply_in_child_binds_one_use_case_and_one_entry(tmp_path, monkeypatch, 
         base_url="http://127.0.0.1:9/v1",
     )
     changed = cell_provider.apply_in_child(binding)
-    assert changed  # it reports WHAT it did
+    assert changed
 
     config = json.loads((tmp_path / "config.json").read_text(encoding="utf-8"))
     assert [p["name"] for p in config["providers"]] == ["LocalRuntime"]
@@ -263,7 +267,9 @@ def _resolve_cell_model():
     can reach. ``_force_model_axis`` is how the native builder resolves that inner model,
     and it is the axis this whole seam is about.
     """
-    from gideon.providers.provider_bridge import resolve_provider_for_use_case
+    from gideon.extensions.providers.provider_bridge import (
+        resolve_provider_for_use_case,
+    )
 
     return resolve_provider_for_use_case("chat", _force_model_axis=True)
 
@@ -302,7 +308,9 @@ def test_a_bound_cell_has_a_registered_type_and_a_capable_entry(
     assert entry.model == "test-model"
 
 
-def test_a_bound_cell_resolves_a_real_provider_for_chat(tmp_path, monkeypatch, clean_registry):
+def test_a_bound_cell_resolves_a_real_provider_for_chat(
+    tmp_path, monkeypatch, clean_registry
+):
     """The done-when end to end: after the child-side apply, the ordinary resolution path
     builds a real protocol client — not the scripted replay.
 
@@ -310,29 +318,37 @@ def test_a_bound_cell_resolves_a_real_provider_for_chat(tmp_path, monkeypatch, c
     and a provider whose SDK is absent is unbuildable for reasons that have nothing to do
     with this binding. The sibling test above pins the binding itself without it.
     """
-    pytest.importorskip("openai", reason="the OpenAI-compatible protocol client is an extra")
+    pytest.importorskip(
+        "openai", reason="the OpenAI-compatible protocol client is an extra"
+    )
     _apply_chat_binding(tmp_path, monkeypatch)
     assert type(_resolve_cell_model()).__name__ == "OpenAIProvider"
 
 
-def test_an_unbound_cell_cannot_resolve_any_provider(tmp_path, monkeypatch, clean_registry):
+def test_an_unbound_cell_cannot_resolve_any_provider(
+    tmp_path, monkeypatch, clean_registry
+):
     """The negative half: with no binding applied, the same call has nothing to build."""
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     monkeypatch.delenv(registry_lib.SCRIPTED_PROVIDER_ENV, raising=False)
     (tmp_path / "config.json").write_text("{}", encoding="utf-8")
 
-    from gideon.providers.provider_bridge import ProviderResolutionError
+    from gideon.extensions.providers.provider_bridge import ProviderResolutionError
 
     with pytest.raises(ProviderResolutionError):
         _resolve_cell_model()
 
 
-def test_an_unbound_cell_resolves_the_scripted_fixture(tmp_path, monkeypatch, clean_registry):
+def test_an_unbound_cell_resolves_the_scripted_fixture(
+    tmp_path, monkeypatch, clean_registry
+):
     """`scripted` stays the default: with only the offline opt-in set, that is what a cell
     gets — and it is all it gets."""
     script = tmp_path / "replay.json"
     script.write_text(
-        json.dumps({"version": 1, "turns": [{"text": "hi", "stop_reason": "end_turn"}]}),
+        json.dumps(
+            {"version": 1, "turns": [{"text": "hi", "stop_reason": "end_turn"}]}
+        ),
         encoding="utf-8",
     )
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
@@ -343,20 +359,18 @@ def test_an_unbound_cell_resolves_the_scripted_fixture(tmp_path, monkeypatch, cl
     assert type(_resolve_cell_model()).__name__ == "ScriptedProvider"
 
 
-# ── the grant is narrow ──────────────────────────────────────────────────────
-
-
 def test_a_chat_binding_declares_no_embedding_or_vision_capability():
     caps = cell_provider.cell_capabilities("chat")
     assert Capability.CHAT in caps
-    # CODE_TOOLS is present so the native loop offers tool schemas at all.
     assert Capability.CODE_TOOLS in caps
     assert Capability.EMBEDDING not in caps
     assert Capability.VISION not in caps
 
 
 def test_a_chat_subcategory_borrows_the_chat_capability():
-    assert cell_provider.cell_capabilities("code_tools") == cell_provider.cell_capabilities("chat")
+    assert cell_provider.cell_capabilities(
+        "code_tools"
+    ) == cell_provider.cell_capabilities("chat")
 
 
 def test_a_use_case_with_no_provider_capability_is_refused():
@@ -364,13 +378,10 @@ def test_a_use_case_with_no_provider_capability_is_refused():
         cell_provider.cell_capabilities("audio_modality")
 
 
-# ── the descriptor says which kind of run this was ───────────────────────────
-
-
 def test_the_cell_descriptor_records_the_binding(bound_home, monkeypatch):
     binding = cell_provider.resolve_binding("LocalRuntime:test-model")
     _spawn(monkeypatch, binding=binding)
-    from gideon.evals import store
+    from gideon.assurance.evals import store
 
     descriptor = json.loads(
         (store.matrix_dir("m-s-bound") / "cell-0000" / "descriptor.json").read_text(
@@ -383,7 +394,7 @@ def test_the_cell_descriptor_records_the_binding(bound_home, monkeypatch):
 
 def test_an_unbound_cell_descriptor_says_so(bound_home, monkeypatch):
     _spawn(monkeypatch)
-    from gideon.evals import store
+    from gideon.assurance.evals import store
 
     descriptor = json.loads(
         (store.matrix_dir("m-s-plain") / "cell-0000" / "descriptor.json").read_text(
@@ -393,7 +404,9 @@ def test_an_unbound_cell_descriptor_says_so(bound_home, monkeypatch):
     assert "provider_binding" not in descriptor
 
 
-def test_the_overlay_config_patcher_is_still_the_only_config_writer(tmp_path, monkeypatch):
+def test_the_overlay_config_patcher_is_still_the_only_config_writer(
+    tmp_path, monkeypatch
+):
     """One answer to "how does a cell edit its own config" — the binding reuses it."""
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     assert overlay_lib.patch_child_config("providers", []) == "config.json:providers=[]"

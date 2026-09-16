@@ -23,14 +23,16 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from gideon import after_turn_review as atr
-from gideon.skills import loader as loader_mod
-from gideon.skills import overlays, proposals, refine
-from gideon.skills.loader import SkillsLoader
+from gideon.cognition import after_turn_review as atr
+from gideon.extensions.skills import loader as loader_mod
+from gideon.extensions.skills import overlays, proposals, refine
+from gideon.extensions.skills.loader import ProcedureLibrary
 
 NOW = datetime(2026, 8, 25, 12, 0, tzinfo=timezone.utc)
 SKILL = "release-flow"
-BASE = "---\nname: release-flow\ndescription: Ship a release\n---\n\nRun `pip install`.\n"
+BASE = (
+    "---\nname: release-flow\ndescription: Ship a release\n---\n\nRun `pip install`.\n"
+)
 
 
 @pytest.fixture
@@ -43,11 +45,15 @@ def home(tmp_path, monkeypatch):
     overlays. Asserted below rather than assumed.
     """
     monkeypatch.setattr(loader_mod, "config_dir", lambda: tmp_path)
-    import gideon.skills.marketplace as mp
+    import gideon.extensions.skills.marketplace as mp
 
     monkeypatch.setattr(mp, "SKILL_DISCOVERY_PATHS", [])
-    assert tmp_path in proposals._proposals_dir().parents, "the proposal queue was NOT redirected"
-    assert tmp_path in overlays.overlays_dir().parents, "the overlay store was NOT redirected"
+    assert (
+        tmp_path in proposals._proposals_dir().parents
+    ), "the proposal queue was NOT redirected"
+    assert (
+        tmp_path in overlays.overlays_dir().parents
+    ), "the overlay store was NOT redirected"
     return tmp_path
 
 
@@ -58,17 +64,15 @@ def _install(home, name: str = SKILL, body: str = BASE) -> None:
 
 
 def _load(name: str = SKILL) -> str | None:
-    return SkillsLoader(install_builtins=False).load_skill(name)
-
-
-# ── T3.1 the classifier: one test per trigger, each paired with its negative ──────────────
+    return ProcedureLibrary(install_builtins=False).load_skill(name)
 
 
 def test_correction_fires_and_the_same_turn_without_a_skill_does_not():
-    kw = dict(user_message="No, use uv instead of pip.", assistant_text="Ran pip install.")
+    kw = dict(
+        user_message="No, use uv instead of pip.", assistant_text="Ran pip install."
+    )
     fired = atr.detect_stumble(used_skills=[SKILL], **kw)
     assert fired is not None and fired.trigger == "correction"
-    # VACUITY of the used_skills guard: the ONLY difference is the loaded set.
     assert atr.detect_stumble(used_skills=[], **kw) is None
 
 
@@ -79,8 +83,10 @@ def test_failure_retry_fires_only_when_the_tool_was_actually_retried():
         used_skills=[SKILL],
         tool_outcomes=[("shell", "failed"), ("shell", "success")],
     )
-    assert retried is not None and (retried.trigger, retried.detail) == ("failure_retry", "shell")
-    # A failure NOTHING followed is an abandoned step, not a worked-around procedure gap.
+    assert retried is not None and (retried.trigger, retried.detail) == (
+        "failure_retry",
+        "shell",
+    )
     assert (
         atr.detect_stumble(
             user_message="carry on",
@@ -99,8 +105,10 @@ def test_rejection_fires_only_when_the_denial_stood():
         used_skills=[SKILL],
         tool_outcomes=[("write_file", "denied")],
     )
-    assert stood is not None and (stood.trigger, stood.detail) == ("rejection", "write_file")
-    # Denied then succeeded = the user steered a parameter, not refused the procedure.
+    assert stood is not None and (stood.trigger, stood.detail) == (
+        "rejection",
+        "write_file",
+    )
     assert (
         atr.detect_stumble(
             user_message="carry on",
@@ -138,7 +146,9 @@ def test_the_env_failure_fixture_never_triggers(user_message, assistant_text):
     env-failure guardrail — which is what makes this a test of the guardrail rather than a test
     that a boring turn is boring.
     """
-    assert atr.is_correction_signal(user_message), "fixture must carry a correction signal"
+    assert atr.is_correction_signal(
+        user_message
+    ), "fixture must carry a correction signal"
     assert (
         atr.detect_stumble(
             user_message=user_message,
@@ -171,11 +181,15 @@ def test_the_arm_never_calls_a_model():
     no provider entry point may appear in its source at all.
     """
     src = inspect.getsource(refine)
-    for forbidden in ("one_shot_completion", "llm_helpers", "ModelProvider", "completion("):
-        assert forbidden not in src, f"{forbidden} reached the model-free refinement arm"
-
-
-# ── T3.2 the proposal + its diff ──────────────────────────────────────────────────────────
+    for forbidden in (
+        "one_shot_completion",
+        "llm_helpers",
+        "ModelProvider",
+        "completion(",
+    ):
+        assert (
+            forbidden not in src
+        ), f"{forbidden} reached the model-free refinement arm"
 
 
 def _propose(home, *, now=NOW, user_message="No, use uv instead of pip."):
@@ -202,10 +216,11 @@ def test_a_stumble_yields_exactly_one_refine_proposal_with_a_valid_diff(home):
     diff = refine.proposal_diff(prop)
     assert diff.startswith(f"--- {SKILL}/SKILL.md"), diff[:80]
     assert "@@" in diff
-    added = [ln for ln in diff.split("\n") if ln.startswith("+") and not ln.startswith("+++")]
+    added = [
+        ln for ln in diff.split("\n") if ln.startswith("+") and not ln.startswith("+++")
+    ]
     assert any("## Refinement v1" in ln for ln in added), added
     assert any("use uv instead of pip" in ln for ln in added), added
-    # The base file is untouched by PROPOSING — propose-don't-write.
     assert (home / "skills" / SKILL / "SKILL.md").read_text(encoding="utf-8") == BASE
 
 
@@ -225,7 +240,9 @@ def test_diff_is_exactly_what_accept_applies(home):
     after = _load()
     assert result.name == SKILL and result.version == 1
     reconstructed = _apply_patch(before, diff)
-    assert reconstructed == after, "the diff shown to the user is not the change accept made"
+    assert (
+        reconstructed == after
+    ), "the diff shown to the user is not the change accept made"
 
 
 def _apply_patch(original: str, diff: str) -> str:
@@ -269,22 +286,22 @@ def test_the_daily_cap_holds_across_the_accept_that_empties_the_queue(home):
     """
     _install(home)
     assert _propose(home) is not None
-    assert _propose(home, now=NOW + timedelta(hours=1)) is None, "pending half of the cap"
+    assert (
+        _propose(home, now=NOW + timedelta(hours=1)) is None
+    ), "pending half of the cap"
     assert len(proposals.list_pending()) == 1
 
     proposals.accept(proposals.list_pending()[0].id)
     assert proposals.list_pending() == []
-    assert _propose(home, now=NOW + timedelta(hours=2)) is None, "accepted half of the cap"
-    # …and the window really is a window: past it, the arm proposes again.
+    assert (
+        _propose(home, now=NOW + timedelta(hours=2)) is None
+    ), "accepted half of the cap"
     assert _propose(home, now=NOW + timedelta(hours=25)) is not None
 
 
 def test_a_vanished_skill_proposes_nothing(home):
     assert _propose(home) is None, "there is nothing to refine"
     assert proposals.list_pending() == []
-
-
-# ── T3.3 versioned acceptance ─────────────────────────────────────────────────────────────
 
 
 def test_two_accepted_refinements_are_distinguishable_by_version(home):
@@ -311,9 +328,7 @@ def test_two_accepted_refinements_are_distinguishable_by_version(home):
 
     body = _load()
     assert "## Refinement v1" in body and "## Refinement v2" in body
-    # The trigger rides through accept into the rendered heading, so each version says WHY.
     assert "from a correction" in body and "from a rejected action" in body
-    # …and the overlay is still ONE file, so revert is still one unlink.
     assert len(list((home / "skills" / ".overlays").rglob("*.json"))) == 1
     stored = json.loads((home / "skills" / ".overlays" / f"{SKILL}.json").read_text())
     assert [r["trigger"] for r in stored["refinements"]] == ["correction", "rejection"]
@@ -325,9 +340,13 @@ def test_reject_leaves_the_skill_untouched(home):
     assert prop is not None
     assert proposals.reject(prop.id) is True
     assert (home / "skills" / SKILL / "SKILL.md").read_text(encoding="utf-8") == BASE
-    assert not (home / "skills" / ".overlays").exists(), "reject must not write an overlay"
+    assert not (
+        home / "skills" / ".overlays"
+    ).exists(), "reject must not write an overlay"
     assert _load() == BASE
-    assert overlays.next_version(SKILL) == 1, "a rejected refinement consumed no version"
+    assert (
+        overlays.next_version(SKILL) == 1
+    ), "a rejected refinement consumed no version"
 
 
 def test_the_detail_route_serves_the_diff_and_the_version_it_would_create(home):
@@ -338,7 +357,7 @@ def test_the_detail_route_serves_the_diff_and_the_version_it_would_create(home):
     """
     import asyncio
 
-    from gideon.dashboard.handlers import skills as skills_handlers
+    from gideon.interfaces.dashboard.handlers import skills as skills_handlers
 
     class _Req:
         def __init__(self, pid: str) -> None:
@@ -373,7 +392,7 @@ def test_a_new_kind_proposal_carries_no_diff_and_no_version(home):
     """The derived fields are refine-only: a ``kind="new"`` accept creates, it does not version."""
     import asyncio
 
-    from gideon.dashboard.handlers import skills as skills_handlers
+    from gideon.interfaces.dashboard.handlers import skills as skills_handlers
 
     class _Req:
         def __init__(self, pid: str) -> None:
@@ -388,7 +407,9 @@ def test_a_new_kind_proposal_carries_no_diff_and_no_version(home):
         created_at=NOW.isoformat(timespec="seconds"),
     )
     assert prop is not None
-    payload = json.loads(asyncio.run(skills_handlers.api_skill_proposal_detail(_Req(prop.id))).text)
+    payload = json.loads(
+        asyncio.run(skills_handlers.api_skill_proposal_detail(_Req(prop.id))).text
+    )
     assert "diff" not in payload and "version" not in payload
     assert proposals.accept(prop.id).version == 0
 
@@ -401,7 +422,7 @@ def test_the_proposal_detail_route_is_registered(home):
     stripped first (a text scanner otherwise reads a commented-out route as a live one), and a
     fabricated path is asserted ABSENT so the scan cannot pass vacuously.
     """
-    from gideon.dashboard import server as server_mod
+    from gideon.interfaces.dashboard import server as server_mod
 
     src = inspect.getsource(server_mod.start_dashboard)
     code = "\n".join(ln for ln in src.split("\n") if not ln.strip().startswith("#"))
@@ -409,11 +430,10 @@ def test_the_proposal_detail_route_is_registered(home):
         'add_get("/api/skills/proposals/{id}", api_skill_proposal_detail)',
         'add_post("/api/skills/proposals/{id}/accept", api_skill_proposal_accept)',
     ):
-        assert expected in code, f"{expected} is not registered — the endpoint would 404"
+        assert (
+            expected in code
+        ), f"{expected} is not registered — the endpoint would 404"
     assert 'add_get("/api/skills/proposals/{id}/diff"' not in code, "vacuity floor"
-
-
-# ── The call site (a mechanism nothing calls is not a feature) ─────────────────────────────
 
 
 class _State:
@@ -443,10 +463,12 @@ def test_the_after_turn_seam_calls_the_stumble_arm():
     call OUT of the seam into dead code at module level reds. The absent-name assertion is the
     vacuity floor for the scan itself.
     """
-    from gideon.dashboard import chat_runner
+    from gideon.interfaces.dashboard import chat_runner
 
     src = inspect.getsource(chat_runner._maybe_after_turn_review)
-    assert "_maybe_refine_stumble(" in src, "the stumble arm is never reached from the seam"
+    assert (
+        "_maybe_refine_stumble(" in src
+    ), "the stumble arm is never reached from the seam"
     assert "_maybe_refine_nothing(" not in src, "vacuity floor"
 
 
@@ -457,7 +479,7 @@ def test_the_call_site_files_a_proposal_and_surfaces_the_existing_learned_chip(h
     channel: that origin is what makes the chip's tap-through land on the proposals surface,
     where the diff renders.
     """
-    from gideon.dashboard import chat_runner
+    from gideon.interfaces.dashboard import chat_runner
 
     _install(home)
     state = _State()
@@ -479,18 +501,20 @@ def test_the_call_site_files_a_proposal_and_surfaces_the_existing_learned_chip(h
 
 def test_the_call_site_is_silent_when_nothing_was_loaded(home):
     """Same turn, no loaded skill: no proposal, no chip. The vacuity floor for the test above."""
-    from gideon.dashboard import chat_runner
+    from gideon.interfaces.dashboard import chat_runner
 
     _install(home)
     state = _State()
     chat_runner._maybe_refine_stumble(
-        state, _Session([]), "No, use uv instead of pip.", "Ran pip install.", [], _Cfg()
+        state,
+        _Session([]),
+        "No, use uv instead of pip.",
+        "Ran pip install.",
+        [],
+        _Cfg(),
     )
     assert proposals.list_pending() == []
     assert state.sent == []
-
-
-# ── V3: the full arc ──────────────────────────────────────────────────────────────────────
 
 
 def test_v3_arc_flawed_skill_stumble_refine_approve_rerun(home):
@@ -500,16 +524,14 @@ def test_v3_arc_flawed_skill_stumble_refine_approve_rerun(home):
     whole arc must leave ``SKILL.md`` exactly as it was found (propose-don't-write, and
     WF2LEA-6's immutable base).
     """
-    from gideon.dashboard import chat_runner
+    from gideon.interfaces.dashboard import chat_runner
 
     _install(home)
     original_bytes = (home / "skills" / SKILL / "SKILL.md").read_bytes()
 
-    # 1. the flawed skill is what a run would load — no refinement in sight.
     assert "Run `pip install`." in _load()
     assert "uv" not in _load()
 
-    # 2. the turn that stumbles on it, driven through the real call site.
     state = _State()
     chat_runner._maybe_refine_stumble(
         state,
@@ -521,26 +543,19 @@ def test_v3_arc_flawed_skill_stumble_refine_approve_rerun(home):
     )
     pending = proposals.list_pending()
     assert len(pending) == 1 and pending[0].kind == "refine"
-    # The heading's date is the PROPOSAL's own `created_at` day — `overlays.render_block`
-    # splits that timestamp at "T". This arc mints its proposal through the real clock, not
-    # this module's frozen NOW, so derive the day instead of hardcoding one: a literal here
-    # agreed with the real clock only while UTC's date matched NOW's, and broke the moment
-    # UTC rolled past it. Capture before accept(), which consumes the proposal.
     day = pending[0].created_at.split("T", 1)[0]
-    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", day), f"no ISO day to pin the heading on: {day!r}"
-    # 3. nothing was written yet: the proposal is a proposal.
+    assert re.fullmatch(
+        r"\d{4}-\d{2}-\d{2}", day
+    ), f"no ISO day to pin the heading on: {day!r}"
     assert (home / "skills" / SKILL / "SKILL.md").read_bytes() == original_bytes
     assert _load() == BASE
 
-    # 4. approve — the one human action, and the only writer.
     result = proposals.accept(pending[0].id)
     assert (result.name, result.version) == (SKILL, 1)
 
-    # 5. the re-run loads the refined skill.
     refined = _load()
     assert "use uv" in refined
     assert f"## Refinement v1 ({day}, from a correction)" in refined
     assert "Run `pip install`." in refined, "the base procedure is still there"
-    # …and the base file was never touched by any of it.
     assert (home / "skills" / SKILL / "SKILL.md").read_bytes() == original_bytes
     assert proposals.list_pending() == []

@@ -15,7 +15,7 @@ the monotonic cursor (enabling one trigger replaying a month of history).
 
 import time
 
-from gideon.triggers.dispatch import (
+from gideon.automation.triggers.dispatch import (
     COALESCE_WINDOW_SECS,
     DEDUP_WINDOW_SECS,
     MAX_TRANSIENT_RETRIES,
@@ -43,12 +43,11 @@ NOW = 1_700_000_000.0
 
 
 def _env(seq: int = 1, **over) -> Envelope:
-    base = dict(source="memory", kind="MemoryUpdate", payload={"k": "v"}, emitted_at=NOW)
+    base = dict(
+        source="memory", kind="MemoryUpdate", payload={"k": "v"}, emitted_at=NOW
+    )
     base.update(over)
     return Envelope(seq=seq, **base)  # type: ignore[arg-type]
-
-
-# ── the shipped bug, pinned ──
 
 
 def test_the_SHIPPED_sync_context_drop_is_REAL(tmp_path, monkeypatch):
@@ -59,7 +58,7 @@ def test_the_SHIPPED_sync_context_drop_is_REAL(tmp_path, monkeypatch):
     so. This test documents the defect the spool exists to fix; if `event_triggers` is ever fixed
     directly, this is where that shows up."""
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.event_triggers import (
+    from gideon.automation.event_triggers import (
         SOURCE_MEMORY,
         EventTrigger,
         EventTriggerEngine,
@@ -78,12 +77,14 @@ def test_the_SHIPPED_sync_context_drop_is_REAL(tmp_path, monkeypatch):
     )
     engine = EventTriggerEngine()
     monkeypatch.setattr(engine, "_get_store", lambda: store)
-    # No running loop — exactly a sync CLI write.
     engine.on_event(
-        source=SOURCE_MEMORY, event_type="MemoryUpdate", key="k", value="v", now=time.time()
+        source=SOURCE_MEMORY,
+        event_type="MemoryUpdate",
+        key="k",
+        value="v",
+        now=time.time(),
     )
     assert store.load()[0].fire_count == 1, "the fire was counted"
-    # …and the action went nowhere. That is the whole point.
 
 
 def test_the_spool_gives_a_sync_context_fire_SOMEWHERE_TO_GO(tmp_path):
@@ -97,21 +98,19 @@ def test_the_spool_gives_a_sync_context_fire_SOMEWHERE_TO_GO(tmp_path):
 
 def test_a_spool_write_FAILURE_does_not_break_the_caller(tmp_path):
     """Best-effort by design. The event is lost, but the memory write that triggered it still
-    succeeds — the opposite trade would let an unwritable disk take down ordinary use."""
-    unwritable = tmp_path / "nope" / "x" / "spool.jsonl"
-    unwritable.parent.mkdir(parents=True)
-    unwritable.parent.chmod(0o400)
-    try:
-        assert spool_fire(_env(), path=unwritable) is False
-    finally:
-        unwritable.parent.chmod(0o700)
+    succeeds — the opposite trade would let an unwritable disk take down ordinary use.
+    """
+    parent_file = tmp_path / "not-a-directory"
+    parent_file.write_text("occupied")
+    assert spool_fire(_env(), path=parent_file / "spool.jsonl") is False
+    assert parent_file.read_text() == "occupied"
 
 
 def test_the_spool_lives_under_the_CONFIG_dir(tmp_path, monkeypatch):
     """Resolved per call, not at import: a module-level path binds to
     whichever home was set when the
     module first loaded, which is how a test writes into the real `~/.gideon`."""
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     assert str(spool_path()).startswith(str(tmp_path))
 
 
@@ -130,7 +129,8 @@ def test_ONE_DAMAGED_line_does_not_hide_the_rest(tmp_path):
 
 def test_draining_does_NOT_truncate(tmp_path):
     """Peek-then-deliver-then-ack, applied to the spool. Truncating on read would lose every spooled
-    fire to a crash during handling — the same bug the spool exists to fix, one layer up."""
+    fire to a crash during handling — the same bug the spool exists to fix, one layer up.
+    """
     spool = tmp_path / "spool.jsonl"
     spool_fire(_env(), path=spool)
     drain_spool(path=spool)
@@ -145,7 +145,7 @@ def test_clearing_KEEPS_what_arrived_during_the_drain(tmp_path):
     for seq in (1, 2, 3):
         spool_fire(_env(seq=seq), path=spool)
     drained, _ = drain_spool(path=spool)
-    spool_fire(_env(seq=99), path=spool)  # arrives mid-drain
+    spool_fire(_env(seq=99), path=spool)
     clear_spool(handled=len(drained), path=spool)
     assert [e.seq for e in drain_spool(path=spool)[0]] == [99]
 
@@ -162,9 +162,6 @@ def test_draining_a_MISSING_spool_is_empty_not_an_error(tmp_path):
     assert drain_spool(path=tmp_path / "absent.jsonl") == ([], 0)
 
 
-# ── deterministic ids and dedup ──
-
-
 def test_the_event_id_is_DETERMINISTIC_over_payload_content():
     """A random id would make at-least-once delivery indistinguishable from duplicate work."""
     assert _env(payload={"a": 1}).event_id == _env(seq=99, payload={"a": 1}).event_id
@@ -175,7 +172,9 @@ def test_the_hash_is_STABLE_across_key_order():
     different order would hash differently — defeating the dedup window
     exactly when it matters, on a
     sender retrying with a re-serialized body."""
-    assert payload_hash("s", "k", {"x": 1, "y": 2}) == payload_hash("s", "k", {"y": 2, "x": 1})
+    assert payload_hash("s", "k", {"x": 1, "y": 2}) == payload_hash(
+        "s", "k", {"y": 2, "x": 1}
+    )
 
 
 def test_a_DIFFERENT_payload_is_a_different_event():
@@ -204,9 +203,6 @@ def test_the_dedup_check_does_NOT_mutate_the_seen_set():
     seen: dict = {}
     is_duplicate(env, seen, NOW)
     assert seen == {}
-
-
-# ── the cursor rule ──
 
 
 def test_a_DELIVERED_event_is_consumed():
@@ -247,14 +243,14 @@ def test_an_UNCLASSIFIED_throw_is_TRANSIENT_not_permanent():
 
 def test_a_handler_that_REPORTS_permanent_is_believed():
     """It knows its payload is unusable in a way the dispatcher cannot see."""
-    assert classify_handler_outcome(None, Handling.PERMANENT.value) == Handling.PERMANENT.value
+    assert (
+        classify_handler_outcome(None, Handling.PERMANENT.value)
+        == Handling.PERMANENT.value
+    )
 
 
 def test_no_exception_and_no_report_is_DELIVERED():
     assert classify_handler_outcome(None) == Handling.DELIVERED.value
-
-
-# ── the monotonic cursor ──
 
 
 def test_the_cursor_ADVANCES_forward():
@@ -286,9 +282,6 @@ def test_the_cursor_is_keyed_per_TRIGGER_and_STREAM():
     assert payload["stream"] == "memory"
 
 
-# ── wake vs resume ──
-
-
 def test_a_WAKE_is_droppable_when_the_session_is_busy():
     """The run in flight will drain the inbox, so skipping IS `overlap:
     skip` — exactly what autonudge
@@ -306,9 +299,6 @@ def test_an_unknown_wake_kind_is_treated_as_DROPPABLE():
     """Only `resume` carries an answer; anything else is a wake, and treating an unknown kind as
     undroppable would let a bad value pin a busy session."""
     assert droppable("something-new") is True
-
-
-# ── the cycle guard ──
 
 
 def test_a_trigger_cannot_fire_on_its_OWN_run_s_event():
@@ -330,9 +320,6 @@ def test_an_event_with_no_lineage_fires_normally():
     assert cycle_guard(_env(), "t-1")[0] is True
 
 
-# ── coalescing ──
-
-
 def test_a_BURST_of_one_family_collapses_to_the_LATEST():
     """For a `FileChanged` burst the newest state is the one worth acting on — acting on the first
     means reading a file the user has since changed again."""
@@ -351,7 +338,7 @@ def test_DIFFERENT_families_are_not_collapsed_together():
 
 def test_events_an_HOUR_apart_are_two_facts_not_a_burst():
     far = [_env(seq=1, emitted_at=NOW), _env(seq=2, emitted_at=NOW + 3600)]
-    assert len(coalesce_family(far, NOW)) == 1  # same family, latest wins
+    assert len(coalesce_family(far, NOW)) == 1
     assert coalesce_family(far, NOW)[0].seq == 2
 
 
@@ -363,9 +350,6 @@ def test_the_coalesced_batch_is_ORDERED_by_seq():
 
 def test_the_coalesce_window_is_declared():
     assert 0 < COALESCE_WINDOW_SECS <= 0.25
-
-
-# ── the dispatch record ──
 
 
 def test_delivery_state_is_PER_TARGET():

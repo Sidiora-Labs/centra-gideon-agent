@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 
-import gideon.mcp_discovery as disc
+import gideon.integrations.mcp_discovery as disc
 
 
 def _write(path, servers: dict) -> None:
@@ -23,14 +23,14 @@ def test_claude_json_not_a_silent_discovery_source(tmp_path, monkeypatch):
     """A server living only in ~/.claude.json must NOT appear in list_servers()."""
     cc = tmp_path / ".claude.json"
     _write(cc, {"cc-only": {"command": "npx", "args": ["cc-mcp"]}})
-    # Only PClaw scopes are discovery sources now (no claude.json).
+    # Only Gideon scopes are discovery sources now (no claude.json).
     monkeypatch.setattr(disc, "_mcp_json_paths", lambda: (tmp_path / "mcp.json",))
     monkeypatch.setattr(disc, "_load_agent_config", lambda: {})
     names = {s.name for s in disc.list_servers()}
     assert "cc-only" not in names
 
 
-def test_discover_importable_returns_cc_servers_not_in_pclaw(tmp_path, monkeypatch):
+def test_discover_importable_returns_cc_servers_not_in_gideon(tmp_path, monkeypatch):
     cc = tmp_path / ".claude.json"
     _write(
         cc,
@@ -41,33 +41,35 @@ def test_discover_importable_returns_cc_servers_not_in_pclaw(tmp_path, monkeypat
         },
     )
     monkeypatch.setattr(disc, "_IMPORT_JSON_PATHS", ((cc, "Claude Code"),))
-    # No PClaw-scope servers configured.
+    # No Gideon-scope servers configured.
     monkeypatch.setattr(disc, "_mcp_json_paths", lambda: (tmp_path / "nope.json",))
     monkeypatch.setattr(disc, "_load_agent_config", lambda: {})
 
     out = disc.discover_importable_servers()
     by_name = {s["name"]: s for s in out}
-    assert set(by_name) == {"cc-only", "remote"}  # bogus dropped (no command/url)
+    assert set(by_name) == {"cc-only", "remote"}
     assert by_name["cc-only"]["backend"] == "Claude Code"
     assert by_name["cc-only"]["command"] == "npx"
     assert by_name["remote"]["url"] == "https://example.com/sse"
 
 
 def test_discover_importable_excludes_already_known(tmp_path, monkeypatch):
-    """A server already in PClaw scope is not offered as importable."""
+    """A server already in Gideon scope is not offered as importable."""
     cc = tmp_path / ".claude.json"
     _write(cc, {"shared": {"command": "npx"}})
-    pclaw = tmp_path / "mcp.json"
-    _write(pclaw, {"shared": {"command": "npx"}})
+    gideon = tmp_path / "mcp.json"
+    _write(gideon, {"shared": {"command": "npx"}})
     monkeypatch.setattr(disc, "_IMPORT_JSON_PATHS", ((cc, "Claude Code"),))
-    monkeypatch.setattr(disc, "_mcp_json_paths", lambda: (pclaw,))
+    monkeypatch.setattr(disc, "_mcp_json_paths", lambda: (gideon,))
     monkeypatch.setattr(disc, "_load_agent_config", lambda: {})
 
     assert disc.discover_importable_servers() == []
 
 
 def test_discover_importable_no_source_file(tmp_path, monkeypatch):
-    monkeypatch.setattr(disc, "_IMPORT_JSON_PATHS", ((tmp_path / "absent.json", "Claude Code"),))
+    monkeypatch.setattr(
+        disc, "_IMPORT_JSON_PATHS", ((tmp_path / "absent.json", "Claude Code"),)
+    )
     monkeypatch.setattr(disc, "_mcp_json_paths", lambda: (tmp_path / "nope.json",))
     monkeypatch.setattr(disc, "_load_agent_config", lambda: {})
     assert disc.discover_importable_servers() == []

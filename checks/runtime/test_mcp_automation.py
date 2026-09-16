@@ -13,15 +13,14 @@ import json
 
 import pytest
 
-from gideon import mcp_automation as A
+from gideon.integrations import mcp_automation as A
 
 
 @pytest.fixture
 def home(tmp_path, monkeypatch):
     """An isolated home so the store the tools build never touches the real one."""
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    # `config_dir()` may be cached; point it at the temp home directly too.
-    import gideon.config.loader as loader
+    import gideon.core.config.loader as loader
 
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
     return tmp_path
@@ -36,18 +35,11 @@ def _data(text: str) -> dict:
     return json.loads(blob)
 
 
-# ── the surface lists and every tool validates ──
-
-
-#: WF2LOO-9 added two self-scheduling tools to this surface. They are NOT in
-#: `triggers.tools.TOOL_NAMES` on purpose: that tuple is §4's table of `automation_*` handlers
-#: living in that module, and these two live here and delegate into `tools.create`. Naming them
-#: separately keeps both meanings honest — "handlers there" and "names an agent may call here".
 SELF_SCHEDULE_TOOLS = frozenset({"set_onetime_task", "set_recurring_task"})
 
 
 def test_the_surface_is_section_4s_table_plus_the_self_schedule_pair():
-    from gideon.triggers.tools import TOOL_NAMES
+    from gideon.automation.triggers.tools import TOOL_NAMES
 
     listed = {t["name"] for t in A._list_tools()}
     assert listed == set(TOOL_NAMES) | SELF_SCHEDULE_TOOLS
@@ -56,7 +48,7 @@ def test_the_surface_is_section_4s_table_plus_the_self_schedule_pair():
 def test_every_listed_tool_has_a_schema():
     """🔴 A tool with no schema silently skips validation — an agent-supplied `id` or `patch`
     would reach the store unchecked."""
-    from gideon.validation import MCP_AUTOMATION_SCHEMAS
+    from gideon.assurance.validation import MCP_AUTOMATION_SCHEMAS
 
     for tool in A._list_tools():
         assert tool["name"] in MCP_AUTOMATION_SCHEMAS, tool["name"]
@@ -72,9 +64,6 @@ def test_create_advertises_the_criterion_2_example():
     file-watch shape, or an agent reaches for `schedule_add` and gets a cron."""
     create = next(t for t in A._list_tools() if t["name"] == "automation_create")
     assert "~/notes" in create["description"]
-
-
-# ── 🔴 criterion 2 through the real dispatch ──
 
 
 def test_criterion_2_through_the_full_dispatch(home):
@@ -100,7 +89,7 @@ def test_the_created_trigger_persists_to_the_shared_store(home):
         "automation_create",
         {"name": "Notes", "when": "when a file in ~/notes changes", "message": "go"},
     )
-    from gideon.triggers.store import TriggerStore
+    from gideon.automation.triggers.store import TriggerStore
 
     assert TriggerStore(base_dir=home).get("file:notes") is not None
 
@@ -132,10 +121,9 @@ def test_pause_resume_delete_through_dispatch(home):
     assert "Paused" in A._call_tool("automation_pause", {"id": "file:notes"})
     assert "Resumed" in A._call_tool("automation_resume", {"id": "file:notes"})
     assert "confirm" in A._call_tool("automation_delete", {"id": "file:notes"})
-    assert "Deleted" in A._call_tool("automation_delete", {"id": "file:notes", "confirm": True})
-
-
-# ── validation actually runs ──
+    assert "Deleted" in A._call_tool(
+        "automation_delete", {"id": "file:notes", "confirm": True}
+    )
 
 
 def test_a_missing_required_id_is_rejected_by_validation(home):
@@ -148,19 +136,16 @@ def test_an_unknown_tool_name_is_a_clean_error(home):
     assert "unknown automation tool" in A._call_tool("automation_bogus", {}).lower()
 
 
-# ── 🔴 the wiring: aggregated AND registered as a native app ──
-
-
 def test_the_module_is_in_the_core_aggregation():
     """🔴 The ACP MCP server an external CLI spawns exposes the aggregated set; if this module is
     not in it, `automation_*` is invisible to claude-code/codex."""
-    from gideon.mcp_core import _AGGREGATED_CATEGORY_MODULES
+    from gideon.integrations.mcp_core import _AGGREGATED_CATEGORY_MODULES
 
-    assert "gideon.mcp_automation" in _AGGREGATED_CATEGORY_MODULES
+    assert "gideon.integrations.mcp_automation" in _AGGREGATED_CATEGORY_MODULES
 
 
 def test_the_aggregated_surface_includes_the_automation_tools():
-    from gideon.mcp_core import _aggregated_list_tools
+    from gideon.integrations.mcp_core import _aggregated_list_tools
 
     names = {t["name"] for t in _aggregated_list_tools()}
     assert "automation_create" in names
@@ -169,7 +154,8 @@ def test_the_aggregated_surface_includes_the_automation_tools():
 
 def test_a_native_app_bundle_registers_the_provider():
     """🔴 The native surface loads tools from `apps/native/*/app.json`. Without the bundle the
-    provider factory exists but nothing constructs it — the tools never appear in chat."""
+    provider factory exists but nothing constructs it — the tools never appear in chat.
+    """
     import json as _json
     from pathlib import Path
 
@@ -180,12 +166,12 @@ def test_a_native_app_bundle_registers_the_provider():
     assert manifest["native"] is True
     assert (
         manifest["provider"]["implementation"]
-        == "gideon.tool_providers.registry:create_automation_provider"
+        == "gideon.integrations.tool_providers.registry:create_automation_provider"
     )
 
 
 def test_the_provider_factory_builds_and_names_itself():
-    from gideon.tool_providers.registry import create_automation_provider
+    from gideon.integrations.tool_providers.registry import create_automation_provider
 
     provider = create_automation_provider()
     assert provider.name == "gideon-automation"

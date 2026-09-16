@@ -15,24 +15,23 @@ from pathlib import Path
 
 import pytest
 
-from gideon.apps import app_manager, manager
+from gideon.extensions.apps import app_manager, manager
 
 
 @pytest.fixture(autouse=True)
 def _isolate_apps(tmp_path, monkeypatch):
-    import gideon.config.loader as loader
+    import gideon.core.config.loader as loader
 
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(manager, "config_dir", lambda: tmp_path)
-    # Fresh provider registry per test so registrations don't leak.
-    from gideon.providers import registry as reg
+    from gideon.extensions.providers import registry as reg
 
     monkeypatch.setattr(reg, "_registry", None, raising=False)
     return tmp_path
 
 
 _PROVIDER_PY = textwrap.dedent("""
-    from gideon.search_providers.base import (
+    from gideon.integrations.search_providers.base import (
         SearchCapabilities,
         SearchHit,
         SearchProvider,
@@ -80,29 +79,25 @@ def _provider_app(tmp_path: Path) -> Path:
 
 @pytest.mark.asyncio
 async def test_provider_only_app_registers_and_is_callable(tmp_path):
-    from gideon.search_providers.registry import (
+    from gideon.integrations.search_providers.registry import (
         get_provider,
         list_providers,
         unregister_provider,
     )
 
-    # clean any stale registration from a prior run
     unregister_provider("fixture-search")
 
     res = app_manager.install(_provider_app(tmp_path))
     assert res.ok, res.error
 
-    # install() registers + enables providers → it should be live + callable.
     prov = get_provider("fixture-search")
     assert prov is not None, [p.name for p in list_providers()]
     out = await prov.search("hello")
     assert out.results and out.results[0].title == "X hello"
 
-    # disable deregisters it from the live registry
     assert app_manager.disable("fixture-search")
     assert get_provider("fixture-search") is None
 
-    # re-enable restores it
     assert app_manager.enable("fixture-search")
     assert get_provider("fixture-search") is not None
     unregister_provider("fixture-search")
@@ -112,8 +107,11 @@ async def test_provider_only_app_registers_and_is_callable(tmp_path):
 async def test_uninstall_deactivates_provider_keeps_registration(tmp_path):
     """Uninstall = deactivate: the live provider is torn down (off) but the
     extension registration is KEPT (disabled) so re-install/enable restores it."""
-    from gideon.providers.registry import get_provider_registry
-    from gideon.search_providers.registry import get_provider, unregister_provider
+    from gideon.extensions.providers.registry import get_provider_registry
+    from gideon.integrations.search_providers.registry import (
+        get_provider,
+        unregister_provider,
+    )
 
     unregister_provider("fixture-search")
     res = app_manager.install(_provider_app(tmp_path))
@@ -122,8 +120,6 @@ async def test_uninstall_deactivates_provider_keeps_registration(tmp_path):
     assert ext_registry.get("fixture-search") is not None
 
     assert app_manager.uninstall("fixture-search")
-    # Torn down in the domain registry (off) but still KNOWN (disabled) in the
-    # extension registry — and the files remain so it can be re-enabled.
     assert get_provider("fixture-search") is None
     ext = ext_registry.get("fixture-search")
     assert ext is not None and ext.enabled is False
@@ -133,8 +129,11 @@ async def test_uninstall_deactivates_provider_keeps_registration(tmp_path):
 async def test_force_uninstall_fully_deregisters_provider(tmp_path):
     """Force-uninstall must FORGET the provider entirely — no disabled ghost in
     the extension registry."""
-    from gideon.providers.registry import get_provider_registry
-    from gideon.search_providers.registry import get_provider, unregister_provider
+    from gideon.extensions.providers.registry import get_provider_registry
+    from gideon.integrations.search_providers.registry import (
+        get_provider,
+        unregister_provider,
+    )
 
     unregister_provider("fixture-search")
     res = app_manager.install(_provider_app(tmp_path))
@@ -149,8 +148,6 @@ async def test_force_uninstall_fully_deregisters_provider(tmp_path):
 
 
 def _provider_app_named(tmp_path: Path, app_name: str, provider_name: str) -> Path:
-    # Two apps that BOTH ship a top-level `provider.py` but expose different
-    # SearchProviders — the module-name-collision regression.
     d = tmp_path / "src" / app_name
     d.mkdir(parents=True)
     (d / "app.json").write_text(
@@ -170,7 +167,7 @@ def _provider_app_named(tmp_path: Path, app_name: str, provider_name: str) -> Pa
         encoding="utf-8",
     )
     body = textwrap.dedent(f"""
-        from gideon.search_providers.base import (
+        from gideon.integrations.search_providers.base import (
             SearchCapabilities,
             SearchHit,
             SearchProvider,
@@ -198,7 +195,10 @@ def _provider_app_named(tmp_path: Path, app_name: str, provider_name: str) -> Pa
 def test_two_apps_same_module_name_dont_collide(tmp_path):
     """Two apps both shipping provider.py must BOTH load — not have the second
     silently get the first's cached module from sys.modules."""
-    from gideon.search_providers.registry import get_provider, unregister_provider
+    from gideon.integrations.search_providers.registry import (
+        get_provider,
+        unregister_provider,
+    )
 
     for pn in ("prov-alpha", "prov-beta"):
         unregister_provider(pn)
@@ -208,13 +208,15 @@ def test_two_apps_same_module_name_dont_collide(tmp_path):
     a = get_provider("prov-alpha")
     b = get_provider("prov-beta")
     assert a is not None and a.name == "prov-alpha"
-    assert b is not None and b.name == "prov-beta", "second app collided with first's module"
+    assert (
+        b is not None and b.name == "prov-beta"
+    ), "second app collided with first's module"
     unregister_provider("prov-alpha")
     unregister_provider("prov-beta")
 
 
 _MULTI_PROVIDER_PY = textwrap.dedent("""
-    from gideon.search_providers.base import (
+    from gideon.integrations.search_providers.base import (
         SearchCapabilities,
         SearchHit,
         SearchProvider,
@@ -278,8 +280,11 @@ async def test_app_registers_multiple_providers(tmp_path):
     """An app may register one or more providers (same or different kinds). Both
     the singular `provider` and each of `providers` go live on install+enable and
     are torn down on disable."""
-    from gideon.providers.registry import get_provider_registry
-    from gideon.search_providers.registry import get_provider, unregister_provider
+    from gideon.extensions.providers.registry import get_provider_registry
+    from gideon.integrations.search_providers.registry import (
+        get_provider,
+        unregister_provider,
+    )
 
     for pn in ("multi-primary", "multi-secondary"):
         unregister_provider(pn)
@@ -287,19 +292,16 @@ async def test_app_registers_multiple_providers(tmp_path):
     res = app_manager.install(_multi_provider_app(tmp_path))
     assert res.ok, res.error
 
-    # BOTH providers live + callable in the search registry.
     primary, secondary = get_provider("multi-primary"), get_provider("multi-secondary")
     assert primary is not None and secondary is not None
     assert (await secondary.search("q")).results[0].title == "multi-secondary"
 
-    # The extension registry flattens the app's chain to one entry per provider.
     ext_registry = get_provider_registry()
     multi = [e for e in ext_registry.list_extensions() if e.name == "multi-app"]
     assert len(multi) == 2
     impls = {e.provider_config.implementation for e in multi}
     assert impls == {"provider:make_primary", "provider:make_secondary"}
 
-    # Disable tears down BOTH.
     assert app_manager.disable("multi-app")
     assert get_provider("multi-primary") is None
     assert get_provider("multi-secondary") is None

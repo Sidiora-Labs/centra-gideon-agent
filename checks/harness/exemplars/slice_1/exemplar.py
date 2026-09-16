@@ -6,7 +6,7 @@ It exercises the load-bearing Slice-1 machinery at once: the pure `frontier()` s
 one node at a time in dependency order, the dispatchers, binding resolution threading a
 value from node to node, terminal-status ownership, and the Run Ledger emission.
 
-Runnable standalone: `python -m harness.exemplars.slice_1.exemplar` (or `smoke.sh`).
+Runnable standalone: `python -m checks.harness.exemplars.slice_1.exemplar` (or `smoke.sh`).
 `main()` self-asserts and returns 0 on the expected COMPLETE outcome, non-zero otherwise.
 """
 
@@ -15,14 +15,11 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from gideon.workflows import journal as J
-from gideon.workflows import store
-from gideon.workflows.controller import EngineServices, RunController
-from gideon.workflows.models import InstanceState, RunStatus, WorkflowRun
+from gideon.automation.workflows import journal as J
+from gideon.automation.workflows import store
+from gideon.automation.workflows.controller import EngineServices, RunController
+from gideon.automation.workflows.models import InstanceState, RunStatus, WorkflowRun
 
-#: `think`'s prompt binds `seed`'s output; `final`'s expr binds `think`'s output. If the
-#: frontier scheduled out of order, or bindings did not thread, `final` would resolve to
-#: nothing and the assertions below would catch it.
 SPEC: dict[str, Any] = {
     "name": "slice1-frontier-and-journal",
     "root": {
@@ -35,7 +32,11 @@ SPEC: dict[str, Any] = {
                 "id": "think",
                 "config": {"prompt": "double {{nodes.seed.output.n}}"},
             },
-            {"kind": "transform", "id": "final", "config": {"expr": "got {{nodes.think.output}}"}},
+            {
+                "kind": "transform",
+                "id": "final",
+                "config": {"expr": "got {{nodes.think.output}}"},
+            },
         ],
     },
 }
@@ -45,7 +46,9 @@ def _echo():
     """A fake model that records the prompts it saw, so binding-threading is observable."""
     calls: list[str] = []
 
-    async def fn(prompt: str, *, use_case: str = "background", output_type: Any = None) -> str:
+    async def fn(
+        prompt: str, *, use_case: str = "background", output_type: Any = None
+    ) -> str:
         calls.append(prompt)
         return f"out{len(calls)}"
 
@@ -69,23 +72,25 @@ def main() -> int:
         print(f"FAIL: expected run status COMPLETE, got {status}")
         return 1
 
-    # Binding threaded seed→think: the resolved prompt saw seed's value, not the raw template.
     if calls != ["double 7"]:
-        print(f"FAIL: expected the infer node to see the bound prompt ['double 7'], got {calls}")
+        print(
+            f"FAIL: expected the infer node to see the bound prompt ['double 7'], got {calls}"
+        )
         return 1
 
-    # Every node reached DONE, and there are exactly three.
-    if len(instances) != 3 or not all(i.state is InstanceState.DONE for i in instances.values()):
-        print(f"FAIL: expected 3 DONE nodes, got {[(k, v.state) for k, v in instances.items()]}")
+    if len(instances) != 3 or not all(
+        i.state is InstanceState.DONE for i in instances.values()
+    ):
+        print(
+            f"FAIL: expected 3 DONE nodes, got {[(k, v.state) for k, v in instances.items()]}"
+        )
         return 1
 
-    # The run row carries terminal metadata (started/completed timestamps, token total).
     saved = store.get(run_id)
     if saved is None or not (saved.started_at and saved.completed_at):
         print("FAIL: the run row is missing its terminal timestamps")
         return 1
 
-    # The journal recorded a completion per node — the Run Ledger the flywheel/UI read.
     completed = [r for r in J.ledger(run_id) if r["kind"] == J.STEP_COMPLETED]
     if len(completed) != 3:
         print(f"FAIL: expected 3 STEP_COMPLETED ledger records, got {len(completed)}")

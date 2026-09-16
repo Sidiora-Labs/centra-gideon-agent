@@ -24,18 +24,20 @@ import json
 
 import pytest
 
-from gideon.triggers import claims as C
-from gideon.triggers import executor as E
-from gideon.triggers import service as SVC
-from gideon.triggers.models import Trigger
-from gideon.triggers.scheduling import CLAIM_MAX_DURATION_SECS, Claim
-from gideon.triggers.store import TriggerStore
+from gideon.automation.triggers import claims as C
+from gideon.automation.triggers import executor as E
+from gideon.automation.triggers import service as SVC
+from gideon.automation.triggers.models import Trigger
+from gideon.automation.triggers.scheduling import CLAIM_MAX_DURATION_SECS, Claim
+from gideon.automation.triggers.store import TriggerStore
 
 NOW = 1_800_000_000.0
 
 
 def _claim(tid="j", *, at=NOW, holder="tick", max_secs=CLAIM_MAX_DURATION_SECS):
-    return Claim(trigger_id=tid, holder=holder, claimed_at=at, max_duration_secs=max_secs)
+    return Claim(
+        trigger_id=tid, holder=holder, claimed_at=at, max_duration_secs=max_secs
+    )
 
 
 def _clock(overlap="skip", tid="j"):
@@ -58,9 +60,6 @@ async def _ok(_payload):
 
 async def _boom(_payload):
     raise RuntimeError("provider exploded")
-
-
-# ── 🔴 defect 1: overlap was inert ──
 
 
 def test_overlap_skip_now_blocks_a_second_fire(tmp_path):
@@ -103,9 +102,6 @@ def test_overlap_parallel_still_allows_concurrency(tmp_path):
     assert [f.trigger.id for f in second.fires] == ["j"]
 
 
-# ── 🔴 defect 2: is_running was unanswerable ──
-
-
 def test_a_granted_claim_is_persisted(tmp_path):
     store = TriggerStore(base_dir=tmp_path)
     store.upsert(_clock())
@@ -120,7 +116,6 @@ def test_running_state_is_visible_across_processes(tmp_path):
     reader (a new process) must see the same answer."""
     C.write_claim(_claim(), base_dir=tmp_path)
     assert C.is_running("j", now=NOW + 1, base_dir=tmp_path) is True
-    # A second "process" reading only the directory sees it too.
     assert C.running_ids(now=NOW + 1, base_dir=tmp_path) == ["j"]
 
 
@@ -139,9 +134,6 @@ def test_a_tick_dry_run_does_not_write_a_claim(tmp_path):
     assert C.is_running("j", now=NOW, base_dir=tmp_path) is False
 
 
-# ── 🔴 defect 3: the executor never released ──
-
-
 def test_a_completed_run_releases_its_claim(tmp_path):
     """🔴 Without this, (1)+(2) make things WORSE: every `overlap: skip` trigger blocks ITSELF after
     one run until the 1h expiry — the overlap guard becomes a one-shot."""
@@ -155,7 +147,9 @@ def test_a_RAISING_run_also_releases_its_claim(tmp_path):
     only on success would strand it on every failure — the worst case, since a failing automation is
     exactly the one a user retries."""
     C.write_claim(_claim(), base_dir=tmp_path)
-    outcome = asyncio.run(E.run_one({"trigger_id": "j"}, _boom, now=NOW, base_dir=tmp_path))
+    outcome = asyncio.run(
+        E.run_one({"trigger_id": "j"}, _boom, now=NOW, base_dir=tmp_path)
+    )
     assert outcome.outcome == "failed"
     assert C.is_running("j", now=NOW, base_dir=tmp_path) is False
 
@@ -181,18 +175,21 @@ def test_a_failed_release_does_not_mask_the_runs_outcome(tmp_path):
         raise OSError("disk gone")
 
     outcome = asyncio.run(
-        E.run_one({"trigger_id": "j"}, _ok, now=NOW, release_claim=broken, base_dir=tmp_path)
+        E.run_one(
+            {"trigger_id": "j"}, _ok, now=NOW, release_claim=broken, base_dir=tmp_path
+        )
     )
     assert outcome.outcome == "ran"
 
 
 def test_release_can_be_disabled_for_a_caller_that_owns_the_claim(tmp_path):
     C.write_claim(_claim(), base_dir=tmp_path)
-    asyncio.run(E.run_one({"trigger_id": "j"}, _ok, now=NOW, release_claim=None, base_dir=tmp_path))
+    asyncio.run(
+        E.run_one(
+            {"trigger_id": "j"}, _ok, now=NOW, release_claim=None, base_dir=tmp_path
+        )
+    )
     assert C.is_running("j", now=NOW, base_dir=tmp_path) is True
-
-
-# ── expiry + robustness ──
 
 
 def test_an_expired_claim_reads_as_idle(tmp_path):
@@ -200,7 +197,10 @@ def test_an_expired_claim_reads_as_idle(tmp_path):
     some janitor notices."""
     C.write_claim(_claim(at=NOW), base_dir=tmp_path)
     assert C.is_running("j", now=NOW + 1, base_dir=tmp_path) is True
-    assert C.is_running("j", now=NOW + CLAIM_MAX_DURATION_SECS + 1, base_dir=tmp_path) is False
+    assert (
+        C.is_running("j", now=NOW + CLAIM_MAX_DURATION_SECS + 1, base_dir=tmp_path)
+        is False
+    )
 
 
 def test_an_expired_claim_does_not_block_a_fire(tmp_path):
@@ -218,7 +218,7 @@ def test_a_malformed_claim_reads_as_idle_rather_than_blocking_forever(tmp_path):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("{not json")
     assert C.is_running("j", now=NOW, base_dir=tmp_path) is False
-    path.write_text(json.dumps({"trigger_id": "j"}))  # no claimed_at
+    path.write_text(json.dumps({"trigger_id": "j"}))
     assert C.is_running("j", now=NOW, base_dir=tmp_path) is False
 
 
@@ -259,7 +259,9 @@ def test_running_ids_is_sorted(tmp_path):
 
 def test_running_ids_omits_expired_claims(tmp_path):
     C.write_claim(_claim(tid="live", at=NOW), base_dir=tmp_path)
-    C.write_claim(_claim(tid="dead", at=NOW - CLAIM_MAX_DURATION_SECS - 10), base_dir=tmp_path)
+    C.write_claim(
+        _claim(tid="dead", at=NOW - CLAIM_MAX_DURATION_SECS - 10), base_dir=tmp_path
+    )
     assert C.running_ids(now=NOW, base_dir=tmp_path) == ["live"]
 
 
@@ -283,7 +285,7 @@ def test_the_claim_root_is_derived_from_the_store_not_the_real_home(tmp_path):
     tests' fires. A claim describes ONE store, so its root is that store's directory."""
     store = TriggerStore(base_dir=tmp_path)
     store.upsert(_clock())
-    asyncio.run(SVC.tick(store, now=NOW))  # no explicit base_dir
+    asyncio.run(SVC.tick(store, now=NOW))
     assert C._claims_dir(tmp_path).is_dir()
     assert C.is_running("j", now=NOW, base_dir=tmp_path) is True
     assert store.base_dir == tmp_path
@@ -292,6 +294,6 @@ def test_the_claim_root_is_derived_from_the_store_not_the_real_home(tmp_path):
 def test_a_release_without_a_root_is_a_noop_not_a_real_home_write(tmp_path):
     """Same hazard on the release side: `run_one` must not reach into the user's home when the
     caller did not say which store the claim belongs to."""
-    from gideon.triggers.executor import _release_claim
+    from gideon.automation.triggers.executor import _release_claim
 
     assert _release_claim("j") is False

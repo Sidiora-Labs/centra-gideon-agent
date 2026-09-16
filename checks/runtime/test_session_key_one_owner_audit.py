@@ -37,23 +37,16 @@ from pathlib import Path
 
 import pytest
 
-SRC = Path(__file__).resolve().parents[1] / "src" / "gideon"
+SRC = Path(__file__).resolve().parents[2] / "runtime" / "gideon"
 DASHBOARD = SRC / "dashboard"
 HISTORY = SRC / "history.py"
 
-#: The owner module. It is the ONE place allowed to compose a key from a shape, because
-#: composing candidate shapes is precisely its job.
 OWNER_MODULE = DASHBOARD / "chat_utils.py"
 
-#: The functions that answer "which key is this session's file under?" from the DISK.
 OWNER_CALLS = frozenset({"resolve_history_key", "persisted_history_key"})
 
-#: The prefix-only helper. Correct for normalising two in-memory keys into one space;
-#: never correct as the key handed to a ``conversation_log`` read or write.
 PREFIX_ONLY = "_history_key_for"
 
-#: ``str`` methods that return a string derived from their receiver, so taint flows
-#: through them (``name.removeprefix("dashboard_")`` is still the wire name).
 _STR_METHODS = frozenset(
     {
         "removeprefix",
@@ -68,9 +61,6 @@ _STR_METHODS = frozenset(
         "replace",
     }
 )
-
-
-# ── deriving the keyed method set ────────────────────────────────────────────────
 
 
 def keyed_conversation_log_methods() -> frozenset[str]:
@@ -89,9 +79,6 @@ def keyed_conversation_log_methods() -> frozenset[str]:
     return frozenset(out)
 
 
-# ── the taint analysis ───────────────────────────────────────────────────────────
-
-
 class _KeyFlow(ast.NodeVisitor):
     """Resolve, per function, where each keyed ``conversation_log`` key came from.
 
@@ -107,11 +94,8 @@ class _KeyFlow(ast.NodeVisitor):
         self.keyed = keyed
         self.module = module
         self.is_owner_module = module == OWNER_MODULE
-        #: (lineno, method, key source, classification)
         self.sites: list[tuple[int, str, str, str]] = []
         self._scope: list[dict[str, list[ast.expr]]] = [{}]
-
-    # -- scope handling ----------------------------------------------------------
 
     def _enter(self) -> None:
         self._scope.append({})
@@ -158,8 +142,6 @@ class _KeyFlow(ast.NodeVisitor):
     visit_SetComp = visit_ListComp  # type: ignore[assignment]
     visit_GeneratorExp = visit_ListComp  # type: ignore[assignment]
 
-    # -- provenance --------------------------------------------------------------
-
     def _reaches(
         self, expr: ast.expr | None, want: str, seen: frozenset[int] = frozenset()
     ) -> bool:
@@ -182,25 +164,16 @@ class _KeyFlow(ast.NodeVisitor):
                 return True
             if want == "prefix" and fname == PREFIX_ONLY:
                 return True
-            # Argument taint is NOT generic. `state._sessions.get(name)` takes the wire
-            # name and returns a session OBJECT — propagating through it would taint
-            # `session.key` and every attribute reachable from it, i.e. every handler
-            # that ever read `match_info["session"]`. So only genuine string plumbing
-            # propagates: a mapping `.get`'s DEFAULT (`body.get("key", name)`) and the
-            # receiver of a `str` method (`name.removeprefix("dashboard_")`).
             if fname == "get":
                 return any(self._reaches(a, want, seen) for a in expr.args[1:])
             if fname in _STR_METHODS and isinstance(expr.func, ast.Attribute):
                 return self._reaches(expr.func.value, want, seen)
             if fname in OWNER_CALLS or fname == PREFIX_ONLY:
-                # A resolver called with a tainted name still yields a resolved key for
-                # the OTHER clauses' purposes; only its own clause classifies it.
                 return False
             return False
 
         if isinstance(expr, ast.Subscript):
             if want == "wire_session":
-                # request.match_info["session"] — the raw wire session NAME.
                 sl = expr.slice
                 if (
                     isinstance(expr.value, ast.Attribute)
@@ -214,7 +187,9 @@ class _KeyFlow(ast.NodeVisitor):
         if isinstance(expr, ast.BoolOp):
             return any(self._reaches(v, want, seen) for v in expr.values)
         if isinstance(expr, ast.IfExp):
-            return self._reaches(expr.body, want, seen) or self._reaches(expr.orelse, want, seen)
+            return self._reaches(expr.body, want, seen) or self._reaches(
+                expr.orelse, want, seen
+            )
         if isinstance(expr, (ast.Tuple, ast.List, ast.Set)):
             return any(self._reaches(e, want, seen) for e in expr.elts)
         if isinstance(expr, ast.JoinedStr):
@@ -223,12 +198,11 @@ class _KeyFlow(ast.NodeVisitor):
             return self._reaches(expr.value, want, seen)
         if isinstance(expr, ast.Name):
             return any(self._reaches(d, want, seen) for d in self._defs(expr.id))
-        # ast.Attribute is deliberately NOT traversed — see the class docstring.
         return False
 
-    # -- the call sites ----------------------------------------------------------
-
-    def _is_conversation_log(self, expr: ast.expr, seen: frozenset[int] = frozenset()) -> bool:
+    def _is_conversation_log(
+        self, expr: ast.expr, seen: frozenset[int] = frozenset()
+    ) -> bool:
         """Whether *expr* denotes the conversation log, through local aliases.
 
         ``session_key_exists`` calls it as ``log.has_log(...)`` after ``log =
@@ -289,54 +263,50 @@ def audit_tree() -> list[tuple[Path, int, str, str, str]]:
     return out
 
 
-# ── the rule ─────────────────────────────────────────────────────────────────────
-
-
 def test_no_keyed_conversation_log_call_bypasses_the_one_owner():
     """No dashboard disk access may key off a hand-formed prefix or a raw wire name."""
     bypasses = [row for row in audit_tree() if row[4].startswith("BYPASS")]
-    assert not bypasses, "keyed conversation_log call sites bypassing the one owner:\n" + "\n".join(
+    assert (
+        not bypasses
+    ), "keyed conversation_log call sites bypassing the one owner:\n" + "\n".join(
         f"  {p.relative_to(SRC.parent)}:{ln} {m}({src})  → {kind}"
         for p, ln, m, src, kind in bypasses
     )
 
 
-# ── vacuity floor ────────────────────────────────────────────────────────────────
-#
-# Everything above asserts an ABSENCE. These four tests are what stop that absence from
-# being an artefact of an analyzer that resolves nothing: the derived method set is
-# non-trivial, the scan population is large, the analyzer demonstrably RECOGNISES the
-# owner on real code, and the two bypass detectors demonstrably FIRE on planted source
-# while leaving the owner-routed form of the same code alone.
-
-
 def test_keyed_method_set_is_derived_and_populated():
     keyed = keyed_conversation_log_methods()
-    assert len(keyed) >= 15, f"derived too few keyed ConversationLog methods: {sorted(keyed)}"
+    assert (
+        len(keyed) >= 15
+    ), f"derived too few keyed ConversationLog methods: {sorted(keyed)}"
     # Spot-check the ones the two symptoms actually went through.
-    for name in ("get_metadata", "read_messages", "read_messages_chained", "_path", "has_log"):
+    for name in (
+        "get_metadata",
+        "read_messages",
+        "read_messages_chained",
+        "_path",
+        "has_log",
+    ):
         assert name in keyed, f"{name} must be derived as key-taking"
 
 
 def test_scan_population_is_non_trivial_and_owner_is_recognised():
     rows = audit_tree()
-    assert len(rows) >= 25, f"analyzer found only {len(rows)} keyed call sites — it stopped seeing"
+    assert (
+        len(rows) >= 25
+    ), f"analyzer found only {len(rows)} keyed call sites — it stopped seeing"
     owner_routed = [r for r in rows if r[4] == "owner"]
     assert len(owner_routed) >= 10, (
         f"analyzer resolved the owner at only {len(owner_routed)} sites — a taint rule that "
         "cannot recognise the owner is green for free"
     )
-    # The prefix helper must still be a live name in the tree, or clause one is matching
-    # something that no longer exists.
     assert any(
         PREFIX_ONLY in p.read_text(encoding="utf-8") for p in DASHBOARD.rglob("*.py")
     ), f"{PREFIX_ONLY} is gone — clause one now matches nothing"
 
 
-#: Isolates clause ONE: a hand-formed prefix reaching disk. Deliberately takes the name
-#: as a plain argument so the wire clause cannot also fire and mask it.
 _PLANTED_PREFIX_BYPASS = """
-from gideon.dashboard.chat_utils import _history_key_for
+from gideon.interfaces.dashboard.chat_utils import _history_key_for
 
 def persist_thing(state, session_name):
     history_key = _history_key_for(session_name)
@@ -352,7 +322,7 @@ async def api_thing(request, state):
 """
 
 _PLANTED_OWNER_ROUTED = """
-from gideon.dashboard.chat_utils import persisted_history_key
+from gideon.interfaces.dashboard.chat_utils import persisted_history_key
 
 async def api_thing(request, state):
     name = request.match_info["session"]
@@ -380,7 +350,9 @@ def test_detector_fires_on_planted_bypass(source, expected):
 
 def test_detector_is_quiet_on_the_owner_routed_form():
     sites = audit_source(
-        _PLANTED_OWNER_ROUTED, path=DASHBOARD / "planted.py", keyed=keyed_conversation_log_methods()
+        _PLANTED_OWNER_ROUTED,
+        path=DASHBOARD / "planted.py",
+        keyed=keyed_conversation_log_methods(),
     )
     assert [s[3] for s in sites] == ["owner"], sites
 
@@ -388,6 +360,8 @@ def test_detector_is_quiet_on_the_owner_routed_form():
 def test_owner_module_may_compose_the_prefix():
     """``chat_utils`` is the one place allowed to build a key from a shape."""
     sites = audit_source(
-        _PLANTED_PREFIX_BYPASS, path=OWNER_MODULE, keyed=keyed_conversation_log_methods()
+        _PLANTED_PREFIX_BYPASS,
+        path=OWNER_MODULE,
+        keyed=keyed_conversation_log_methods(),
     )
     assert [s[3] for s in sites] == ["other"], sites

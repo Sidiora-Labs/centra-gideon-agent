@@ -20,11 +20,8 @@ import json
 
 import pytest
 
-from gideon.dashboard import views_store as store
+from gideon.interfaces.dashboard import views_store as store
 
-#: The four lane refs, verbatim, in triage order. Duplicated from the module ON PURPOSE:
-#: asserting against ``store._MISSION_CONTROL_CORE_REFS`` alone would pass through any
-#: rename, and the FE codes against these literals.
 LANE_REFS = [
     "core:lane-needs-approval",
     "core:lane-your-turn",
@@ -32,7 +29,6 @@ LANE_REFS = [
     "core:lane-idle",
 ]
 
-#: The eight Overview refs, verbatim — a second preset must not perturb the first.
 OVERVIEW_REFS = [
     "core:hero-pulse",
     "core:action-center",
@@ -50,11 +46,10 @@ def _isolate_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(home))
-    monkeypatch.setattr("gideon.dashboard.views_store.config_dir", lambda: home)
+    monkeypatch.setattr(
+        "gideon.interfaces.dashboard.views_store.config_dir", lambda: home
+    )
     return home
-
-
-# ── The preset resolves, and is locked ──────────────────────────────────────
 
 
 def test_mission_control_resolves_as_a_locked_preset_with_four_lanes():
@@ -63,7 +58,6 @@ def test_mission_control_resolves_as_a_locked_preset_with_four_lanes():
     assert view.id == "mission-control"
     assert view.name == "Mission Control"
     assert view.preset is True
-    # Exactly the four lanes, in declared triage order — nothing more on a fresh home.
     assert [t.ref for t in view.tiles] == LANE_REFS
     assert store._MISSION_CONTROL_CORE_REFS == tuple(LANE_REFS)
 
@@ -82,12 +76,8 @@ def test_mission_control_refuses_edit():
 
 
 def test_mission_control_refuses_delete():
-    # Separate call site from update_view's guard — both must be covered.
     with pytest.raises(store.PresetLockedError):
         store.delete_view(store.PRESET_MISSION_CONTROL_ID)
-
-
-# ── The first preset is untouched ────────────────────────────────────────────
 
 
 def test_both_presets_listed_and_overview_is_unchanged():
@@ -98,11 +88,7 @@ def test_both_presets_listed_and_overview_is_unchanged():
     assert [t["ref"] for t in overview["tiles"]] == OVERVIEW_REFS
     assert overview["preset"] is True and overview["nav_pinned"] is True
     assert overview["icon"] == "LayoutDashboard"
-    # And the two presets share no refs — the ``lane-`` segment is doing its job.
     assert not set(LANE_REFS) & set(OVERVIEW_REFS)
-
-
-# ── Overlay ordering (the Overview invariant, held for the new preset) ───────
 
 
 def test_overlay_tile_orders_after_the_four_core_lanes():
@@ -115,14 +101,10 @@ def test_overlay_tile_orders_after_the_four_core_lanes():
     assert all(t.order < overlaid.order for t in view.tiles if t.ref in LANE_REFS)
 
 
-# ── Vacuity floor: resolution DISCRIMINATES ─────────────────────────────────
-
-
 def test_presets_are_exactly_two_and_a_bogus_id_does_not_resolve():
     presets = store._presets(store._empty_disk())
     assert [p.id for p in presets] == ["overview", "mission-control"]
     assert all(p.preset for p in presets)
-    # ``get_view`` returns None for an unknown id; the WRITE paths raise.
     assert store.get_view("not-a-view") is None
     assert store._is_preset("not-a-view") is False
     with pytest.raises(store.ViewNotFoundError):
@@ -131,21 +113,15 @@ def test_presets_are_exactly_two_and_a_bogus_id_does_not_resolve():
         store.delete_view("not-a-view")
 
 
-# ── Presets are code-defined, never persisted as user views ─────────────────
-
-
 def test_preset_never_round_trips_to_disk_as_a_user_view():
     """If Mission Control landed in ``dashboard_views.json`` under ``views`` it would
     become editable and the lock would be a fiction."""
-    # Force a write, and add an overlay tile so the file definitely exists.
     store.add_tile(store.PRESET_MISSION_CONTROL_ID, "artifact:board")
     disk = json.loads(store.views_path().read_text())
     assert [v.get("id") for v in disk["views"]] == []
-    # The overlay is persisted; the preset's own composition is NOT.
     assert "mission-control" in disk["overlay"]
     assert [t["ref"] for t in disk["overlay"]["mission-control"]] == ["artifact:board"]
     assert not any(r in json.dumps(disk["views"]) for r in LANE_REFS)
-    # Re-reading rebuilds the lanes from code, and the lock still holds.
     reread = store.get_view(store.PRESET_MISSION_CONTROL_ID)
     assert [t.ref for t in reread.tiles] == [*LANE_REFS, "artifact:board"]
     with pytest.raises(store.PresetLockedError):
@@ -160,7 +136,6 @@ def test_a_user_view_named_like_the_preset_is_still_not_a_preset():
     ids = [v.id for v in store.load_views()]
     assert ids[:2] == ["overview", "mission-control"]
     assert created.id in ids[2:]
-    # And it IS editable — proving the lock is keyed on the preset id, not the name.
     store.update_view(created.id, {"name": "Renamed"})
     store.delete_view(created.id)
 
@@ -182,7 +157,10 @@ def test_the_frontend_names_the_same_four_refs_as_the_registry():
     import pathlib
     import re
 
-    tsx = pathlib.Path(__file__).resolve().parents[1] / "web/src/pages/dashboard/MissionControl.tsx"
+    tsx = (
+        pathlib.Path(__file__).resolve().parents[2]
+        / "apps/console/src/pages/dashboard/MissionControl.tsx"
+    )
     assert tsx.exists(), f"{tsx} moved — re-point this rail"
     body = tsx.read_text()
     block = re.search(r"export const LANE_REFS[^{]*\{(.*?)\n\}", body, re.S)
@@ -190,9 +168,9 @@ def test_the_frontend_names_the_same_four_refs_as_the_registry():
         block
     ), "LANE_REFS is no longer a literal object in MissionControl.tsx — re-derive this rail"
     fe_refs = set(re.findall(r"'(core:[^']+)'", block.group(1)))
-    # Vacuity floor: a regex that matched an empty block would make the comparison below
-    # trivially true against an empty set, which is exactly how a rail reads clean forever.
-    assert len(fe_refs) == 4, f"parsed {len(fe_refs)} refs out of LANE_REFS, expected 4: {fe_refs}"
+    assert (
+        len(fe_refs) == 4
+    ), f"parsed {len(fe_refs)} refs out of LANE_REFS, expected 4: {fe_refs}"
     assert fe_refs == set(store._MISSION_CONTROL_CORE_REFS), (
         "the Mission Control view's LANE_REFS and the registry's _MISSION_CONTROL_CORE_REFS name "
         f"different tiles.\n  frontend: {sorted(fe_refs)}\n  registry: "

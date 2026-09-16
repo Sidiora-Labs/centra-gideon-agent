@@ -37,9 +37,9 @@ async def test_fork_inherits_parent_mode(tmp_path) -> None:
         body = await resp.json()
         assert body["ok"] is True
         new_session = state._sessions[body["key"]]
-        assert new_session.mode == "steer"  # inherited from parent
-        assert new_session.forked_from  # set
-        assert body["messages"] == 2  # full history copied
+        assert new_session.mode == "steer"
+        assert new_session.forked_from
+        assert body["messages"] == 2
     finally:
         await client.close()
 

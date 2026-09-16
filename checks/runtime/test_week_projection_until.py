@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from gideon.triggers.calendar import project_occurrences
+from gideon.automation.triggers.calendar import project_occurrences
 
 
 def _project(start: datetime, **kw):
@@ -29,7 +29,7 @@ def test_until_is_the_bound_when_given():
     start = datetime(2026, 8, 3)
     until = start + timedelta(hours=5)
     rows = _project(start, days=7, until=until)
-    assert len(rows) == 5  # hourly fires in [start, until), not a week's worth
+    assert len(rows) == 5
     assert all(start.timestamp() <= r.at < until.timestamp() for r in rows)
 
 
@@ -50,11 +50,10 @@ def test_endpoint_validates_until_fail_closed():
     """Malformed / inverted / over-cap `until` values are 400s, not silent fallbacks."""
     import inspect
 
-    from gideon.dashboard.handlers import triggers as mod
+    from gideon.interfaces.dashboard.handlers import triggers as mod
 
     src = inspect.getsource(mod.api_triggers_week)
     assert 'request.query.get("until")' in src
     assert "until must be an ISO date" in src
     assert "until must be after start and within 31 days" in src
-    # And the real bound is echoed back, so the client can verify the agreed window.
     assert "(until or (start + timedelta(days=days))).isoformat()" in src

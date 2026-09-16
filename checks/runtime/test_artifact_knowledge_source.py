@@ -23,9 +23,7 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.artifacts import changes
-from gideon.artifacts.native import NativeArtifactProvider
-from gideon.knowledge.artifact_ingest import (
+from gideon.cognition.knowledge.artifact_ingest import (
     ARTIFACT_ITEM_TYPE,
     ARTIFACT_SOURCE_KIND,
     ARTIFACT_SOURCE_PROVIDER,
@@ -35,7 +33,9 @@ from gideon.knowledge.artifact_ingest import (
     ensure_source,
     find_source,
 )
-from gideon.knowledge.store import KnowledgeStore
+from gideon.cognition.knowledge.store import KnowledgeStore
+from gideon.workspace.artifacts import changes
+from gideon.workspace.artifacts.native import NativeArtifactProvider
 
 
 @pytest.fixture(autouse=True)
@@ -100,22 +100,22 @@ def _mirror(store, slug: str) -> dict | None:
     return store.find_source_item(str(source["id"]), slug) if source else None
 
 
-# ── the aggregate source row ────────────────────────────────────────────────────
-
-
 def test_one_aggregate_source_row_created_once(store):
     """One ``artifact://`` row for the whole library, and its existence is the marker."""
     sid, created = ensure_source(store)
     assert created is True
     again_id, again_created = ensure_source(store)
-    assert (again_id, again_created) == (sid, False), "a second call must not mint a second row"
-    rows = [s for s in store.list_sources() if s["provider"] == ARTIFACT_SOURCE_PROVIDER]
+    assert (again_id, again_created) == (
+        sid,
+        False,
+    ), "a second call must not mint a second row"
+    rows = [
+        s for s in store.list_sources() if s["provider"] == ARTIFACT_SOURCE_PROVIDER
+    ]
     assert len(rows) == 1
     row = rows[0]
     assert row["kind"] == ARTIFACT_SOURCE_KIND
     assert row["spec"] == {"uri": ARTIFACT_SOURCE_URI}
-    # The mirror is automatic and default-on, so it must never spend a model call: `raw`
-    # routes every mirrored item through the LLM-free graph (see pipeline/graphs.graph_for).
     assert row["enrichment"] == "raw"
 
 
@@ -125,13 +125,11 @@ def test_no_source_row_until_something_is_indexed(store, artifacts):
     artifacts.create(name="Note", content="# hi", kind="markdown")
     queue = _FakeQueue()
     assert (
-        _indexer(store, artifacts, queue, enabled=False).index("note") == ArtifactIndexer.DISABLED
+        _indexer(store, artifacts, queue, enabled=False).index("note")
+        == ArtifactIndexer.DISABLED
     )
     assert find_source(store) is None
     assert queue.enqueued == []
-
-
-# ── searchable, not listed ──────────────────────────────────────────────────────
 
 
 def test_saving_a_markdown_artifact_makes_it_searchable(store, artifacts):
@@ -139,37 +137,42 @@ def test_saving_a_markdown_artifact_makes_it_searchable(store, artifacts):
     queue = _FakeQueue()
     idx = _indexer(store, artifacts, queue)
     art = artifacts.create(
-        name="Quarterly notes", content="# Q3\nthe kestrel migration finished", kind="markdown"
+        name="Quarterly notes",
+        content="# Q3\nthe kestrel migration finished",
+        kind="markdown",
     )
     assert idx.index(art.slug) == ArtifactIndexer.INDEXED
     assert _search_titles(store, "kestrel") == ["Quarterly notes"]
-    # And it went through the one ingestion path rather than being hand-written.
     assert queue.enqueued == [_mirror(store, art.slug)["id"]]
 
 
 @pytest.mark.asyncio
 async def test_mirror_is_searchable_but_absent_from_the_items_list(store, artifacts):
     """Searchable in Knowledge WITHOUT appearing in the Knowledge list — asserted against
-    the real ``GET /api/knowledge/items`` handler, not a reimplementation of its filter."""
-    from gideon.dashboard.handlers.knowledge import list_items
+    the real ``GET /api/knowledge/items`` handler, not a reimplementation of its filter.
+    """
+    from gideon.interfaces.dashboard.handlers.knowledge import list_items
 
     queue = _FakeQueue()
     idx = _indexer(store, artifacts, queue)
-    store.create_typed_item(item_type="note", title="A real note", content="kestrel too")
+    store.create_typed_item(
+        item_type="note", title="A real note", content="kestrel too"
+    )
     art = artifacts.create(name="Mirrored artifact", content="kestrel", kind="markdown")
     assert idx.index(art.slug) == ArtifactIndexer.INDEXED
 
     listed = await _list(list_items, store, {})
     titles = [i["title"] for i in listed["items"]]
     assert "A real note" in titles
-    assert "Mirrored artifact" not in titles, "an artifact must never be listed as an item"
-    assert listed["total"] == 1, "the count must agree with the rows, not with the store"
+    assert (
+        "Mirrored artifact" not in titles
+    ), "an artifact must never be listed as an item"
+    assert (
+        listed["total"] == 1
+    ), "the count must agree with the rows, not with the store"
 
-    # It IS in the index: the same handler with a query returns it (the search branch does
-    # not filter mirrors — that asymmetry is the whole feature).
     found = await _list(list_items, store, {"q": "kestrel"})
     assert "Mirrored artifact" in [i["title"] for i in found["items"]]
-    # An explicit ?type=artifact is a deliberate question and gets a real answer.
     explicit = await _list(list_items, store, {"type": ARTIFACT_ITEM_TYPE})
     assert [i["title"] for i in explicit["items"]] == ["Mirrored artifact"]
 
@@ -221,20 +224,21 @@ async def _list(handler, store, query: dict) -> dict:
     return _json.loads(resp.body.decode())
 
 
-# ── edit refreshes, delete removes ──────────────────────────────────────────────
-
-
 def test_editing_refreshes_the_index_without_a_second_row(store, artifacts):
     queue = _FakeQueue()
     idx = _indexer(store, artifacts, queue)
-    art = artifacts.create(name="Doc", content="the original word osprey", kind="markdown")
+    art = artifacts.create(
+        name="Doc", content="the original word osprey", kind="markdown"
+    )
     idx.index(art.slug)
     first_id = _mirror(store, art.slug)["id"]
 
     artifacts.update(art.slug, content="the replacement word albatross", snapshot=True)
     assert idx.index(art.slug) == ArtifactIndexer.INDEXED
 
-    assert _mirror(store, art.slug)["id"] == first_id, "an edit must not mint a second mirror"
+    assert (
+        _mirror(store, art.slug)["id"] == first_id
+    ), "an edit must not mint a second mirror"
     assert _search_titles(store, "albatross") == ["Doc"]
     assert _search_titles(store, "osprey") == [], "the stale text must leave the index"
 
@@ -249,9 +253,9 @@ def test_deleting_an_artifact_leaves_no_orphan_index_entry(store, artifacts):
     assert idx.remove(art.slug) is True
     assert _search_titles(store, "dodo") == [], "search still finds a deleted artifact"
     assert _mirror(store, art.slug) is None
-    # The sighting is forgotten too — the failure this guards is invisible: leaving the
-    # source_seen row makes create_typed_item's novelty gate refuse the slug FOREVER.
-    seen = store.db.execute("SELECT COUNT(*) FROM source_seen WHERE guid = ?", (art.slug,))
+    seen = store.db.execute(
+        "SELECT COUNT(*) FROM source_seen WHERE guid = ?", (art.slug,)
+    )
     assert seen.fetchone()[0] == 0
 
 
@@ -259,13 +263,19 @@ def test_a_recreated_slug_indexes_again(store, artifacts):
     """The consequence of forgetting the sighting, asserted end to end."""
     queue = _FakeQueue()
     idx = _indexer(store, artifacts, queue)
-    art = artifacts.create(name="Recycled", content="first body pelican", kind="markdown")
+    art = artifacts.create(
+        name="Recycled", content="first body pelican", kind="markdown"
+    )
     idx.index(art.slug)
     idx.remove(art.slug)
     artifacts.delete(art.slug)
 
-    again = artifacts.create(name="Recycled", content="second body flamingo", kind="markdown")
-    assert again.slug == art.slug, "the fixture must reuse the slug for this to mean anything"
+    again = artifacts.create(
+        name="Recycled", content="second body flamingo", kind="markdown"
+    )
+    assert (
+        again.slug == art.slug
+    ), "the fixture must reuse the slug for this to mean anything"
     assert idx.index(again.slug) == ArtifactIndexer.INDEXED
     assert _search_titles(store, "flamingo") == ["Recycled"]
 
@@ -280,9 +290,6 @@ def test_the_delete_path_ignores_the_master_switch(store, artifacts):
     assert _search_titles(store, "quagga") == []
 
 
-# ── idempotence ─────────────────────────────────────────────────────────────────
-
-
 def test_reindexing_twice_is_a_measured_no_op(store, artifacts):
     queue = _FakeQueue()
     idx = _indexer(store, artifacts, queue)
@@ -293,14 +300,19 @@ def test_reindexing_twice_is_a_measured_no_op(store, artifacts):
     assert idx.index(art.slug) == ArtifactIndexer.UNCHANGED
     after = _mirror(store, art.slug)
 
-    assert after["updated_at"] == before["updated_at"], "an unchanged artifact was rewritten"
-    assert len(queue.enqueued) == 1, "an unchanged artifact was re-enqueued for enrichment"
+    assert (
+        after["updated_at"] == before["updated_at"]
+    ), "an unchanged artifact was rewritten"
+    assert (
+        len(queue.enqueued) == 1
+    ), "an unchanged artifact was re-enqueued for enrichment"
     assert _item_count(store) == 1
 
 
 def test_a_rename_refreshes_the_indexed_title(store, artifacts):
     """The hash covers title AND text, so a metadata-only rename is a real change: the title
-    is what a search result shows, and a content-only hash would leave the old name indexed."""
+    is what a search result shows, and a content-only hash would leave the old name indexed.
+    """
     queue = _FakeQueue()
     idx = _indexer(store, artifacts, queue)
     art = artifacts.create(name="Old name", content="body text", kind="markdown")
@@ -314,7 +326,9 @@ def test_a_rename_refreshes_the_indexed_title(store, artifacts):
 def test_backfill_runs_once_and_a_reboot_does_not_re_run(store, artifacts):
     """The atom's third done_when. ``start`` is driven TWICE — the second call is the reboot."""
     for i in range(3):
-        artifacts.create(name=f"Existing {i}", content=f"prior content number {i}", kind="markdown")
+        artifacts.create(
+            name=f"Existing {i}", content=f"prior content number {i}", kind="markdown"
+        )
     queue = _FakeQueue()
 
     first = _start(store, artifacts, queue)
@@ -324,9 +338,13 @@ def test_backfill_runs_once_and_a_reboot_does_not_re_run(store, artifacts):
 
     second = _start(store, artifacts, queue)
     assert second == 0, "a reboot re-ran the backfill"
-    assert len(queue.enqueued) == 3, "a reboot re-enqueued every artifact for enrichment"
+    assert (
+        len(queue.enqueued) == 3
+    ), "a reboot re-enqueued every artifact for enrichment"
     assert _item_count(store) == 3
-    assert {a.slug: _mirror(store, a.slug)["updated_at"] for a in artifacts.list()} == stamps
+    assert {
+        a.slug: _mirror(store, a.slug)["updated_at"] for a in artifacts.list()
+    } == stamps
 
 
 def _start(store, artifacts, queue) -> int:
@@ -344,9 +362,6 @@ def _item_count(store) -> int:
     ).fetchone()[0]
 
 
-# ── redaction ───────────────────────────────────────────────────────────────────
-
-
 def test_a_credential_is_redacted_before_indexing(store, artifacts):
     """The atom's fourth done_when. Asserted from BOTH directions: the secret is not findable
     by search, and its plaintext is in no stored column — a redaction applied on the way out
@@ -355,18 +370,19 @@ def test_a_credential_is_redacted_before_indexing(store, artifacts):
     queue = _FakeQueue()
     idx = _indexer(store, artifacts, queue)
     art = artifacts.create(
-        name="Deploy notes", content=f"export API_KEY={secret}\nremember the ibis", kind="markdown"
+        name="Deploy notes",
+        content=f"export API_KEY={secret}\nremember the ibis",
+        kind="markdown",
     )
     assert idx.index(art.slug) == ArtifactIndexer.INDEXED
 
-    assert _search_titles(store, "ibis") == ["Deploy notes"], "the rest of the body must index"
+    assert _search_titles(store, "ibis") == [
+        "Deploy notes"
+    ], "the rest of the body must index"
     assert _search_titles(store, "livekey1234567890abcdefghijklmn") == []
     row = _mirror(store, art.slug)
     assert secret not in str(row), f"the credential reached storage: {row['content']!r}"
     assert "REDACTED" in row["content"]
-
-
-# ── the kind allowlist ──────────────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize("kind", sorted(INDEXABLE_KINDS))
@@ -386,7 +402,9 @@ def test_program_text_kinds_are_not_indexed(store, artifacts, kind):
     indexing it makes every search for a variable name outrank the user's notes."""
     queue = _FakeQueue()
     idx = _indexer(store, artifacts, queue)
-    art = artifacts.create(name=f"W {kind}", content="<script>const okapi = 1</script>", kind=kind)
+    art = artifacts.create(
+        name=f"W {kind}", content="<script>const okapi = 1</script>", kind=kind
+    )
     assert idx.index(art.slug) == ArtifactIndexer.SKIPPED
     assert _search_titles(store, "okapi") == []
     assert _item_count(store) == 0
@@ -409,16 +427,15 @@ def test_html_is_reduced_to_prose_through_the_shared_reader(store, artifacts):
     assert _search_titles(store, "marmot") == ["Page"]
 
 
-# ── the change seam wiring ──────────────────────────────────────────────────────
-
-
 def test_a_save_through_the_store_reaches_the_index(store, artifacts):
     """The end-to-end shape a user actually drives: no explicit index() call anywhere — the
     provider's own write emits, the subscribed listener indexes."""
     queue = _FakeQueue()
     changes.subscribe(_indexer(store, artifacts, queue).listener)
 
-    art = artifacts.create(name="Live save", content="a wombat appears", kind="markdown")
+    art = artifacts.create(
+        name="Live save", content="a wombat appears", kind="markdown"
+    )
     assert _search_titles(store, "wombat") == ["Live save"]
 
     artifacts.update(art.slug, content="a numbat appears instead", snapshot=True)
@@ -460,17 +477,16 @@ def test_an_unknown_change_kind_is_refused_not_guessed(store, artifacts):
         changes.emit("modified", "some-slug")
 
 
-# ── the Sources surface ─────────────────────────────────────────────────────────
-
-
 def test_the_source_row_reports_itself_as_event_driven(store):
     """The Sources UI reads `event_driven` to avoid describing this row as a broken poller.
     `enrolled` stays FALSE — nothing IS enrolled to poll it, and faking that would hide a
     genuinely orphaned row of some future kind."""
-    from gideon.dashboard.handlers.knowledge import _serialize_source
+    from gideon.interfaces.dashboard.handlers.knowledge import _serialize_source
 
     ensure_source(store)
-    row = [s for s in store.list_sources() if s["provider"] == ARTIFACT_SOURCE_PROVIDER][0]
+    row = [
+        s for s in store.list_sources() if s["provider"] == ARTIFACT_SOURCE_PROVIDER
+    ][0]
     shaped = _serialize_source(row, enrolled=set())
     assert shaped["event_driven"] is True
     assert shaped["enrolled"] is False
@@ -480,14 +496,11 @@ def test_the_poll_engine_does_not_enrol_the_artifact_source(store):
     """No poll-capable provider is registered under the mirror's name, so the engine's own
     tick filters the row out. Asserted through the engine rather than by reading the registry:
     the claim is "it is never polled", not "it is absent from a list"."""
-    from gideon.knowledge.source_engine import SourceEngine
+    from gideon.cognition.knowledge.source_engine import SourceEngine
 
     ensure_source(store)
     engine = SourceEngine(store, _FakeQueue(), providers_lister=lambda: [])
     assert ARTIFACT_SOURCE_PROVIDER not in engine.enrolled_provider_names()
-
-
-# ── config round-trip ───────────────────────────────────────────────────────────
 
 
 def test_config_round_trips(tmp_path, monkeypatch):
@@ -495,11 +508,11 @@ def test_config_round_trips(tmp_path, monkeypatch):
     import json
     from unittest.mock import patch as mock_patch
 
-    from gideon.config.loader import AppConfig
+    from gideon.core.config.loader import AppConfig
 
     p = tmp_path / "config.json"
     p.write_text("{}", encoding="utf-8")
-    with mock_patch("gideon.config.loader.config_path", return_value=p):
+    with mock_patch("gideon.core.config.loader.config_path", return_value=p):
         assert AppConfig().knowledge.auto_ingest_artifacts is True, "default must be ON"
         cfg = AppConfig()
         cfg.knowledge.auto_ingest_artifacts = False
@@ -512,6 +525,6 @@ def test_the_field_is_patchable_without_a_restart():
     """It is in the PATCH allowlist, so the toggle in Settings → Sources saves. A field the
     frontend renders but the write path rejects is a control that reports success and moves
     nothing."""
-    from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+    from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
     assert _EDITABLE_CONFIG["knowledge.auto_ingest_artifacts"] == {"type": "bool"}

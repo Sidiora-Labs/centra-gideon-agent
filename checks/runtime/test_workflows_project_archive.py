@@ -21,15 +21,13 @@ from pathlib import Path
 
 import pytest
 
-from gideon.workflows import project_archive as pa
-from gideon.workflows.project_export import (
+from gideon.automation.workflows import project_archive as pa
+from gideon.automation.workflows.project_export import (
     MANIFEST_SCHEMA,
     excluded,
     secret_basenames,
     sha256_bytes,
 )
-
-# ── fixtures: a project on disk, with every portable shape and a planted credential ──
 
 BRIEF = '{"id": "p-round", "name": "Round Trip", "brief": "ship the archive"}'
 OVERVIEW = "# Overview\n\nCurrent state: the archive round-trips.\n"
@@ -50,15 +48,11 @@ def _seed_project(root: Path) -> None:
     (root / "context" / "out-of-scope.md").write_text(OUT_OF_SCOPE, encoding="utf-8")
     (root / "templates" / "nightly.json").write_text(TEMPLATE, encoding="utf-8")
 
-    # A credential, by each name the policy knows. Planted INSIDE a portable dir on purpose: the
-    # allowlist says `context/` travels, so the only thing standing between a `.env` in there and
-    # the archive is the exclusion policy itself.
     for name in sorted(secret_basenames()):
         target = root / "context" / name
         if target.suffix or "/" not in name:
             target.write_text("SUPER-SECRET-VALUE-8f3a", encoding="utf-8")
 
-    # A git worktree: gigabytes in the real world, `derived_within` in the inventory.
     (root / "worktrees" / "repo").mkdir(parents=True, exist_ok=True)
     (root / "worktrees" / "repo" / "huge.md").write_text("x" * 4096, encoding="utf-8")
 
@@ -95,16 +89,20 @@ def project(tmp_path: Path) -> Path:
     return root
 
 
-# ── clause 1: the ZIP writer exists and the planner has an importer ──
-
-
 def test_the_export_PLANNER_now_has_an_importer():
     """🔴 The atom's centre. Every symbol below existed and nothing in `src/` called any of them, so
-    the exclusion policy, the digests and the path-safety predicate were written and unused."""
+    the exclusion policy, the digests and the path-safety predicate were written and unused.
+    """
     import inspect
 
     src = inspect.getsource(pa)
-    for symbol in ("plan_export", "plan_import", "safe_member", "artifact_digest", "run_digest"):
+    for symbol in (
+        "plan_export",
+        "plan_import",
+        "safe_member",
+        "artifact_digest",
+        "run_digest",
+    ):
         assert symbol in src, f"{symbol} is still unreachable from the archive layer"
 
 
@@ -122,15 +120,15 @@ def test_an_export_writes_a_REAL_zip(project: Path):
 
 def test_the_archive_contents_and_the_manifest_AGREE(project: Path):
     """An archive whose members and manifest disagree is worse than either: the importer trusts the
-    manifest and a secrets grep reads the bytes, so a mismatch makes one of the two lie."""
+    manifest and a secrets grep reads the bytes, so a mismatch makes one of the two lie.
+    """
     raw, plan = pa.export_project_archive("p-round", project_root=project)
     with zipfile.ZipFile(io.BytesIO(raw)) as zf:
-        members = {n[len(pa.PAYLOAD_PREFIX) :] for n in zf.namelist() if n != pa.MANIFEST_NAME}
+        members = {
+            n[len(pa.PAYLOAD_PREFIX) :] for n in zf.namelist() if n != pa.MANIFEST_NAME
+        }
         manifest = json.loads(zf.read(pa.MANIFEST_NAME))
     assert members == {e["path"] for e in manifest["entries"]}
-
-
-# ── clause 4: the round trip on a CLEAN home ──
 
 
 def test_ROUND_TRIP_on_a_clean_home_keeps_every_entity_sha256_verified(
@@ -163,7 +161,6 @@ def test_ROUND_TRIP_on_a_clean_home_keeps_every_entity_sha256_verified(
     dest = home_b / "projects" / "p-imported"
     written = pa.commit_import(import_plan, extracted, project_root=dest)
 
-    # The BRIEF, the OVERVIEW, the three ledgers, the TEMPLATE.
     for rel, expected in (
         ("project.json", BRIEF),
         ("context/overview.md", OVERVIEW),
@@ -175,12 +172,9 @@ def test_ROUND_TRIP_on_a_clean_home_keeps_every_entity_sha256_verified(
         assert rel in written, f"{rel} did not arrive"
         got = (dest / rel).read_text(encoding="utf-8")
         assert got == expected, f"{rel} changed in transit"
-        # sha256-verified against the MANIFEST, not merely against the source: the manifest is what
-        # an importer on another machine has to trust.
         declared = {e["path"]: e["sha256"] for e in extracted.manifest["entries"]}
         assert declared[rel] == sha256_bytes(expected.encode("utf-8"))
 
-    # ARTIFACT METADATA and RUN DIGESTS, as one entity each.
     assert "artifacts.json" in written and "runs.json" in written
     arts = json.loads((dest / "artifacts.json").read_text(encoding="utf-8"))
     assert arts[0]["slug"] == "sales-dash" and arts[0]["version"] == 3
@@ -201,9 +195,10 @@ def test_ZERO_secrets_appear_in_the_archive_BYTES(project: Path):
     """
     raw, plan = pa.export_project_archive("p-round", project_root=project, runs=RUNS)
 
-    # (a) no secret NAME is a member.
     with zipfile.ZipFile(io.BytesIO(raw)) as zf:
-        members = [pa.normalize_member(n) for n in zf.namelist() if n != pa.MANIFEST_NAME]
+        members = [
+            pa.normalize_member(n) for n in zf.namelist() if n != pa.MANIFEST_NAME
+        ]
     for member in members:
         is_excluded, reason = excluded(member)
         assert (
@@ -214,15 +209,13 @@ def test_ZERO_secrets_appear_in_the_archive_BYTES(project: Path):
         basenames & secret_basenames()
     ), f"a credential is a member: {basenames & secret_basenames()}"
 
-    # (b) no secret VALUE appears anywhere in the raw archive bytes. Compression means a plaintext
-    # grep on the zip is not sufficient on its own, so both the raw bytes AND every decompressed
-    # member are checked.
     assert b"SUPER-SECRET-VALUE-8f3a" not in raw
     with zipfile.ZipFile(io.BytesIO(raw)) as zf:
         for name in zf.namelist():
-            assert b"SUPER-SECRET-VALUE-8f3a" not in zf.read(name), f"the secret leaked via {name}"
+            assert b"SUPER-SECRET-VALUE-8f3a" not in zf.read(
+                name
+            ), f"the secret leaked via {name}"
 
-    # (c) each one is reported as a PRESENCE FLAG, so the far side knows to re-enter it.
     assert plan.secrets_present, "the credentials were dropped SILENTLY"
     assert set(plan.secrets_present) <= secret_basenames()
 
@@ -248,9 +241,6 @@ def test_the_real_home_is_UNTOUCHED_by_a_round_trip(
     assert (home_b / "projects" / "x" / "project.json").is_file()
 
 
-# ── clause 1: extraction-time path safety, unique tmp, janitor cleanup ──
-
-
 def test_a_TRAVERSAL_member_is_refused_at_EXTRACTION_time(tmp_path: Path):
     """Hand-built archive: a manifest naming a safe file and a member escaping the directory.
 
@@ -262,7 +252,9 @@ def test_a_TRAVERSAL_member_is_refused_at_EXTRACTION_time(tmp_path: Path):
     with zipfile.ZipFile(buf, "w") as zf:
         zf.writestr(
             pa.MANIFEST_NAME,
-            json.dumps({"schema": MANIFEST_SCHEMA, "project_name": "evil", "entries": []}),
+            json.dumps(
+                {"schema": MANIFEST_SCHEMA, "project_name": "evil", "entries": []}
+            ),
         )
         zf.writestr(f"{pa.PAYLOAD_PREFIX}../../../{victim.name}", "pwned")
     archive = tmp_path / "evil.zip"
@@ -286,7 +278,7 @@ def test_the_extraction_TEMP_DIR_is_unique_and_CLEANED(tmp_path: Path, project: 
 
     def _spy(*args, **kwargs):
         d = real(*args, **kwargs)
-        if "pclaw-project-" in str(kwargs.get("prefix", "")):
+        if "gideon-project-" in str(kwargs.get("prefix", "")):
             seen.append(d)
         return d
 
@@ -313,7 +305,7 @@ def test_the_temp_dir_is_cleaned_even_on_a_FAULT(tmp_path: Path):
 
     def _spy(*args, **kwargs):
         d = real(*args, **kwargs)
-        if "pclaw-project-" in str(kwargs.get("prefix", "")):
+        if "gideon-project-" in str(kwargs.get("prefix", "")):
             seen.append(d)
         return d
 
@@ -364,14 +356,13 @@ def test_a_MISSING_manifest_is_refused_structurally(tmp_path: Path):
 
 
 def test_a_NAME_COLLISION_gets_a_slot_never_an_overwrite(tmp_path: Path, project: Path):
-    raw, _ = pa.export_project_archive("p-round", project_root=project, project_name="Round Trip")
+    raw, _ = pa.export_project_archive(
+        "p-round", project_root=project, project_name="Round Trip"
+    )
     archive = tmp_path / "a.zip"
     archive.write_bytes(raw)
     plan, _ = pa.read_archive_plan(archive, existing_names=["Round Trip"])
     assert plan.project_name == "Round Trip (imported-1)"
-
-
-# ── clause 2: optional AES-GCM ──
 
 
 def test_ENCRYPTION_is_available_on_this_install():
@@ -380,14 +371,21 @@ def test_ENCRYPTION_is_available_on_this_install():
     assert pa.encryption_available() is True
 
 
-@pytest.mark.skipif(not pa.encryption_available(), reason="optional `cryptography` extra absent")
+@pytest.mark.skipif(
+    not pa.encryption_available(), reason="optional `cryptography` extra absent"
+)
 def test_an_ENCRYPTED_archive_round_trips(tmp_path: Path, project: Path):
     raw, _ = pa.export_project_archive(
-        "p-round", project_root=project, project_name="Round Trip", passphrase="correct horse"
+        "p-round",
+        project_root=project,
+        project_name="Round Trip",
+        passphrase="correct horse",
     )
     assert pa.is_encrypted(raw), "the archive is not encrypted"
     assert raw[:2] != b"PK", "the plaintext zip header is still visible"
-    assert b"ship the archive" not in raw, "the plaintext brief is readable in the ciphertext"
+    assert (
+        b"ship the archive" not in raw
+    ), "the plaintext brief is readable in the ciphertext"
 
     archive = tmp_path / "enc.zip"
     archive.write_bytes(raw)
@@ -399,9 +397,13 @@ def test_an_ENCRYPTED_archive_round_trips(tmp_path: Path, project: Path):
     assert (dest / "project.json").read_text(encoding="utf-8") == BRIEF
 
 
-@pytest.mark.skipif(not pa.encryption_available(), reason="optional `cryptography` extra absent")
+@pytest.mark.skipif(
+    not pa.encryption_available(), reason="optional `cryptography` extra absent"
+)
 def test_a_WRONG_passphrase_is_refused(tmp_path: Path, project: Path):
-    raw, _ = pa.export_project_archive("p-round", project_root=project, passphrase="right")
+    raw, _ = pa.export_project_archive(
+        "p-round", project_root=project, passphrase="right"
+    )
     archive = tmp_path / "enc.zip"
     archive.write_bytes(raw)
     with pytest.raises(pa.ArchiveRefused) as exc:
@@ -409,11 +411,17 @@ def test_a_WRONG_passphrase_is_refused(tmp_path: Path, project: Path):
     assert exc.value.reason == "decrypt_failed"
 
 
-@pytest.mark.skipif(not pa.encryption_available(), reason="optional `cryptography` extra absent")
-def test_TAMPERED_ciphertext_is_refused_like_a_wrong_passphrase(tmp_path: Path, project: Path):
+@pytest.mark.skipif(
+    not pa.encryption_available(), reason="optional `cryptography` extra absent"
+)
+def test_TAMPERED_ciphertext_is_refused_like_a_wrong_passphrase(
+    tmp_path: Path, project: Path
+):
     """One refusal for both: AES-GCM cannot tell them apart, and inventing a distinction would tell
     an attacker which of the two they achieved."""
-    raw, _ = pa.export_project_archive("p-round", project_root=project, passphrase="right")
+    raw, _ = pa.export_project_archive(
+        "p-round", project_root=project, passphrase="right"
+    )
     mutated = bytearray(raw)
     mutated[-1] ^= 0xFF
     archive = tmp_path / "enc.zip"
@@ -423,10 +431,16 @@ def test_TAMPERED_ciphertext_is_refused_like_a_wrong_passphrase(tmp_path: Path, 
     assert exc.value.reason == "decrypt_failed"
 
 
-@pytest.mark.skipif(not pa.encryption_available(), reason="optional `cryptography` extra absent")
-def test_an_encrypted_archive_without_a_passphrase_says_SO(tmp_path: Path, project: Path):
+@pytest.mark.skipif(
+    not pa.encryption_available(), reason="optional `cryptography` extra absent"
+)
+def test_an_encrypted_archive_without_a_passphrase_says_SO(
+    tmp_path: Path, project: Path
+):
     """Not "corrupt". The magic header exists precisely so this case is distinguishable."""
-    raw, _ = pa.export_project_archive("p-round", project_root=project, passphrase="right")
+    raw, _ = pa.export_project_archive(
+        "p-round", project_root=project, passphrase="right"
+    )
     archive = tmp_path / "enc.zip"
     archive.write_bytes(raw)
     with pytest.raises(pa.ArchiveRefused) as exc:
@@ -434,7 +448,9 @@ def test_an_encrypted_archive_without_a_passphrase_says_SO(tmp_path: Path, proje
     assert exc.value.reason == "passphrase_required"
 
 
-@pytest.mark.skipif(not pa.encryption_available(), reason="optional `cryptography` extra absent")
+@pytest.mark.skipif(
+    not pa.encryption_available(), reason="optional `cryptography` extra absent"
+)
 def test_two_encryptions_of_ONE_archive_differ(project: Path):
     """A reused salt/nonce pair under one passphrase is the one mistake AES-GCM does not survive."""
     a, _ = pa.export_project_archive("p-round", project_root=project, passphrase="same")
@@ -442,11 +458,8 @@ def test_two_encryptions_of_ONE_archive_differ(project: Path):
     assert a != b
 
 
-# ── clause 3: the `projects` component ──
-
-
 def test_PROJECTS_is_a_registered_snapshot_component():
-    from gideon.snapshot import COMPONENT_HELP, VALID_COMPONENTS
+    from gideon.workspace.snapshot import COMPONENT_HELP, VALID_COMPONENTS
 
     assert "projects" in VALID_COMPONENTS
     assert "projects" in COMPONENT_HELP, "--list-components must advertise it"
@@ -455,7 +468,7 @@ def test_PROJECTS_is_a_registered_snapshot_component():
 def test_the_projects_component_selects_ONLY_projects():
     """🔴 `--components projects` must not silently widen to every store, and must not narrow to
     nothing. `everything` remains a superset marker."""
-    from gideon import snapshot
+    from gideon.workspace import snapshot
 
     assert snapshot._store_selected(["projects"], "projects/p-1") is True
     assert snapshot._store_selected(["projects"], "tasks") is False
@@ -468,12 +481,11 @@ def test_DERIVED_WITHIN_now_has_an_executor():
     """🔴 The field was declared on four inventory entries and read by NOTHING, so every capture
     path copied `projects/*/worktrees` wholesale — a declaration that reads as a decision and
     behaves as an omission."""
-    from gideon import snapshot
-    from gideon.portability import _is_derived_within
+    from gideon.workspace import snapshot
+    from gideon.workspace.portability import _is_derived_within
 
     assert snapshot._derived_within("projects") == ("*/worktrees",)
     assert _is_derived_within("projects", "p-1/worktrees") is True
-    # A FILE nested inside it, which is what an export walk actually offers.
     assert _is_derived_within("projects", "p-1/worktrees/repo/src/a.py") is True
     assert _is_derived_within("projects", "p-1/context/overview.md") is False
     assert _is_derived_within("tasks", "anything/worktrees") is False
@@ -496,7 +508,7 @@ def test_a_SNAPSHOT_excludes_worktrees_but_keeps_the_project(
     alone is not isolation, because modules that bound `config_dir` at import keep writing to the
     real home.
     """
-    from gideon import snapshot
+    from gideon.workspace import snapshot
 
     home = tmp_path / "home"
     proj = home / "projects" / "p-round"
@@ -510,13 +522,15 @@ def test_a_SNAPSHOT_excludes_worktrees_but_keeps_the_project(
     assert "context" not in skipped and "project.json" not in skipped
 
 
-def test_a_PORTABILITY_export_excludes_worktrees(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_a_PORTABILITY_export_excludes_worktrees(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     """The whole-home export path, driven — not just the predicate.
 
     Both whole-home directions must honor the same declaration; a rule enforced in one is the
     asymmetry that made a restore drop what a backup captured.
     """
-    import gideon.portability as port
+    import gideon.workspace.portability as port
 
     home = tmp_path / "home"
     proj = home / "projects" / "p-round"
@@ -528,13 +542,12 @@ def test_a_PORTABILITY_export_excludes_worktrees(tmp_path: Path, monkeypatch: py
     raw, _manifest = port.create_export_zip()
     with zipfile.ZipFile(io.BytesIO(raw)) as zf:
         names = zf.namelist()
-    assert not [n for n in names if "worktrees" in n], "the export carried a git worktree"
+    assert not [
+        n for n in names if "worktrees" in n
+    ], "the export carried a git worktree"
     assert [
         n for n in names if n.endswith("projects/p-round/project.json")
     ], "the export dropped the project itself"
-
-
-# ── the download name ──
 
 
 @pytest.mark.parametrize(
@@ -560,13 +573,13 @@ def test_the_export_summary_reports_what_was_LEFT_BEHIND(project: Path):
     assert summary["skipped"], "the skipped entities were not reported"
     assert summary["secrets_present"], "the credentials to re-enter were not reported"
     assert summary["schema"] == MANIFEST_SCHEMA
-    json.dumps(summary)  # a REST surface has to be able to serialize it
+    json.dumps(summary)
 
 
 def test_an_incomplete_plan_is_REFUSED_not_shipped_short(project: Path):
     """A manifest that claims an entity the archive lacks makes the importer report a refusal the
     exporter could have caught."""
-    from gideon.workflows.project_export import plan_export
+    from gideon.automation.workflows.project_export import plan_export
 
     plan = plan_export("p-x", files={"project.json": b"{}"})
     with pytest.raises(pa.ArchiveRefused) as exc:

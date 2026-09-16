@@ -12,7 +12,7 @@ journal, which the flywheel reads, bug reports ship, and the UI renders). Two me
    returns a secret-shaped token, then greps the entire run directory to prove the token
    is nowhere on disk.
 
-Runnable standalone: `python -m harness.exemplars.slice_3.exemplar` (or `smoke.sh`).
+Runnable standalone: `python -m checks.harness.exemplars.slice_3.exemplar` (or `smoke.sh`).
 """
 
 from __future__ import annotations
@@ -20,13 +20,11 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from gideon.workflows import store
-from gideon.workflows.bindings import BindingContext, BindingError, resolve
-from gideon.workflows.controller import EngineServices, RunController
-from gideon.workflows.models import RunStatus, WorkflowRun
+from gideon.automation.workflows import store
+from gideon.automation.workflows.bindings import BindingContext, BindingError, resolve
+from gideon.automation.workflows.controller import EngineServices, RunController
+from gideon.automation.workflows.models import RunStatus, WorkflowRun
 
-#: A secret-shaped token (an OpenAI-style prefix + filler). Never a real credential — the
-#: point is that this synthetic value must not survive to disk.
 FAKE_SECRET = "sk-" + "z" * 40
 
 SPEC: dict[str, Any] = {
@@ -44,11 +42,11 @@ async def _leaky_model(
 
 def _check_secret_binding() -> str | None:
     """Return an error string, or None on success."""
-    # A supplied resolver makes the reference resolve.
-    ctx = BindingContext(secret_resolver=lambda key: "resolved-value" if key == "API_KEY" else None)
+    ctx = BindingContext(
+        secret_resolver=lambda key: "resolved-value" if key == "API_KEY" else None
+    )
     if resolve("{{secret:API_KEY}}", ctx) != "resolved-value":
         return "the secret resolver was not consulted for {{secret:API_KEY}}"
-    # An unset key is a typed BindingError, never a silent empty string.
     try:
         resolve("{{secret:MISSING}}", ctx)
     except BindingError:
@@ -62,15 +60,21 @@ async def _run_and_scan_disk() -> str | None:
     """Drive a run whose output leaks a secret; return an error string, or None on success."""
     run = store.create(WorkflowRun(id="", workflow_name=SPEC["name"]))
     store.write_spec(run.id, SPEC)
-    controller = RunController(run, SPEC, services=EngineServices(completion=_leaky_model))
+    controller = RunController(
+        run, SPEC, services=EngineServices(completion=_leaky_model)
+    )
     status = await controller.run_to_completion(timeout=20)
     if status is not RunStatus.COMPLETE:
         return f"expected the run to COMPLETE, got {status}"
     blob = "".join(
-        p.read_text(errors="replace") for p in store.run_dir(run.id).rglob("*") if p.is_file()
+        p.read_text(errors="replace")
+        for p in store.run_dir(run.id).rglob("*")
+        if p.is_file()
     )
     if FAKE_SECRET in blob:
-        return "the credential reached disk — the RedactingSink did not scrub the journal"
+        return (
+            "the credential reached disk — the RedactingSink did not scrub the journal"
+        )
     return None
 
 

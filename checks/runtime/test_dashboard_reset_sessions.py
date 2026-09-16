@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from aiohttp import web
 
-from gideon.dashboard.handlers import _reset_all_sessions
+from gideon.interfaces.dashboard.handlers import _reset_all_sessions
 
 
 class _FakeSession:
@@ -23,7 +23,7 @@ class _FakeSession:
 
 
 class _FakeSessionManager:
-    """Minimal ``SessionManager`` stub for ``_reset_all_sessions``.
+    """Minimal ``ConversationDirectory`` stub for ``_reset_all_sessions``.
 
     Exposes the internals that the handler pokes at: ``_lock``, ``_sessions``,
     ``count``, ``_pool_started``, and ``start_pool``. ``start_pool`` records
@@ -83,15 +83,16 @@ class TestResetAllSessionsShutdown:
     async def test_awaits_healthy_shutdowns_without_force_kill(self) -> None:
         """When ``shutdown()`` returns cleanly, ``_sync_kill_provider`` is never called."""
         p1 = MagicMock()
-        p1.shutdown = MagicMock(return_value=asyncio.sleep(0))  # fast, clean
+        p1.shutdown = MagicMock(return_value=asyncio.sleep(0))
         p2 = MagicMock()
         p2.shutdown = MagicMock(return_value=asyncio.sleep(0))
         sessions = _FakeSessionManager([p1, p2])
         request, state = _make_request(sessions)
 
-        with patch("gideon.dashboard.handlers._sync_kill_provider") as mock_kill:
+        with patch(
+            "gideon.interfaces.dashboard.handlers._sync_kill_provider"
+        ) as mock_kill:
             count = await _reset_all_sessions(request)
-            # Wait for the background task to finish so we can observe side effects.
             for task in list(state._background_tasks):
                 await task
 
@@ -100,18 +101,19 @@ class TestResetAllSessionsShutdown:
         p2.shutdown.assert_called_once()
         mock_kill.assert_not_called()
         assert sessions.start_pool_called is True
-        # Both lifecycle events should have fired in order.
         events = [e for e, _ in state._broadcasts if e == "sessions_restarting"]
         assert events == ["sessions_restarting", "sessions_restarting"]
-        statuses = [p["status"] for e, p in state._broadcasts if e == "sessions_restarting"]
+        statuses = [
+            p["status"] for e, p in state._broadcasts if e == "sessions_restarting"
+        ]
         assert statuses == ["restarting", "ready"]
 
     @pytest.mark.asyncio
     async def test_force_kills_hung_provider_after_timeout(self, monkeypatch) -> None:
         """When ``shutdown()`` hangs past the budget, ``_sync_kill_provider`` runs."""
-        # Shorten timeout so the test doesn't take 5s. The production default
-        # is 5.0 but tests only need to verify the timeout->kill path fires.
-        monkeypatch.setattr("gideon.dashboard.handlers._SHUTDOWN_TIMEOUT_SECS", 0.05)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.handlers._SHUTDOWN_TIMEOUT_SECS", 0.05
+        )
 
         async def _never_returns() -> None:
             await asyncio.sleep(60)
@@ -123,22 +125,27 @@ class TestResetAllSessionsShutdown:
         sessions = _FakeSessionManager([hung, healthy])
         request, state = _make_request(sessions)
 
-        with patch("gideon.dashboard.handlers._sync_kill_provider") as mock_kill:
+        with patch(
+            "gideon.interfaces.dashboard.handlers._sync_kill_provider"
+        ) as mock_kill:
             await _reset_all_sessions(request)
             for task in list(state._background_tasks):
                 await task
 
-        # The hung provider should have been force-killed; the healthy one should not.
         mock_kill.assert_called_once_with(hung)
         assert sessions.start_pool_called is True
 
     @pytest.mark.asyncio
-    async def test_force_kill_fallback_exception_is_swallowed(self, monkeypatch) -> None:
+    async def test_force_kill_fallback_exception_is_swallowed(
+        self, monkeypatch
+    ) -> None:
         """If ``_sync_kill_provider`` itself raises, ``_safe_shutdown`` must still
         complete so ``asyncio.gather`` doesn't abort other providers' shutdowns
         and ``start_pool`` runs.
         """
-        monkeypatch.setattr("gideon.dashboard.handlers._SHUTDOWN_TIMEOUT_SECS", 0.05)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.handlers._SHUTDOWN_TIMEOUT_SECS", 0.05
+        )
 
         async def _never_returns() -> None:
             await asyncio.sleep(60)
@@ -148,20 +155,18 @@ class TestResetAllSessionsShutdown:
         sessions = _FakeSessionManager([hung])
         request, state = _make_request(sessions)
 
-        # Force _sync_kill_provider to raise — simulates PermissionError/OSError
         def _raising_kill(_p: object) -> None:
             raise PermissionError("simulated kill failure")
 
         with patch(
-            "gideon.dashboard.handlers._sync_kill_provider", side_effect=_raising_kill
+            "gideon.interfaces.dashboard.handlers._sync_kill_provider",
+            side_effect=_raising_kill,
         ) as mock_kill:
             await _reset_all_sessions(request)
             for task in list(state._background_tasks):
                 await task
 
-        # Fallback kill was attempted but raised — must not abort _safe_shutdown.
         mock_kill.assert_called_once_with(hung)
-        # start_pool must still have run despite the fallback kill exception.
         assert sessions.start_pool_called is True
 
     @pytest.mark.asyncio
@@ -179,7 +184,6 @@ class TestResetAllSessionsShutdown:
         p2.shutdown = MagicMock(side_effect=lambda: _tracked_shutdown("p2"))
         sessions = _FakeSessionManager([p1, p2])
 
-        # Wrap start_pool to record when it ran.
         real_start_pool = sessions.start_pool
 
         async def _tracked_start_pool(*, blocking: bool = True) -> None:
@@ -193,6 +197,5 @@ class TestResetAllSessionsShutdown:
         for task in list(state._background_tasks):
             await task
 
-        # Both shutdowns must complete before start_pool.
         assert completion_order[-1] == "start_pool"
         assert set(completion_order[:-1]) == {"shutdown:p1", "shutdown:p2"}

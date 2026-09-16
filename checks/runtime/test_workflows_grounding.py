@@ -16,7 +16,7 @@ import json
 
 import pytest
 
-from gideon.workflows.generation import (
+from gideon.automation.workflows.generation import (
     MAX_REPAIR_ATTEMPTS,
     parse_emission,
     planning_prompt,
@@ -24,40 +24,38 @@ from gideon.workflows.generation import (
     self_check,
     spec_json_schema,
 )
-from gideon.workflows.grounding import (
+from gideon.automation.workflows.grounding import (
     GroundingBundle,
     ProviderSignature,
     build_bundle,
 )
-from gideon.workflows.models import Node
-from gideon.workflows.patterns import (
+from gideon.automation.workflows.models import Node
+from gideon.automation.workflows.patterns import (
     SHAPES,
     SHAPES_BY_NAME,
     catalog,
     pick_shape,
     unfilled_slots,
 )
-from gideon.workflows.validator import validate_node_tree
+from gideon.automation.workflows.validator import validate_node_tree
 
 
 def stage(node_id: str) -> dict:
     return {"kind": "stage", "id": node_id, "config": {"prompt": "do the thing"}}
 
 
-# ── the bundle is true about this system ──
-
-
 def test_the_bundle_reports_the_real_node_kinds():
     """Read from `NodeKind`, not listed by hand. A hand-written list is wrong the first time a
-    kind is added and nobody notices, because the planner's invalid spec gets blamed instead."""
-    from gideon.workflows.models import NodeKind
+    kind is added and nobody notices, because the planner's invalid spec gets blamed instead.
+    """
+    from gideon.automation.workflows.models import NodeKind
 
     bundle = build_bundle(include_mcp=False)
     assert set(bundle.node_kinds) == {k.value for k in NodeKind}
 
 
 def test_the_bundle_reports_the_real_pipes():
-    from gideon.workflows.bindings import PIPES
+    from gideon.automation.workflows.bindings import PIPES
 
     assert set(build_bundle(include_mcp=False).pipes) == set(PIPES)
 
@@ -65,7 +63,7 @@ def test_the_bundle_reports_the_real_pipes():
 def test_the_bundle_offers_only_dispatchable_providers():
     """Registered-but-not-allowlisted is a real state, and a spec targeting one validates, saves,
     and fails at run time — the exact failure the hook allowlist exists to prevent."""
-    from gideon.validation import ALLOWED_HOOK_PROVIDERS
+    from gideon.assurance.validation import ALLOWED_HOOK_PROVIDERS
 
     bundle = build_bundle(include_mcp=False)
     assert bundle.providers
@@ -110,12 +108,18 @@ def test_a_provider_that_genuinely_takes_nothing_says_that_instead():
 
 def test_a_source_scanned_shape_does_not_claim_requiredness():
     """The source scan learns NAMES reliably and requiredness not at all. Reporting "all args
-    optional" from a scan that never checked would be a contract the bundle cannot support."""
+    optional" from a scan that never checked would be a contract the bundle cannot support.
+    """
     scanned = ProviderSignature(
-        name="x", source="source-scan", fields=[("a", "any", False), ("b", "any", False)]
+        name="x",
+        source="source-scan",
+        fields=[("a", "any", False), ("b", "any", False)],
     )
     assert "all args optional" not in scanned.index_line()
-    assert "NOT stated here" in scanned.detail_block() or "not stated" in scanned.detail_block()
+    assert (
+        "NOT stated here" in scanned.detail_block()
+        or "not stated" in scanned.detail_block()
+    )
 
 
 def test_unknown_structured_output_is_not_reported_as_unsupported():
@@ -152,7 +156,7 @@ def test_the_bundle_serializes():
     payload = build_bundle(include_mcp=False).to_dict()
     for key in ("node_kinds", "providers", "templates", "binding_roots", "pipes"):
         assert key in payload
-    json.dumps(payload)  # must be transport-safe
+    json.dumps(payload)
 
 
 def test_the_binding_roots_include_the_ones_sessions_36_and_38_added():
@@ -160,9 +164,6 @@ def test_the_binding_roots_include_the_ones_sessions_36_and_38_added():
     five would have the planner avoid bindings that work."""
     roots = set(build_bundle(include_mcp=False).binding_roots)
     assert {"siblings", "previous", "brief"} <= roots
-
-
-# ── the shape registry ──
 
 
 @pytest.mark.parametrize("shape", SHAPES, ids=lambda s: s.name)
@@ -199,7 +200,8 @@ def test_shape_picking_on_real_intents(intent, expected):
 
 def test_an_unmatched_intent_routes_to_freeform():
     """Freeform is a legitimate destination. A shape picked because it scored zero like everything
-    else is worse than no shape, because its skeleton then constrains the wrong thing."""
+    else is worse than no shape, because its skeleton then constrains the wrong thing.
+    """
     shape, reason = pick_shape("xyzzy plugh frotz")
     assert shape is None
     assert "freeform" in reason
@@ -208,7 +210,9 @@ def test_an_unmatched_intent_routes_to_freeform():
 def test_a_signal_tie_declines_to_choose():
     """A tie means the signals do not distinguish. Picking the alphabetically-first shape would be
     arbitrary precision dressed as a decision."""
-    shape, reason = pick_shape("compare each option and refine until we explore every idea")
+    shape, reason = pick_shape(
+        "compare each option and refine until we explore every idea"
+    )
     if shape is None:
         assert "tied" in reason or "freeform" in reason
 
@@ -243,9 +247,6 @@ def test_unfilled_slots_are_detectable():
     assert unfilled_slots(shape, filled) == []
 
 
-# ── the self-check ──
-
-
 def test_a_missing_root_is_caught():
     assert self_check({}).issues
 
@@ -260,7 +261,9 @@ def test_duplicate_ids_are_caught_with_a_readable_message():
     """The message was inside a pre-escaped f-string, so the repair note handed the model
     `{{{{nodes.{node_id}.output}}}}` verbatim — a note the model cannot read produces another
     wrong spec."""
-    spec = {"root": {"kind": "sequence", "id": "r", "children": [stage("a"), stage("a")]}}
+    spec = {
+        "root": {"kind": "sequence", "id": "r", "children": [stage("a"), stage("a")]}
+    }
     issue = next(i for i in self_check(spec).issues if "more than once" in i)
     assert "{{nodes.a.output}}" in issue
     assert "{{{{" not in issue
@@ -273,7 +276,10 @@ def test_a_judge_gate_without_criteria_is_caught():
         "root": {
             "kind": "sequence",
             "id": "r",
-            "children": [stage("w"), {"kind": "gate", "id": "g", "config": {"kind": "judge"}}],
+            "children": [
+                stage("w"),
+                {"kind": "gate", "id": "g", "config": {"kind": "judge"}},
+            ],
         }
     }
     assert any("no `config.prompt`" in i for i in self_check(spec).issues)
@@ -318,7 +324,9 @@ def test_a_missing_stopping_condition_is_caught():
     """The plan calls goal / verification / stopping-condition the minimal triple. A sequence of
     stages reports success whether or not it achieved anything — "the last node returned" is a
     different claim from "the goal was met"."""
-    spec = {"root": {"kind": "sequence", "id": "r", "children": [stage("a"), stage("b")]}}
+    spec = {
+        "root": {"kind": "sequence", "id": "r", "children": [stage("a"), stage("b")]}
+    }
     assert any("when the work is DONE" in i for i in self_check(spec).issues)
 
 
@@ -332,7 +340,11 @@ def test_a_single_stage_is_exempt_from_the_stopping_rule():
     "stopper",
     [
         {"kind": "gate", "id": "g", "config": {"kind": "judge", "prompt": "good?"}},
-        {"kind": "gate", "id": "g", "config": {"kind": "expression", "expr": "{{inputs.x}}"}},
+        {
+            "kind": "gate",
+            "id": "g",
+            "config": {"kind": "expression", "expr": "{{inputs.x}}"},
+        },
     ],
 )
 def test_any_gate_satisfies_the_stopping_rule(stopper):
@@ -347,7 +359,11 @@ def test_a_watcher_alone_does_not_satisfy_the_stopping_rule():
             "kind": "loop",
             "id": "l",
             "config": {"mode": "until_cancelled", "max_iterations": 5},
-            "body": {"kind": "sequence", "id": "b", "children": [stage("a"), stage("b")]},
+            "body": {
+                "kind": "sequence",
+                "id": "b",
+                "children": [stage("a"), stage("b")],
+            },
         }
     }
     assert any("when the work is DONE" in i for i in self_check(spec).issues)
@@ -356,13 +372,21 @@ def test_a_watcher_alone_does_not_satisfy_the_stopping_rule():
 def test_an_invalid_binding_root_is_caught():
     """Session 31 shipped five templates referencing `{{defaults.*}}`. The validator caught it, but
     only after the specs were written."""
-    spec = {"root": {"kind": "stage", "id": "s", "config": {"prompt": "{{defaults.model}}"}}}
+    spec = {
+        "root": {"kind": "stage", "id": "s", "config": {"prompt": "{{defaults.model}}"}}
+    }
     issue = next(i for i in self_check(spec).issues if "defaults" in i)
     assert "not a binding root" in issue
 
 
 def test_a_dangling_node_reference_is_caught_and_the_real_ids_listed():
-    spec = {"root": {"kind": "stage", "id": "s", "config": {"prompt": "{{nodes.ghost.output}}"}}}
+    spec = {
+        "root": {
+            "kind": "stage",
+            "id": "s",
+            "config": {"prompt": "{{nodes.ghost.output}}"},
+        }
+    }
     issue = next(i for i in self_check(spec).issues if "ghost" in i)
     assert "does not exist" in issue
     assert "`s`" in issue or "s" in issue
@@ -375,14 +399,19 @@ def test_a_surviving_slot_placeholder_is_caught():
 
 def test_the_self_check_never_raises_on_a_malformed_tree():
     """It runs ON malformed trees. Raising here would turn a repairable spec into an exception."""
-    for junk in ({"root": "not a dict"}, {"root": {"kind": "sequence", "children": "nope"}}):
-        self_check(junk)  # must not raise
+    for junk in (
+        {"root": "not a dict"},
+        {"root": {"kind": "sequence", "children": "nope"}},
+    ):
+        self_check(junk)
 
 
 def test_the_repair_note_caps_what_it_reports():
     """A note listing forty issues is one nobody acts on, and the first few are usually the cause
     of the rest."""
-    children = [{"kind": "stage", "id": "dup", "config": {"prompt": "x"}} for _ in range(20)]
+    children = [
+        {"kind": "stage", "id": "dup", "config": {"prompt": "x"}} for _ in range(20)
+    ]
     check = self_check({"root": {"kind": "sequence", "id": "r", "children": children}})
     note = check.note()
     assert note.count("\n") < 15
@@ -398,13 +427,12 @@ def test_the_repair_prompt_carries_the_original_spec():
     assert f"of {MAX_REPAIR_ATTEMPTS}" in text
 
 
-# ── emission ──
-
-
 def test_a_decline_is_a_first_class_outcome():
     """A planner that declines has told the user something true; one that emits a plausible spec
     for an impossible request has not."""
-    spec, reason = parse_emission({"cannot_plan": "no provider can send SMS on this machine"})
+    spec, reason = parse_emission(
+        {"cannot_plan": "no provider can send SMS on this machine"}
+    )
     assert spec is None
     assert "SMS" in reason
 
@@ -424,14 +452,12 @@ def test_garbage_yields_neither_a_spec_nor_a_decline():
 
 def test_the_emission_schema_makes_declining_visible():
     """The schema's job here is to put `cannot_plan` in the model's output contract, where it can
-    see the option — not to fully type the node tree, which would crowd out the grounding."""
+    see the option — not to fully type the node tree, which would crowd out the grounding.
+    """
     schema = spec_json_schema()
     branches = schema["oneOf"]
     assert any("cannot_plan" in (b.get("required") or []) for b in branches)
     assert any("root" in (b.get("required") or []) for b in branches)
-
-
-# ── the generated prompt ──
 
 
 def test_hard_requirements_come_before_the_intent():
@@ -458,7 +484,10 @@ def test_the_prompt_carries_the_live_provider_list():
 def test_a_picked_shape_ships_its_skeleton_and_its_when_not():
     shape = SHAPES_BY_NAME["convergent-research"]
     text = planning_prompt(
-        "research something", bundle=build_bundle(include_mcp=False), shape=shape, shape_reason="x"
+        "research something",
+        bundle=build_bundle(include_mcp=False),
+        shape=shape,
+        shape_reason="x",
     )
     assert "convergent-research" in text
     assert "NOT the right shape when" in text
@@ -492,11 +521,6 @@ def test_a_model_without_structured_output_is_told_to_return_bare_json():
     assert "no markdown fence" in text
 
 
-# ── the A/B harness (UP-R13.2) ──
-
-#: Five representative planning intents, one per shape family the plan names. The metric is
-#: first-try-valid: does the spec a planner would produce under this condition survive the
-#: self-check without repair?
 AB_INTENTS = [
     "research which vector database fits our workload",
     "audit every file in the auth module for credential handling",
@@ -525,7 +549,11 @@ def _ungrounded_spec(intent: str) -> dict:
                     "id": "save",
                     "config": {"provider": "knowledge-persist", "title": intent},
                 },
-                {"kind": "stage", "id": "report", "config": {"prompt": "{{defaults.summary}}"}},
+                {
+                    "kind": "stage",
+                    "id": "report",
+                    "config": {"prompt": "{{defaults.summary}}"},
+                },
             ],
         },
     }
@@ -536,7 +564,9 @@ def _grounded_spec(intent: str) -> dict:
     which already validates, plus real content."""
     shape, _reason = pick_shape(intent)
     skeleton = json.loads(
-        json.dumps(shape.skeleton if shape else SHAPES_BY_NAME["staged-with-gates"].skeleton)
+        json.dumps(
+            shape.skeleton if shape else SHAPES_BY_NAME["staged-with-gates"].skeleton
+        )
     )
     text = json.dumps(skeleton)
     for slot in re.findall(r"<<([a-z_]+)>>", text):
@@ -558,7 +588,9 @@ def test_grounding_ab_first_try_valid_rate():
     grounded_valid = sum(1 for i in AB_INTENTS if self_check(_grounded_spec(i)).ok)
 
     assert ungrounded_valid == 0, "an ungrounded spec should never pass the self-check"
-    assert grounded_valid >= 4, f"grounded first-try-valid was {grounded_valid}/5, plan wants >=4"
+    assert (
+        grounded_valid >= 4
+    ), f"grounded first-try-valid was {grounded_valid}/5, plan wants >=4"
 
 
 def test_the_ab_harness_measures_distinct_failure_modes():
@@ -567,5 +599,5 @@ def test_the_ab_harness_measures_distinct_failure_modes():
     one that runs and quietly does the wrong thing."""
     issues = self_check(_ungrounded_spec(AB_INTENTS[0])).issues
     joined = " ".join(issues)
-    assert "not a node kind" in joined  # a hard validation failure
-    assert "binding root" in joined  # a silent-miss class: it would resolve to nothing
+    assert "not a node kind" in joined
+    assert "binding root" in joined

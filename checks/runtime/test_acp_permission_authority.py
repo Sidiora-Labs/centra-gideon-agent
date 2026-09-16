@@ -13,7 +13,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from gideon.acp.permission_authority import (
+from gideon.cognition.history import ConversationLog
+from gideon.engine.hooks import ToolHookResult
+from gideon.integrations.acp.permission_authority import (
     AUTO_APPROVE_MODES,
     HOST_AUTHORITY_MODE,
     NOT_GATEABLE,
@@ -26,21 +28,17 @@ from gideon.acp.permission_authority import (
     not_gateable_entry,
     sanitize_mode,
 )
-from gideon.acp.translate import build_permission_event
-from gideon.acp.types import JsonRpcMessage
-from gideon.dashboard.chat_runner import run_chat
-from gideon.dashboard.state import DashboardState, _ChatSession
-from gideon.history import ConversationLog
-from gideon.hooks import ToolHookResult
-from gideon.llm.base import (
+from gideon.integrations.acp.translate import build_permission_event
+from gideon.integrations.acp.types import JsonRpcMessage
+from gideon.integrations.llm.base import (
     EVENT_COMPLETE,
     EVENT_PERMISSION_REQUEST,
     EVENT_TOOL_CALL,
     EVENT_TOOL_RESULT,
     LLMEvent,
 )
-
-# ── mode clamp: the module contract ──────────────────────────────────────────
+from gideon.interfaces.dashboard.chat_runner import run_chat
+from gideon.interfaces.dashboard.state import ConsoleState, _ChatSession
 
 
 class TestSanitizeMode:
@@ -58,7 +56,8 @@ class TestSanitizeMode:
         assert mode in d.reason
 
     @pytest.mark.parametrize(
-        "spelling", ["acceptEdits", "accept-edits", "ACCEPT_EDITS", "bypassPermissions", "yolo"]
+        "spelling",
+        ["acceptEdits", "accept-edits", "ACCEPT_EDITS", "bypassPermissions", "yolo"],
     )
     def test_spelling_variants_do_not_slip_through(self, spelling):
         assert sanitize_mode(spelling).mode == HOST_AUTHORITY_MODE
@@ -76,13 +75,18 @@ class TestSanitizeMode:
 
     def test_unattended_is_the_only_declared_escape(self):
         """§2.3 owns the unattended path; it must be an EXPLICIT opt-in, not a default."""
-        assert sanitize_mode("bypassPermissions", unattended=True).mode == "bypassPermissions"
+        assert (
+            sanitize_mode("bypassPermissions", unattended=True).mode
+            == "bypassPermissions"
+        )
         assert sanitize_mode("bypassPermissions").mode == HOST_AUTHORITY_MODE
 
 
 class TestCommandProbe:
     def test_probes_the_real_command_behind_an_unknown_title(self):
-        assert command_probe("unknown", "git push --force") == "Running: git push --force"
+        assert (
+            command_probe("unknown", "git push --force") == "Running: git push --force"
+        )
 
     def test_no_probe_when_the_title_already_carries_the_command(self):
         assert command_probe("Running: ls -la", "ls -la") == ""
@@ -144,8 +148,12 @@ class TestNotGateableRegistry:
     def test_every_measured_residual_carries_its_proving_observation(self):
         for cov in NOT_GATEABLE.values():
             for entry in cov.entries:
-                assert entry.reason.strip(), f"{cov.provider}/{entry.tool} has no reason"
-                assert entry.observation.strip(), f"{cov.provider}/{entry.tool} has no proof"
+                assert (
+                    entry.reason.strip()
+                ), f"{cov.provider}/{entry.tool} has no reason"
+                assert (
+                    entry.observation.strip()
+                ), f"{cov.provider}/{entry.tool} has no proof"
 
     def test_no_provider_claims_an_empty_residual_while_declaring_one(self):
         """The original defect in its general form: measurement prose asserting an
@@ -168,7 +176,7 @@ class TestNotGateableRegistry:
         entry = not_gateable_entry("acp:claude-code-acp", "Terminal")
         assert entry is not None and entry.tool == "Terminal"
         assert entry.state is ResidualState.UNACCEPTED
-        assert entry.accepted is False  # the derived shorthand agrees
+        assert entry.accepted is False
         cov = coverage_for("claude-code")
         assert cov is not None and cov.unaccepted_residual == cov.entries
 
@@ -193,11 +201,13 @@ class TestNotGateableRegistry:
         this rail pins where the third state LIVES, not merely what it says."""
         names = {f.name for f in fields(NotGateable)}
         assert "state" in names
-        assert "gated_universally" not in {f.name for f in fields(ProviderCoverage)}  # floor
+        assert "gated_universally" not in {f.name for f in fields(ProviderCoverage)}
         for cov in NOT_GATEABLE.values():
             for entry in cov.entries:
-                assert isinstance(entry.state, ResidualState), (cov.provider, entry.tool)
-                # Prose, not a bare flag: the doc prints this verbatim.
+                assert isinstance(entry.state, ResidualState), (
+                    cov.provider,
+                    entry.tool,
+                )
                 assert " " in entry.state.value
 
     def test_provider_key_normalization_covers_all_three_spellings(self):
@@ -206,14 +216,11 @@ class TestNotGateableRegistry:
         assert normalize_provider("KIRO") == "kiro-cli"
 
 
-# ── mode clamp: the AcpClient call site ──────────────────────────────────────
-
-
 class TestAcpClientClampsAtTheCallSite:
     def _client(self, mode):
-        from gideon.acp.client import AcpClient
+        from gideon.integrations.acp.client import AcpClient
 
-        with patch("gideon.sel.sel", MagicMock()):
+        with patch("gideon.security.sel.sel", MagicMock()):
             return AcpClient(work_dir="/tmp", command=["true"], mode=mode)
 
     def test_constructor_refuses_an_auto_approve_mode(self):
@@ -231,8 +238,10 @@ class TestAcpClientClampsAtTheCallSite:
         client = self._client("default")
         client._session_id = "sess-1"
         sent: list = []
-        client._send_dialect_request = AsyncMock(side_effect=lambda req: sent.append(req))
-        with patch("gideon.sel.sel", MagicMock()):
+        client._send_dialect_request = AsyncMock(
+            side_effect=lambda req: sent.append(req)
+        )
+        with patch("gideon.security.sel.sel", MagicMock()):
             await client.set_mode("acceptEdits")
         assert client._mode == HOST_AUTHORITY_MODE
         assert sent == [], "an auto-approve mode must not be forwarded to the adapter"
@@ -253,14 +262,11 @@ class TestPooledSessionProviderClampsToo:
     through AcpClient — fixing only the wrapper would leave this raw child open."""
 
     def _provider(self):
-        from gideon.llm.acp_session_provider import AcpSessionProvider
+        from gideon.integrations.llm.acp_session_provider import AcpSessionProvider
 
         provider = AcpSessionProvider.__new__(AcpSessionProvider)
         provider._conn = MagicMock()
         provider._session = MagicMock(session_id="sess-1")
-        # __init__ is bypassed here, so state it explicitly: these are ATTENDED
-        # sessions. AAP-6 added the unattended axis that set_mode reads, and the
-        # clamp asserted below is precisely what an attended session must keep.
         provider._unattended = False
         provider._conn._dialect.set_mode_request.side_effect = lambda **kw: kw
         provider._send_dialect_request = AsyncMock()
@@ -269,7 +275,7 @@ class TestPooledSessionProviderClampsToo:
     @pytest.mark.asyncio
     async def test_pooled_set_mode_refuses_an_auto_approve_mode(self):
         provider = self._provider()
-        with patch("gideon.sel.sel", MagicMock()):
+        with patch("gideon.security.sel.sel", MagicMock()):
             await provider.set_mode("bypassPermissions")
         forwarded = provider._conn._dialect.set_mode_request.call_args.kwargs["mode"]
         assert forwarded == HOST_AUTHORITY_MODE
@@ -279,7 +285,9 @@ class TestPooledSessionProviderClampsToo:
         """Inverse floor."""
         provider = self._provider()
         await provider.set_mode("plan")
-        assert provider._conn._dialect.set_mode_request.call_args.kwargs["mode"] == "plan"
+        assert (
+            provider._conn._dialect.set_mode_request.call_args.kwargs["mode"] == "plan"
+        )
         provider._send_dialect_request.assert_awaited_once()
 
 
@@ -296,13 +304,12 @@ class TestPermissionFrameCarriesKind:
             },
         )
         dialect = MagicMock()
-        dialect.parse_permission_options.return_value = [{"id": "allow", "label": "Allow"}]
+        dialect.parse_permission_options.return_value = [
+            {"id": "allow", "label": "Allow"}
+        ]
         event = build_permission_event(msg, dialect, {}, {}, {})
         assert event.tool_kind == "edit"
-        assert event.title == "unknown"  # the adapter sent none — unchanged
-
-
-# ── the gate call sites: drive run_chat ─────────────────────────────────────
+        assert event.title == "unknown"
 
 
 async def _async_iter(items):
@@ -318,7 +325,7 @@ def _make_state(tmp_path, context_builder=None):
     sessions.get_or_create = AsyncMock(return_value=(client, True, False))
     sessions.record_failure = AsyncMock()
     sessions.check_context_usage = MagicMock()
-    state = DashboardState(
+    state = ConsoleState(
         sessions=sessions,
         start_time=0.0,
         conversation_log=ConversationLog(base_dir=tmp_path),
@@ -354,7 +361,11 @@ def _set_stream(client, events):
 
 
 def _tool_texts(session):
-    return [m["content"] for m in session.messages if m.get("role") in ("tool", "permission")]
+    return [
+        m["content"]
+        for m in session.messages
+        if m.get("role") in ("tool", "permission")
+    ]
 
 
 async def _drive(state, session, *, answer=None, sel_mock=None):
@@ -374,7 +385,7 @@ async def _drive(state, session, *, answer=None, sel_mock=None):
                 await asyncio.sleep(0.01)
 
         asyncio.get_event_loop().create_task(_answer())
-    with patch("gideon.dashboard.chat_runner.sel", sel_mock or MagicMock()):
+    with patch("gideon.interfaces.dashboard.chat_runner.sel", sel_mock or MagicMock()):
         await run_chat(state, session, "hello")
 
 
@@ -393,7 +404,7 @@ class TestNoSilentWriteUnderAsk:
     @pytest.mark.asyncio
     async def test_ask_mode_blocks_the_write_at_the_prompt(self, tmp_path):
         state, client = _make_state(tmp_path, context_builder=_context_builder())
-        session = _session(task_mode="ask", trust=True)  # trust ON: the gate still wins
+        session = _session(task_mode="ask", trust=True)
         _set_stream(
             client,
             [
@@ -462,15 +473,19 @@ class TestDenyListAtThePrompt:
 
     @staticmethod
     def _deny_git_push(name):
-        from gideon.security import is_denied
+        from gideon.security.security import is_denied
 
         reason = is_denied(name)
         return ToolHookResult.deny(reason) if reason else ToolHookResult.allow()
 
     @pytest.mark.asyncio
-    async def test_denied_command_hidden_behind_an_unknown_title_is_rejected(self, tmp_path):
+    async def test_denied_command_hidden_behind_an_unknown_title_is_rejected(
+        self, tmp_path
+    ):
         """The title is "unknown" (G18) — the deny-list must see the real command."""
-        state, client = _make_state(tmp_path, context_builder=_context_builder(self._deny_git_push))
+        state, client = _make_state(
+            tmp_path, context_builder=_context_builder(self._deny_git_push)
+        )
         session = _session(task_mode="agent", trust=True)
         _set_stream(
             client,
@@ -488,14 +503,18 @@ class TestDenyListAtThePrompt:
         await _drive(state, session)
         client.reject_tool.assert_awaited_once_with("req-1")
         client.approve_tool.assert_not_awaited()
-        assert any("Blocked by security policy" in t for t in _tool_texts(session)), _tool_texts(
-            session
-        )
+        assert any(
+            "Blocked by security policy" in t for t in _tool_texts(session)
+        ), _tool_texts(session)
 
     @pytest.mark.asyncio
-    async def test_an_allowed_command_behind_the_same_unknown_title_proceeds(self, tmp_path):
+    async def test_an_allowed_command_behind_the_same_unknown_title_proceeds(
+        self, tmp_path
+    ):
         """Inverse floor: the probe denies by PATTERN, it does not deny everything."""
-        state, client = _make_state(tmp_path, context_builder=_context_builder(self._deny_git_push))
+        state, client = _make_state(
+            tmp_path, context_builder=_context_builder(self._deny_git_push)
+        )
         session = _session(task_mode="agent", trust=True)
         _set_stream(
             client,
@@ -548,7 +567,9 @@ class TestBlockingPreToolUseOnTheAcpPath:
         await _drive(state, session)
         client.reject_tool.assert_awaited_once_with("req-1")
         client.approve_tool.assert_not_awaited()
-        assert any("hook blocked" in t for t in _tool_texts(session)), _tool_texts(session)
+        assert any("hook blocked" in t for t in _tool_texts(session)), _tool_texts(
+            session
+        )
 
     @pytest.mark.asyncio
     async def test_passing_hook_lets_the_tool_run(self, tmp_path):
@@ -586,7 +607,9 @@ class TestUngatedResidue:
                 tool_kind=kind,
                 tool_input=tool_input,
             ),
-            LLMEvent(kind=EVENT_TOOL_RESULT, tool_call_id=tool_call_id, tool_output="ok"),
+            LLMEvent(
+                kind=EVENT_TOOL_RESULT, tool_call_id=tool_call_id, tool_output="ok"
+            ),
         ]
 
     @pytest.mark.asyncio
@@ -609,18 +632,24 @@ class TestUngatedResidue:
         client.cancel_session.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_undeclared_ungated_mutation_under_ask_aborts_the_turn(self, tmp_path):
+    async def test_undeclared_ungated_mutation_under_ask_aborts_the_turn(
+        self, tmp_path
+    ):
         state, client = _make_state(tmp_path, context_builder=_context_builder())
         session = _session(task_mode="ask")
         _set_stream(
             client,
-            self._tool_pair("tc-9", "rm -rf /tmp/aap5", "execute", '{"command": "rm -rf /tmp/x"}')
+            self._tool_pair(
+                "tc-9", "rm -rf /tmp/aap5", "execute", '{"command": "rm -rf /tmp/x"}'
+            )
             + [LLMEvent(kind=EVENT_COMPLETE, stop_reason="end_turn")],
         )
         await _drive(state, session)
         client.cancel_session.assert_awaited_once()
         assert any("ungated" in t for t in _tool_texts(session)), _tool_texts(session)
-        assert any("turn stopped" in t for t in _tool_texts(session)), _tool_texts(session)
+        assert any("turn stopped" in t for t in _tool_texts(session)), _tool_texts(
+            session
+        )
 
     @pytest.mark.asyncio
     async def test_a_gated_tool_is_never_reported_as_ungated(self, tmp_path):
@@ -651,7 +680,9 @@ class TestUngatedResidue:
         await _drive(state, session)
         client.approve_tool.assert_awaited_once()
         client.cancel_session.assert_not_awaited()
-        assert not any("ungated" in t for t in _tool_texts(session)), _tool_texts(session)
+        assert not any("ungated" in t for t in _tool_texts(session)), _tool_texts(
+            session
+        )
 
     @pytest.mark.asyncio
     async def test_native_runtime_tools_are_never_judged_ungated(self, tmp_path):
@@ -662,15 +693,21 @@ class TestUngatedResidue:
         session = _session(task_mode="ask")
         _set_stream(
             client,
-            self._tool_pair("tc-3", "rm -rf /tmp/aap5", "execute", '{"command": "rm -rf /x"}')
+            self._tool_pair(
+                "tc-3", "rm -rf /tmp/aap5", "execute", '{"command": "rm -rf /x"}'
+            )
             + [LLMEvent(kind=EVENT_COMPLETE, stop_reason="end_turn")],
         )
         await _drive(state, session)
         client.cancel_session.assert_not_awaited()
-        assert not any("ungated" in t for t in _tool_texts(session)), _tool_texts(session)
+        assert not any("ungated" in t for t in _tool_texts(session)), _tool_texts(
+            session
+        )
 
     @pytest.mark.asyncio
-    async def test_vacuity_floor_gate_fires_in_the_same_turn_as_an_ungated_tool(self, tmp_path):
+    async def test_vacuity_floor_gate_fires_in_the_same_turn_as_an_ungated_tool(
+        self, tmp_path
+    ):
         """ "Gated" must not be able to pass by nothing being attempted: in ONE turn a
         gated write raises a card AND kiro's ungateable todo_list is surfaced."""
         state, client = _make_state(tmp_path, context_builder=_context_builder())
@@ -698,16 +735,13 @@ class TestUngatedResidue:
             ],
         )
         await _drive(state, session)
-        client.approve_tool.assert_awaited_once_with("req-1")  # the gate DID fire
+        client.approve_tool.assert_awaited_once_with("req-1")
         texts = [
             c.args[1].get("text", "")
             for c in state.broadcast_ws.call_args_list
             if c.args and c.args[0] == "activity_event"
         ]
         assert any("Not gated by host" in t for t in texts), texts
-
-
-# ── the third state: declared, unaccepted, and therefore still loud ──────────
 
 
 class TestUnacceptedResidualStaysLoud:
@@ -752,7 +786,7 @@ class TestUnacceptedResidualStaysLoud:
         ``ungated_declared=False`` marker, and the abort of a destructive tool that
         ran under ask mode with no card."""
         declared = not_gateable_entry("claude-code", "Terminal")
-        assert declared is not None  # precondition, not luck: the registry DOES hold it
+        assert declared is not None
         assert declared.state is ResidualState.UNACCEPTED
         state, client, session = self._drive_claude_code_terminal(tmp_path)
         sel_mock = MagicMock()
@@ -762,12 +796,16 @@ class TestUnacceptedResidualStaysLoud:
         assert any("Ran without host approval" in t for t in texts), texts
         assert not any("Not gated by host" in t for t in texts), texts
         assert any("(ungated:" in t for t in _tool_texts(session)), _tool_texts(session)
-        assert any("turn stopped" in t for t in _tool_texts(session)), _tool_texts(session)
+        assert any("turn stopped" in t for t in _tool_texts(session)), _tool_texts(
+            session
+        )
         client.cancel_session.assert_awaited_once()
         assert any(m.get("ungated_declared") is False for m in self._tool_meta(session))
         rows = _ungated_audit_rows(sel_mock)
         assert [r["outcome"] for r in rows] == ["ungated"], rows
-        assert rows[0]["metadata"]["reason"] == ("no session/request_permission for this tool_call")
+        assert rows[0]["metadata"]["reason"] == (
+            "no session/request_permission for this tool_call"
+        )
 
     @pytest.mark.asyncio
     async def test_accepting_that_same_residual_is_what_quiets_it(self, tmp_path):
@@ -780,7 +818,9 @@ class TestUnacceptedResidualStaysLoud:
         blessed = ProviderCoverage(
             provider=cov.provider,
             measurement=cov.measurement,
-            entries=tuple(replace(e, state=ResidualState.ACCEPTED) for e in cov.entries),
+            entries=tuple(
+                replace(e, state=ResidualState.ACCEPTED) for e in cov.entries
+            ),
         )
         state, client, session = self._drive_claude_code_terminal(tmp_path)
         sel_mock = MagicMock()
@@ -790,7 +830,9 @@ class TestUnacceptedResidualStaysLoud:
         texts = self._activity(state)
         assert any("Not gated by host" in t for t in texts), texts
         assert not any("Ran without host approval" in t for t in texts), texts
-        assert not any("(ungated:" in t for t in _tool_texts(session)), _tool_texts(session)
+        assert not any("(ungated:" in t for t in _tool_texts(session)), _tool_texts(
+            session
+        )
         client.cancel_session.assert_not_awaited()
         assert any(m.get("ungated_declared") is True for m in self._tool_meta(session))
         rows = _ungated_audit_rows(sel_mock)

@@ -37,8 +37,8 @@ from pathlib import Path
 import pytest
 
 import gideon
-from gideon.apps.manifest import PROVIDER_TYPES, AppManifest
-from gideon.cli_app_new import (
+from gideon.extensions.apps.manifest import PROVIDER_TYPES, AppManifest
+from gideon.interfaces.cli.app_new import (
     SCAFFOLD_FILES,
     ScaffoldError,
     app_cmd,
@@ -49,23 +49,15 @@ from gideon.cli_app_new import (
     scaffold,
 )
 
-# Parametrization source: the same runtime derivation the CLI prints.
 ALL_TYPES = provider_types()
 
-# The src root of the package under test — what the generated app's own pytest run needs
-# on PYTHONPATH so `from gideon.sdk...` resolves to THIS checkout.
 SRC_ROOT = str(Path(gideon.__file__).resolve().parent.parent)
 
-# A credential-shaped KEY assigned a literal VALUE — the shape that would mean the
-# scaffold shipped a secret or a placeholder credential. A reference to an environment
-# variable ($GIDEON_TOKEN in the README's install snippet) is not that: it names
-# where the user's own secret lives and embeds nothing.
 _CREDENTIAL_LITERAL = re.compile(
     r"""(api[_-]?key|apikey|password|passwd|secret|access[_-]?token|auth[_-]?token)"""
     r"""["']?\s*[:=]\s*["'][^"'\s]+["']""",
     re.IGNORECASE,
 )
-# Vendor key prefixes that are a secret no matter what they are assigned to.
 _KEY_PREFIXES = ("sk-", "ghp_", "xoxb-", "xoxp-", "aki")
 
 
@@ -83,11 +75,6 @@ def _generate(provider_type: str, dest: Path) -> Path:
     )
     assert result.path.is_dir()
     return result.path
-
-
-# ---------------------------------------------------------------------------
-# The apps-repo conformance kit (GideonApps/.github/workflows/ci.yml)
-# ---------------------------------------------------------------------------
 
 
 def _check_manifest(app: Path) -> AppManifest:
@@ -119,7 +106,9 @@ def _check_boundary(app: Path) -> None:
                     bad.append(mod)
         if bad:
             offenders[py.name] = sorted(set(bad))
-    assert offenders == {}, f"generated code reaches around the SDK boundary: {offenders}"
+    assert (
+        offenders == {}
+    ), f"generated code reaches around the SDK boundary: {offenders}"
 
 
 def _check_files(app: Path) -> None:
@@ -147,21 +136,19 @@ def _check_no_credentials(app: Path) -> None:
         text = path.read_text(encoding="utf-8")
         checked += 1
         assigned = _CREDENTIAL_LITERAL.search(text)
-        assert assigned is None, f"{path.name} assigns a credential literal: {assigned.group(0)!r}"
+        assert (
+            assigned is None
+        ), f"{path.name} assigns a credential literal: {assigned.group(0)!r}"
         prefixed = [p for p in _KEY_PREFIXES if p in text.lower()]
         assert prefixed == [], f"{path.name} carries a vendor key prefix: {prefixed}"
-    # A rail over zero files reads as clean.
     assert checked >= len(SCAFFOLD_FILES) - 1
-
-
-# ---------------------------------------------------------------------------
-# The derived table
-# ---------------------------------------------------------------------------
 
 
 def test_the_type_list_is_not_empty() -> None:
     """Vacuity floor for every parametrized loop below."""
-    assert ALL_TYPES, "no provider types derived — every per-type test would vacuously pass"
+    assert (
+        ALL_TYPES
+    ), "no provider types derived — every per-type test would vacuously pass"
     assert set(ALL_TYPES) == set(PROVIDER_TYPES)
     assert len(ALL_TYPES) == len(PROVIDER_TYPES)
 
@@ -191,7 +178,8 @@ def test_an_upstream_type_appears_without_editing_the_generator(
     fake = "fake_capability"
     assert fake not in PROVIDER_TYPES
     monkeypatch.setattr(
-        "gideon.apps.manifest.PROVIDER_TYPES", frozenset(PROVIDER_TYPES | {fake})
+        "gideon.extensions.apps.manifest.PROVIDER_TYPES",
+        frozenset(PROVIDER_TYPES | {fake}),
     )
 
     assert fake in provider_types()
@@ -200,23 +188,20 @@ def test_an_upstream_type_appears_without_editing_the_generator(
     assert fake in out
     assert f"Provider types ({len(PROVIDER_TYPES) + 1})" in out
 
-    app = scaffold("fake-cap-app", fake, dest=tmp_path, author="Scaffold Test", year=2026)
+    app = scaffold(
+        "fake-cap-app", fake, dest=tmp_path, author="Scaffold Test", year=2026
+    )
     manifest = _check_manifest(app.path)
     assert manifest.provider is not None
     assert manifest.provider.type == fake
     _check_boundary(app.path)
 
 
-# ---------------------------------------------------------------------------
-# Contract resolution
-# ---------------------------------------------------------------------------
-
-
 def test_contracts_resolve_off_the_sdk_surface() -> None:
     """The resolution ladder, on the three shapes that exercise all of it."""
-    assert resolve_contract("search").abc_name == "SearchProvider"  # exact
-    assert resolve_contract("channel").abc_name == "ChannelTransportProvider"  # token
-    assert resolve_contract("inbox").abc_name == "MessageSourceProvider"  # sole ABC
+    assert resolve_contract("search").abc_name == "SearchProvider"
+    assert resolve_contract("channel").abc_name == "ChannelTransportProvider"
+    assert resolve_contract("inbox").abc_name == "MessageSourceProvider"
     assert resolve_contract("search").sdk_module == "gideon.sdk.search"
 
 
@@ -224,13 +209,14 @@ def test_contracts_resolve_off_the_sdk_surface() -> None:
 def test_a_resolved_contract_names_real_abstract_methods(provider_type: str) -> None:
     contract = resolve_contract(provider_type)
     if not contract.has_abc:
-        # An unresolved contract must be honest about it rather than half-claiming one.
         assert contract.sdk_module == "" and contract.abc_name == ""
         return
     module = importlib.import_module(contract.sdk_module)
     abc_obj = getattr(module, contract.abc_name)
     assert set(contract.methods) == set(abc_obj.__abstractmethods__)
-    assert contract.methods, f"{provider_type}: resolved an ABC with no abstract methods"
+    assert (
+        contract.methods
+    ), f"{provider_type}: resolved an ABC with no abstract methods"
 
 
 def test_a_duck_typed_type_still_carries_what_its_handler_demands() -> None:
@@ -239,13 +225,10 @@ def test_a_duck_typed_type_still_carries_what_its_handler_demands() -> None:
     assert resolve_contract("duty_gate").methods == ("on_duty",)
 
 
-# ---------------------------------------------------------------------------
-# Per-type generation
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("provider_type", ALL_TYPES)
-def test_generated_app_passes_the_apps_repo_checks(provider_type: str, tmp_path: Path) -> None:
+def test_generated_app_passes_the_apps_repo_checks(
+    provider_type: str, tmp_path: Path
+) -> None:
     app = _generate(provider_type, tmp_path)
     manifest = _check_manifest(app)
     _check_boundary(app)
@@ -255,20 +238,19 @@ def test_generated_app_passes_the_apps_repo_checks(provider_type: str, tmp_path:
 
 
 @pytest.mark.parametrize("provider_type", ALL_TYPES)
-def test_generated_manifest_declares_the_plan32_seams(provider_type: str, tmp_path: Path) -> None:
+def test_generated_manifest_declares_the_plan32_seams(
+    provider_type: str, tmp_path: Path
+) -> None:
     app = _generate(provider_type, tmp_path)
     data = json.loads((app / "app.json").read_text(encoding="utf-8"))
     assert data["name"] == app.name
     assert data["version"] == "0.1.0"
     assert data["displayName"]
     assert data["description"]
-    # Plan 32: the two CLI seams + the logger roots, both pointing at emitted code.
     assert data["cli"] == {"setup": "app_cli:setup", "doctor": "app_cli:doctor"}
     assert data["loggerRoots"] == [app.name.replace("-", "_")]
     assert data["provider"]["type"] == provider_type
     assert data["provider"]["implementation"] == "provider:create_provider"
-    # Minimum permissions is the whole point of the consent surface: the scaffold asks
-    # for nothing, so a new app has to add each permission deliberately.
     assert "permissions" not in data
 
 
@@ -294,7 +276,9 @@ def test_generated_tests_pass(provider_type: str, tmp_path: Path) -> None:
 def test_the_generated_cli_seams_are_callable(tmp_path: Path) -> None:
     """A declared ``cli.doctor`` that cannot be imported is an inert control."""
     app = _generate("search", tmp_path)
-    spec = importlib.util.spec_from_file_location("scaffold_app_cli", app / "app_cli.py")
+    spec = importlib.util.spec_from_file_location(
+        "scaffold_app_cli", app / "app_cli.py"
+    )
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -303,7 +287,7 @@ def test_the_generated_cli_seams_are_callable(tmp_path: Path) -> None:
 
     printed: list[str] = []
     module.setup(
-        argparse.Namespace(  # a SetupContext duck: the seam only uses .print here
+        argparse.Namespace(
             app_name=app.name,
             get_credential=lambda _k: "",
             save_credential=lambda _k, _v: None,
@@ -315,18 +299,13 @@ def test_the_generated_cli_seams_are_callable(tmp_path: Path) -> None:
     assert printed
 
 
-# ---------------------------------------------------------------------------
-# Install from local source → the provider registers
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("provider_type", ALL_TYPES)
 def test_local_source_install_registers_the_provider(
     provider_type: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import gideon.config.loader as loader
-    from gideon.apps import app_manager, manager
-    from gideon.providers.registry import get_provider_registry
+    import gideon.core.config.loader as loader
+    from gideon.extensions.apps import app_manager, manager
+    from gideon.extensions.providers.registry import get_provider_registry
 
     home = tmp_path / "home"
     home.mkdir()
@@ -340,18 +319,15 @@ def test_local_source_install_registers_the_provider(
         assert result.ok, f"install refused: {result.error}"
         assert app_manager.enable(app.name)
         ext = registry.get(app.name)
-        assert ext is not None, f"{provider_type}: nothing registered in the provider registry"
+        assert (
+            ext is not None
+        ), f"{provider_type}: nothing registered in the provider registry"
         assert ext.enabled, f"{provider_type}: registered but not enabled — {ext.error}"
         assert ext.error == ""
         assert ext.provider_config.type == provider_type
     finally:
         app_manager.disable(app.name)
         registry.deregister(app.name)
-
-
-# ---------------------------------------------------------------------------
-# Refusals
-# ---------------------------------------------------------------------------
 
 
 def test_an_unknown_type_is_refused_with_the_known_list(tmp_path: Path) -> None:

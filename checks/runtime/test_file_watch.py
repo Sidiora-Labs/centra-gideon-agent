@@ -8,7 +8,7 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.dashboard.handlers import api_file_watch
+from gideon.interfaces.dashboard.handlers import api_file_watch
 
 
 def _make_app() -> web.Application:
@@ -19,7 +19,7 @@ def _make_app() -> web.Application:
 
 @pytest.fixture()
 def mock_sel():
-    with patch("gideon.dashboard.handlers.sel") as m:
+    with patch("gideon.interfaces.dashboard.handlers.sel") as m:
         instance = MagicMock()
         m.return_value = instance
         yield instance
@@ -44,7 +44,7 @@ def home_patch(tmp_path):
         patch("os.path.realpath", side_effect=real_realpath),
         patch("pathlib.Path.home", return_value=tmp_path),
         patch(
-            "gideon.dashboard.handlers.files._dashboard_roots",
+            "gideon.interfaces.dashboard.handlers.files._dashboard_roots",
             return_value=[("Test", str(tmp_path))],
         ),
     ):
@@ -80,14 +80,15 @@ class TestFileWatch:
             resp = await client.get(f"/api/file-watch?path={tmp_file}")
             assert resp.status == 200
 
-            # Read the first SSE event
             buf = b""
             async for chunk in resp.content.iter_any():
                 buf += chunk
                 if b"\n\n" in buf:
                     break
 
-            data_line = [line for line in buf.decode().split("\n") if line.startswith("data: ")][0]
+            data_line = [
+                line for line in buf.decode().split("\n") if line.startswith("data: ")
+            ][0]
             payload = json.loads(data_line[6:])
             assert "# Hello" in payload["content"]
             assert "Initial content" in payload["content"]

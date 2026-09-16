@@ -2,7 +2,7 @@
 
 from unittest.mock import patch
 
-from gideon.mcp_subagents import _call_tool_inner
+from gideon.integrations.mcp_subagents import _call_tool_inner
 
 
 class TestSpawnListRedactBeforeTruncate:
@@ -10,7 +10,7 @@ class TestSpawnListRedactBeforeTruncate:
         """A credential straddling the 60-char boundary must be fully redacted."""
         padding = "A" * 50
         secret = "AKIAIOSFODNN7EXAMPLE"
-        task = padding + secret  # 70 chars total
+        task = padding + secret
 
         fake_response = {
             "agents": [
@@ -26,10 +26,11 @@ class TestSpawnListRedactBeforeTruncate:
             ]
         }
 
-        with patch("gideon.mcp_subagents._get", return_value=fake_response):
+        with patch(
+            "gideon.integrations.mcp_subagents._get", return_value=fake_response
+        ):
             result = _call_tool_inner("subagent_list", {})
 
-        # The raw key must not appear (even partially) in the output
         assert "AKIAIOSFODNN7EXAMPLE" not in result
         assert "AKIA" not in result
 
@@ -42,14 +43,12 @@ class TestSpawnListAgentNames:
 
         fake_response = {"agents": []}
 
-        # subagent_list reads configured agent names from AppConfig.load().agents
-        # (a dict keyed by name).
         fake_cfg = MagicMock()
         fake_cfg.agents = {"yolo-general": MagicMock()}
 
         with (
-            patch("gideon.mcp_subagents._get", return_value=fake_response),
-            patch("gideon.config.loader.AppConfig.load", return_value=fake_cfg),
+            patch("gideon.integrations.mcp_subagents._get", return_value=fake_response),
+            patch("gideon.core.config.loader.AppConfig.load", return_value=fake_cfg),
         ):
             result = _call_tool_inner("subagent_list", {})
 

@@ -2,7 +2,7 @@
 
 The bug (windows-native-audit ``WIN-1``): ``gateway.py`` did a bare ``import resource`` at boot.
 ``resource`` is POSIX-only, so a native-Windows process ``ImportError``ed before it could serve.
-The fix moves the import behind :mod:`gideon.resource_limits`, mirroring the guard already
+The fix moves the import behind :mod:`gideon.core.resource_limits`, mirroring the guard already
 at ``_spawn_exec_shim.py``, and routes the facility's two consumers through it:
 
 * the gateway's own ``RLIMIT_NOFILE`` raise at boot (``raise_fd_limit``), and
@@ -19,12 +19,13 @@ import ast
 import importlib
 import os
 import sys
+from pathlib import Path
 
 import pytest
 
-from gideon import resource_limits as rl
-from gideon.resilience import doctor
-from gideon.resilience.doctor import DoctorContext, Tier
+from gideon.core import resource_limits as rl
+from gideon.operations.resilience import doctor
+from gideon.operations.resilience.doctor import DoctorContext, Tier
 
 PROBE_ID = "sandbox.resource_limits"
 
@@ -36,7 +37,7 @@ class _FakeResource:
     high soft cap) and lets us assert the exact ``(soft, hard)`` target the helper computes.
     """
 
-    RLIMIT_NOFILE = 7  # the real constant's value is irrelevant; only identity matters
+    RLIMIT_NOFILE = 7
 
     def __init__(self, soft: int, hard: int):
         self._soft = soft
@@ -51,9 +52,6 @@ class _FakeResource:
         assert which == self.RLIMIT_NOFILE
         self.set_calls.append((which, pair))
         self._soft, self._hard = pair
-
-
-# ── the degraded branch actually runs when ``resource`` is absent ──────────────
 
 
 def test_resource_limits_available_is_true_on_this_posix_host():
@@ -71,7 +69,6 @@ def test_raise_fd_limit_degrades_to_noop_when_resource_absent(monkeypatch):
     res = rl.raise_fd_limit()
     assert res.available is False
     assert res.raised is False
-    # No attempt was made to read or set a limit — the whole rlimit path was skipped.
     assert res.soft is None and res.target is None
 
 
@@ -81,12 +78,11 @@ def test_import_guard_survives_an_absent_resource_module():
     uses for pysqlite3. Restores the import system to exactly its prior state afterward so the
     module object other test modules hold a binding to is unchanged."""
     saved_resource = sys.modules.get("resource")
-    saved_self = sys.modules.get("gideon.resource_limits")
-    sys.modules.pop("gideon.resource_limits", None)
+    saved_self = sys.modules.get("gideon.core.resource_limits")
+    sys.modules.pop("gideon.core.resource_limits", None)
     sys.modules["resource"] = None  # type: ignore[assignment]  # makes `import resource` raise
     try:
-        reloaded = importlib.import_module("gideon.resource_limits")
-        # The guard swallowed the ImportError and the module still imports.
+        reloaded = importlib.import_module("gideon.core.resource_limits")
         assert reloaded.resource_limits_available() is False
         degraded = reloaded.raise_fd_limit()
         assert degraded.available is False and degraded.raised is False
@@ -95,12 +91,9 @@ def test_import_guard_survives_an_absent_resource_module():
             sys.modules["resource"] = saved_resource
         else:
             sys.modules.pop("resource", None)
-        sys.modules.pop("gideon.resource_limits", None)
+        sys.modules.pop("gideon.core.resource_limits", None)
         if saved_self is not None:
-            sys.modules["gideon.resource_limits"] = saved_self
-
-
-# ── POSIX behaviour is byte-identical to the previous inline code ──────────────
+            sys.modules["gideon.core.resource_limits"] = saved_self
 
 
 def test_raise_fd_limit_raises_soft_toward_target_when_below(monkeypatch):
@@ -133,7 +126,8 @@ def test_raise_fd_limit_leaves_an_already_high_soft_alone(monkeypatch):
 
 def test_raise_fd_limit_swallows_a_setrlimit_failure(monkeypatch):
     """A platform that has ``resource`` but refuses the ``setrlimit`` still boots — the helper
-    never propagates the OSError (the ``except Exception: pass`` the inline code had)."""
+    never propagates the OSError (the ``except Exception: pass`` the inline code had).
+    """
     fake = _FakeResource(soft=256, hard=1_000_000)
 
     def _boom(_which, _pair):
@@ -141,18 +135,17 @@ def test_raise_fd_limit_swallows_a_setrlimit_failure(monkeypatch):
 
     monkeypatch.setattr(fake, "setrlimit", _boom)
     monkeypatch.setattr(rl, "_resource", fake)
-    res = rl.raise_fd_limit()  # must not raise
+    res = rl.raise_fd_limit()
     assert res.available is True and res.raised is False
-
-
-# ── the second consumer: the doctor row ───────────────────────────────────────
 
 
 def test_the_resource_limits_probe_is_registered_at_the_CAPABILITY_tier():
     """Registered, not merely defined — a host without ``resource`` is not a broken gateway,
     so the row is tier-3 and never gates the core."""
     ids = {p.id: p for p in doctor.all_probes()}
-    assert doctor.all_probes(), "the probe registry is empty — the lookup proves nothing"
+    assert (
+        doctor.all_probes()
+    ), "the probe registry is empty — the lookup proves nothing"
     assert "sandbox.resource_limits_that_does_not_exist" not in ids
     assert PROBE_ID in ids, "the probe must be registered, not just defined"
     probe = ids[PROBE_ID]
@@ -183,30 +176,27 @@ async def test_doctor_row_degrades_loudly_when_resource_absent(monkeypatch):
     assert "not available" in res.detail.lower()
 
 
-# ── regression: the gateway boot path no longer carries a bare ``import resource`` ──
-
-
 def test_gateway_boot_has_no_unguarded_import_resource():
     """The exact WIN-1 deliverable: ``gateway.py`` must not import ``resource`` directly —
     that bare import at boot was the crash. An AST scan (not a substring grep) so a
     re-introduced ``import resource`` / ``import resource as x`` reds, and it fails on the
     pre-fix tree for the right reason."""
-    gw_path = os.path.join(
-        os.path.dirname(os.path.dirname(__file__)),
-        "src",
-        "gideon",
-        "gateway.py",
-    )
-    tree = ast.parse(open(gw_path, encoding="utf-8").read())
-    direct = [
-        alias.name
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Import)
-        for alias in node.names
-        if alias.name == "resource"
-    ]
-    assert not direct, f"gateway.py imports the POSIX-only `resource` directly: {direct}"
+    engine = Path(__file__).resolve().parents[2] / "runtime/gideon/engine"
+    for name in ("gateway.py", "lifecycle.py"):
+        tree = ast.parse((engine / name).read_text(encoding="utf-8"))
+        direct = [
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Import)
+            for alias in node.names
+            if alias.name == "resource"
+        ]
+        assert not direct, f"{name} imports POSIX-only resource directly: {direct}"
 
-    # And it DOES route through the guarded helper (the extraction is not cosmetic).
-    src = open(gw_path, encoding="utf-8").read()
-    assert "raise_fd_limit" in src, "gateway no longer calls the guarded raise_fd_limit helper"
+    lifecycle = ast.parse((engine / "lifecycle.py").read_text(encoding="utf-8"))
+    assert any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "raise_fd_limit"
+        for node in ast.walk(lifecycle)
+    ), "Runtime startup no longer calls the guarded raise_fd_limit helper"

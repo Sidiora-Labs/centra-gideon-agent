@@ -159,7 +159,7 @@ the ceiling did not bound.
 - **Path matching** normalizes only the queried item (`~`/`$VAR`, then
   `abspath`) and **never** runs a pattern through `normpath`, which would
   collapse `/a/**/../b` to `/a/b` and silently drop the `**`
-  (`tests/test_guardrails_path_matcher.py` is the table).
+  (`checks/runtime/test_guardrails_path_matcher.py` is the table).
 - **What the layer buys**: no HTTP write surface (absent from the
   `_EDITABLE_CONFIG` PATCH allowlist, no PUT of its own); agent write paths
   refuse it (`governance/` is in the built-in sensitive-path denylist); no
@@ -190,7 +190,7 @@ chokepoint:
   cloud metadata service by hand.
 - `egress_policy_for(base)` is the single config-layering seam: the Security
   panel's allow/deny hosts and `allow_private` are layered onto a base policy
-  at the `web_fetch`/`web_extract`/render entry (`web/fetch.py`) and at
+  at the `web_fetch`/`web_extract`/render entry (`apps/console/fetch.py`) and at
   webhook/knowledge-connector call sites (`knowledge/connectors/web_url.py`).
   Raw `net.fetch` stays config-free for fixed-posture internal callers.
 - `allow_only` inverts `allow_hosts` from ADDITIVE (waive the private-range
@@ -198,7 +198,7 @@ chokepoint:
   resolution. It is what makes an egress TIER able to narrow anything.
 - `egress_policy_for_profile(base, tier)` narrows a surface policy by the RUN's
   `SafetyProfile.egress_tier` — tightest wins, and caps only tighten. `off`
-  returns `None` and the caller refuses. Live at `web/fetch.py::web_fetch` (the
+  returns `None` and the caller refuses. Live at `apps/console/fetch.py::web_fetch` (the
   agent's primary fetch surface) and `triggers/web_poll.py` (watched-source
   polls, plain + headless tier).
 

@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from gideon.dashboard.handlers.optimizer import (
+from gideon.interfaces.dashboard.handlers.optimizer import (
     _CTX_MAX_TURNS,
     _CTX_TURN_CHARS,
     MAX_CONTEXT_CHARS,
@@ -15,15 +15,11 @@ from gideon.dashboard.handlers.optimizer import (
     handle_optimize,
 )
 
-# Home isolation (GIDEON_HOME → throwaway tmp dir) is provided globally by the
-# autouse ``_isolate_gideon_home`` fixture in tests/conftest.py, so the optimizer
-# system prompt (bundled ``task-prompt-optimizer``) seeds into a throwaway home here.
-
 
 def _optimizer_system() -> str:
     """The optimizer system prompt as the handler resolves it (bundled
     ``task-prompt-optimizer`` rendered through the prompt engine)."""
-    from gideon.prompt_providers.runtime import render_use_case_prompt
+    from gideon.integrations.prompt_providers.runtime import render_use_case_prompt
 
     return render_use_case_prompt("prompt_optimizer", {}) or ""
 
@@ -39,7 +35,7 @@ class TestOptimizerSystem:
         """CC-5: the handler has always honored a bare ``UNCHANGED`` reply, but until
         now nothing TOLD the model to send it — a live reader of an unwritten token.
         The prompt must name the exact token the handler recognizes."""
-        from gideon.dashboard.handlers.optimizer import _UNCHANGED_TOKEN
+        from gideon.interfaces.dashboard.handlers.optimizer import _UNCHANGED_TOKEN
 
         text = _optimizer_system()
         assert _UNCHANGED_TOKEN in text
@@ -94,7 +90,7 @@ class TestOptimizerEndpoint:
 
     @pytest.mark.asyncio
     async def test_unchanged_response_from_llm(self):
-        from gideon.llm.base import EVENT_COMPLETE, EVENT_TEXT_CHUNK
+        from gideon.integrations.llm.base import EVENT_COMPLETE, EVENT_TEXT_CHUNK
 
         mock_client = AsyncMock()
 
@@ -113,7 +109,10 @@ class TestOptimizerEndpoint:
 
         request = MagicMock()
         request.json = AsyncMock(
-            return_value={"prompt": "refactor the auth module to be cleaner", "context": ""}
+            return_value={
+                "prompt": "refactor the auth module to be cleaner",
+                "context": "",
+            }
         )
         request.app = {"state": mock_state}
 
@@ -124,12 +123,10 @@ class TestOptimizerEndpoint:
 
     @pytest.mark.asyncio
     async def test_optimized_response_from_llm(self):
-        from gideon.llm.base import EVENT_COMPLETE, EVENT_TEXT_CHUNK
+        from gideon.integrations.llm.base import EVENT_COMPLETE, EVENT_TEXT_CHUNK
 
         mock_client = AsyncMock()
-        optimized_text = (
-            "Refactor the auth module: extract token validation into a separate service."
-        )
+        optimized_text = "Refactor the auth module: extract token validation into a separate service."
 
         async def fake_stream(prompt):
             yield MagicMock(kind=EVENT_TEXT_CHUNK, text=optimized_text)
@@ -146,7 +143,10 @@ class TestOptimizerEndpoint:
 
         request = MagicMock()
         request.json = AsyncMock(
-            return_value={"prompt": "refactor the auth module to be cleaner", "context": ""}
+            return_value={
+                "prompt": "refactor the auth module to be cleaner",
+                "context": "",
+            }
         )
         request.app = {"state": mock_state}
 
@@ -158,13 +158,14 @@ class TestOptimizerEndpoint:
     @pytest.mark.asyncio
     async def test_short_prompt_still_optimized(self):
         """Explicit user action means even short prompts get optimized."""
-        from gideon.llm.base import EVENT_COMPLETE, EVENT_TEXT_CHUNK
+        from gideon.integrations.llm.base import EVENT_COMPLETE, EVENT_TEXT_CHUNK
 
         mock_client = AsyncMock()
 
         async def fake_stream(prompt):
             yield MagicMock(
-                kind=EVENT_TEXT_CHUNK, text="Confirm and proceed with the previous action."
+                kind=EVENT_TEXT_CHUNK,
+                text="Confirm and proceed with the previous action.",
             )
             yield MagicMock(kind=EVENT_COMPLETE)
 
@@ -189,13 +190,17 @@ class TestOptimizerEndpoint:
     @pytest.mark.asyncio
     async def test_llm_error_returns_original(self):
         mock_sessions = MagicMock()
-        mock_sessions.get_or_create = AsyncMock(side_effect=RuntimeError("LLM unavailable"))
+        mock_sessions.get_or_create = AsyncMock(
+            side_effect=RuntimeError("LLM unavailable")
+        )
 
         mock_state = MagicMock()
         mock_state.sessions = mock_sessions
 
         request = MagicMock()
-        request.json = AsyncMock(return_value={"prompt": "refactor the auth module", "context": ""})
+        request.json = AsyncMock(
+            return_value={"prompt": "refactor the auth module", "context": ""}
+        )
         request.app = {"state": mock_state}
 
         resp = await handle_optimize(request)
@@ -205,12 +210,14 @@ class TestOptimizerEndpoint:
 
     @pytest.mark.asyncio
     async def test_quoted_response_stripped(self):
-        from gideon.llm.base import EVENT_COMPLETE, EVENT_TEXT_CHUNK
+        from gideon.integrations.llm.base import EVENT_COMPLETE, EVENT_TEXT_CHUNK
 
         mock_client = AsyncMock()
 
         async def fake_stream(prompt):
-            yield MagicMock(kind=EVENT_TEXT_CHUNK, text='"Refactor the auth module cleanly"')
+            yield MagicMock(
+                kind=EVENT_TEXT_CHUNK, text='"Refactor the auth module cleanly"'
+            )
             yield MagicMock(kind=EVENT_COMPLETE)
 
         mock_client.stream = fake_stream
@@ -223,7 +230,9 @@ class TestOptimizerEndpoint:
         mock_state.sessions = mock_sessions
 
         request = MagicMock()
-        request.json = AsyncMock(return_value={"prompt": "refactor the auth module", "context": ""})
+        request.json = AsyncMock(
+            return_value={"prompt": "refactor the auth module", "context": ""}
+        )
         request.app = {"state": mock_state}
 
         resp = await handle_optimize(request)
@@ -235,7 +244,7 @@ class TestOptimizerEndpoint:
         """The TAIL is what survives — which is why the composer assembles newest-last.
         (The cap was 2000 before CC-5; it is now MAX_CONTEXT_CHARS, derived from the
         composer's own turn budget.)"""
-        from gideon.llm.base import EVENT_COMPLETE, EVENT_TEXT_CHUNK
+        from gideon.integrations.llm.base import EVENT_COMPLETE, EVENT_TEXT_CHUNK
 
         mock_client = AsyncMock()
         captured_prompt = []
@@ -265,12 +274,8 @@ class TestOptimizerEndpoint:
         request.app = {"state": mock_state}
 
         await handle_optimize(request)
-        # The newest end (all the B's) survives; the head is dropped.
         assert "B" * 2000 in captured_prompt[0]
         assert "A" * (MAX_CONTEXT_CHARS + 1000) not in captured_prompt[0]
-
-
-# ── CC-5: role-labeled, newest-last context that survives the cap ──
 
 
 def _stub_request(prompt: str, context: str = "", reply: str = "optimized result"):
@@ -279,7 +284,7 @@ def _stub_request(prompt: str, context: str = "", reply: str = "optimized result
     Returns ``(request, captured)``; ``captured`` collects the full prompt the handler
     actually hands the model, which is the only place the context's shape is observable.
     """
-    from gideon.llm.base import EVENT_COMPLETE, EVENT_TEXT_CHUNK
+    from gideon.integrations.llm.base import EVENT_COMPLETE, EVENT_TEXT_CHUNK
 
     captured: list[str] = []
 
@@ -304,7 +309,8 @@ def _stub_request(prompt: str, context: str = "", reply: str = "optimized result
 
 def _labeled_context(n: int, body_chars: int = 600) -> str:
     """``n`` role-labeled turns, one per line, newest LAST — the shape
-    web/src/pages/chat/optimizerContext.ts emits, at a size that exercises the cap."""
+    apps/console/src/pages/chat/optimizerContext.ts emits, at a size that exercises the cap.
+    """
     lines = []
     for i in range(n):
         role = "assistant" if i % 2 else "user"
@@ -321,12 +327,13 @@ class TestContextCap:
         constants instead of trusting the comment. Drift here means the handler quietly
         starts cutting well-formed contexts again."""
         ts = (
-            Path(__file__).resolve().parents[1] / "web/src/pages/chat/optimizerContext.ts"
+            Path(__file__).resolve().parents[2]
+            / "apps/console/src/pages/chat/optimizerContext.ts"
         ).read_text()
         fe_turns = int(re.search(r"CTX_MAX_TURNS = (\d+)", ts).group(1))
         fe_chars = int(re.search(r"CTX_TURN_CHARS = (\d+)", ts).group(1))
         assert (fe_turns, fe_chars) == (_CTX_MAX_TURNS, _CTX_TURN_CHARS)
-        assert MAX_CONTEXT_CHARS == 4129  # CTX_BUDGET_CHARS in optimizerContext.ts
+        assert MAX_CONTEXT_CHARS == 4129
 
     def test_a_conforming_context_is_not_touched_at_all(self):
         ctx = _labeled_context(10, body_chars=390)
@@ -334,17 +341,14 @@ class TestContextCap:
         assert _clip_context(ctx) == ctx
 
     def test_over_cap_drops_the_oldest_turns_whole_and_keeps_the_newest(self):
-        ctx = _labeled_context(20)  # ~12k chars — three times the cap
+        ctx = _labeled_context(20)
         assert len(ctx) > MAX_CONTEXT_CHARS
         kept = _clip_context(ctx)
 
         assert len(kept) <= MAX_CONTEXT_CHARS
-        # Every surviving line still wears its role label: nothing was decapitated.
         for line in kept.split("\n"):
             assert re.match(r"^(user|assistant): turn\d+ ", line), line
-        # The NEWEST turn survived and is still last — the end a naive head-slice loses.
         assert kept.split("\n")[-1].startswith("assistant: turn19 ")
-        # The oldest turns are gone, whole.
         assert "turn0 " not in kept
 
     def test_a_naive_character_slice_would_decapitate_the_oldest_survivor(self):
@@ -353,8 +357,8 @@ class TestContextCap:
         unattributed fragment."""
         ctx = _labeled_context(20)
         naive = ctx[-MAX_CONTEXT_CHARS:]
-        assert not re.match(r"^(user|assistant): ", naive)  # the defect
-        assert re.match(r"^(user|assistant): ", _clip_context(ctx))  # the fix
+        assert not re.match(r"^(user|assistant): ", naive)
+        assert re.match(r"^(user|assistant): ", _clip_context(ctx))
 
     def test_a_context_with_no_line_boundary_keeps_the_raw_tail(self):
         """Vacuity guard for the newline snap: some other caller (the loop composer, an
@@ -369,22 +373,24 @@ class TestContextCap:
     async def test_handler_sends_the_labels_and_the_newest_turn(self):
         """Assert on what the handler actually hands the model, not on a helper's return
         value: role labels only matter if they reach the prompt."""
-        request, captured = _stub_request("add a test for that file", _labeled_context(20))
+        request, captured = _stub_request(
+            "add a test for that file", _labeled_context(20)
+        )
         await handle_optimize(request)
 
         sent = captured[0]
-        # Anchor on the exact delimiters the handler writes — the system prompt also
-        # mentions "<context>" (it has to explain the block to the model).
         block = sent.split("<context>\n")[1].split("\n</context>")[0]
         assert "user: " in block and "assistant: " in block
-        assert "turn19 " in block  # newest present
-        assert "turn0 " not in block  # oldest dropped
+        assert "turn19 " in block
+        assert "turn0 " not in block
         assert block.strip().split("\n")[-1].startswith("assistant: turn19 ")
 
     @pytest.mark.asyncio
     async def test_non_string_context_is_a_400_not_a_500(self):
         request = MagicMock()
-        request.json = AsyncMock(return_value={"prompt": "do a thing", "context": {"a": 1}})
+        request.json = AsyncMock(
+            return_value={"prompt": "do a thing", "context": {"a": 1}}
+        )
         resp = await handle_optimize(request)
         assert resp.status == 400
 
@@ -408,7 +414,7 @@ class TestUnchangedContract:
         ],
     )
     async def test_token_reply_keeps_the_users_prompt(self, reply):
-        original = "Run pytest tests/test_optimizer.py -q and report the failing assertions"
+        original = "Run pytest checks/runtime/test_optimizer.py -q and report the failing assertions"
         request, _ = _stub_request(original, reply=reply)
         resp = await handle_optimize(request)
         data = json.loads(resp.body)

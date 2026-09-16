@@ -35,15 +35,15 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import make_mocked_request
 
-from gideon.knowledge.staleness import staleness_for
-from gideon.knowledge.store import KnowledgeStore
+from gideon.cognition.knowledge.staleness import staleness_for
+from gideon.cognition.knowledge.store import KnowledgeStore
 
 
 @pytest.fixture
 def store(tmp_path, monkeypatch):
     """An isolated store under tmp_path. Nothing here may reach the developer's own home."""
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     return KnowledgeStore(str(tmp_path / "knowledge.db"))
 
 
@@ -67,7 +67,9 @@ def _cite(store, item_id: str, source_item_id: str) -> None:
     """
     setter = getattr(store, "set_item_citations", None)
     if setter is not None:
-        setter(item_id, [{"marker": 1, "source_item_id": source_item_id, "chunk_index": 0}])
+        setter(
+            item_id, [{"marker": 1, "source_item_id": source_item_id, "chunk_index": 0}]
+        )
         return
     store.db.execute(
         "CREATE TABLE IF NOT EXISTS item_citations ("
@@ -86,9 +88,12 @@ def _get_staleness(store, item_id: str):
     app = web.Application()
     app["state"] = SimpleNamespace(knowledge_store=store)
     req = make_mocked_request(
-        "GET", f"/api/knowledge/items/{item_id}/staleness", app=app, match_info={"id": item_id}
+        "GET",
+        f"/api/knowledge/items/{item_id}/staleness",
+        app=app,
+        match_info={"id": item_id},
     )
-    from gideon.dashboard.handlers import knowledge as H
+    from gideon.interfaces.dashboard.handlers import knowledge as H
 
     resp = _run(H.get_item_staleness(req))
     return resp, json.loads(resp.body)
@@ -98,9 +103,12 @@ def _post_regenerate(store, item_id: str):
     app = web.Application()
     app["state"] = SimpleNamespace(knowledge_store=store)
     req = make_mocked_request(
-        "POST", f"/api/knowledge/items/{item_id}/regenerate", app=app, match_info={"id": item_id}
+        "POST",
+        f"/api/knowledge/items/{item_id}/regenerate",
+        app=app,
+        match_info={"id": item_id},
     )
-    from gideon.dashboard.handlers import knowledge as H
+    from gideon.interfaces.dashboard.handlers import knowledge as H
 
     resp = _run(H.regenerate_item(req))
     return resp, json.loads(resp.body)
@@ -215,7 +223,7 @@ def test_regenerate_refuses_an_observed_item(store):
 def test_regenerate_without_the_update_pipeline_is_an_explicit_503(store, monkeypatch):
     """A missing update module is a stated unavailability, not a traceback."""
     insight = _item(store, "insight", "Overview of alpha", tags=["alpha"])
-    monkeypatch.setitem(sys.modules, "gideon.knowledge.updates", None)
+    monkeypatch.setitem(sys.modules, "gideon.cognition.knowledge.updates", None)
 
     resp, body = _post_regenerate(store, insight)
 
@@ -223,8 +231,6 @@ def test_regenerate_without_the_update_pipeline_is_an_explicit_503(store, monkey
     assert body["reason"] == "updates_unavailable"
     assert "unavailable" in body["error"]
 
-
-# ── the regenerate SUCCESS path (and its two honest empties) ──
 
 SOURCE_BODY = "the M2 cold start measured 4.2s after a fresh boot"
 REGENERATED = "Regenerated: cold start is 4.2s on the M2 [1]."
@@ -234,14 +240,14 @@ REGENERATED = "Regenerated: cold start is 4.2s on the M2 [1]."
 def queue(store, tmp_path, monkeypatch):
     """The proposal queue, redirected under tmp_path — asserted, not assumed.
 
-    ``proposals._dir()`` resolves ``config_dir`` lazily from ``gideon.config.loader``
-    (which the ``store`` fixture patches), but ``gideon.config`` re-exports the name at
+    ``proposals._dir()`` resolves ``config_dir`` lazily from ``gideon.core.config.loader``
+    (which the ``store`` fixture patches), but ``gideon.core.config`` re-exports the name at
     import time, so a caller that bound it from there would still write the developer's own
     ``~/.gideon``. Both bindings are patched and the redirect is then ASSERTED: an
     unasserted patch is how a destructive test quietly stops being isolated.
     """
-    import gideon.config as config_pkg
-    from gideon.learning import proposals
+    import gideon.core.config as config_pkg
+    from gideon.cognition.learning import proposals
 
     if hasattr(config_pkg, "config_dir"):
         monkeypatch.setattr(config_pkg, "config_dir", lambda: tmp_path)
@@ -266,17 +272,21 @@ def _synthesis(store, monkeypatch, *, text: str = REGENERATED) -> tuple[str, lis
         prompts.append(prompt)
         return text
 
-    monkeypatch.setattr("gideon.knowledge.updates._synthesis_completion", _fake)
+    monkeypatch.setattr(
+        "gideon.cognition.knowledge.updates._synthesis_completion", _fake
+    )
     return insight, prompts
 
 
 def _pending(queue, item_id: str) -> list:
-    from gideon.knowledge import updates
+    from gideon.cognition.knowledge import updates
 
     return [p for p in queue.list_pending(updates.DRAFT_KIND) if p.target == item_id]
 
 
-def test_regenerate_files_a_proposal_carrying_the_recomputed_synthesis(store, queue, monkeypatch):
+def test_regenerate_files_a_proposal_carrying_the_recomputed_synthesis(
+    store, queue, monkeypatch
+):
     """The success path, asserted in the STORE rather than in the response body.
 
     The response shape did not change when this was fixed, so a test that read only the body
@@ -293,15 +303,12 @@ def test_regenerate_files_a_proposal_carrying_the_recomputed_synthesis(store, qu
     proposal_id = body["proposal"]["proposal_id"]
     assert proposal_id
 
-    # The recompute read the SOURCE, not just the document: a regeneration that never looked at
-    # the material the banner counted would be a fresh invention wearing the same button.
     assert "cold start measured 4.2s" in prompts[0]
 
     rows = _pending(queue, insight)
     assert [r.id for r in rows] == [proposal_id]
     assert REGENERATED in rows[0].body
 
-    # And the item itself is untouched until the owner accepts — the whole point of a proposal.
     assert store.get_item(insight)["content"] == "body of Overview of alpha"
 
 
@@ -334,7 +341,9 @@ def test_regenerate_files_nothing_and_says_so_when_the_synthesis_cites_nothing(
         calls.append(prompt)
         return REGENERATED
 
-    monkeypatch.setattr("gideon.knowledge.updates._synthesis_completion", _fake)
+    monkeypatch.setattr(
+        "gideon.cognition.knowledge.updates._synthesis_completion", _fake
+    )
 
     resp, body = _post_regenerate(store, insight)
 
@@ -342,15 +351,14 @@ def test_regenerate_files_nothing_and_says_so_when_the_synthesis_cites_nothing(
     assert body["ok"] is False
     assert body["proposal"]["proposal_id"] == ""
     assert "cites no sources" in body["proposal"]["reason"]
-    # No model call at all: asking a model to consolidate nothing invites it to invent the
-    # document, which is the one thing a synthesis may not do.
     assert calls == []
     assert _pending(queue, insight) == []
 
 
 def test_regenerate_without_a_model_is_an_explicit_503(store, queue, monkeypatch):
     """`one_shot_completion` returns a falsy value instead of raising, so the empty text IS the
-    signal. A regeneration that produced nothing says so; it does not file an empty proposal."""
+    signal. A regeneration that produced nothing says so; it does not file an empty proposal.
+    """
     insight, prompts = _synthesis(store, monkeypatch, text="")
 
     resp, body = _post_regenerate(store, insight)

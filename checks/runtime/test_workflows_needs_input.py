@@ -16,9 +16,9 @@ with it.
 
 import pytest
 
-from gideon.workflows.human_input import AskKind
-from gideon.workflows.models import FailureClass
-from gideon.workflows.needs_input import (
+from gideon.automation.workflows.human_input import AskKind
+from gideon.automation.workflows.models import FailureClass
+from gideon.automation.workflows.needs_input import (
     MAX_CHOICES,
     MAX_EVIDENCE_CHARS,
     MAX_RENOTIFICATIONS,
@@ -49,14 +49,14 @@ def card(**kw) -> NeedsInputItem:
     return NeedsInputItem(**{**base, **kw})
 
 
-# ── the classifier covers the ENGINE's real vocabulary ──
-
-
 @pytest.mark.parametrize("failure_class", [f.value for f in FailureClass])
-def test_every_real_failure_class_classifies_without_falling_through_by_accident(failure_class):
+def test_every_real_failure_class_classifies_without_falling_through_by_accident(
+    failure_class,
+):
     """The sweep that found the bug: an earlier version matched invented class names, so real
     classes
-    silently landed on NEEDS_INPUT. This asserts each real class reaches a DELIBERATE answer."""
+    silently landed on NEEDS_INPUT. This asserts each real class reaches a DELIBERATE answer.
+    """
     kind = classify_block({}, {"failure_class": failure_class})
     assert isinstance(kind, BlockKind)
 
@@ -79,14 +79,17 @@ def test_a_BUG_is_not_filed_as_retryable(failure_class):
     """Filing a bug as transient means it retries forever while nobody is told — the failure
     mode is
     silence, which is worse than an error."""
-    assert classify_block({}, {"failure_class": failure_class}) is not BlockKind.TRANSIENT
+    assert (
+        classify_block({}, {"failure_class": failure_class}) is not BlockKind.TRANSIENT
+    )
 
 
 def test_an_APPROVAL_ask_wins_over_any_failure_class():
     """It is the one kind where the work is already done, and misfiling it loses the "just say yes"
     affordance that makes it cheap to answer."""
     assert (
-        classify_block({"kind": "approval"}, {"failure_class": "transient"}) is BlockKind.APPROVAL
+        classify_block({"kind": "approval"}, {"failure_class": "transient"})
+        is BlockKind.APPROVAL
     )
 
 
@@ -94,9 +97,10 @@ def test_the_promptless_HEADLINE_ladder_is_reachable_from_a_real_gate():
     """`_blocker_text`'s fallback ladder — the failure cause, else "`<node>` is waiting" — was
     unreachable in production for the same reason the inbox title's was: `_ask_payload` manufactured
     `prompt = "Approval needed"`, so the first branch always won and the card's headline named
-    neither the step nor the cause. Asserted from the REAL ask, not a hand-built dict."""
-    from gideon.workflows.engine import _ask_payload
-    from gideon.workflows.needs_input import _blocker_text
+    neither the step nor the cause. Asserted from the REAL ask, not a hand-built dict.
+    """
+    from gideon.automation.workflows.engine import _ask_payload
+    from gideon.automation.workflows.needs_input import _blocker_text
 
     class _Node:
         id = "init_gate"
@@ -104,15 +108,15 @@ def test_the_promptless_HEADLINE_ladder_is_reachable_from_a_real_gate():
     ask = _ask_payload(_Node(), {})
     assert ask["prompt"] == "", f"a prompt was manufactured again: {ask['prompt']!r}"
 
-    # No failure recorded: the node is named, so the card says which step is waiting.
     assert _blocker_text(ask, None, "init_gate") == "`init_gate` is waiting"
-    # A failure's plain cause outranks that, because it says WHY rather than merely where.
-    assert _blocker_text(ask, {"cause_plain": "the deploy key expired"}, "init_gate") == (
-        "the deploy key expired"
-    )
-    # And an authored prompt still outranks both.
+    assert _blocker_text(
+        ask, {"cause_plain": "the deploy key expired"}, "init_gate"
+    ) == ("the deploy key expired")
     authored = _ask_payload(_Node(), {"prompt": "Ship the release?"})
-    assert _blocker_text(authored, {"cause_plain": "x"}, "init_gate") == "Ship the release?"
+    assert (
+        _blocker_text(authored, {"cause_plain": "x"}, "init_gate")
+        == "Ship the release?"
+    )
 
 
 @pytest.mark.parametrize("ask_kind", [k.value for k in AskKind])
@@ -124,21 +128,17 @@ def test_no_ask_and_no_failure_is_a_decision():
     assert classify_block(None, None) is BlockKind.NEEDS_INPUT
 
 
-# ── actionability ──
-
-
 def test_a_transient_block_is_NOT_the_users_to_answer():
     """Asking the user to decide about a rate limit is asking them to do the system's waiting."""
     assert BlockKind.TRANSIENT not in USER_ACTIONABLE
     assert card(block_kind=BlockKind.TRANSIENT).actionable is False
 
 
-@pytest.mark.parametrize("kind", [BlockKind.NEEDS_INPUT, BlockKind.CAPABILITY, BlockKind.APPROVAL])
+@pytest.mark.parametrize(
+    "kind", [BlockKind.NEEDS_INPUT, BlockKind.CAPABILITY, BlockKind.APPROVAL]
+)
 def test_the_other_three_kinds_are_actionable(kind):
     assert card(block_kind=kind).actionable is True
-
-
-# ── the card's shape ──
 
 
 def test_the_blocker_is_the_asks_OWN_prompt():
@@ -150,7 +150,9 @@ def test_the_blocker_is_the_asks_OWN_prompt():
 
 
 def test_a_failure_supplies_the_blocker_when_there_is_no_ask():
-    item = build_item(run_id="r", node_id="n", failure={"cause_plain": "the API key is missing"})
+    item = build_item(
+        run_id="r", node_id="n", failure={"cause_plain": "the API key is missing"}
+    )
     assert item.blocker == "the API key is missing"
 
 
@@ -162,20 +164,27 @@ def test_a_blocker_always_says_SOMETHING():
 def test_the_recommendation_comes_from_the_ASKS_default():
     """The ask already carries one — S45's grill protocol makes every question ship a
     recommendation.
-    Re-deriving it here would give the card a second opinion that could contradict the run's own."""
-    item = build_item(run_id="r", node_id="n", ask={"prompt": "How often?", "default": "weekly"})
+    Re-deriving it here would give the card a second opinion that could contradict the run's own.
+    """
+    item = build_item(
+        run_id="r", node_id="n", ask={"prompt": "How often?", "default": "weekly"}
+    )
     assert "weekly" in item.recommendation
 
 
 def test_a_failures_REMEDIATION_is_the_recommendation_when_there_is_no_default():
     item = build_item(
-        run_id="r", node_id="n", failure={"cause_plain": "x", "remediation": "add the token"}
+        run_id="r",
+        node_id="n",
+        failure={"cause_plain": "x", "remediation": "add the token"},
     )
     assert item.recommendation == "add the token"
 
 
 def test_an_approval_card_recommends_reviewing_the_output():
-    item = build_item(run_id="r", node_id="n", ask={"kind": "approval", "prompt": "ok?"})
+    item = build_item(
+        run_id="r", node_id="n", ask={"kind": "approval", "prompt": "ok?"}
+    )
     assert "approve" in item.recommendation.lower()
 
 
@@ -234,11 +243,10 @@ def test_evidence_scalars_survive_as_scalars():
 
 
 def test_choices_are_capped():
-    item = build_item(run_id="r", node_id="n", ask={"choices": [str(i) for i in range(20)]})
+    item = build_item(
+        run_id="r", node_id="n", ask={"choices": [str(i) for i in range(20)]}
+    )
     assert len(item.choices) == MAX_CHOICES
-
-
-# ── owner binding ──
 
 
 def test_the_OWNER_may_answer():
@@ -266,11 +274,10 @@ def test_the_refusal_NAMES_the_owner():
     assert "dashboard:chat-1" in may_satisfy(card(owner="dashboard:chat-1"), "other")[1]
 
 
-# ── staleness re-notify ──
-
-
 def test_a_card_older_than_the_window_earns_ONE_reminder():
-    fires, why = should_renotify(card(created_at=NOW - (RENOTIFY_AFTER_HOURS + 1) * HOUR), now=NOW)
+    fires, why = should_renotify(
+        card(created_at=NOW - (RENOTIFY_AFTER_HOURS + 1) * HOUR), now=NOW
+    )
     assert fires is True
     assert "unanswered" in why
 
@@ -341,9 +348,6 @@ def test_the_reminder_text_names_the_question_without_repeating_the_card():
     assert len(text) < 200
 
 
-# ── expiry ──
-
-
 def test_a_card_with_no_deadline_NEVER_expires():
     """Most gates wait for a person with no deadline, and inventing one would silently abandon runs
     the user still intends to answer."""
@@ -365,9 +369,6 @@ def test_the_ttl_is_computed_from_now_plus_the_window():
 
 def test_no_ttl_leaves_the_deadline_unset():
     assert build_item(run_id="r", node_id="n", now=NOW).expires_at == 0.0
-
-
-# ── refs round trip ──
 
 
 def test_the_card_rides_the_EXISTING_refs_dict():
@@ -408,30 +409,36 @@ def test_an_UNKNOWN_block_kind_reads_as_actionable():
     """Being wrong toward actionable costs one card the user could have ignored; being wrong toward
     transient hides a decision the run is blocked on, and the run waits forever with nothing
     surfaced."""
-    restored = NeedsInputItem.from_dict({"run_id": "r", "block_kind": "some_future_kind"})
+    restored = NeedsInputItem.from_dict(
+        {"run_id": "r", "block_kind": "some_future_kind"}
+    )
     assert restored.block_kind is BlockKind.NEEDS_INPUT
     assert restored.actionable is True
-
-
-# ── one decision per card ──
 
 
 def test_a_multi_question_blocker_is_FLAGGED():
     """A card offering several decisions gets answered on the first and abandoned on the rest,
     and the
     run stays blocked on a card the user believes they handled."""
-    findings = one_decision_lint(card(blocker="Publish it? And should we also tweet it?"))
+    findings = one_decision_lint(
+        card(blocker="Publish it? And should we also tweet it?")
+    )
     assert any("one decision per card" in f for f in findings)
 
 
 def test_an_approval_card_with_explicit_choices_is_flagged():
     """Approve/reject IS the affordance; adding choices is two affordances for one decision."""
-    findings = one_decision_lint(card(block_kind=BlockKind.APPROVAL, choices=["yes", "no"]))
+    findings = one_decision_lint(
+        card(block_kind=BlockKind.APPROVAL, choices=["yes", "no"])
+    )
     assert any("approval card" in f for f in findings)
 
 
 def test_a_single_question_card_is_clean():
-    assert one_decision_lint(card(blocker="Publish the draft?", choices=["yes", "no"])) == []
+    assert (
+        one_decision_lint(card(blocker="Publish the draft?", choices=["yes", "no"]))
+        == []
+    )
 
 
 def test_the_lint_is_ADVISORY_and_the_card_still_ships():
@@ -442,11 +449,8 @@ def test_the_lint_is_ADVISORY_and_the_card_still_ships():
     assert overloaded.actionable is True
 
 
-# ── the wired emit path ──
-
-
 def _fake_state():
-    from gideon.inbox import InboxStore
+    from gideon.integrations.inbox import InboxStore
 
     class Svc:
         def __init__(self):
@@ -465,7 +469,7 @@ def _fake_state():
 def test_raising_a_gate_attaches_the_STRUCTURED_card():
     """The end-to-end claim, driven against a real `InboxStore`: the row the inbox holds carries the
     card, not just a title and a token."""
-    from gideon.workflows import attention
+    from gideon.automation.workflows import attention
 
     state = _fake_state()
     item_id = attention.raise_gate_item(
@@ -497,7 +501,7 @@ def test_raising_a_gate_attaches_the_STRUCTURED_card():
 
 def test_the_LEGACY_refs_keys_are_preserved_verbatim():
     """A surface written against today's shape must keep working — the card is additive."""
-    from gideon.workflows import attention
+    from gideon.automation.workflows import attention
 
     state = _fake_state()
     item_id = attention.raise_gate_item(
@@ -520,7 +524,7 @@ def test_the_LEGACY_refs_keys_are_preserved_verbatim():
 def test_a_gate_raised_with_NO_card_inputs_still_raises_a_row():
     """A required card argument would have made the whole existing gate path a breaking change for a
     payload most callers cannot yet supply."""
-    from gideon.workflows import attention
+    from gideon.automation.workflows import attention
 
     state = _fake_state()
     assert attention.raise_gate_item(

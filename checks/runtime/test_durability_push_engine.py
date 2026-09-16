@@ -10,22 +10,22 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from gideon.durability.outbox import (
-    OUTCOME_TRANSIENT,
-    STATUS_DELIVERED,
-    STATUS_PENDING,
-    Outbox,
-    entry_id,
-)
-from gideon.durability.push_engine import publish_export
-from gideon.durability.registry import Registry, shard_prefix
-from gideon.sync_transports.base import (
+from gideon.integrations.sync_transports.base import (
     ConnectionResult,
     PushResult,
     RemoteRef,
     SyncObject,
     SyncTransportProvider,
 )
+from gideon.operations.durability.outbox import (
+    OUTCOME_TRANSIENT,
+    STATUS_DELIVERED,
+    STATUS_PENDING,
+    Outbox,
+    entry_id,
+)
+from gideon.operations.durability.push_engine import publish_export
+from gideon.operations.durability.registry import Registry, shard_prefix
 
 
 class FakeTransport(SyncTransportProvider):
@@ -68,7 +68,9 @@ class FakeTransport(SyncTransportProvider):
 def _export_dir(tmp_path) -> Path:
     d = tmp_path / "export"
     (d / "tasks").mkdir(parents=True)
-    (d / "tasks" / "entities.jsonl").write_text('{"id":"a","data":{}}\n', encoding="utf-8")
+    (d / "tasks" / "entities.jsonl").write_text(
+        '{"id":"a","data":{}}\n', encoding="utf-8"
+    )
     (d / "manifest.json").write_text('{"schema_version":1}', encoding="utf-8")
     return d
 
@@ -79,27 +81,30 @@ class TestPublish:
         reg = Registry()
         ob = Outbox(tmp_path / "sync")
         report = publish_export(
-            tr, _export_dir(tmp_path), reg, ob, self_id="me", manifest_sha="sha1", now="t"
+            tr,
+            _export_dir(tmp_path),
+            reg,
+            ob,
+            self_id="me",
+            manifest_sha="sha1",
+            now="t",
         )
         assert report.seq == 1 and report.registry_committed
-        # Objects landed under this machine's seq prefix.
         prefix = shard_prefix("me", 1)
         assert any(k.startswith(prefix) for k in tr.objects)
-        # The outbox entry is delivered; the registry knows our seq.
         assert ob.get(entry_id("fake", 1)).status == STATUS_DELIVERED
         assert Registry.loads(tr.registry_bytes).seq_of("me") == 1
 
     def test_obligation_is_recorded_before_push(self, tmp_path):
-        # Even a transient push leaves a durable pending outbox entry to retry.
         tr = FakeTransport(push_outcome="transient")
         reg = Registry()
         ob = Outbox(tmp_path / "sync")
         report = publish_export(
             tr, _export_dir(tmp_path), reg, ob, self_id="me", manifest_sha="s", now="t"
         )
-        assert not report.registry_committed  # a failed push must NOT announce the seq
+        assert not report.registry_committed
         assert ob.get(entry_id("fake", 1)).status == STATUS_PENDING
-        assert tr.registry_bytes is None  # registry untouched
+        assert tr.registry_bytes is None
 
     def test_transient_push_does_not_announce_seq(self, tmp_path):
         tr = FakeTransport(push_outcome="transient")
@@ -118,21 +123,22 @@ class TestPublish:
         tr = FakeTransport()
         reg = Registry()
         ob = Outbox(tmp_path / "sync")
-        export = _export_dir(tmp_path)  # same export dir, published twice
+        export = _export_dir(tmp_path)
         publish_export(tr, export, reg, ob, self_id="me", manifest_sha="s1", now="t1")
-        r2 = publish_export(tr, export, reg, ob, self_id="me", manifest_sha="s2", now="t2")
+        r2 = publish_export(
+            tr, export, reg, ob, self_id="me", manifest_sha="s2", now="t2"
+        )
         assert r2.seq == 2 and Registry.loads(tr.registry_bytes).seq_of("me") == 2
 
 
 class TestCasRetry:
     def test_lost_race_then_win_reload_and_retry(self, tmp_path):
-        # First CAS loses, second wins. The reloader returns a registry where a peer moved.
         tr = FakeTransport(cas_returns=[False, True])
         reg = Registry()
 
         def reload():
             remote = Registry()
-            remote.bump("peer", manifest_sha="p", now="t")  # a peer published while we raced
+            remote.bump("peer", manifest_sha="p", now="t")
             return remote
 
         report = publish_export(
@@ -147,7 +153,6 @@ class TestCasRetry:
         )
         assert report.registry_committed and report.cas_attempts == 2
         committed = Registry.loads(tr.registry_bytes)
-        # Both our seq and the peer's survived the merge-on-retry.
         assert committed.seq_of("me") == 1 and committed.seq_of("peer") == 1
 
     def test_no_reloader_gives_up_on_cas_miss(self, tmp_path):
@@ -180,4 +185,4 @@ class TestCasRetry:
             reload_registry=reload,
         )
         assert not report.registry_committed
-        assert report.cas_attempts == 5  # bounded, not infinite
+        assert report.cas_attempts == 5

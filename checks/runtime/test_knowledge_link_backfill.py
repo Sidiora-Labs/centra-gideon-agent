@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.knowledge import link_backfill
+from gideon.cognition.knowledge import link_backfill
 
 
 @pytest.fixture()
@@ -44,7 +44,7 @@ def store(tmp_path):
     """
     mp = pytest.MonkeyPatch()
     mp.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.knowledge.store import KnowledgeStore, knowledge_db_path
+    from gideon.cognition.knowledge.store import KnowledgeStore, knowledge_db_path
 
     try:
         yield KnowledgeStore(str(knowledge_db_path()))
@@ -52,8 +52,6 @@ def store(tmp_path):
         mp.undo()
 
 
-#: Anchor items exist only to keep their entity alive (see `_entity`) and are pre-swept, so
-#: every assertion helper below filters them out by title rather than by a tracked id set.
 _ANCHOR_PREFIX = "anchor-"
 
 
@@ -80,7 +78,7 @@ def _entity(store, name: str) -> str:
     eid = store.add_entity(name, "project")
     anchor = _item(store, title=f"{_ANCHOR_PREFIX}{name}", content=name)
     store.add_mention(anchor, eid, context=name)
-    store.record_mention_sweep(anchor)  # pre-swept: the anchor is not part of any backlog
+    store.record_mention_sweep(anchor)
     return eid
 
 
@@ -110,9 +108,6 @@ def _linked_names(store, item_id) -> set[str]:
     return {r["name"] for r in rows}
 
 
-# ── It links what was unlinked ──────────────────────────────────────────
-
-
 def test_links_an_entity_named_in_the_body(store):
     """The payload: an item that plainly names a known entity gains the mention row.
 
@@ -139,15 +134,14 @@ def test_links_an_entity_named_only_in_title_or_summary(store):
     _entity(store, "Kestrel")
     _entity(store, "Merlin")
     titled = _item(store, title="Kestrel roadmap", content="unrelated body text")
-    summarized = _item(store, title="Q3", content="unrelated body text", summary="Merlin status")
+    summarized = _item(
+        store, title="Q3", content="unrelated body text", summary="Merlin status"
+    )
 
     assert link_backfill.link_backfill_pass(batch_size=10) == 2
 
     assert _linked_names(store, titled) == {"Kestrel"}
     assert _linked_names(store, summarized) == {"Merlin"}
-
-
-# ── It terminates ───────────────────────────────────────────────────────
 
 
 def test_unlinkable_item_still_leaves_the_backlog(store):
@@ -158,11 +152,15 @@ def test_unlinkable_item_still_leaves_the_backlog(store):
     sub-batch of every tick. The sweep row is what lets it leave having found nothing.
     """
     _entity(store, "Sparrow")
-    item_id = _item(store, title="Unrelated", content="nothing here names a known entity")
+    item_id = _item(
+        store, title="Unrelated", content="nothing here names a known entity"
+    )
 
     assert link_backfill.link_backfill_pass(batch_size=10) == 1
     assert _mention_rows(store) == set(), "nothing to link, so nothing linked"
-    assert _swept_ids(store) == {item_id}, "but the linker LOOKED, and that must be recorded"
+    assert _swept_ids(store) == {
+        item_id
+    }, "but the linker LOOKED, and that must be recorded"
 
     assert link_backfill.link_backfill_pass(batch_size=10) == 0
     assert store.count_items_missing_mention_sweep() == 0
@@ -180,7 +178,7 @@ def test_repeated_calls_drain_the_backlog_then_return_zero(store):
     assert store.count_items_missing_mention_sweep() == 5
 
     returns = []
-    for _ in range(10):  # a bound, so a non-terminating pass fails instead of hanging
+    for _ in range(10):
         got = link_backfill.link_backfill_pass(batch_size=2)
         returns.append(got)
         if got == 0:
@@ -189,7 +187,9 @@ def test_repeated_calls_drain_the_backlog_then_return_zero(store):
     assert returns == [2, 2, 1, 0], f"expected a clean drain to 0, got {returns}"
     assert store.count_items_missing_mention_sweep() == 0
     assert _swept_ids(store) == set(linkable) | set(inert)
-    assert len(_mention_rows(store)) == 3, "only the three linkable items produced mentions"
+    assert (
+        len(_mention_rows(store)) == 3
+    ), "only the three linkable items produced mentions"
 
 
 def test_empty_backlog_returns_zero_without_calling_the_linker(monkeypatch, store):
@@ -198,7 +198,7 @@ def test_empty_backlog_returns_zero_without_calling_the_linker(monkeypatch, stor
     _item(store, content="Sparrow ships Friday.")
     assert link_backfill.link_backfill_pass(batch_size=10) == 1
 
-    from gideon.knowledge import alias_prepass
+    from gideon.cognition.knowledge import alias_prepass
 
     calls = []
 
@@ -209,9 +209,6 @@ def test_empty_backlog_returns_zero_without_calling_the_linker(monkeypatch, stor
     monkeypatch.setattr(alias_prepass, "link_known_entities", _boom)
     assert link_backfill.link_backfill_pass(batch_size=10) == 0
     assert calls == []
-
-
-# ── It is idempotent ────────────────────────────────────────────────────
 
 
 def test_second_pass_adds_no_duplicate_mentions(store):
@@ -233,16 +230,12 @@ def test_second_pass_adds_no_duplicate_mentions(store):
     assert link_backfill.link_backfill_pass(batch_size=10) == 0
     assert _mention_rows(store) == before
 
-    # Force the linker to run over THIS item again, bypassing the backlog predicate. Scoped to
-    # the one id: clearing the table wholesale would also un-sweep the anchors and the pass
-    # would then legitimately claim three items, which is not what this asserts.
     store.db.execute("DELETE FROM mention_sweeps WHERE item_id = ?", (item_id,))
     store.db.commit()
     assert link_backfill.link_backfill_pass(batch_size=10) == 1
-    assert _mention_rows(store) == before, "re-linking must be INSERT OR IGNORE, not append"
-
-
-# ── It is bounded ───────────────────────────────────────────────────────
+    assert (
+        _mention_rows(store) == before
+    ), "re-linking must be INSERT OR IGNORE, not append"
 
 
 def test_one_call_processes_at_most_batch_size(store):
@@ -267,9 +260,6 @@ def test_non_positive_batch_size_is_a_no_op(store):
     assert _swept_ids(store) == set()
 
 
-# ── Vacuity: nothing to link against ────────────────────────────────────
-
-
 def test_no_entities_writes_nothing_at_all(store):
     """🔴 An empty entity graph is a precondition, not a per-item concern.
 
@@ -282,7 +272,9 @@ def test_no_entities_writes_nothing_at_all(store):
 
     assert link_backfill.link_backfill_pass(batch_size=10) == 0
     assert _mention_rows(store) == set()
-    assert _swept_ids(store) == set(), "the backlog must survive for when entities appear"
+    assert (
+        _swept_ids(store) == set()
+    ), "the backlog must survive for when entities appear"
     assert store.count_items_missing_mention_sweep() == 3
 
 
@@ -290,9 +282,6 @@ def test_empty_store_returns_zero(store):
     """A fresh install costs one COUNT and reports no work."""
     assert link_backfill.count_link_backlog() == 0
     assert link_backfill.link_backfill_pass(batch_size=10) == 0
-
-
-# ── The backlog predicate ───────────────────────────────────────────────
 
 
 def test_backlog_excludes_archived_and_textless_items(store):
@@ -330,7 +319,8 @@ def test_count_link_backlog_reports_the_pending_work(store):
 
 def test_deleting_an_item_drops_its_sweep_row(store):
     """The marker is per-item bookkeeping and must not outlive the item, or it accumulates
-    for the life of the library (invisible to the backlog query, which selects FROM items)."""
+    for the life of the library (invisible to the backlog query, which selects FROM items).
+    """
     _entity(store, "Sparrow")
     item_id = _item(store, content="Sparrow again")
     assert link_backfill.link_backfill_pass(batch_size=10) == 1
@@ -340,16 +330,13 @@ def test_deleting_an_item_drops_its_sweep_row(store):
     assert _swept_ids(store) == set()
 
 
-# ── It never raises ─────────────────────────────────────────────────────
-
-
 def test_a_failing_linker_costs_its_item_not_the_tick(store):
     """A linking hiccup must not break a maintenance tick, AND must not wedge the backlog.
 
     The item is still swept, so a permanently-failing item is skipped once rather than
     re-claimed on every tick — which would starve every item behind it.
     """
-    from gideon.knowledge import alias_prepass
+    from gideon.cognition.knowledge import alias_prepass
 
     _entity(store, "Sparrow")
     item_id = _item(store, content="Sparrow again")
@@ -357,9 +344,6 @@ def test_a_failing_linker_costs_its_item_not_the_tick(store):
     def _boom(*args, **kwargs):
         raise RuntimeError("matcher exploded")
 
-    # A SCOPED context, not the `monkeypatch` fixture + `undo()`: `undo()` is all-or-nothing
-    # over one MonkeyPatch instance, so restoring the linker that way would also drop the home
-    # isolation and the call below would sweep the real library.
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(alias_prepass, "link_known_entities", _boom)
         assert link_backfill.link_backfill_pass(batch_size=10) == 1

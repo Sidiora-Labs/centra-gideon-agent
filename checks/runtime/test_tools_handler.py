@@ -13,7 +13,7 @@ import asyncio
 
 import pytest
 
-import gideon.dashboard.handlers.tools as tools_mod
+import gideon.interfaces.dashboard.handlers.tools as tools_mod
 
 
 class _FakeTool:
@@ -47,28 +47,25 @@ class _FakeRegistry:
 @pytest.mark.asyncio
 async def test_slow_mcp_server_does_not_block_catalog(monkeypatch):
     monkeypatch.setattr(tools_mod, "_MCP_LIST_TIMEOUT_SECS", 0.1)
-    # The handler imports these names locally inside the function, so patch the
-    # source modules (not tools_mod) for the patched callables to take effect.
     monkeypatch.setattr(
-        "gideon.mcp_client.get_mcp_client_registry",
+        "gideon.integrations.mcp_client.get_mcp_client_registry",
         lambda: _FakeRegistry({"fast": _FastConn(), "dead": _SlowConn()}),
         raising=False,
     )
-    # Silence the unrelated sources — this test is about Source 2 only.
     monkeypatch.setattr(
-        "gideon.tool_providers.registry.list_all_tools",
+        "gideon.integrations.tool_providers.registry.list_all_tools",
         _noop_list_all_tools,
         raising=False,
     )
 
-    resp = await asyncio.wait_for(tools_mod.api_tools_list(_DummyRequest()), timeout=5.0)
+    resp = await asyncio.wait_for(
+        tools_mod.api_tools_list(_DummyRequest()), timeout=5.0
+    )
 
     import json
 
     payload = json.loads(resp.body.decode())
     names = {t["name"] for t in payload["tools"]}
-    # Fast server's tool is present; the dead server contributed nothing and did
-    # not stall the call (the outer wait_for would have fired otherwise).
     assert "mcp/fast/fast_tool" in names
     assert not any(n.startswith("mcp/dead/") for n in names)
 
@@ -81,16 +78,13 @@ class _DummyRequest:
     """Minimal stand-in — the handler reads nothing off the request."""
 
 
-# ── Load-failure surfacing ───────────────────────────────────────────────────
-
-
 def test_registry_records_and_dedups_failures():
-    from gideon.tool_providers import registry as reg
+    from gideon.integrations.tool_providers import registry as reg
 
     reg.clear_load_failures()
     reg.record_failure("prov-a", "boom")
     reg.record_failure("prov-b", "kaboom")
-    reg.record_failure("prov-a", "boom-again")  # same provider → replaces, not duplicates
+    reg.record_failure("prov-a", "boom-again")
     failures = reg.get_load_failures()
     by_provider = {f["provider"]: f["error"] for f in failures}
     assert by_provider == {"prov-a": "boom-again", "prov-b": "kaboom"}
@@ -101,7 +95,7 @@ def test_registry_records_and_dedups_failures():
 @pytest.mark.asyncio
 async def test_handler_surfaces_provider_load_failure(monkeypatch):
     """A tool provider that raises while listing is reported in load_failures."""
-    from gideon.tool_providers import registry as reg
+    from gideon.integrations.tool_providers import registry as reg
 
     class _BrokenProvider:
         name = "broken-prov"
@@ -109,12 +103,12 @@ async def test_handler_surfaces_provider_load_failure(monkeypatch):
         async def list_tools(self):
             raise RuntimeError("could not connect")
 
-    # Real list_all_tools over a broken provider → records the failure.
     reg.clear_load_failures()
     monkeypatch.setattr(reg, "_providers", {"broken-prov": _BrokenProvider()})
-    # No MCP registry for this test.
     monkeypatch.setattr(
-        "gideon.mcp_client.get_mcp_client_registry", lambda: None, raising=False
+        "gideon.integrations.mcp_client.get_mcp_client_registry",
+        lambda: None,
+        raising=False,
     )
 
     resp = await tools_mod.api_tools_list(_DummyRequest())
@@ -124,7 +118,9 @@ async def test_handler_surfaces_provider_load_failure(monkeypatch):
     payload = json.loads(resp.body.decode())
     providers_failed = {f["provider"] for f in payload.get("load_failures", [])}
     assert "broken-prov" in providers_failed
-    msg = next(f["error"] for f in payload["load_failures"] if f["provider"] == "broken-prov")
+    msg = next(
+        f["error"] for f in payload["load_failures"] if f["provider"] == "broken-prov"
+    )
     assert "could not connect" in msg
 
 
@@ -132,14 +128,16 @@ async def test_handler_surfaces_provider_load_failure(monkeypatch):
 async def test_handler_no_failures_when_all_load(monkeypatch):
     """A clean catalog build reports an empty load_failures list."""
     monkeypatch.setattr(
-        "gideon.tool_providers.registry.list_all_tools",
+        "gideon.integrations.tool_providers.registry.list_all_tools",
         _noop_list_all_tools,
         raising=False,
     )
     monkeypatch.setattr(
-        "gideon.mcp_client.get_mcp_client_registry", lambda: None, raising=False
+        "gideon.integrations.mcp_client.get_mcp_client_registry",
+        lambda: None,
+        raising=False,
     )
-    from gideon.tool_providers import registry as reg
+    from gideon.integrations.tool_providers import registry as reg
 
     reg.clear_load_failures()
 
@@ -151,15 +149,12 @@ async def test_handler_no_failures_when_all_load(monkeypatch):
     assert payload.get("load_failures") == []
 
 
-# ── GET /api/tools/savings (Context Economy §1.3) ─────────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_savings_endpoint_returns_summary(tmp_path, monkeypatch):
     import json
 
-    import gideon.config.loader as cfg
-    import gideon.tool_providers.savings as sv
+    import gideon.core.config.loader as cfg
+    import gideon.integrations.tool_providers.savings as sv
 
     monkeypatch.setattr(cfg, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(sv, "config_dir", lambda: tmp_path)
@@ -178,8 +173,8 @@ async def test_savings_endpoint_returns_summary(tmp_path, monkeypatch):
 async def test_savings_endpoint_empty_is_safe(tmp_path, monkeypatch):
     import json
 
-    import gideon.config.loader as cfg
-    import gideon.tool_providers.savings as sv
+    import gideon.core.config.loader as cfg
+    import gideon.integrations.tool_providers.savings as sv
 
     monkeypatch.setattr(cfg, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(sv, "config_dir", lambda: tmp_path)
@@ -195,18 +190,24 @@ async def test_groups_endpoint_reports_the_partition(monkeypatch):
     assembles, with core always-on and offerability resolved."""
     import json
 
-    from gideon.tool_providers.base import ToolDefinition
+    from gideon.integrations.tool_providers.base import ToolDefinition
 
     async def _tools():
         return [
-            ToolDefinition(name="schedule_add", description="d", provider="gideon-schedule"),
-            ToolDefinition(name="subagent_run", description="d", provider="gideon-subagents"),
+            ToolDefinition(
+                name="schedule_add", description="d", provider="gideon-schedule"
+            ),
+            ToolDefinition(
+                name="subagent_run", description="d", provider="gideon-subagents"
+            ),
         ]
 
-    monkeypatch.setattr("gideon.tool_providers.registry.list_all_tools", _tools)
-    # No model resolvable → the subagents group is not offerable (§5.5).
     monkeypatch.setattr(
-        "gideon.providers.provider_bridge.can_resolve_use_case", lambda _u: False
+        "gideon.integrations.tool_providers.registry.list_all_tools", _tools
+    )
+    monkeypatch.setattr(
+        "gideon.extensions.providers.provider_bridge.can_resolve_use_case",
+        lambda _u: False,
     )
 
     resp = await tools_mod.api_tool_groups(_DummyRequest())
@@ -214,11 +215,9 @@ async def test_groups_endpoint_reports_the_partition(monkeypatch):
     by_name = {g["name"]: g for g in payload["groups"]}
     assert by_name["schedule"]["toolCount"] == 1
     assert by_name["schedule"]["offerable"] is True
-    assert by_name["subagents"]["offerable"] is False  # capability unmet
+    assert by_name["subagents"]["offerable"] is False
     assert by_name["subagents"]["capability"] == "model:orchestration"
-    # core is present (the platform provider is enumerated separately) and always-on.
     assert by_name["core"]["alwaysOn"] is True
-    # Per-surface defaults are reported; chat's empty list means "every group".
     assert "chat" in payload["surfaceDefaults"]
     assert isinstance(payload["enabled"], bool)
 
@@ -231,13 +230,12 @@ async def test_groups_endpoint_survives_a_broken_registry(monkeypatch):
     async def _boom():
         raise RuntimeError("registry down")
 
-    monkeypatch.setattr("gideon.tool_providers.registry.list_all_tools", _boom)
+    monkeypatch.setattr(
+        "gideon.integrations.tool_providers.registry.list_all_tools", _boom
+    )
     resp = await tools_mod.api_tool_groups(_DummyRequest())
     payload = json.loads(resp.body.decode())
-    assert "groups" in payload  # still a well-formed answer
-
-
-# ── POST /api/tools/invoke — request type guards ──────────────────────────────
+    assert "groups" in payload
 
 
 class _InvokeRequest:
@@ -246,15 +244,12 @@ class _InvokeRequest:
 
     def __init__(self, body: dict) -> None:
         self._body = body
-        # The handler reads X-Session-Key for the SEL row on every outcome, including
-        # the refusals, so the stand-in needs a mapping rather than nothing.
         self.headers: dict[str, str] = {}
 
     async def json(self):
         return self._body
 
     def get(self, key, default=None):
-        # No app identity → the owner/internal caller path (no permission gate).
         return default
 
 
@@ -278,11 +273,12 @@ async def test_invoke_rejects_non_string_provider(bad_provider):
     assert payload["error"] == "provider must be a string"
 
 
-# ── #444 gaps #2/#3: tools toggle validation ────────────────────────────────
 async def _one_tool():
-    from gideon.tool_providers.base import ToolDefinition
+    from gideon.integrations.tool_providers.base import ToolDefinition
 
-    return [ToolDefinition(name="artifact_list", description="d", provider="gideon-core")]
+    return [
+        ToolDefinition(name="artifact_list", description="d", provider="gideon-core")
+    ]
 
 
 @pytest.mark.asyncio
@@ -292,7 +288,9 @@ async def test_toggle_rejects_non_bool_enabled(bad_enabled, monkeypatch):
     truthy under bool()) must be a 400, not a silent inversion of the toggle."""
     import json
 
-    monkeypatch.setattr("gideon.tool_providers.registry.list_all_tools", _one_tool)
+    monkeypatch.setattr(
+        "gideon.integrations.tool_providers.registry.list_all_tools", _one_tool
+    )
     resp = await tools_mod.api_tools_toggle(
         _InvokeRequest(
             {"provider": "gideon-core", "name": "artifact_list", "enabled": bad_enabled}
@@ -311,9 +309,11 @@ async def test_toggle_rejects_unknown_tool_name(monkeypatch):
     import json
 
     calls = []
-    monkeypatch.setattr("gideon.tool_providers.registry.list_all_tools", _one_tool)
     monkeypatch.setattr(
-        "gideon.tool_providers.tool_prefs.set_enabled",
+        "gideon.integrations.tool_providers.registry.list_all_tools", _one_tool
+    )
+    monkeypatch.setattr(
+        "gideon.integrations.tool_providers.tool_prefs.set_enabled",
         lambda *a, **k: calls.append((a, k)) or {"ok": True},
     )
     resp = await tools_mod.api_tools_toggle(
@@ -325,7 +325,7 @@ async def test_toggle_rejects_unknown_tool_name(monkeypatch):
     payload = json.loads(resp.body.decode())
     assert payload["ok"] is False
     assert "unknown tool" in payload["error"]
-    assert calls == []  # set_enabled never reached → nothing persisted
+    assert calls == []
 
 
 @pytest.mark.asyncio
@@ -333,9 +333,11 @@ async def test_toggle_accepts_a_real_bool_and_known_tool(monkeypatch):
     """The guards don't over-block: a real bool + a known tool still toggles."""
     import json
 
-    monkeypatch.setattr("gideon.tool_providers.registry.list_all_tools", _one_tool)
     monkeypatch.setattr(
-        "gideon.tool_providers.tool_prefs.set_enabled",
+        "gideon.integrations.tool_providers.registry.list_all_tools", _one_tool
+    )
+    monkeypatch.setattr(
+        "gideon.integrations.tool_providers.tool_prefs.set_enabled",
         lambda provider, name, enabled: {
             "ok": True,
             "provider": provider,
@@ -344,31 +346,20 @@ async def test_toggle_accepts_a_real_bool_and_known_tool(monkeypatch):
         },
     )
     resp = await tools_mod.api_tools_toggle(
-        _InvokeRequest({"provider": "gideon-core", "name": "artifact_list", "enabled": False})
+        _InvokeRequest(
+            {"provider": "gideon-core", "name": "artifact_list", "enabled": False}
+        )
     )
     assert resp.status == 200
     payload = json.loads(resp.body.decode())
     assert payload["ok"] is True
 
 
-# ── #437: POST /api/tools/invoke honors the Tools page toggle ─────────────────
-#
-# The toggle wrote `tool_prefs.json` and only the NATIVE RUNTIME read it, dropping
-# disabled tools at schema assembly. This route resolved a provider and called it, so a
-# tool the UI showed as "disabled" still executed — including through
-# `schedule_script.py`, which posts here specifically so a cron script "gets the same
-# MCP+native tool surface the agent has". The realistic failure is a scheduled run using
-# a tool the user believes they turned off.
-#
-# The tests below are written against the ROUTE, not against `tool_prefs`: the preference
-# store was always correct, and asserting it again would have passed before the fix.
-
-
 class _RecordingProvider:
     """A provider that records whether it was reached. Reaching it IS the bug."""
 
     def __init__(self, tool_name: str, provider_tag: str = "gideon-artifacts") -> None:
-        from gideon.tool_providers.base import RiskLevel, ToolDefinition
+        from gideon.integrations.tool_providers.base import RiskLevel, ToolDefinition
 
         self.name = provider_tag
         self.invoked: list[tuple[str, dict]] = []
@@ -385,7 +376,7 @@ class _RecordingProvider:
         return self._defs
 
     async def invoke(self, name, arguments):
-        from gideon.tool_providers.base import ToolResult
+        from gideon.integrations.tool_providers.base import ToolResult
 
         self.invoked.append((name, dict(arguments or {})))
         return ToolResult(success=True, output="[]")
@@ -393,17 +384,22 @@ class _RecordingProvider:
 
 def _install_provider(monkeypatch, provider):
     monkeypatch.setattr(
-        "gideon.tool_providers.registry.get_provider",
+        "gideon.integrations.tool_providers.registry.get_provider",
         lambda name: provider if name == provider.name else None,
     )
-    monkeypatch.setattr("gideon.tool_providers.registry.list_providers", lambda: [provider])
+    monkeypatch.setattr(
+        "gideon.integrations.tool_providers.registry.list_providers", lambda: [provider]
+    )
 
 
 def _disable(monkeypatch, *keys: str):
     """Point the preference store at an explicit disabled set (no real home touched)."""
-    monkeypatch.setattr("gideon.tool_providers.tool_prefs.load_disabled", lambda: set(keys))
     monkeypatch.setattr(
-        "gideon.tool_providers.tool_prefs.load_disabled_providers", lambda: set()
+        "gideon.integrations.tool_providers.tool_prefs.load_disabled", lambda: set(keys)
+    )
+    monkeypatch.setattr(
+        "gideon.integrations.tool_providers.tool_prefs.load_disabled_providers",
+        lambda: set(),
     )
 
 
@@ -420,7 +416,9 @@ async def test_invoke_refuses_a_disabled_tool(monkeypatch):
     assert resp.status == 403
     payload = json.loads(resp.body.decode())
     assert payload["error"]["code"] == "tool_disabled"
-    assert prov.invoked == [], "the provider was reached — the toggle still gates nothing"
+    assert (
+        prov.invoked == []
+    ), "the provider was reached — the toggle still gates nothing"
 
 
 @pytest.mark.asyncio
@@ -446,7 +444,7 @@ async def test_an_enabled_tool_still_runs(monkeypatch):
 
     prov = _RecordingProvider("artifact_list")
     _install_provider(monkeypatch, prov)
-    _disable(monkeypatch)  # nothing disabled
+    _disable(monkeypatch)
 
     resp = await tools_mod.api_tool_invoke(_InvokeRequest({"tool": "artifact_list"}))
     assert resp.status == 200
@@ -478,7 +476,7 @@ async def test_the_gate_keys_on_the_tools_own_provider_tag(monkeypatch):
     tool as enabled for exactly the tools a disable row exists for.
     """
     prov = _RecordingProvider("artifact_list", provider_tag="gideon-artifacts")
-    prov.name = "artifacts-instance-42"  # instance name ≠ the tools' provider tag
+    prov.name = "artifacts-instance-42"
     _install_provider(monkeypatch, prov)
     _disable(monkeypatch, "gideon-artifacts:artifact_list")
 
@@ -495,9 +493,11 @@ async def test_a_disabled_provider_refuses_its_whole_toolset(monkeypatch):
     `disabledProviders`, and the runtime skips that provider entirely."""
     prov = _RecordingProvider("artifact_list")
     _install_provider(monkeypatch, prov)
-    monkeypatch.setattr("gideon.tool_providers.tool_prefs.load_disabled", lambda: set())
     monkeypatch.setattr(
-        "gideon.tool_providers.tool_prefs.load_disabled_providers",
+        "gideon.integrations.tool_providers.tool_prefs.load_disabled", lambda: set()
+    )
+    monkeypatch.setattr(
+        "gideon.integrations.tool_providers.tool_prefs.load_disabled_providers",
         lambda: {"gideon-artifacts"},
     )
 
@@ -516,11 +516,7 @@ def test_only_two_execution_paths_exist_and_both_are_gated():
     import pathlib
     import re
 
-    src = pathlib.Path(__file__).resolve().parent.parent / "src" / "gideon"
-    # File → how many dispatch sites it holds. Files and counts, deliberately NOT line
-    # numbers: an edit anywhere above a call site would move its line and red this test
-    # for a reason that has nothing to do with gating. A SECOND `.invoke(` appearing in an
-    # already-listed file is still caught, because the count changes.
+    src = pathlib.Path(__file__).resolve().parent.parent.parent / "runtime" / "gideon"
     hits: dict[str, int] = {}
     for py in sorted(src.rglob("*.py")):
         for line in py.read_text(encoding="utf-8").splitlines():

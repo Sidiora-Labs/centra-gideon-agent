@@ -13,10 +13,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from gideon.dashboard import side as side_mod
-from gideon.dashboard.side_context import build_side_message, build_snapshot
-from gideon.dashboard.side_state import SideState
-from gideon.dashboard.state import _ChatSession
+from gideon.interfaces.dashboard import side as side_mod
+from gideon.interfaces.dashboard.side_context import build_side_message, build_snapshot
+from gideon.interfaces.dashboard.side_state import SideState
+from gideon.interfaces.dashboard.state import _ChatSession
 
 
 def _parent_with_history() -> _ChatSession:
@@ -28,11 +28,11 @@ def _parent_with_history() -> _ChatSession:
 
 def test_snapshot_reads_only_visible_parent_messages():
     s = _parent_with_history()
-    s.append("tool", "🔧 bash", "msg msg-tool", broadcast=False)  # non-visible
+    s.append("tool", "🔧 bash", "msg msg-tool", broadcast=False)
     snap = build_snapshot(s)
     assert "User: deploy the stack" in snap
     assert "Assistant: Deployed. Gateway is healthy." in snap
-    assert "bash" not in snap  # tool messages excluded
+    assert "bash" not in snap
 
 
 def test_build_side_message_includes_snapshot_question_and_prior():
@@ -41,10 +41,10 @@ def test_build_side_message_includes_snapshot_question_and_prior():
     side.append("user", "what model?")
     side.append("assistant", "glm-5.1")
     prompt = build_side_message(s, side, "summarize what we did")
-    assert "deploy the stack" in prompt  # snapshot
-    assert "what model?" in prompt  # prior side Q
-    assert "summarize what we did" in prompt  # new question
-    assert "read-only" in prompt.lower()  # boundary envelope
+    assert "deploy the stack" in prompt
+    assert "what model?" in prompt
+    assert "summarize what we did" in prompt
+    assert "read-only" in prompt.lower()
 
 
 @pytest.mark.asyncio
@@ -54,12 +54,11 @@ async def test_side_turn_never_appends_to_parent():
     s = _parent_with_history()
     parent_msg_count = len(s.messages)
     on_message = MagicMock()
-    s._on_message = on_message  # would fire inside append() if it were called
+    s._on_message = on_message
     s._side = SideState(open=True)
-    s._side.last_run_id = "run-1"  # api_side_turn sets this before dispatching
+    s._side.last_run_id = "run-1"
     s._side.is_complete = False
 
-    # Fake provider + session manager: stream two chunks, no real model.
     state = MagicMock()
     state.broadcast_ws = MagicMock()
     state._background_tasks = set()
@@ -68,23 +67,27 @@ async def test_side_turn_never_appends_to_parent():
     state.sessions.get_or_create = AsyncMock(return_value=(provider, True, False))
     state.sessions.release = MagicMock()
 
-    async def fake_stream_and_collect(prov, msg, *, approval_policy, on_chunk=None, **kw):
+    async def fake_stream_and_collect(
+        prov, msg, *, approval_policy, on_chunk=None, **kw
+    ):
         if on_chunk:
             on_chunk("The model ")
             on_chunk("is glm-5.1.")
         return "The model is glm-5.1."
 
-    with patch("gideon.llm_helpers.stream_and_collect", new=fake_stream_and_collect):
-        await side_mod._run_side_turn(state, "parent", s, s._side, "what model?", "run-1")
+    with patch(
+        "gideon.integrations.llm_helpers.stream_and_collect",
+        new=fake_stream_and_collect,
+    ):
+        await side_mod._run_side_turn(
+            state, "parent", s, s._side, "what model?", "run-1"
+        )
 
-    # Parent transcript completely untouched.
     assert len(s.messages) == parent_msg_count
     on_message.assert_not_called()
-    # Answer landed ONLY on the side buffer.
     assert s._side.messages[-1].role == "assistant"
     assert "glm-5.1" in s._side.messages[-1].content
     assert s._side.is_complete is True
-    # A side_result frame with done=True was broadcast.
     assert any(
         c.args[0] == side_mod.SIDE_RESULT_EVENT and c.args[1].get("done")
         for c in state.broadcast_ws.call_args_list
@@ -108,10 +111,10 @@ async def test_side_turn_rejects_tools():
         captured["policy"] = approval_policy
         return ""
 
-    with patch("gideon.llm_helpers.stream_and_collect", new=fake_sac):
+    with patch("gideon.integrations.llm_helpers.stream_and_collect", new=fake_sac):
         await side_mod._run_side_turn(state, "parent", s, s._side, "q", "run-1")
 
-    from gideon.llm_helpers import ToolApprovalPolicy
+    from gideon.integrations.llm_helpers import ToolApprovalPolicy
 
     assert captured["policy"] == ToolApprovalPolicy.REJECT_ALL
 
@@ -122,7 +125,7 @@ async def test_stale_run_frames_are_dropped():
     must not broadcast — _emit drops frames whose run_id != side.last_run_id."""
     s = _parent_with_history()
     s._side = SideState(open=True)
-    s._side.last_run_id = "run-2"  # a newer run already claimed the buffer
+    s._side.last_run_id = "run-2"
     state = MagicMock()
     state.broadcast_ws = MagicMock()
     state.sessions = MagicMock()
@@ -134,8 +137,7 @@ async def test_stale_run_frames_are_dropped():
             on_chunk("stale chunk")
         return "stale chunk"
 
-    with patch("gideon.llm_helpers.stream_and_collect", new=fake_sac):
-        # Run with the OLD run-1 id — every _emit should be dropped.
+    with patch("gideon.integrations.llm_helpers.stream_and_collect", new=fake_sac):
         await side_mod._run_side_turn(state, "parent", s, s._side, "q", "run-1")
 
-    assert state.broadcast_ws.call_count == 0  # all frames stale → dropped
+    assert state.broadcast_ws.call_count == 0

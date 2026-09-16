@@ -29,7 +29,7 @@ import json
 
 import pytest
 
-from gideon.evals import scenarios, store, studies, study_arms
+from gideon.assurance.evals import scenarios, store, studies, study_arms
 
 WORKFLOW = "es5-suite-demo"
 OLD_SPEC = {
@@ -61,7 +61,7 @@ def eval_home(tmp_path, monkeypatch):
     """
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     monkeypatch.setattr(
-        "gideon.evals.pinning.model_fingerprint",
+        "gideon.assurance.evals.pinning.model_fingerprint",
         lambda: {"chat": "Fake:model-a", "eval_judge": "Fake:model-j"},
     )
     return tmp_path
@@ -84,12 +84,11 @@ def _install_harvested(count: int, *, workflow: str = WORKFLOW) -> None:
                 "run_started_at": f"2026-08-1{i}T00:00:00Z",
                 "inputs": {"target": f"subsystem-{i}"},
             },
-            "sessions": [{"name": "harvested_run", "turns": [{"user": "x", "assertions": []}]}],
+            "sessions": [
+                {"name": "harvested_run", "turns": [{"user": "x", "assertions": []}]}
+            ],
         }
         (lib / f"{case['name']}.json").write_text(json.dumps(case), encoding="utf-8")
-
-
-# ── clause: "over the harvested suite" ───────────────────────────────────────
 
 
 def test_the_suite_comes_from_the_HARVEST(eval_home):
@@ -100,10 +99,7 @@ def test_the_suite_comes_from_the_HARVEST(eval_home):
     assert suite.population == 3
     assert not suite.low_power
     assert not suite.refusal
-    # The pin names the case AND its content hash, so a later suite cannot be swapped in
-    # under the same pre-registration.
     assert all("@" in pin for pin in suite.input_pins)
-    # `case_input` is the RECORDED inputs, canonically — the variable an A/B holds still.
     assert json.loads(suite.cases[0].case_input) == {"target": "subsystem-0"}
     assert suite.cases[0].goal.startswith("carry out run0")
 
@@ -135,13 +131,12 @@ def test_low_power_is_a_LABEL_and_its_threshold_is_the_studies_constant(eval_hom
     assert not study_arms.harvested_study_cases(workflow_name=WORKFLOW).low_power
 
 
-# ── the arms, and the vacuity gate over them ─────────────────────────────────
-
-
 def test_the_arm_prompt_binds_the_cases_recorded_inputs():
     """`{{inputs.*}}` resolves through the engine's own resolver, not a second dialect."""
     body = json.dumps(OLD_SPEC)
-    prompt = study_arms.render_arm_prompt(body, case_input=json.dumps({"target": "the ledger"}))
+    prompt = study_arms.render_arm_prompt(
+        body, case_input=json.dumps({"target": "the ledger"})
+    )
 
     assert prompt == "Summarize the ledger in one paragraph."
     assert "{{" not in prompt
@@ -157,18 +152,22 @@ def test_the_two_arms_render_DIFFERENT_prompts_from_the_diffs_own_ops():
 
     assert old == "Summarize the ledger in one paragraph."
     assert new == "Summarize the ledger in exactly three bullets."
-    # The candidate was never installed: measuring a template you had to install first is
-    # measuring the live template, not a candidate.
     assert json.loads(old_body)["root"]["config"]["prompt"].endswith("one paragraph.")
 
 
 def test_identical_arms_are_REFUSED_because_a_tie_would_look_confident():
     """The vacuity gate fires — an A/B whose arms render alike measures nothing."""
-    cases = [studies.StudyCase(case_id="c0", goal="g", case_input=json.dumps({"target": "x"}))]
+    cases = [
+        studies.StudyCase(
+            case_id="c0", goal="g", case_input=json.dumps({"target": "x"})
+        )
+    ]
     body = json.dumps(OLD_SPEC)
 
     with pytest.raises(study_arms.StudyArmError, match="IDENTICAL"):
-        study_arms.assert_arms_differ(cases, old_template_body=body, new_template_body=body)
+        study_arms.assert_arms_differ(
+            cases, old_template_body=body, new_template_body=body
+        )
 
 
 def test_the_identical_arms_gate_can_PASS(eval_home):
@@ -176,11 +175,17 @@ def test_the_identical_arms_gate_can_PASS(eval_home):
 
     Without this, a gate hardwired to raise would look like a working guard.
     """
-    cases = [studies.StudyCase(case_id="c0", goal="g", case_input=json.dumps({"target": "x"}))]
+    cases = [
+        studies.StudyCase(
+            case_id="c0", goal="g", case_input=json.dumps({"target": "x"})
+        )
+    ]
     old_body, new_body = study_arms.arm_bodies_for_ops(OLD_SPEC, DIFF_OPS)
 
     assert (
-        study_arms.assert_arms_differ(cases, old_template_body=old_body, new_template_body=new_body)
+        study_arms.assert_arms_differ(
+            cases, old_template_body=old_body, new_template_body=new_body
+        )
         == 1
     )
 
@@ -189,10 +194,12 @@ def test_an_empty_case_list_is_NOT_reported_as_identical_arms():
     """Zero cases is a low-power suite, a different statement — reporting the wrong one
     would send a user hunting a diff bug when their ledger is simply empty."""
     body = json.dumps(OLD_SPEC)
-    assert study_arms.assert_arms_differ([], old_template_body=body, new_template_body=body) == 0
-
-
-# ── the production ArmRunner ─────────────────────────────────────────────────
+    assert (
+        study_arms.assert_arms_differ(
+            [], old_template_body=body, new_template_body=body
+        )
+        == 0
+    )
 
 
 def test_the_arm_runner_writes_its_output_into_its_OWN_workspace(eval_home):
@@ -303,7 +310,6 @@ def test_an_unfinished_arm_is_NOT_judged_as_an_empty_answer(eval_home, monkeypat
     assert judge_calls == []
     assert result.no_signal == 1
     assert result.wins == 0 and result.losses == 0 and result.ties == 0
-    # Unmeasurable agreement is None, never 0.0 — the study could not measure it.
     assert result.agreement is None
     pair = result.cases[0].pairs[0]
     assert pair.judgeable is False
@@ -325,7 +331,7 @@ def test_a_pair_whose_arms_BOTH_finish_IS_judged(eval_home):
         which is §2.3 working, and would make this floor unable to tell a judged pair from a
         skipped one.
         """
-        from gideon.evals.judge_bench import JudgeCall
+        from gideon.assurance.evals.judge_bench import JudgeCall
 
         judge_calls.append(prompt)
         winner = "A" if prompt.index("answer-new") < prompt.index("answer-old") else "B"
@@ -354,7 +360,7 @@ def test_a_pair_whose_arms_BOTH_finish_IS_judged(eval_home):
         )
     )
 
-    assert len(judge_calls) == 2  # both positions of the one pair
+    assert len(judge_calls) == 2
     assert result.no_signal == 0
     assert result.cases[0].pairs[0].judgeable is True
 
@@ -385,11 +391,7 @@ def test_the_arm_runner_screens_its_model_output_exactly_once(eval_home):
 
     assert "sk-ant-api03-AAAA" not in out.output
     assert "REDACTED" in out.output
-    # Screened exactly once — a second pass is what garbles a composed key/value line.
     assert out.output.count("REDACTED") == 1
-
-
-# ── clause: "a flywheel template-diff RUNS a pre-registered study" ───────────
 
 
 def test_run_study_uses_the_PRODUCTION_arm_runner_by_default(eval_home, monkeypatch):
@@ -417,7 +419,7 @@ def test_run_study_uses_the_PRODUCTION_arm_runner_by_default(eval_home, monkeypa
     )
 
     async def judge(prompt, *, use_case):
-        from gideon.evals.judge_bench import JudgeCall
+        from gideon.assurance.evals.judge_bench import JudgeCall
 
         return JudgeCall(text=json.dumps({"winner": "A", "cannot_judge": ""}))
 
@@ -444,7 +446,7 @@ def test_filing_a_template_diff_PRE_REGISTERS_a_study(eval_home, monkeypatch):
     site can falsify that.
     """
     _install_harvested(3)
-    from gideon.learning import refiner_tools
+    from gideon.cognition.learning import refiner_tools
 
     out = refiner_tools.file_template_diff(
         WORKFLOW,
@@ -458,8 +460,6 @@ def test_filing_a_template_diff_PRE_REGISTERS_a_study(eval_home, monkeypatch):
     raw = store.read_study_registration(out["study_id"])
     assert raw is not None
     reg = studies.registration_from_dict(raw)
-    # The registration names the template, the proposal that motivated it, and the corpus
-    # it will be measured over — so a run cannot substitute a different subject later.
     assert reg.subject["template_id"] == WORKFLOW
     assert reg.subject["diff_proposal_id"] == out["proposal_id"]
     assert reg.subject["corpus"] == "harvested"
@@ -468,7 +468,9 @@ def test_filing_a_template_diff_PRE_REGISTERS_a_study(eval_home, monkeypatch):
     assert reg.rubric_sha256 == studies.rubric_sha256(study_arms.TEMPLATE_AB_RUBRIC)
 
 
-def test_a_failed_pre_registration_does_NOT_lose_the_filed_proposal(eval_home, monkeypatch):
+def test_a_failed_pre_registration_does_NOT_lose_the_filed_proposal(
+    eval_home, monkeypatch
+):
     """The vacuity floor for the hook: its best-effort guard really swallows.
 
     Without this, the `try/except` above is decorative — nothing would show that a filed
@@ -480,10 +482,13 @@ def test_a_failed_pre_registration_does_NOT_lose_the_filed_proposal(eval_home, m
         raise RuntimeError("eval store unwritable")
 
     monkeypatch.setattr(study_arms, "register_template_study", boom)
-    from gideon.learning import refiner_tools
+    from gideon.cognition.learning import refiner_tools
 
     out = refiner_tools.file_template_diff(
-        WORKFLOW, ops=DIFF_OPS, rationale="still worth filing", run_ids=["r0", "r1", "r2"]
+        WORKFLOW,
+        ops=DIFF_OPS,
+        rationale="still worth filing",
+        run_ids=["r0", "r1", "r2"],
     )
 
     assert out["filed"] is True
@@ -497,7 +502,7 @@ def test_a_rejected_diff_registers_NOTHING(eval_home):
     A registration is immutable, so a study minted for a diff that was never filed is an
     artifact nobody can delete and nobody can run.
     """
-    from gideon.learning import refiner_tools
+    from gideon.cognition.learning import refiner_tools
 
     out = refiner_tools.file_template_diff(
         WORKFLOW,
@@ -511,9 +516,6 @@ def test_a_rejected_diff_registers_NOTHING(eval_home):
     assert store.list_study_ids() == []
 
 
-# ── the invocation surface (the `_judge_bench` shape) ────────────────────────
-
-
 def test_the_cli_command_is_wired_to_the_dispatch():
     """A module with no production importer is not done. This is the importer.
 
@@ -522,7 +524,8 @@ def test_the_cli_command_is_wired_to_the_dispatch():
     """
     import pathlib
 
-    from gideon import cli, cli_commands
+    from gideon.interfaces.cli import commands as cli_commands
+    from gideon.interfaces.cli import main as cli
 
     assert cli._study is cli_commands._study
     source = pathlib.Path(cli.__file__).read_text(encoding="utf-8")
@@ -544,13 +547,19 @@ def test_the_preflight_counts_BOTH_positions_of_every_pair(eval_home):
         k=5,
     )
     cases = [
-        studies.StudyCase(case_id=f"c{i}", goal="g", case_input=json.dumps({"target": f"t{i}"}))
+        studies.StudyCase(
+            case_id=f"c{i}", goal="g", case_input=json.dumps({"target": f"t{i}"})
+        )
         for i in range(3)
     ]
     old_body, new_body = study_arms.arm_bodies_for_ops(OLD_SPEC, DIFF_OPS)
 
     pre = study_arms.preflight(
-        reg, cases=cases, old_template_body=old_body, new_template_body=new_body, samples=3
+        reg,
+        cases=cases,
+        old_template_body=old_body,
+        new_template_body=new_body,
+        samples=3,
     )
 
     assert pre.arm_calls == 3 * 5 * 2
@@ -559,34 +568,39 @@ def test_the_preflight_counts_BOTH_positions_of_every_pair(eval_home):
     assert "30 arm + 90 judge" in pre.render()
 
 
-def test_the_cli_dry_run_prints_the_spend_and_CALLS_NOTHING(eval_home, monkeypatch, capsys):
+def test_the_cli_dry_run_prints_the_spend_and_CALLS_NOTHING(
+    eval_home, monkeypatch, capsys
+):
     """The `--dry-run` contract, asserted on the money seam rather than on the text.
 
     A dry run that printed the right number and still spent would pass a text-only check.
     So the model call itself is replaced with a detonator.
     """
     _install_harvested(3)
-    from gideon.cli_commands import _study
-    from gideon.workflows.native_defs import NativeWorkflowDefProvider
+    from gideon.automation.workflows.native_defs import NativeWorkflowDefProvider
+    from gideon.interfaces.cli.commands import _study
 
     asyncio.run(NativeWorkflowDefProvider().save_def(**OLD_SPEC))
-    from gideon.learning import refiner_tools
+    from gideon.cognition.learning import refiner_tools
 
     filed = refiner_tools.file_template_diff(
-        WORKFLOW, ops=DIFF_OPS, rationale="bullets beat paragraphs", run_ids=["r0", "r1", "r2"]
+        WORKFLOW,
+        ops=DIFF_OPS,
+        rationale="bullets beat paragraphs",
+        run_ids=["r0", "r1", "r2"],
     )
 
     async def detonate(prompt, *, use_case):  # pragma: no cover - must never run
         raise AssertionError("--dry-run spent money")
 
     monkeypatch.setattr(study_arms, "_one_shot_completion", detonate)
-    # `studies` import-binds `live_judge_caller`, so patching `judge_bench.live_judge_caller`
-    # would replace a name nothing reads. Patch the binding the caller actually resolves.
     monkeypatch.setattr(studies, "live_judge_caller", detonate)
 
     asyncio.run(
         _study(
-            argparse.Namespace(list=False, view="", run=filed["study_id"], dry_run=True, samples=0)
+            argparse.Namespace(
+                list=False, view="", run=filed["study_id"], dry_run=True, samples=0
+            )
         )
     )
 
@@ -598,12 +612,12 @@ def test_the_cli_dry_run_prints_the_spend_and_CALLS_NOTHING(eval_home, monkeypat
 
 def test_the_cli_refuses_a_study_whose_corpus_is_EMPTY(eval_home, capsys):
     """An empty population exits 1 with the refusal sentence, not with a verdict."""
-    from gideon.cli_commands import _study
-    from gideon.workflows.native_defs import NativeWorkflowDefProvider
+    from gideon.automation.workflows.native_defs import NativeWorkflowDefProvider
+    from gideon.interfaces.cli.commands import _study
 
     asyncio.run(NativeWorkflowDefProvider().save_def(**OLD_SPEC))
     _install_harvested(3)
-    from gideon.learning import refiner_tools
+    from gideon.cognition.learning import refiner_tools
 
     filed = refiner_tools.file_template_diff(
         WORKFLOW, ops=DIFF_OPS, rationale="bullets", run_ids=["r0", "r1", "r2"]
@@ -632,14 +646,17 @@ def test_the_cli_can_run_a_registered_study_end_to_end(eval_home, monkeypatch, c
     proposal's own ops, the harvested corpus, the per-arm workspaces, the persisted verdict.
     """
     _install_harvested(3)
-    from gideon.cli_commands import _study
-    from gideon.evals.judge_bench import JudgeCall
-    from gideon.learning import refiner_tools
-    from gideon.workflows.native_defs import NativeWorkflowDefProvider
+    from gideon.assurance.evals.judge_bench import JudgeCall
+    from gideon.automation.workflows.native_defs import NativeWorkflowDefProvider
+    from gideon.cognition.learning import refiner_tools
+    from gideon.interfaces.cli.commands import _study
 
     asyncio.run(NativeWorkflowDefProvider().save_def(**OLD_SPEC))
     filed = refiner_tools.file_template_diff(
-        WORKFLOW, ops=DIFF_OPS, rationale="bullets beat paragraphs", run_ids=["r0", "r1", "r2"]
+        WORKFLOW,
+        ops=DIFF_OPS,
+        rationale="bullets beat paragraphs",
+        run_ids=["r0", "r1", "r2"],
     )
 
     async def arm(prompt, *, use_case):
@@ -654,7 +671,9 @@ def test_the_cli_can_run_a_registered_study_end_to_end(eval_home, monkeypatch, c
 
     asyncio.run(
         _study(
-            argparse.Namespace(list=False, view="", run=filed["study_id"], dry_run=False, samples=1)
+            argparse.Namespace(
+                list=False, view="", run=filed["study_id"], dry_run=False, samples=1
+            )
         )
     )
 
@@ -663,12 +682,8 @@ def test_the_cli_can_run_a_registered_study_end_to_end(eval_home, monkeypatch, c
     verdict = store.read_study_verdict(filed["study_id"])
     assert verdict is not None
     assert verdict["verdict"] in studies.VERDICTS
-    # The per-arm workspaces are real and distinct — 3 cases x k x 2 arms.
     arms_dir = store.study_dir(filed["study_id"]) / "arms"
     assert len(list(arms_dir.iterdir())) == 3 * verdict["k"] * 2
-
-
-# ── 🔴 the seal reaches the command a user types ──────────────────────────────
 
 
 def test_the_cli_REFUSES_a_tampered_registration_BEFORE_it_quotes_a_spend(
@@ -684,14 +699,17 @@ def test_the_cli_REFUSES_a_tampered_registration_BEFORE_it_quotes_a_spend(
     never reaches `run_study`.
     """
     _install_harvested(3)
-    from gideon.cli_commands import _study
-    from gideon.workflows.native_defs import NativeWorkflowDefProvider
+    from gideon.automation.workflows.native_defs import NativeWorkflowDefProvider
+    from gideon.interfaces.cli.commands import _study
 
     asyncio.run(NativeWorkflowDefProvider().save_def(**OLD_SPEC))
-    from gideon.learning import refiner_tools
+    from gideon.cognition.learning import refiner_tools
 
     filed = refiner_tools.file_template_diff(
-        WORKFLOW, ops=DIFF_OPS, rationale="bullets beat paragraphs", run_ids=["r0", "r1", "r2"]
+        WORKFLOW,
+        ops=DIFF_OPS,
+        rationale="bullets beat paragraphs",
+        run_ids=["r0", "r1", "r2"],
     )
     study_id = filed["study_id"]
 
@@ -704,7 +722,9 @@ def test_the_cli_REFUSES_a_tampered_registration_BEFORE_it_quotes_a_spend(
     args = dict(list=False, view="", run=study_id, dry_run=True, samples=0)
     asyncio.run(_study(argparse.Namespace(**args)))
     intact = capsys.readouterr().out
-    assert "arm + " in intact and "judge" in intact, "floor: the sealed study reaches the spend"
+    assert (
+        "arm + " in intact and "judge" in intact
+    ), "floor: the sealed study reaches the spend"
     assert "Refusing:" not in intact
 
     path = store.registration_path(study_id)
@@ -714,7 +734,9 @@ def test_the_cli_REFUSES_a_tampered_registration_BEFORE_it_quotes_a_spend(
     path.write_text(json.dumps(raw, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     path.chmod(0o400)
     assert (
-        studies.registration_from_dict(store.read_study_registration(study_id)).hypothesis
+        studies.registration_from_dict(
+            store.read_study_registration(study_id)
+        ).hypothesis
         == raw["hypothesis"]
     ), "vacuity floor: the edit applied"
 
@@ -724,5 +746,7 @@ def test_the_cli_REFUSES_a_tampered_registration_BEFORE_it_quotes_a_spend(
     out = capsys.readouterr().out
     assert exc.value.code == 1
     assert studies.SEAL_TAMPERED in out
-    assert "arm + " not in out, "refused BEFORE the preflight, not after quoting a spend"
+    assert (
+        "arm + " not in out
+    ), "refused BEFORE the preflight, not after quoting a spend"
     assert store.read_study_verdict(study_id) is None

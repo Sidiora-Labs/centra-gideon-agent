@@ -8,7 +8,7 @@ wrong version (a per-tile registry) would rebuild the machinery that was removed
 
 import pytest
 
-from gideon.workflows import pinned
+from gideon.automation.workflows import pinned
 
 
 @pytest.fixture(autouse=True)
@@ -23,7 +23,9 @@ def _isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(home))
-    monkeypatch.setattr("gideon.providers.entity_routes.config_dir", lambda: home)
+    monkeypatch.setattr(
+        "gideon.extensions.providers.entity_routes.config_dir", lambda: home
+    )
     return home
 
 
@@ -36,7 +38,6 @@ class TestPinning:
         assert entry["slug"] == "weekly-report"
         assert entry["run_id"] == "r1"
         assert entry["pinned_at"]
-        # No name, no content, no kind: those live on the artifact.
         assert set(entry) == {"slug", "pinned_at", "run_id"}
 
     def test_repinning_MOVES_rather_than_duplicating(self) -> None:
@@ -84,7 +85,7 @@ class TestPinning:
     def test_a_corrupt_store_reads_as_empty_rather_than_crashing(self) -> None:
         """Fail-OPEN for the STORE: a pin is a bookmark, so the worst case of a bad read is an
         empty widget. Crashing the dashboard over a bookmark would be the real bug."""
-        from gideon.providers.entity_routes import _entity_settings_path
+        from gideon.extensions.providers.entity_routes import _entity_settings_path
 
         path = _entity_settings_path("pinned_artifacts")
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -92,7 +93,7 @@ class TestPinning:
         assert pinned.list_pins() == []
 
     def test_a_malformed_entry_is_skipped_not_rendered(self) -> None:
-        from gideon.providers.entity_routes import _save_entity_settings
+        from gideon.extensions.providers.entity_routes import _save_entity_settings
 
         _save_entity_settings(
             "pinned_artifacts",
@@ -102,7 +103,7 @@ class TestPinning:
 
     def test_the_store_lives_in_entity_settings_not_config(self) -> None:
         """Entity/user state goes in `entity_settings/*.json`; `config.json` is for config."""
-        from gideon.providers.entity_routes import _entity_settings_path
+        from gideon.extensions.providers.entity_routes import _entity_settings_path
 
         pinned.pin("a")
         assert _entity_settings_path("pinned_artifacts").is_file()
@@ -116,12 +117,12 @@ class TestTouchedItemsFeed:
     """
 
     def test_a_run_that_touched_nothing_has_an_empty_feed(self) -> None:
-        from gideon.workflows import service
+        from gideon.automation.workflows import service
 
         assert service.touched_items("no-such-run") == []
 
     def test_published_artifacts_and_dropped_files_are_UNIONED(self) -> None:
-        from gideon.workflows import service, store
+        from gideon.automation.workflows import service, store
 
         store.append_jsonl(
             "r-touch",
@@ -136,7 +137,7 @@ class TestTouchedItemsFeed:
                 "node_id": "write",
             },
         )
-        from gideon.workflows import filedrop
+        from gideon.automation.workflows import filedrop
 
         filedrop.record_drop(
             "r-touch",
@@ -150,25 +151,28 @@ class TestTouchedItemsFeed:
         )
         rows = service.touched_items("r-touch")
         assert {r["kind"] for r in rows} == {"artifact", "file"}
-        # Newest-first: a feed is read from the top, and the latest touch is what a watching user
-        # is waiting for.
         assert rows[0]["ref"] == "input.csv"
 
     def test_the_publish_VERB_is_preserved(self) -> None:
         """A converged republish is not a new version. Collapsing them would make an unchanged
         artifact look freshly written."""
-        from gideon.workflows import service, store
+        from gideon.automation.workflows import service, store
 
         store.append_jsonl(
             "r-verb",
             "publishes.jsonl",
-            {"ts": "2026-08-11T02:00:00+00:00", "slug": "s", "artifact": "A", "action": "noop"},
+            {
+                "ts": "2026-08-11T02:00:00+00:00",
+                "slug": "s",
+                "artifact": "A",
+                "action": "noop",
+            },
         )
         [row] = service.touched_items("r-verb")
         assert row["action"] == "noop"
 
     def test_a_row_with_no_timestamp_sorts_last_rather_than_crashing(self) -> None:
-        from gideon.workflows import service, store
+        from gideon.automation.workflows import service, store
 
         for rec in (
             {"ts": "", "slug": "undated", "artifact": "U", "action": "create"},
@@ -188,6 +192,6 @@ class TestTouchedItemsFeed:
         reader needs both together — so it is not a separate fetch."""
         import inspect
 
-        from gideon.workflows import service
+        from gideon.automation.workflows import service
 
         assert "touched=touched_items(run_id)" in inspect.getsource(service.introspect)

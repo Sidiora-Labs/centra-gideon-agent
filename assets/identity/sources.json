@@ -1,0 +1,59 @@
+{
+  "source": "User-supplied Gideon artwork",
+  "archives": {
+    "apps/desktop/assets/gid_darkmode.zip": "4554e3940c21a3aba0bd30dfc3dddcfdca9dcc1a00f35fff5c499a4bf6ac30d3",
+    "apps/desktop/assets/gid_lightmode.zip": "3a1769be88302b5f8faba588ee8769aab41b8e5c684fcd55d000cabf2f64209a"
+  },
+  "files": {
+    "assets/identity/dark/logo-24.png": {
+      "archive": "apps/desktop/assets/gid_darkmode.zip",
+      "member": "windows/Square44x44Logo.targetsize-24.png",
+      "sha256": "d7636eeb990b77bdf895536ae33412c07b3d959403b54808f9f8e64adad1d81d"
+    },
+    "assets/identity/dark/logo-32.png": {
+      "archive": "apps/desktop/assets/gid_darkmode.zip",
+      "member": "windows/Square44x44Logo.targetsize-32.png",
+      "sha256": "97e9df161972cbde554a9d2548c2b0904b81a84fbb2c524d7e0367f598be1b6d"
+    },
+    "assets/identity/dark/logo-64.png": {
+      "archive": "apps/desktop/assets/gid_darkmode.zip",
+      "member": "windows/Square44x44Logo.targetsize-64.png",
+      "sha256": "578eb7096b8c8d993bed82ccca4424498a73bd2fabefc4ee6c37f597ec1f6a0a"
+    },
+    "assets/identity/dark/logo-192.png": {
+      "archive": "apps/desktop/assets/gid_darkmode.zip",
+      "member": "android/launchericon-192x192.png",
+      "sha256": "221ae2430fcb407f78db367e0ce02914b96c4faabfa7a326ac8d9fa1fdbf7a27"
+    },
+    "assets/identity/dark/logo-512.png": {
+      "archive": "apps/desktop/assets/gid_darkmode.zip",
+      "member": "android/launchericon-512x512.png",
+      "sha256": "5e798f99673922fce62bcd7c74c79be0e057bfa5d68b6e76e77ab4da8575a40a"
+    },
+    "assets/identity/light/logo-24.png": {
+      "archive": "apps/desktop/assets/gid_lightmode.zip",
+      "member": "windows/Square44x44Logo.targetsize-24.png",
+      "sha256": "91d1a56fe9425138c40cc451b9b9b0f99a4015e673f54336b490aa3742dd7887"
+    },
+    "assets/identity/light/logo-32.png": {
+      "archive": "apps/desktop/assets/gid_lightmode.zip",
+      "member": "windows/Square44x44Logo.targetsize-32.png",
+      "sha256": "2d54cd4b2cd2018d319783ce00d2aea4472eea84815aa58f762843b24e476ff9"
+    },
+    "assets/identity/light/logo-64.png": {
+      "archive": "apps/desktop/assets/gid_lightmode.zip",
+      "member": "windows/Square44x44Logo.targetsize-64.png",
+      "sha256": "ba54d2abcc3e3feae16d9deeaef49f761c832e0979a2dc17292a14f0d6295de3"
+    },
+    "assets/identity/light/logo-192.png": {
+      "archive": "apps/desktop/assets/gid_lightmode.zip",
+      "member": "android/launchericon-192x192.png",
+      "sha256": "b48ed90270261412b654d5ad90b372abc9b2cc6ec15aafb7da6bf1db9d79a89e"
+    },
+    "assets/identity/light/logo-512.png": {
+      "archive": "apps/desktop/assets/gid_lightmode.zip",
+      "member": "android/launchericon-512x512.png",
+      "sha256": "635005f2b6e94190fd31904448e12b7a9e22c2daaae03616a25f252ca6850e21"
+    }
+  }
+}

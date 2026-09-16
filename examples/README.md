@@ -1,8 +1,8 @@
-# `scratch/` — content prepared in-tree for the owner to publish
+# `examples/` — content prepared in-tree for the owner to publish
 
 Nothing here is imported, installed or served by Gideon. It is content that belongs in
 **other** repositories, staged in this one so it can be reviewed, tested and version-controlled
-before it is pushed. `scratch/` is outside `testpaths` and outside `make lint`'s targets, so it
+before it is pushed. `examples/` is outside `testpaths` and outside `make lint`'s targets, so it
 does not participate in the core build.
 
 ET-2 (the ECOSYSTEM-TOOLING plan (internal), Session 1 T1.4) stages one thing: the template
@@ -28,7 +28,7 @@ app-template/
 
 The four generated files are pinned byte-for-byte to a fresh
 `gideon app new app-template --type tool` run by
-`tests/test_app_from_template.py::test_the_staged_template_is_byte_identical_to_a_fresh_scaffold`.
+`checks/runtime/test_app_from_template.py::test_the_staged_template_is_byte_identical_to_a_fresh_scaffold`.
 **If you change the scaffold, regenerate this directory in the same commit** — that test is the
 only thing keeping the published template from contradicting the generator. To regenerate:
 
@@ -64,7 +64,7 @@ freshly-homed gateway, and the wall-clock numbers in the text are measured, not 
 The apps repo has no docs test tier, so nothing in **this** repo can pin that text. The same
 auth-shape invariant it depends on (`?token=` query parameter, never a Bearer header) is pinned
 here on the template README by
-`tests/test_app_from_template.py::test_the_staged_readme_uses_the_query_token_not_a_bearer_header`.
+`checks/runtime/test_app_from_template.py::test_the_staged_readme_uses_the_query_token_not_a_bearer_header`.
 
 ## 3. `registry/` → `github.com/gideon/registry`
 

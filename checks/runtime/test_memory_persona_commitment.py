@@ -5,20 +5,17 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.memory_record import MemoryKind, MemoryScope
-from gideon.memory_service import MemoryService
-from gideon.vector_memory import VectorMemoryStore
+from gideon.cognition.memory_record import MemoryKind, MemoryScope
+from gideon.cognition.memory_service import MemoryService
+from gideon.cognition.vector_memory import SemanticArchive
 
 
 @pytest.fixture
 def svc(tmp_path):
-    s = VectorMemoryStore(db_path=tmp_path / "m.db", embedding_dim=3)
+    s = SemanticArchive(db_path=tmp_path / "m.db", embedding_dim=3)
     s.init()
     s.embed_fn = lambda t: [1.0, 0.0, 0.0]
     return MemoryService.over_vector_store(s)
-
-
-# ── self-persona ──
 
 
 def test_record_persona_creates_agent_scoped_record(svc):
@@ -48,11 +45,7 @@ def test_persona_reinforces(svc):
     assert svc.get_record(k1).recall_count == 2
 
 
-# ── commitment guardrails (the creepy-when-wrong class) ──
-
-
 def test_commitment_off_by_default(svc):
-    # enabled defaults to False → refused
     key = svc.record_commitment(
         agent="A",
         channel="dash",
@@ -72,7 +65,7 @@ def test_commitment_requires_high_confidence(svc):
         confidence=0.5,
         enabled=True,
     )
-    assert key is None  # confidence < 0.8 → refused
+    assert key is None
 
 
 def test_commitment_recorded_when_enabled_and_confident(svc):
@@ -87,7 +80,6 @@ def test_commitment_recorded_when_enabled_and_confident(svc):
     assert key is not None
     rec = svc.get_record(key)
     assert rec.kind == MemoryKind.COMMITMENT
-    # delivery metadata rides the value_json envelope (no dedicated columns)
     assert rec.value["due_window"] == "2026-07-01T09:00:00+00:00"
     assert rec.value["channel"] == "dash"
     assert rec.value["text"] == "check the Friday migration on Monday"
@@ -105,7 +97,6 @@ def test_commitment_per_day_cap_enforced(svc):
             max_per_day=3,
         )
         assert k is not None
-    # the 4th is refused by the hard cap
     k4 = svc.record_commitment(
         agent="A",
         channel="dash",
@@ -119,7 +110,6 @@ def test_commitment_per_day_cap_enforced(svc):
 
 
 def test_commitment_never_injected_into_context(svc):
-    # commitments are delivered by the heartbeat, NEVER injected as memory context
     svc.record_commitment(
         agent="A",
         channel="dash",
@@ -128,7 +118,6 @@ def test_commitment_never_injected_into_context(svc):
         confidence=0.95,
         enabled=True,
     )
-    # get_context (the injection path) must not contain the commitment text
     ctx = svc.get_context()
     assert "ping about X" not in ctx
 
@@ -142,9 +131,10 @@ def test_commitment_never_promotes_to_global(svc):
         confidence=0.95,
         enabled=True,
     )
-    # even with heat, promote_by_heat skips commitments
     for r in svc.get_records(kinds={MemoryKind.COMMITMENT.value}):
-        svc._vs.db.execute("UPDATE semantic_memory SET recall_count=99 WHERE key=?", (r.id,))
+        svc._vs.db.execute(
+            "UPDATE semantic_memory SET recall_count=99 WHERE key=?", (r.id,)
+        )
     svc._vs.db.commit()
     svc.promote_by_heat(threshold=0.1)
     for r in svc.get_records(kinds={MemoryKind.COMMITMENT.value}):
@@ -162,7 +152,6 @@ def test_due_commitments_and_dismiss(svc):
     )
     due = svc.due_commitments(agent="A", now_iso="2026-01-01T00:00:00+00:00")
     assert any(d["key"] == key for d in due)
-    # one-tap dismiss → no longer delivered
     assert svc.dismiss_commitment(key) is True
     due2 = svc.due_commitments(agent="A", now_iso="2026-01-01T00:00:00+00:00")
     assert not any(d["key"] == key for d in due2)

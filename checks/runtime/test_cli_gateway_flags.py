@@ -9,9 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from gideon.cli import _resolve_gateway_args
-
-# ─── Helpers ─────────────────────────────────────────────────────────────
+from gideon.interfaces.cli.main import _resolve_gateway_args
 
 
 def _ns(**kwargs) -> argparse.Namespace:
@@ -36,9 +34,6 @@ def _ns(**kwargs) -> argparse.Namespace:
     return argparse.Namespace(**defaults)
 
 
-# ─── _resolve_gateway_args: bundle expansion + override semantics ────────
-
-
 class TestNoFlags:
     """Without any new flags, current behavior is preserved byte-for-byte."""
 
@@ -51,9 +46,6 @@ class TestNoFlags:
             "port_override": None,
             "json_ready": False,
             "approval_mode": None,
-            # AS-6 §6 recovery lever. Enumerated here (an exact dict, not a subset) on purpose:
-            # every key this resolver returns is splatted into `_gateway`, so a new one has to
-            # be argued for in this test before it can reach the entry point.
             "safe_surfaces": False,
         }
 
@@ -62,7 +54,6 @@ class TestNoFlags:
         assert result["no_dashboard"] is True
         assert result["no_crons"] is True
         assert result["no_open"] is True
-        # New flags untouched.
         assert result["port_override"] is None
         assert result["json_ready"] is False
         assert result["approval_mode"] is None
@@ -79,11 +70,9 @@ class TestTestModeBundle:
         assert result["approval_mode"] == "reads"
 
     def test_explicit_approval_overrides_bundle(self, tmp_path, monkeypatch):
-        # yolo bundle override needs the safety rail to pass; isolate home.
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
         result = _resolve_gateway_args(_ns(test_mode=True, approval="yolo"))
         assert result["approval_mode"] == "yolo"
-        # Other bundle defaults still apply.
         assert result["port_override"] == "auto"
         assert result["json_ready"] is True
         assert result["no_open"] is True
@@ -100,7 +89,6 @@ class TestTestModeBundle:
         assert result["approval_mode"] == "interactive"
 
     def test_explicit_reads_redundant_but_accepted(self):
-        # Same as the bundle default — should be a no-op, not an error.
         result = _resolve_gateway_args(_ns(test_mode=True, approval="reads"))
         assert result["approval_mode"] == "reads"
 
@@ -111,7 +99,7 @@ class TestStandaloneFlags:
     def test_port_int(self):
         result = _resolve_gateway_args(_ns(port="9999"))
         assert result["port_override"] == "9999"
-        assert result["json_ready"] is False  # not set by --port
+        assert result["json_ready"] is False
 
     def test_port_auto_alone(self):
         result = _resolve_gateway_args(_ns(port="auto"))
@@ -119,7 +107,6 @@ class TestStandaloneFlags:
         assert result["json_ready"] is False
 
     def test_port_auto_uppercase_canonicalized(self):
-        # Case-insensitive auto — common typo, should accept.
         result = _resolve_gateway_args(_ns(port="AUTO"))
         assert result["port_override"] == "auto"
 
@@ -128,15 +115,13 @@ class TestStandaloneFlags:
         assert result["port_override"] == "auto"
 
     def test_port_int_canonicalized_to_string(self):
-        # Integer string passes through unchanged so downstream
-        # comparison with "auto" works without type-juggling.
         result = _resolve_gateway_args(_ns(port="1234"))
         assert result["port_override"] == "1234"
 
     def test_json_ready_alone(self):
         result = _resolve_gateway_args(_ns(json_ready=True))
         assert result["json_ready"] is True
-        assert result["port_override"] is None  # not set by --json-ready
+        assert result["port_override"] is None
 
     def test_approval_reads_alone(self):
         result = _resolve_gateway_args(_ns(approval="reads"))
@@ -170,7 +155,6 @@ class TestPortValidation:
         assert "out of range" in captured.err
 
     def test_zero_port_rejected(self, capsys):
-        # Port 0 means "ephemeral" only via the `auto` keyword. Bare 0 is a typo.
         with pytest.raises(SystemExit) as exc:
             _resolve_gateway_args(_ns(port="0"))
         assert exc.value.code == 2
@@ -189,9 +173,6 @@ class TestPortValidation:
     def test_port_min_accepted(self):
         result = _resolve_gateway_args(_ns(port="1"))
         assert result["port_override"] == "1"
-
-
-# ─── Safety rail: --approval yolo ────────────────────────────────────────
 
 
 class TestApprovalYoloSafetyRail:
@@ -214,7 +195,6 @@ class TestApprovalYoloSafetyRail:
         assert "GIDEON_HOME must be explicitly set" in captured.err
 
     def test_yolo_refused_when_resolves_to_default_home(self, monkeypatch, capsys):
-        # Point GIDEON_HOME at the literal default; rail must catch it.
         monkeypatch.setenv("GIDEON_HOME", str(Path.home() / ".gideon"))
         with pytest.raises(SystemExit) as exc:
             _resolve_gateway_args(_ns(approval="yolo"))
@@ -223,12 +203,10 @@ class TestApprovalYoloSafetyRail:
         assert "main gateway home" in captured.err
 
     def test_yolo_refused_via_tilde_expansion(self, monkeypatch, capsys):
-        # `~/.gideon` expands then resolves to the same path as Path.home() / .gideon.
         monkeypatch.setenv("GIDEON_HOME", "~/.gideon")
         with pytest.raises(SystemExit) as exc:
             _resolve_gateway_args(_ns(approval="yolo"))
         assert exc.value.code == 2
-        # Confirm we hit the same-as-default branch (not the resolve-failure branch).
         captured = capsys.readouterr()
         assert "main gateway home" in captured.err
 
@@ -237,23 +215,21 @@ class TestApprovalYoloSafetyRail:
         result = _resolve_gateway_args(_ns(approval="yolo"))
         assert result["approval_mode"] == "yolo"
 
-    def test_yolo_accepted_via_test_mode_bundle_with_isolated_home(self, tmp_path, monkeypatch):
+    def test_yolo_accepted_via_test_mode_bundle_with_isolated_home(
+        self, tmp_path, monkeypatch
+    ):
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
         result = _resolve_gateway_args(_ns(test_mode=True, approval="yolo"))
         assert result["approval_mode"] == "yolo"
         assert result["port_override"] == "auto"
 
     def test_reads_mode_skips_safety_rail(self):
-        # Rail only applies to yolo; reads should pass with default home.
         result = _resolve_gateway_args(_ns(approval="reads"))
         assert result["approval_mode"] == "reads"
 
     def test_interactive_mode_skips_safety_rail(self):
         result = _resolve_gateway_args(_ns(approval="interactive"))
         assert result["approval_mode"] == "interactive"
-
-
-# ─── _is_read_only_tool helper ───────────────────────────────────────────
 
 
 class TestIsReadOnlyTool:
@@ -281,7 +257,7 @@ class TestIsReadOnlyTool:
         ],
     )
     def test_known_read_verbs_match(self, title):
-        from gideon.gateway import _is_read_only_tool
+        from gideon.engine.gateway import _is_read_only_tool
 
         assert _is_read_only_tool(title) is True
 
@@ -299,52 +275,48 @@ class TestIsReadOnlyTool:
         ],
     )
     def test_write_verbs_do_not_match(self, title):
-        from gideon.gateway import _is_read_only_tool
+        from gideon.engine.gateway import _is_read_only_tool
 
         assert _is_read_only_tool(title) is False
 
     @pytest.mark.parametrize(
         "title",
         [
-            "read_or_write",  # read prefix masking write
-            "read_and_delete",  # read prefix masking delete
-            "find_and_replace",  # find prefix masking replace
-            "search_replace",  # search prefix masking replace
-            "get_or_create",  # get prefix masking create
-            "list_and_remove",  # list prefix masking remove
-            "fetch_and_update",  # fetch prefix masking update
-            "query_and_modify",  # query prefix masking modify
+            "read_or_write",
+            "read_and_delete",
+            "find_and_replace",
+            "search_replace",
+            "get_or_create",
+            "list_and_remove",
+            "fetch_and_update",
+            "query_and_modify",
         ],
     )
     def test_compound_read_write_verbs_rejected(self, title):
         """Denylist catches tools whose read-verb prefix masks a write capability."""
-        from gideon.gateway import _is_read_only_tool
+        from gideon.engine.gateway import _is_read_only_tool
 
         assert _is_read_only_tool(title) is False
 
     def test_empty_string_not_match(self):
-        from gideon.gateway import _is_read_only_tool
+        from gideon.engine.gateway import _is_read_only_tool
 
         assert _is_read_only_tool("") is False
 
     def test_whitespace_only_not_match(self):
-        from gideon.gateway import _is_read_only_tool
+        from gideon.engine.gateway import _is_read_only_tool
 
         assert _is_read_only_tool("   ") is False
         assert _is_read_only_tool("\t\n") is False
 
     def test_handles_punctuation_separators(self):
-        from gideon.gateway import _is_read_only_tool
+        from gideon.engine.gateway import _is_read_only_tool
 
-        # First token before space/colon/underscore/dash/paren counts.
         assert _is_read_only_tool("read(file.txt)") is True
         assert _is_read_only_tool("LIST: stuff") is True
 
     def test_substring_inside_token_does_not_match(self):
         """`set` token-equality check must not match the longer token `setter`."""
-        from gideon.gateway import _is_read_only_tool
+        from gideon.engine.gateway import _is_read_only_tool
 
-        # `read_setter_field` has read prefix; tokens are
-        # ["read", "setter", "field"]. None equal an entry in
-        # _WRITE_INDICATORS (which lists "set", not "setter").
         assert _is_read_only_tool("read_setter_field") is True

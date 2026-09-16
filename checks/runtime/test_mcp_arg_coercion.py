@@ -10,7 +10,7 @@ These test the PURE helper (no live server / SDK needed), so they run everywhere
 
 from __future__ import annotations
 
-from gideon.mcp_client import _coerce_args_to_schema, _schema_numeric_kind
+from gideon.integrations.mcp_client import _coerce_args_to_schema, _schema_numeric_kind
 
 _SUM_SCHEMA = {
     "type": "object",
@@ -26,7 +26,6 @@ def test_numeric_string_args_coerced_per_schema():
     out = _coerce_args_to_schema({"a": "128", "b": "256", "label": "42"}, _SUM_SCHEMA)
     assert out == {"a": 128.0, "b": 256, "label": "42"}
     assert isinstance(out["a"], float) and isinstance(out["b"], int)
-    # The string-typed field is left a string even though it looks numeric.
     assert out["label"] == "42"
 
 
@@ -36,20 +35,17 @@ def test_already_numeric_args_untouched():
 
 
 def test_non_numeric_string_left_as_is():
-    # "not-a-number" for a number field stays as-is so the server's -32602 fires.
     out = _coerce_args_to_schema({"a": "not-a-number"}, _SUM_SCHEMA)
     assert out == {"a": "not-a-number"}
 
 
 def test_tricky_numeric_looking_strings_not_coerced():
-    # Python int()/float() would accept these; the strict regex must reject them.
     for bad in ("1_000", "inf", "nan", "0x1F", " 12", "12 ", "+", ""):
         out = _coerce_args_to_schema({"b": bad}, _SUM_SCHEMA)
         assert out == {"b": bad}, f"{bad!r} should not be coerced"
 
 
 def test_scientific_notation_coerced_for_number_not_integer():
-    # A "number" field accepts scientific notation; an "integer" field does not.
     assert _coerce_args_to_schema({"a": "1e3"}, _SUM_SCHEMA) == {"a": 1000.0}
     assert _coerce_args_to_schema({"b": "1e3"}, _SUM_SCHEMA) == {"b": "1e3"}
 
@@ -71,7 +67,10 @@ def test_anyof_oneof_ref_not_coerced():
 
 
 def test_negative_and_float_literals():
-    assert _coerce_args_to_schema({"a": "-3.14", "b": "-7"}, _SUM_SCHEMA) == {"a": -3.14, "b": -7}
+    assert _coerce_args_to_schema({"a": "-3.14", "b": "-7"}, _SUM_SCHEMA) == {
+        "a": -3.14,
+        "b": -7,
+    }
 
 
 def test_empty_or_missing_schema_returns_args_unchanged():

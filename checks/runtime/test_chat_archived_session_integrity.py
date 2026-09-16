@@ -42,9 +42,9 @@ from chat_test_helpers import _make_app, _make_state
 @pytest.fixture(autouse=True)
 def _isolate_home(tmp_path, monkeypatch):
     """Every write lands in tmp_path — never the real ``~/.gideon``."""
-    import gideon.config.loader as cfg
-    import gideon.dashboard.state as st
-    import gideon.session_workspace as ws
+    import gideon.core.config.loader as cfg
+    import gideon.engine.session_workspace as ws
+    import gideon.interfaces.dashboard.state as st
 
     monkeypatch.setattr(cfg, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(st, "config_dir", lambda: tmp_path)
@@ -53,7 +53,7 @@ def _isolate_home(tmp_path, monkeypatch):
 
 
 def _hk(name: str) -> str:
-    from gideon.dashboard.chat_utils import _history_key_for
+    from gideon.interfaces.dashboard.chat_utils import _history_key_for
 
     return _history_key_for(name)
 
@@ -64,7 +64,7 @@ def _seed_two_turns(state, name: str = "chat-arch-1") -> str:
     Eviction is what makes it non-resident — the state a gateway restart leaves an
     un-foldered session in, and the state both symptoms need.
     """
-    from gideon.dashboard.chat_persistence import save_session_to_history
+    from gideon.interfaces.dashboard.chat_persistence import save_session_to_history
 
     session = state.get_or_create_session(name)
     session.append("user", "the original question", "msg u0", broadcast=False)
@@ -115,9 +115,6 @@ async def _client(state) -> TestClient:
     return client
 
 
-# ── Symptom A: the transcript survives, and stays archived ───────────────────────
-
-
 @pytest.mark.asyncio
 async def test_a_send_to_an_archived_session_does_not_destroy_its_transcript(tmp_path):
     """The measured defect: 785 B / 2 turns → 693 B / 1 turn, ``closed`` cleared."""
@@ -132,10 +129,12 @@ async def test_a_send_to_an_archived_session_does_not_destroy_its_transcript(tmp
 
     client = await _client(state)
     try:
-        resp = await client.post("/api/chat", json={"session": name, "message": "resurrect"})
-        # The send is accepted — an archived session is writable ("archival is not
-        # deletion"); it is the OVERWRITE that had to stop.
-        assert resp.status == 200, f"a send to an archived session answered {resp.status}"
+        resp = await client.post(
+            "/api/chat", json={"session": name, "message": "resurrect"}
+        )
+        assert (
+            resp.status == 200
+        ), f"a send to an archived session answered {resp.status}"
     finally:
         await client.close()
 
@@ -146,8 +145,6 @@ async def test_a_send_to_an_archived_session_does_not_destroy_its_transcript(tmp
     )
     assert size_after >= size_before, f"file shrank: {size_before} B → {size_after} B"
     assert closed_after, "a normal send silently un-archived the session"
-    # And the original content is still there, verbatim — a count can be satisfied by
-    # the wrong four messages.
     hk = _hk(name)
     contents = [m.get("content") for m in state.conversation_log.read_messages(hk)]
     assert "the original question" in contents
@@ -190,7 +187,7 @@ async def test_a_shutdown_flush_does_not_un_archive(tmp_path):
     With no user in the loop at all, that used to drop ``closed`` — which is also what
     invalidated an earlier attempt to even REPRODUCE symptom A.
     """
-    from gideon.dashboard.chat_persistence import (
+    from gideon.interfaces.dashboard.chat_persistence import (
         _rehydrate_session_from_history,
         save_all_sessions_to_history,
     )
@@ -198,8 +195,9 @@ async def test_a_shutdown_flush_does_not_un_archive(tmp_path):
     state = _make_state(tmp_path)
     name = _seed_two_turns(state)
     _archive_on_disk(state, name)
-    # Make it resident the way the send path does, then flush as shutdown does.
-    assert _rehydrate_session_from_history(state, name, include_archived=True) is not None
+    assert (
+        _rehydrate_session_from_history(state, name, include_archived=True) is not None
+    )
     save_all_sessions_to_history(state)
 
     _, msgs, closed = _disk(state, name)
@@ -215,7 +213,7 @@ async def test_archiving_lands_its_flag_without_rewriting_the_transcript(tmp_pat
     transcript. (The ``side`` buffer twenty lines away already prefers the persisted copy
     for exactly this reason; ``messages`` never did.)
     """
-    from gideon.dashboard.chat_persistence import save_session_to_history
+    from gideon.interfaces.dashboard.chat_persistence import save_session_to_history
 
     state = _make_state(tmp_path)
     name = _seed_two_turns(state)
@@ -228,11 +226,12 @@ async def test_archiving_lands_its_flag_without_rewriting_the_transcript(tmp_pat
 
     size_after, msgs_after, closed_after = _disk(state, name)
     assert closed_after, "the archive flag never landed"
-    assert msgs_after == msgs_before, f"archiving cost the transcript: {msgs_before} → {msgs_after}"
-    assert size_after >= size_before - 2, "archiving rewrote the file from the poorer buffer"
-
-
-# ── Symptom B: /resume reads the resolved key ────────────────────────────────────
+    assert (
+        msgs_after == msgs_before
+    ), f"archiving cost the transcript: {msgs_before} → {msgs_after}"
+    assert (
+        size_after >= size_before - 2
+    ), "archiving rewrote the file from the poorer buffer"
 
 
 @pytest.mark.asyncio
@@ -247,8 +246,12 @@ async def test_resume_of_a_non_resident_session_returns_its_messages(tmp_path):
         resp = await client.post(f"/api/chat/sessions/{name}/resume", json={})
         assert resp.status == 200
         body = await resp.json()
-        assert body["total"] == 4, f"resume served total={body['total']} for a 4-message file"
-        assert len(body["messages"]) == 4, f"resume served {len(body['messages'])} messages"
+        assert (
+            body["total"] == 4
+        ), f"resume served total={body['total']} for a 4-message file"
+        assert (
+            len(body["messages"]) == 4
+        ), f"resume served {len(body['messages'])} messages"
         assert any(
             m.get("content") == "the original question" for m in body["messages"]
         ), "resume served messages, but not this session's"
@@ -257,7 +260,9 @@ async def test_resume_of_a_non_resident_session_returns_its_messages(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_resume_of_a_non_resident_archived_session_clears_closed_on_disk(tmp_path):
+async def test_resume_of_a_non_resident_archived_session_clears_closed_on_disk(
+    tmp_path,
+):
     """The un-archive path. It is now the ONLY one, so it has to work off the real key."""
     state = _make_state(tmp_path)
     name = _seed_two_turns(state)
@@ -285,16 +290,17 @@ async def test_resume_honours_an_explicit_body_key(tmp_path):
 
     client = await _client(state)
     try:
-        resp = await client.post("/api/chat/sessions/chat-arch-fresh/resume", json={"key": other})
+        resp = await client.post(
+            "/api/chat/sessions/chat-arch-fresh/resume", json={"key": other}
+        )
         assert resp.status == 200
         body = await resp.json()
         assert body["total"] == 4, f"body-key resume served total={body['total']}"
-        assert any(m.get("content") == "the original question" for m in body["messages"])
+        assert any(
+            m.get("content") == "the original question" for m in body["messages"]
+        )
     finally:
         await client.close()
-
-
-# ── The properties e3d0dcef0 established must survive ────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -306,7 +312,9 @@ async def test_a_hard_deleted_key_is_still_refused(tmp_path):
     client = await _client(state)
     try:
         assert (await client.delete(f"/api/chat/sessions/{name}")).status == 200
-        assert not state.conversation_log.has_log(_hk(name)), "the JSONL survived a hard delete"
+        assert not state.conversation_log.has_log(
+            _hk(name)
+        ), "the JSONL survived a hard delete"
         for path, body in (
             ("/api/chat", {"session": name, "message": "resurrect"}),
             (f"/api/chat/sessions/{name}/resume", {}),
@@ -318,35 +326,36 @@ async def test_a_hard_deleted_key_is_still_refused(tmp_path):
         await client.close()
 
 
-# ── The owner must actually RESOLVE, not just be called ──────────────────────────
-#
-# Every test above uses a dashboard session, whose file is under the `dashboard:` form —
-# the one case where the prefix helper and the resolver agree. So they all passed with
-# `persisted_history_key` reduced to a bare `_history_key_for` (measured: mutant M5
-# survived the whole suite). The two answers only diverge for a session persisted under
-# its OWN bare key, which is what a channel-provider thread is, so that is the case that
-# holds the owner to its contract.
-
-
 def _seed_bare_key_thread(state, key: str = "chan-thread-77") -> str:
     """A conversation persisted under its own BARE key, as a channel app writes it."""
     log = state.conversation_log
     log.append(key, "user", "thread question", source_thread=key, source_user="u1")
     log.append(key, "assistant", "thread answer", source_thread=key, source_user="bot")
     log.append(key, "user", "thread follow-up", source_thread=key, source_user="u1")
-    log.append(key, "assistant", "thread follow-up answer", source_thread=key, source_user="bot")
+    log.append(
+        key,
+        "assistant",
+        "thread follow-up answer",
+        source_thread=key,
+        source_user="bot",
+    )
     assert log.has_log(key), "precondition: the file is under the BARE key"
     assert not log.has_log(_hk(key)), "precondition: nothing under the dashboard: form"
     return key
 
 
 def test_the_owner_resolves_a_bare_key_the_prefix_helper_would_miss(tmp_path):
-    from gideon.dashboard.chat_utils import _history_key_for, persisted_history_key
+    from gideon.interfaces.dashboard.chat_utils import (
+        _history_key_for,
+        persisted_history_key,
+    )
 
     state = _make_state(tmp_path)
     key = _seed_bare_key_thread(state)
     assert persisted_history_key(state.conversation_log, key) == key
-    assert _history_key_for(key) != key, "the prefix helper would have keyed a second file"
+    assert (
+        _history_key_for(key) != key
+    ), "the prefix helper would have keyed a second file"
 
 
 def test_a_save_does_not_orphan_a_bare_key_transcript(tmp_path):
@@ -355,7 +364,7 @@ def test_a_save_does_not_orphan_a_bare_key_transcript(tmp_path):
     Keyed off the prefix instead, the save wrote a SECOND, near-empty file beside the
     real transcript — and the guard, reading that empty file, saw nothing to protect.
     """
-    from gideon.dashboard.chat_persistence import save_session_to_history
+    from gideon.interfaces.dashboard.chat_persistence import save_session_to_history
 
     state = _make_state(tmp_path)
     key = _seed_bare_key_thread(state)
@@ -385,7 +394,9 @@ async def test_resume_of_a_bare_key_thread_returns_its_messages(tmp_path):
         resp = await client.post(f"/api/chat/sessions/{key}/resume", json={})
         assert resp.status == 200
         body = await resp.json()
-        assert body["total"] == 4, f"resume served total={body['total']} for a 4-message thread"
+        assert (
+            body["total"] == 4
+        ), f"resume served total={body['total']} for a 4-message thread"
         assert any(m.get("content") == "thread question" for m in body["messages"])
     finally:
         await client.close()
@@ -402,9 +413,15 @@ async def test_delete_of_a_bare_key_thread_unlinks_the_real_file(tmp_path):
     client = await _client(state)
     try:
         assert (await client.delete(f"/api/chat/sessions/{key}")).status == 200
-        assert not state.conversation_log.has_log(key), "the real transcript survived the delete"
-        resp = await client.post("/api/chat", json={"session": key, "message": "resurrect"})
-        assert resp.status == 404, f"a send to the deleted thread answered {resp.status}"
+        assert not state.conversation_log.has_log(
+            key
+        ), "the real transcript survived the delete"
+        resp = await client.post(
+            "/api/chat", json={"session": key, "message": "resurrect"}
+        )
+        assert (
+            resp.status == 404
+        ), f"a send to the deleted thread answered {resp.status}"
     finally:
         await client.close()
 
@@ -413,7 +430,7 @@ async def test_delete_of_a_bare_key_thread_unlinks_the_real_file(tmp_path):
 async def test_an_unreadable_log_fails_open_on_the_save_guard(tmp_path):
     """A disk that misbehaves must never cost a live write. Same posture as the
     existence check: absence is unprovable, so do not refuse."""
-    from gideon.dashboard import chat_persistence
+    from gideon.interfaces.dashboard import chat_persistence
 
     state = _make_state(tmp_path)
     name = _seed_two_turns(state)
@@ -429,4 +446,6 @@ async def test_an_unreadable_log_fails_open_on_the_save_guard(tmp_path):
 
     del state.conversation_log.read_messages
     _, msgs, _ = _disk(state, name)
-    assert msgs == 1, f"the guard refused a live write on an unreadable log (msgs={msgs})"
+    assert (
+        msgs == 1
+    ), f"the guard refused a live write on an unreadable log (msgs={msgs})"

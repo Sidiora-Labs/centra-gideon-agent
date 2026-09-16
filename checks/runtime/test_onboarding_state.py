@@ -20,8 +20,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from gideon import onboarding as ob
-from gideon.dashboard import handlers_system as hs
+from gideon.cognition import onboarding as ob
+from gideon.interfaces.dashboard import handlers_system as hs
 
 
 @pytest.fixture(autouse=True)
@@ -56,42 +56,41 @@ async def _json(resp):
     return json.loads(resp.body.decode())
 
 
-# ── 1. defaults + round trip ─────────────────────────────────────────────────
-
-
 def test_fresh_home_starts_at_the_first_step(_isolate_home):
     assert not _store_path(_isolate_home).exists()
     state = ob.load_onboarding_state()
     assert state == {
         "step": "name",
-        "essentials": {"model": None, "search": False, "speech": False, "channel": None},
+        "essentials": {
+            "model": None,
+            "search": False,
+            "speech": False,
+            "channel": None,
+        },
         "first_success": {"knowledge": False, "trigger": False, "loop": False},
     }
 
 
 def test_merge_persists_to_entity_settings_not_config(_isolate_home):
-    ob.merge_onboarding_state({"step": "essentials", "essentials": {"model": "acme-models"}})
+    ob.merge_onboarding_state(
+        {"step": "essentials", "essentials": {"model": "acme-models"}}
+    )
 
-    # The bytes are where §2.1 says they belong…
     on_disk = json.loads(_store_path(_isolate_home).read_text(encoding="utf-8"))
     assert on_disk["step"] == "essentials"
     assert on_disk["essentials"]["model"] == "acme-models"
-    # …and NOT in config.json, whose PATCH allowlist this deliberately bypasses.
     cfg = _isolate_home / "config.json"
     assert not cfg.exists() or "onboarding" not in cfg.read_text(encoding="utf-8")
 
 
 def test_state_survives_a_reload(_isolate_home):
     """A mid-flow reload re-reads from disk — no in-process cache carries the answer."""
-    ob.merge_onboarding_state({"step": "first_success", "first_success": {"knowledge": True}})
-    # Simulate the reload by dropping every cached module-level value there could be:
-    # the store keeps none, so a plain re-read must already agree with disk.
+    ob.merge_onboarding_state(
+        {"step": "first_success", "first_success": {"knowledge": True}}
+    )
     again = ob.load_onboarding_state()
     assert again["step"] == "first_success"
     assert again["first_success"]["knowledge"] is True
-
-
-# ── 2. partial merge at both levels ──────────────────────────────────────────
 
 
 def test_top_level_merge_is_partial(_isolate_home):
@@ -118,16 +117,17 @@ def test_nested_merge_can_clear_one_field_explicitly(_isolate_home):
     """Partial means absent-is-untouched, not absent-is-false — an explicit false wins."""
     ob.merge_onboarding_state({"first_success": {"knowledge": True, "trigger": True}})
     after = ob.merge_onboarding_state({"first_success": {"knowledge": False}})
-    assert after["first_success"] == {"knowledge": False, "trigger": True, "loop": False}
+    assert after["first_success"] == {
+        "knowledge": False,
+        "trigger": True,
+        "loop": False,
+    }
 
 
 def test_essentials_model_can_be_nulled(_isolate_home):
     ob.merge_onboarding_state({"essentials": {"model": "acme-models"}})
     after = ob.merge_onboarding_state({"essentials": {"model": None}})
     assert after["essentials"]["model"] is None
-
-
-# ── 3. tolerant reads ────────────────────────────────────────────────────────
 
 
 def test_old_client_store_missing_every_new_field_still_loads(_isolate_home):
@@ -141,16 +141,19 @@ def test_wrong_typed_fields_do_not_raise_and_fall_back_per_field(_isolate_home):
     _write_raw(
         _isolate_home,
         {
-            "step": 7,  # not a string
-            "essentials": "nope",  # not an object
-            "first_success": {"knowledge": "yes", "loop": True},  # one bad, one good
+            "step": 7,
+            "essentials": "nope",
+            "first_success": {"knowledge": "yes", "loop": True},
         },
     )
     state = ob.load_onboarding_state()
     assert state["step"] == "name"
     assert state["essentials"] == ob.default_state()["essentials"]
-    # The bad sibling does not cost us the good one — per-field fallback.
-    assert state["first_success"] == {"knowledge": False, "trigger": False, "loop": True}
+    assert state["first_success"] == {
+        "knowledge": False,
+        "trigger": False,
+        "loop": True,
+    }
 
 
 def test_out_of_domain_step_on_disk_falls_back(_isolate_home):
@@ -171,9 +174,6 @@ def test_unknown_on_disk_keys_are_not_leaked_back_out(_isolate_home):
     """Bug #22's lesson: garbage must not ride a read back out to every client."""
     _write_raw(_isolate_home, {"step": "done", "totally_bogus_key_xyz": "junk"})
     assert "totally_bogus_key_xyz" not in ob.load_onboarding_state()
-
-
-# ── 4. strict writes ─────────────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -209,20 +209,19 @@ def test_every_declared_step_is_writable(_isolate_home):
         assert ob.merge_onboarding_state({"step": step})["step"] == step
 
 
-# ── 5. the HTTP surface ──────────────────────────────────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_get_carries_progress_beside_the_readiness_triple(_isolate_home):
     ob.merge_onboarding_state({"step": "first_success", "essentials": {"speech": True}})
     data = await _json(await hs.api_onboarding(_req({})))
-    # The pre-existing contract an old client reads is untouched…
     for key in ("needs_model", "has_model_provider", "has_chat_binding"):
         assert key in data
-    # …and the new fields ride alongside it.
     assert data["step"] == "first_success"
     assert data["essentials"]["speech"] is True
-    assert data["first_success"] == {"knowledge": False, "trigger": False, "loop": False}
+    assert data["first_success"] == {
+        "knowledge": False,
+        "trigger": False,
+        "loop": False,
+    }
 
 
 @pytest.mark.asyncio
@@ -231,13 +230,15 @@ async def test_get_still_answers_over_a_corrupt_store(_isolate_home):
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text("]]] broken", encoding="utf-8")
     data = await _json(await hs.api_onboarding(_req({})))
-    assert data["needs_model"] is True  # readiness still computed
+    assert data["needs_model"] is True
     assert data["step"] == "name"
 
 
 @pytest.mark.asyncio
 async def test_post_round_trips_through_the_get(_isolate_home):
-    resp = await hs.api_onboarding_state(_req({"step": "done", "first_success": {"loop": True}}))
+    resp = await hs.api_onboarding_state(
+        _req({"step": "done", "first_success": {"loop": True}})
+    )
     assert resp.status == 200
     posted = await _json(resp)
     assert posted["ok"] is True
@@ -258,7 +259,8 @@ async def test_post_partial_merge_over_http(_isolate_home):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "body", [{"nope": 1}, {"step": "bogus"}, {"essentials": {"search": "yes"}}, "a string"]
+    "body",
+    [{"nope": 1}, {"step": "bogus"}, {"essentials": {"search": "yes"}}, "a string"],
 )
 async def test_post_rejects_bad_bodies_with_400(_isolate_home, body):
     resp = await hs.api_onboarding_state(_req(body))
@@ -279,7 +281,7 @@ def test_post_route_is_registered():
     import ast
     from pathlib import Path
 
-    import gideon.dashboard.server as srv
+    import gideon.interfaces.dashboard.server as srv
 
     tree = ast.parse(Path(srv.__file__).read_text(encoding="utf-8"))
     posts = {
@@ -297,11 +299,13 @@ def test_post_route_is_registered():
 
 def test_onboarding_is_not_wired_into_config(_isolate_home):
     """§2.1: this is entity state. It must not reach the config allowlist or dataclass."""
-    from gideon.config.loader import AppConfig
+    from gideon.core.config.loader import AppConfig
 
     cfg = AppConfig.load()
     assert not hasattr(cfg, "onboarding_step")
     assert not hasattr(cfg, "first_success")
-    from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+    from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
-    assert not any(k.startswith("onboarding") or k == "first_success" for k in _EDITABLE_CONFIG)
+    assert not any(
+        k.startswith("onboarding") or k == "first_success" for k in _EDITABLE_CONFIG
+    )

@@ -1,12 +1,3 @@
-#!/bin/sh
-# Generate a self-signed TLS cert for the Gideon web proxy if one isn't
-# already present. Runs from the official nginx image's docker-entrypoint.d/
-# hook chain (the `10-` prefix runs before `20-envsubst-on-templates.sh`), so
-# the cert exists before nginx loads the rendered config.
-#
-# The stack ships HTTPS + HTTP/2 out of the box with this throwaway cert. To use
-# a real certificate, mount it over /etc/nginx/certs/gideon.{crt,key}
-# (this script then leaves it untouched).
 set -eu
 
 CERT_DIR=/etc/nginx/certs

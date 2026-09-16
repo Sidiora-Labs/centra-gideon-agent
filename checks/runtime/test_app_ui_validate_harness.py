@@ -1,9 +1,9 @@
 """Gate the app-bundle UI validation harness's own reporting logic.
 
-The harness (``scripts/app_ui_validate.mjs``) is the thing that decides whether an
+The harness (``tooling/scripts/app_ui_validate.mjs``) is the thing that decides whether an
 app bundle's "driven in the real UI" clause is satisfied, so the part of it that can
 quietly lie — a leg that never ran reading as green, a SKIPPED leg with no reason —
-carries unit tests of its own (``scripts/lib/app_validate_report.test.mjs``, run
+carries unit tests of its own (``tooling/scripts/lib/app_validate_report.test.mjs``, run
 under ``node --test``). This module runs those from pytest so they sit inside the
 same gate as everything else, and adds the static checks that keep the browser
 driver honest: it must route every status through the tested module rather than
@@ -12,7 +12,7 @@ back to locating a tool's argument fields by ``name`` attribute — a selector t
 matched nothing, ran every tool with EMPTY arguments, and failed the leg with the
 tool's own "needs an X" error attributed to the BUNDLE. The behavioural pin for
 that fill path renders the real form and drives the real function
-(``web/src/pages/tools/harnessFillsToolArgs.test.tsx``); these are the cheap
+(``apps/console/src/pages/tools/harnessFillsToolArgs.test.tsx``); these are the cheap
 source-level rails beside it.
 """
 
@@ -26,11 +26,11 @@ from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-REPORT_MODULE = REPO_ROOT / "scripts" / "lib" / "app_validate_report.mjs"
-REPORT_TESTS = REPO_ROOT / "scripts" / "lib" / "app_validate_report.test.mjs"
-FORM_MODULE = REPO_ROOT / "scripts" / "lib" / "app_validate_form.mjs"
-DRIVER = REPO_ROOT / "scripts" / "app_ui_validate.mjs"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+REPORT_MODULE = REPO_ROOT / "tooling/scripts" / "lib" / "app_validate_report.mjs"
+REPORT_TESTS = REPO_ROOT / "tooling/scripts" / "lib" / "app_validate_report.test.mjs"
+FORM_MODULE = REPO_ROOT / "tooling/scripts" / "lib" / "app_validate_form.mjs"
+DRIVER = REPO_ROOT / "tooling/scripts" / "app_ui_validate.mjs"
 
 
 def _leg_ids() -> list[str]:
@@ -54,9 +54,9 @@ def test_report_module_unit_tests_pass() -> None:
     )
     combined = f"{proc.stdout}\n{proc.stderr}"
     assert proc.returncode == 0, f"node --test failed:\n{combined[-4000:]}"
-    assert re.search(r"^# fail 0$", combined, re.MULTILINE) or "fail 0" in combined, combined[
-        -2000:
-    ]
+    assert (
+        re.search(r"^# fail 0$", combined, re.MULTILINE) or "fail 0" in combined
+    ), combined[-2000:]
 
 
 def test_declared_legs_are_the_six_standard_ones() -> None:
@@ -84,7 +84,9 @@ def test_driver_owns_no_status_vocabulary_of_its_own() -> None:
     would be a second, untested path to a green result."""
     driver = DRIVER.read_text(encoding="utf-8")
     for helper in ("passLeg", "failLeg", "skipLeg", "shapeBundleReport", "shapeReport"):
-        assert helper in driver, f"the driver does not use {helper} from the report module"
+        assert (
+            helper in driver
+        ), f"the driver does not use {helper} from the report module"
     assert not re.search(r"status:\s*['\"](PASS|FAIL|SKIPPED)['\"]", driver), (
         "the driver assigns a leg status literally instead of going through the "
         "report module, which is what enforces the reason-required rule"
@@ -103,17 +105,18 @@ def test_driver_locates_tool_arguments_by_accessible_name() -> None:
     driver = DRIVER.read_text(encoding="utf-8")
     form = FORM_MODULE.read_text(encoding="utf-8")
     assert "fillRequiredArgs" in driver, (
-        "the driver must fill tool arguments through scripts/lib/app_validate_form.mjs, "
+        "the driver must fill tool arguments through tooling/scripts/lib/app_validate_form.mjs, "
         "which is the part pinned against the real rendered form"
     )
-    # An interpolated name selector is the defect's signature. A LITERAL one is fine:
-    # `input[name="app-local-source"]` targets a field that really does set `name`.
     offenders = [
         line.strip()
         for line in (driver + form).splitlines()
-        if re.search(r'\[name="\$\{', line) and not line.lstrip().startswith(("//", "*", "/*"))
+        if re.search(r'\[name="\$\{', line)
+        and not line.lstrip().startswith(("//", "*", "/*"))
     ]
-    assert not offenders, f"a tool argument is being located by name attribute again: {offenders}"
+    assert (
+        not offenders
+    ), f"a tool argument is being located by name attribute again: {offenders}"
     assert "getByLabel" in form, "the fill path must resolve fields by accessible name"
 
 

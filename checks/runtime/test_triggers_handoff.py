@@ -32,9 +32,7 @@ from pathlib import Path
 
 import pytest
 
-from gideon.triggers.handoff import HANDOFF_HINT, detect, needs_prompt
-
-# ── the read/write split, which is the whole predicate ──
+from gideon.automation.triggers.handoff import HANDOFF_HINT, detect, needs_prompt
 
 WRITES = [
     "crontab -e",
@@ -62,11 +60,6 @@ READS = [
     "systemctl cat mytimer.timer",
 ]
 
-#: Ordinary commands that must NEVER prompt. The expensive failure mode here is the false positive:
-#: a seam that nags about `grep -rn crontab docs/` teaches the user to click through prompts, which
-#: degrades every REAL approval prompt on the machine. `grep -rn crontab docs/` is not
-#: hypothetical —
-#: it flagged on the first draft, because the pattern read `docs/` as the file being installed.
 INNOCENT = [
     "ls -la",
     "git commit -m 'add cron docs'",
@@ -88,8 +81,6 @@ def test_a_scheduler_WRITE_is_offered_the_substrate(command):
     assert offer is not None, command
     assert offer.scheduler
     assert offer.pattern in {"cron", "launchd", "systemd"}
-    # The offer must NAME the supported path. A refusal that only says "no" gets worked around —
-    # the model tries `at`, or writes the plist with `python -c`, and the user is no safer.
     assert "automation_create" in offer.observation
 
 
@@ -110,13 +101,15 @@ def test_ordinary_commands_never_prompt(command):
 def test_an_AMBIGUOUS_command_does_not_prompt():
     """`crontab -l > backup && crontab new` reads AND writes. The safe reading of an ambiguous
     command is the non-nagging one — see `INNOCENT` on why a false positive is the expensive
-    failure. A user backing up before installing is the likeliest author of this line."""
+    failure. A user backing up before installing is the likeliest author of this line.
+    """
     assert detect("crontab -l > backup.txt && crontab new.txt") is None
 
 
 def test_it_is_ADVISORY_not_a_security_fence():
     """Fail-OPEN on junk. Its output is a prompt and a suggestion, so a crash here must not deny a
-    legitimate command — the capability fence and PathGuard are the fail-CLOSED controls."""
+    legitimate command — the capability fence and PathGuard are the fail-CLOSED controls.
+    """
     for junk in ("", None, 123, [], "\x00\x00"):
         assert detect(junk) is None  # type: ignore[arg-type]
     assert needs_prompt("crontab -e") is True
@@ -129,12 +122,9 @@ def test_the_hint_names_the_MIGRATION_path():
     assert "automation_create" in HANDOFF_HINT
 
 
-# ── both dispatch seams ──
-
-
 def test_the_NATIVE_bash_tool_declines_with_the_offer(tmp_path):
     """Seam 1 of 2: the native agent's `bash` tool."""
-    from gideon.agents.native.builtin_tools import NativeBuiltinToolProvider
+    from gideon.engine.agents.native.builtin_tools import NativeBuiltinToolProvider
 
     provider = NativeBuiltinToolProvider(cwd=Path(tmp_path))
 
@@ -152,7 +142,7 @@ def test_the_native_bash_tool_still_RUNS_a_read(tmp_path):
     test is for. A bare `assert result.success` would fail on such a machine and look like a bug in
     the seam.
     """
-    from gideon.agents.native.builtin_tools import NativeBuiltinToolProvider
+    from gideon.engine.agents.native.builtin_tools import NativeBuiltinToolProvider
 
     provider = NativeBuiltinToolProvider(cwd=Path(tmp_path))
     result = asyncio.run(provider.invoke("bash", {"command": "crontab -l"}))
@@ -165,7 +155,7 @@ def test_the_ACP_hook_seam_denies_with_the_offer():
     A control on one of two dispatch seams is a control the other silently skips — the shape that
     left `web_watch` unscreened until S134.
     """
-    from gideon.hooks import TOOL_DENY, HookManager
+    from gideon.engine.hooks import TOOL_DENY, HookManager
 
     manager = HookManager()
     denied = manager.on_tool_call("Running: crontab -e")
@@ -178,7 +168,7 @@ def test_the_ACP_hook_seam_denies_with_the_offer():
 
 def test_the_two_seams_AGREE():
     """One predicate, two callers. If they diverged, an agent would just use the other path."""
-    from gideon.hooks import TOOL_DENY, HookManager
+    from gideon.engine.hooks import TOOL_DENY, HookManager
 
     manager = HookManager()
     for command in WRITES + READS + INNOCENT:

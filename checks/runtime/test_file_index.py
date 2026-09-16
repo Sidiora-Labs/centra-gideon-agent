@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from gideon.dashboard.file_index import (
+from gideon.interfaces.dashboard.file_index import (
     FileIndex,
     FileIndexRegistry,
     is_pkg_cache_dir,
@@ -14,7 +14,7 @@ from gideon.dashboard.file_index import (
 class TestIsPkgCacheDir:
     def test_go_pkg_cache_matched(self):
         assert is_pkg_cache_dir("/Users/me/go/pkg")
-        assert is_pkg_cache_dir("/Users/me/go/pkg/")  # trailing slash tolerated
+        assert is_pkg_cache_dir("/Users/me/go/pkg/")
 
     def test_macos_bundles_matched(self):
         assert is_pkg_cache_dir("/Users/me/Pictures/Photos Library.photoslibrary")
@@ -22,9 +22,9 @@ class TestIsPkgCacheDir:
         assert is_pkg_cache_dir("/x/Some.framework")
 
     def test_ordinary_dirs_not_matched(self):
-        assert not is_pkg_cache_dir("/Users/me/go/src")  # not the pkg cache
+        assert not is_pkg_cache_dir("/Users/me/go/src")
         assert not is_pkg_cache_dir("/Users/me/projects/myapp")
-        assert not is_pkg_cache_dir("/Users/me/pkg")  # bare 'pkg' is not go/pkg
+        assert not is_pkg_cache_dir("/Users/me/pkg")
 
 
 def _populate(tmp_path):
@@ -42,11 +42,9 @@ def _populate(tmp_path):
     git = tmp_path / ".git"
     git.mkdir()
     (git / "hello_obj").write_text("g")
-    # Go module cache (non-dot, generic basenames) — pruned by path suffix.
     gocache = tmp_path / "go" / "pkg" / "mod" / "example.com" / "lib@v1"
     gocache.mkdir(parents=True)
     (gocache / "hello_gomod.go").write_text("g")
-    # macOS package bundle (non-dot name w/ bundle extension) — pruned by ext.
     bundle = tmp_path / "Photos Library.photoslibrary" / "database"
     bundle.mkdir(parents=True)
     (bundle / "hello_bundle.db").write_text("b")
@@ -70,7 +68,7 @@ class TestFileIndex:
         await idx.start()
         try:
             assert idx.is_ready
-            assert idx.entry_count >= 3  # hello.py, hello_world.py, readme.md, src/hello_util.py
+            assert idx.entry_count >= 3
             results = idx.search("hello", _scorer)
             names = {r["name"] for r in results}
             assert "hello.py" in names
@@ -85,12 +83,12 @@ class TestFileIndex:
         idx = FileIndex(str(tmp_path))
         await idx.start()
         try:
-            all_names = {e[1] for e in idx._entries}  # name is at index 1
+            all_names = {e[1] for e in idx._entries}
             assert ".secret" not in all_names
-            assert "hello_dep.py" not in all_names  # node_modules
-            assert "hello_obj" not in all_names  # .git
-            assert "hello_gomod.go" not in all_names  # go/pkg cache
-            assert "hello_bundle.db" not in all_names  # .photoslibrary bundle
+            assert "hello_dep.py" not in all_names
+            assert "hello_obj" not in all_names
+            assert "hello_gomod.go" not in all_names
+            assert "hello_bundle.db" not in all_names
         finally:
             idx.stop()
 
@@ -166,9 +164,9 @@ class TestFileIndexRegistry:
         reg = FileIndexRegistry()
         try:
             await reg.acquire(str(tmp_path))
-            await reg.acquire(str(tmp_path))  # refcount = 2
+            await reg.acquire(str(tmp_path))
             root = os.path.realpath(str(tmp_path))
-            await reg.release(root)  # refcount = 1
+            await reg.release(root)
             assert reg.get(root) is not None
         finally:
             reg.stop_all()
@@ -185,7 +183,7 @@ class TestFileIndexRegistry:
     async def test_acquire_failure_cleans_up(self, tmp_path, monkeypatch):
         """Failed start() must not leave orphan entries in registry."""
         reg = FileIndexRegistry()
-        from gideon.dashboard import file_index as fi_mod
+        from gideon.interfaces.dashboard import file_index as fi_mod
 
         async def _fail_start(self):
             raise RuntimeError("boom")
@@ -206,9 +204,7 @@ class TestFileIndexRegistry:
             idx = await reg.acquire(str(tmp_path))
             root = os.path.realpath(str(tmp_path))
             other = os.path.realpath(str(tmp_path / "nonexistent"))
-            # Release a root that was never acquired
             await reg.release(other)
-            # Original index must be unaffected
             assert reg.get(root) is idx
             assert reg._refcounts[root] == 1
         finally:
@@ -222,7 +218,6 @@ class TestFileIndexRegistry:
         root = os.path.realpath(str(tmp_path))
         await reg.acquire(root)
         assert reg.get(root) is not None
-        # Simulate what api_chat_session_delete now does
         await reg.release(root)
         assert reg.get(root) is None
 
@@ -231,7 +226,7 @@ class TestFileIndexTruncation:
     @pytest.mark.asyncio
     async def test_walk_truncates_at_max_entries(self, tmp_path, monkeypatch):
         """Index must set truncated=True when entry cap is hit."""
-        from gideon.dashboard import file_index as fi_mod
+        from gideon.interfaces.dashboard import file_index as fi_mod
 
         monkeypatch.setattr(fi_mod, "_MAX_ENTRIES", 3)
         for i in range(10):

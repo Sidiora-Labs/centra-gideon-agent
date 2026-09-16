@@ -17,22 +17,21 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.embedding_providers import registry
-from gideon.knowledge import embed_batch
-from gideon.knowledge.chunking import chunk_text
-from gideon.knowledge.embedder import (
+from gideon.cognition.knowledge import embed_batch
+from gideon.cognition.knowledge.chunking import chunk_text
+from gideon.cognition.knowledge.embedder import (
     UnifiedEmbedder,
     bytes_to_floats,
     compose_item_text,
     floats_to_bytes,
 )
-from gideon.knowledge.pipeline.runner import embed_item_chunks
-from gideon.knowledge.store import KnowledgeStore
+from gideon.cognition.knowledge.pipeline.runner import embed_item_chunks
+from gideon.cognition.knowledge.store import KnowledgeStore
+from gideon.integrations.embedding_providers import registry
 
-# Six markdown sections → six chunks. Six rather than five so a bisection of the failing
-# group is an even 3+3 split and the arithmetic in the failure test is readable.
 SIX_SECTIONS = "\n".join(
-    f"## Section {i}\nBody text for section {i} with enough words to matter.\n" for i in range(6)
+    f"## Section {i}\nBody text for section {i} with enough words to matter.\n"
+    for i in range(6)
 )
 
 
@@ -76,10 +75,9 @@ def _chunk_rows(store, item_id: str) -> list[tuple[str, bytes | None]]:
 
 
 def _item(store, title="Batched", content=SIX_SECTIONS, summary="") -> str:
-    return store.create_typed_item(item_type="note", title=title, content=content, summary=summary)
-
-
-# ── embed_item_chunks: one call, not N ──
+    return store.create_typed_item(
+        item_type="note", title=title, content=content, summary=summary
+    )
 
 
 def test_all_chunks_of_an_item_embed_in_one_provider_call(store, monkeypatch):
@@ -95,22 +93,22 @@ def test_all_chunks_of_an_item_embed_in_one_provider_call(store, monkeypatch):
     embedder = UnifiedEmbedder(lambda t: per_text.append(t) or _vec(t))
 
     item_id = _item(store)
-    assert _chunk_rows(store, item_id) == []  # nothing wrote chunks before us
+    assert _chunk_rows(store, item_id) == []
     embed_item_chunks(store, item_id, SIX_SECTIONS, embedder)
 
     expected_texts = [c.text for c in chunk_text(SIX_SECTIONS)]
     assert len(expected_texts) == 6
-    # ONE call carrying all six texts — not six calls, and not a batch that dropped any.
     assert len(calls) == 1
     assert calls[0] == expected_texts
-    # The per-text path was not used at all; batching is not a wrapper around it here.
     assert per_text == []
 
 
 def test_every_chunk_is_stored_with_its_own_aligned_vector(store, monkeypatch):
     """No chunk dropped, and no chunk wearing another chunk's vector."""
     monkeypatch.setattr(
-        registry, "get_active_embed_many_fn", lambda: lambda texts: [_vec(t) for t in texts]
+        registry,
+        "get_active_embed_many_fn",
+        lambda: lambda texts: [_vec(t) for t in texts],
     )
     item_id = _item(store)
     embed_item_chunks(store, item_id, SIX_SECTIONS, UnifiedEmbedder(_vec))
@@ -122,13 +120,14 @@ def test_every_chunk_is_stored_with_its_own_aligned_vector(store, monkeypatch):
         assert bytes_to_floats(blob) == _vec(text)
 
 
-def test_one_unembeddable_chunk_is_stored_vector_less_and_the_rest_keep_theirs(store, monkeypatch):
+def test_one_unembeddable_chunk_is_stored_vector_less_and_the_rest_keep_theirs(
+    store, monkeypatch
+):
     """A single bad text costs that chunk its vector — not the item's whole chunk layer,
-    and not the chunk row itself (a vector-less chunk is still keyword/FTS reachable)."""
+    and not the chunk row itself (a vector-less chunk is still keyword/FTS reachable).
+    """
 
     def _many(texts):
-        # A batch-shaped failure: the group is refused as a group, so the spine bisects
-        # until the offending text is alone.
         if any("Section 3" in t for t in texts):
             raise RuntimeError("provider refused the batch")
         return [_vec(t) for t in texts]
@@ -138,15 +137,12 @@ def test_one_unembeddable_chunk_is_stored_vector_less_and_the_rest_keep_theirs(s
     embed_item_chunks(store, item_id, SIX_SECTIONS, UnifiedEmbedder(_vec))
 
     rows = _chunk_rows(store, item_id)
-    assert len(rows) == 6  # nothing dropped
+    assert len(rows) == 6
     for text, blob in rows:
         if "Section 3" in text:
             assert blob is None
         else:
             assert blob is not None and bytes_to_floats(blob) == _vec(text)
-
-
-# ── embed_item_chunks: the per-text fallback ──
 
 
 def test_provider_without_a_batch_path_still_embeds_every_chunk(store, monkeypatch):
@@ -163,17 +159,20 @@ def test_provider_without_a_batch_path_still_embeds_every_chunk(store, monkeypat
     embed_item_chunks(store, item_id, SIX_SECTIONS, UnifiedEmbedder(_one))
 
     expected_texts = [c.text for c in chunk_text(SIX_SECTIONS)]
-    assert seen == expected_texts  # six per-text calls, in order
+    assert seen == expected_texts
     rows = _chunk_rows(store, item_id)
     assert len(rows) == 6
     for text, blob in rows:
         assert blob is not None and bytes_to_floats(blob) == _vec(text)
 
 
-def test_a_caller_supplied_embedder_is_never_batched_through_the_registry(store, monkeypatch):
+def test_a_caller_supplied_embedder_is_never_batched_through_the_registry(
+    store, monkeypatch
+):
     """The registry's batch fn resolves the ACTIVE embedding selection. An embedder the
     caller handed in may be a different model, so it keeps going through its own `.embed`:
-    otherwise chunk vectors from one model would land beside item vectors from another."""
+    otherwise chunk vectors from one model would land beside item vectors from another.
+    """
     resolved: list[str] = []
 
     def _accessor():
@@ -194,12 +193,9 @@ def test_a_caller_supplied_embedder_is_never_batched_through_the_registry(store,
     item_id = _item(store)
     embed_item_chunks(store, item_id, SIX_SECTIONS, stub)
 
-    assert resolved == []  # the batch accessor was never even consulted
+    assert resolved == []
     assert stub.calls == 6
     assert all(blob is not None for _t, blob in _chunk_rows(store, item_id))
-
-
-# ── embed_item_chunks: vacuity ──
 
 
 def test_embedder_without_embed_reaches_no_embedding_path_at_all(store, monkeypatch):
@@ -220,7 +216,9 @@ def test_embedder_without_embed_reaches_no_embedding_path_at_all(store, monkeypa
     )
 
     class _NoEmbed:
-        def embed_for_item(self, title, summary, content=None):  # pragma: no cover - unused
+        def embed_for_item(
+            self, title, summary, content=None
+        ):  # pragma: no cover - unused
             raise AssertionError("embed_for_item is not the chunk path")
 
     item_id = _item(store)
@@ -235,7 +233,9 @@ def test_an_empty_document_still_clears_previous_chunk_rows(store, monkeypatch):
     previous generation's rows. Guarding the whole write behind `if chunks:` would leave
     stale chunks behind after an edit emptied a document."""
     monkeypatch.setattr(
-        registry, "get_active_embed_many_fn", lambda: lambda texts: [_vec(t) for t in texts]
+        registry,
+        "get_active_embed_many_fn",
+        lambda: lambda texts: [_vec(t) for t in texts],
     )
     embedder = UnifiedEmbedder(_vec)
     item_id = _item(store)
@@ -246,11 +246,10 @@ def test_an_empty_document_still_clears_previous_chunk_rows(store, monkeypatch):
     assert _chunk_rows(store, item_id) == []
 
 
-# ── reembed_all ──
-
-
 def _add(store, title, content, summary=""):
-    return store.create_typed_item(item_type="note", title=title, content=content, summary=summary)
+    return store.create_typed_item(
+        item_type="note", title=title, content=content, summary=summary
+    )
 
 
 def _item_blobs(store) -> dict[str, bytes | None]:
@@ -266,14 +265,17 @@ def test_reembed_all_embeds_the_library_in_one_batch_call(store, monkeypatch):
         return [_vec(t) for t in texts]
 
     monkeypatch.setattr(registry, "get_active_embed_many_fn", lambda: _many)
-    ids = [_add(store, f"Title {i}", f"content {i}", summary=f"sum {i}") for i in range(5)]
+    ids = [
+        _add(store, f"Title {i}", f"content {i}", summary=f"sum {i}") for i in range(5)
+    ]
     progress: list[tuple[int, int]] = []
 
-    res = store.reembed_all(UnifiedEmbedder(_vec), on_progress=lambda d, t: progress.append((d, t)))
+    res = store.reembed_all(
+        UnifiedEmbedder(_vec), on_progress=lambda d, t: progress.append((d, t))
+    )
 
     assert res == {"reembedded": 5, "failed": 0, "total": 5}
-    assert len(calls) == 1 and len(calls[0]) == 5  # one call for five items
-    # on_progress still fires once per item, in order — job-progress streaming is unchanged.
+    assert len(calls) == 1 and len(calls[0]) == 5
     assert progress == [(1, 5), (2, 5), (3, 5), (4, 5), (5, 5)]
     blobs = _item_blobs(store)
     for i, iid in enumerate(ids):
@@ -320,13 +322,16 @@ def test_reembed_all_leaves_a_failing_item_vector_less_without_corrupting_the_re
     bad = _add(store, "Bad one", "content bad", summary="sum bad")
     progress: list[tuple[int, int]] = []
 
-    res = store.reembed_all(UnifiedEmbedder(_vec), on_progress=lambda d, t: progress.append((d, t)))
+    res = store.reembed_all(
+        UnifiedEmbedder(_vec), on_progress=lambda d, t: progress.append((d, t))
+    )
 
     assert res == {"reembedded": 1, "failed": 1, "total": 2}
-    assert progress == [(1, 2), (2, 2)]  # progress fires for the failure too
+    assert progress == [(1, 2), (2, 2)]
     blobs = _item_blobs(store)
-    assert blobs[bad] is None  # left vector-less, not corrupted and not deleted
-    assert bytes_to_floats(blobs[good]) == _vec(compose_item_text("Good one", "sum good"))
-    # The row itself survives with its text intact — still keyword/FTS reachable.
+    assert blobs[bad] is None
+    assert bytes_to_floats(blobs[good]) == _vec(
+        compose_item_text("Good one", "sum good")
+    )
     row = store.db.execute("SELECT title FROM items WHERE id = ?", (bad,)).fetchone()
     assert row["title"] == "Bad one"

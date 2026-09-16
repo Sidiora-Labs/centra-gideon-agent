@@ -15,8 +15,8 @@ Two findings measured here, both encoded as regressions:
 
 import pytest
 
-from gideon.workflows import bundled_defs
-from gideon.workflows.eval_specs import (
+from gideon.automation.workflows import bundled_defs
+from gideon.automation.workflows.eval_specs import (
     FIXTURES_PER_TEMPLATE,
     EvalSpec,
     _as_metadata,
@@ -40,9 +40,6 @@ def spec_for(name: str) -> EvalSpec:
     return derive_eval_spec(name, spec, metadata)
 
 
-# ── the walk has to be the engine's ──
-
-
 def test_the_walk_finds_nodes_inside_a_BRANCH():
     """Measured: a hand-rolled walk over `branches`/`then`/`otherwise` found 4 of 13 nodes in
     `deep-research`, because the engine's branch children live under `cases`/`default_case`. A
@@ -64,7 +61,7 @@ def test_the_walk_finds_nodes_inside_a_BRANCH():
 def test_the_walk_agrees_with_the_engine_about_every_shipped_template(name):
     """The derivation reads the same tree the engine runs. A walk that saw fewer nodes would derive
     a benchmark for a template that does not exist."""
-    from gideon.workflows.models import Node, walk
+    from gideon.automation.workflows.models import Node, walk
 
     spec, _metadata = parts(name)
     engine = walk(Node.from_dict(spec["root"]))
@@ -76,12 +73,10 @@ def test_a_malformed_spec_walks_to_nothing_rather_than_raising():
     assert _walk({"kind": "nonsense-kind"}) == []
 
 
-# ── the model-bearing test has to use the engine's own kinds ──
-
-
 def test_an_INFER_only_template_is_not_called_deterministic():
     """Measured: testing for `stage` alone filed `deep-research` (eight `infer` calls) as needing no
-    judge. An `infer` is one bounded model call — exactly the output only a judge can assess."""
+    judge. An `infer` is one bounded model call — exactly the output only a judge can assess.
+    """
     spec = {
         "root": {
             "kind": "sequence",
@@ -100,8 +95,16 @@ def test_a_genuinely_deterministic_template_is_free():
             "kind": "sequence",
             "id": "r",
             "children": [
-                {"kind": "action", "id": "a", "config": {"provider": "knowledge-health"}},
-                {"kind": "transform", "id": "t", "config": {"expr": "{{nodes.a.output}}"}},
+                {
+                    "kind": "action",
+                    "id": "a",
+                    "config": {"provider": "knowledge-health"},
+                },
+                {
+                    "kind": "transform",
+                    "id": "t",
+                    "config": {"expr": "{{nodes.a.output}}"},
+                },
             ],
         }
     }
@@ -117,11 +120,9 @@ def test_deep_research_needs_a_judge():
 
 def test_knowledge_health_is_genuinely_free():
     """The other side: it is all zero-token nodes, so its output IS the check. Demanding a model
-    judge over a deterministic scan spends a call to form an opinion about arithmetic."""
+    judge over a deterministic scan spends a call to form an opinion about arithmetic.
+    """
     assert spec_for("knowledge-health").free is True
-
-
-# ── fixtures come from the template's own matchable surface ──
 
 
 @pytest.mark.parametrize("name", TEMPLATES)
@@ -143,7 +144,9 @@ def test_fixtures_are_capped(name):
 
 
 def test_a_fixture_intent_is_built_from_keywords_a_user_would_TYPE():
-    derived = derive_eval_spec("t", {"root": {}}, {"keywords": ["audit", "review", "find issues"]})
+    derived = derive_eval_spec(
+        "t", {"root": {}}, {"keywords": ["audit", "review", "find issues"]}
+    )
     assert "audit" in derived.fixtures[0].intent
 
 
@@ -167,7 +170,7 @@ def test_a_template_with_no_matchable_surface_still_enters_the_suite():
 def test_a_fixture_never_expects_a_parameter_the_TREE_does_not_read(name):
     """The mirror of session 42's finding. A fixture asserting a phantom parameter would fail
     forever on a correct template, which trains a maintainer to loosen the assertion."""
-    from gideon.workflows.contracts import resolve_unfilled_inputs
+    from gideon.automation.workflows.contracts import resolve_unfilled_inputs
 
     spec, _metadata = parts(name)
     readable = {p.name for p in resolve_unfilled_inputs(spec)}
@@ -188,9 +191,6 @@ def test_expected_params_are_the_REQUIRED_subset():
     }
     derived = derive_eval_spec("t", spec, {"keywords": ["k"]})
     assert derived.fixtures[0].expected_params == ["topic"]
-
-
-# ── structural checks assert only what is PRESENT ──
 
 
 def test_a_loop_earns_a_bounded_exit_check():
@@ -223,7 +223,11 @@ def test_gates_are_asserted_to_SURVIVE_parameterization():
             "id": "r",
             "children": [
                 {"kind": "stage", "id": "w", "config": {"prompt": "x"}},
-                {"kind": "gate", "id": "g", "config": {"kind": "judge", "prompt": "ok?"}},
+                {
+                    "kind": "gate",
+                    "id": "g",
+                    "config": {"kind": "judge", "prompt": "ok?"},
+                },
             ],
         }
     }
@@ -234,9 +238,6 @@ def test_gates_are_asserted_to_SURVIVE_parameterization():
 @pytest.mark.parametrize("name", TEMPLATES)
 def test_every_shipped_template_derives_structural_checks(name):
     assert spec_for(name).structural_checks
-
-
-# ── parameterization checks ──
 
 
 def test_a_parameterless_template_says_the_form_stays_empty():
@@ -260,9 +261,6 @@ def test_required_and_optional_parameters_are_checked_SEPARATELY():
     assert any("defaulted, not asked" in c for c in checks)
 
 
-# ── graded checks are NAMED, never graded here ──
-
-
 def test_the_graded_standard_comes_from_the_templates_OWN_claim():
     """Grading anything else would invent a standard the template never claimed, and a template
     failing an invented standard is a benchmark arguing with the library."""
@@ -283,9 +281,6 @@ def test_a_template_with_no_stated_standard_says_WHY_it_has_no_graded_checks():
 def test_a_deterministic_template_says_why_TOO():
     derived = derive_eval_spec("t", {"root": {"kind": "action", "id": "a"}}, {})
     assert "deterministic" in derived.graded_note
-
-
-# ── the suite ──
 
 
 def test_the_suite_separates_free_from_judge_bearing():

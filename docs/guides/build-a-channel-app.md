@@ -5,10 +5,10 @@ chat app, a DM, a mailbox. A channel app owns both directions — it receives me
 the vendor and it renders the assistant's replies back into the vendor's idea of a
 message. Everything vendor-specific lives in the app; core only knows the two seams.
 
-This guide is extracted from the first-party **telegram-channel** app in the
-[GideonApps](https://github.com/Gideon/GideonApps) repository — the
-reference channel, because it is written against the raw vendor HTTP API with no SDK, so
-every obligation below is visible in one small tree. Read it along
+This guide describes the channel SDK contracts and uses **telegram-channel** as an
+example provider. Obtain a reference bundle through the application catalogue or
+source repository configured by your operator; no public bundle repository is assumed.
+Read it alongside
 [the inbox & channels architecture](../architecture/inbox-channels.md) and
 [the provider boundary](../architecture/provider-boundary.md).
 
@@ -55,7 +55,7 @@ Three levels, and they mean exactly this:
 The **Kit** column says whether the conformance kit *asserts* the obligation. The kit is
 the authority where the two could disagree: it carries the machine-readable inventory
 (`MUST_TRANSPORT_METHODS`, `SHOULD_DELIVERY_METHODS`, `MAY_DELIVERY_METHODS` in
-`src/gideon/testing/channel_conformance.py`) and this table is written from it.
+`runtime/gideon/testing/channel_conformance.py`) and this table is written from it.
 
 ### `ChannelTransportProvider`
 
@@ -229,9 +229,9 @@ def test_channel_contract(fake_backend):
 ```
 
 Import it from `gideon.sdk.channel` — **not** from `gideon.testing.…` and not
-from core's `tests/` tree. The facade is the only path the apps-side import lint allows,
+from core's `checks/runtime/` tree. The facade is the only path the apps-side import lint allows,
 and it is the path core's own suite exercises. (The kit lives in the installed package
-rather than core's `tests/`, which ships in no wheel; the module docstring records that
+rather than core's `checks/runtime/`, which ships in no wheel; the module docstring records that
 decision.)
 
 Run it against an isolated `GIDEON_HOME` — the kit drives the **real** trust seam,

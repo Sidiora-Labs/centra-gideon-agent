@@ -18,15 +18,15 @@ from unittest.mock import patch
 import pytest
 
 import gideon
-from gideon.config.loader import (
+from gideon.core.config.loader import (
     AgentProfile,
     AppConfig,
     resolve_session_workspace,
     workspace_root,
 )
-from gideon.llm.acp_agent import _factory
-from gideon.llm.registry import ProviderEntry
-from gideon.sandbox_providers.none import _NoneHandle
+from gideon.integrations.llm.acp_agent import _factory
+from gideon.integrations.llm.registry import ProviderEntry
+from gideon.integrations.sandbox_providers.none import _NoneHandle
 
 
 class _SpawnReached(Exception):
@@ -70,8 +70,9 @@ async def _spawn_cwd(provider) -> str:
     with patch.object(_NoneHandle, "exec", _exec):
         with pytest.raises(_SpawnReached):
             await provider._client._transport.spawn()
-    # Vacuity guard: a rail that captured nothing would pass every assertion below.
-    assert seen, "spawn never reached exec — the capture seam moved, the rail is vacuous"
+    assert (
+        seen
+    ), "spawn never reached exec — the capture seam moved, the rail is vacuous"
     assert "cwd" in seen, f"spawn kwargs carry no cwd: {sorted(seen)}"
     return str(seen["cwd"])
 
@@ -114,21 +115,20 @@ def test_non_empty_default_dir_still_wins(isolated_home):
     opinion = isolated_home / "opinion"
     cfg = AppConfig.load()
     cfg.agents = {"opinionated": AgentProfile(default_dir=str(opinion))}
-    assert resolve_session_workspace(cfg, "opinionated", str(isolated_home / "bound")) == str(
-        opinion
-    )
+    assert resolve_session_workspace(
+        cfg, "opinionated", str(isolated_home / "bound")
+    ) == str(opinion)
 
 
-def test_empty_default_dir_with_no_session_binding_falls_back_to_the_workspace(isolated_home):
+def test_empty_default_dir_with_no_session_binding_falls_back_to_the_workspace(
+    isolated_home,
+):
     """ "Empty inherits the workspace root" — with nothing to inherit, that root is the answer."""
     cfg = AppConfig.load()
     cfg.agents = {"inheriting": AgentProfile()}
     assert resolve_session_workspace(cfg, "inheriting", "") == str(workspace_root())
 
 
-# Every module that can spawn an ACP backend. ``discover_agents`` (llm/acp_agent.py) is
-# the reason this is a STATIC rail rather than a driven one: it spawns a real CLI, so the
-# only cheap way to keep its cwd honest is to forbid the construct that broke it.
 _ACP_SPAWN_MODULES = (
     "gideon/acp/client.py",
     "gideon/acp/session.py",
@@ -141,7 +141,8 @@ _ACP_SPAWN_MODULES = (
 
 def _home_call_lines(path: Path) -> list[int]:
     """Lines calling ``Path.home()``. AST, not grep: a prose mention of the banned literal
-    in a comment or docstring must not red the rail, and a real call must not hide in one."""
+    in a comment or docstring must not red the rail, and a real call must not hide in one.
+    """
     tree = ast.parse(path.read_text(encoding="utf-8"))
     return [
         node.lineno
@@ -167,16 +168,16 @@ def test_the_agent_bind_path_resolves_the_workspace_through_the_contract():
     """
     src = Path(gideon.__file__).resolve().parent
     handlers = src / "dashboard" / "chat_handlers.py"
-    assert handlers.is_file(), "chat_handlers.py moved — this rail no longer covers the bind path"
+    assert (
+        handlers.is_file()
+    ), "chat_handlers.py moved — this rail no longer covers the bind path"
     text = handlers.read_text(encoding="utf8")
 
-    # Vacuity floor: the module must still contain the seam this rail is about.
     assert "resolve_session_workspace" in text, (
         "chat_handlers no longer references resolve_session_workspace at all — either the bind "
         "path moved (re-point this rail) or G39's fix was removed"
     )
 
-    # Every assignment to a session's workspace_dir on the bind path must go through the contract.
     offenders = [
         (i + 1, line.strip())
         for i, line in enumerate(text.splitlines())
@@ -199,11 +200,10 @@ def test_no_acp_spawn_site_anchors_its_cwd_to_the_real_home():
     from a gateway or a test that set GIDEON_HOME precisely to prevent that."""
     src = Path(gideon.__file__).resolve().parent.parent
 
-    # Positive control: the detector must actually find a real ``Path.home()`` call.
-    # ``config/loader.py`` legitimately has one (the platform workspace default), so an
-    # empty result here means the detector is broken and every assertion below is vacuous.
     control = _home_call_lines(src / "gideon/config/loader.py")
-    assert control, "detector found no Path.home() call in config/loader.py — rail is vacuous"
+    assert (
+        control
+    ), "detector found no Path.home() call in config/loader.py — rail is vacuous"
 
     scanned = 0
     for rel in _ACP_SPAWN_MODULES:

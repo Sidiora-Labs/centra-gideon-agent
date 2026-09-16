@@ -18,11 +18,13 @@ from pathlib import Path
 
 import pytest
 
-from harness import tool_dispatch_bench as tdb
-from gideon.agents.native import dispatch_plan
+from checks.harness import tool_dispatch_bench as tdb
+from gideon.engine.agents.native import dispatch_plan
 
 
-def _row(ms: int, *, mode: str = dispatch_plan.MODE_CONCURRENT, widest: int = 8) -> tdb.DispatchRow:
+def _row(
+    ms: int, *, mode: str = dispatch_plan.MODE_CONCURRENT, widest: int = 8
+) -> tdb.DispatchRow:
     return tdb.DispatchRow(mode=mode, calls=8, waves=1, widest=widest, ms=ms)
 
 
@@ -32,7 +34,9 @@ class TestLogLineContract:
     def test_parses_the_line_the_runtime_actually_emits(self):
         line = f"{dispatch_plan.TIMING_LOG_PREFIX} mode=concurrent calls=8 waves=2 widest=6 ms=812"
         row = tdb.parse_timing_line(line)
-        assert row == tdb.DispatchRow(mode="concurrent", calls=8, waves=2, widest=6, ms=812)
+        assert row == tdb.DispatchRow(
+            mode="concurrent", calls=8, waves=2, widest=6, ms=812
+        )
 
     def test_parses_it_with_a_log_prefix_in_front(self):
         row = tdb.parse_timing_line(
@@ -46,9 +50,6 @@ class TestLogLineContract:
         [
             "",
             "something else entirely",
-            # Missing a field does not parse AT ALL rather than parsing with a default: mode
-            # and widest are the only things telling the baseline arm from the after arm, so
-            # a tolerant parser would silently compare an arm against itself.
             f"{dispatch_plan.TIMING_LOG_PREFIX} mode=serial calls=2 waves=2 ms=7",
             f"{dispatch_plan.TIMING_LOG_PREFIX} calls=2 waves=2 widest=1 ms=7",
         ],
@@ -57,7 +58,7 @@ class TestLogLineContract:
         assert tdb.parse_timing_line(line) is None
 
     def test_the_collector_captures_rows_off_the_runtime_logger(self):
-        log = logging.getLogger("gideon.agents.native.runtime")
+        log = logging.getLogger("gideon.engine.agents.native.runtime")
         with tdb.collect_timing_rows() as rows:
             log.info(
                 "%s mode=%s calls=%d waves=%d widest=%d ms=%d",
@@ -72,14 +73,17 @@ class TestLogLineContract:
         assert [r.ms for r in rows] == [33]
 
     def test_the_collector_forces_the_logger_open_and_restores_it(self):
-        log = logging.getLogger("gideon.agents.native.runtime")
+        log = logging.getLogger("gideon.engine.agents.native.runtime")
         log.setLevel(logging.CRITICAL)
         try:
             with tdb.collect_timing_rows() as rows:
                 log.info(
-                    "%s mode=serial calls=1 waves=1 widest=1 ms=1", dispatch_plan.TIMING_LOG_PREFIX
+                    "%s mode=serial calls=1 waves=1 widest=1 ms=1",
+                    dispatch_plan.TIMING_LOG_PREFIX,
                 )
-            assert len(rows) == 1, "a benchmark that collected nothing must not look clean"
+            assert (
+                len(rows) == 1
+            ), "a benchmark that collected nothing must not look clean"
             assert log.level == logging.CRITICAL
         finally:
             log.setLevel(logging.NOTSET)
@@ -106,12 +110,16 @@ class TestGate:
         v = tdb.evaluate_gate([1000, 1000, 1000], [900, 900, 900])
         assert v.verdict == tdb.VERDICT_UNRESOLVED
 
-    def test_an_outlier_in_the_baselines_tail_cannot_widen_the_band_away_from_a_verdict(self):
+    def test_an_outlier_in_the_baselines_tail_cannot_widen_the_band_away_from_a_verdict(
+        self,
+    ):
         """The band is a fraction of the baseline's MEDIAN, not its mean. Keyed to the mean, a
         single contention-hit serial sample inflated the band past the whole effect and
         reported `unresolved` on arms that did not overlap — noise in the baseline's tail
         deciding a question about its floor."""
-        v = tdb.evaluate_gate([1206, 1313, 1356, 1424, 2901, 10168, 1197], [614, 632, 610, 791])
+        v = tdb.evaluate_gate(
+            [1206, 1313, 1356, 1424, 2901, 10168, 1197], [614, 632, 610, 791]
+        )
         assert v.verdict == tdb.VERDICT_IMPROVED
 
     def test_an_empty_arm_is_unresolved_not_a_win(self):
@@ -134,7 +142,9 @@ class TestBaselineReport:
             repo="/tmp/x",
             calls=8,
             trials=3,
-            serial_rows=[_row(1400, mode=dispatch_plan.MODE_SERIAL, widest=1) for _ in range(3)],
+            serial_rows=[
+                _row(1400, mode=dispatch_plan.MODE_SERIAL, widest=1) for _ in range(3)
+            ],
             concurrent_rows=[_row(900) for _ in range(3)],
         )
         defaults.update(kw)
@@ -172,19 +182,25 @@ class TestEndToEnd:
 
     def test_measures_both_arms_off_real_log_lines(self, tmp_path: Path):
         (tmp_path / "pkg0000").mkdir()
-        (tmp_path / "pkg0000" / "mod0000.py").write_text("VALUE = 0\n", encoding="utf-8")
+        (tmp_path / "pkg0000" / "mod0000.py").write_text(
+            "VALUE = 0\n", encoding="utf-8"
+        )
         (tmp_path / "pkg0001").mkdir()
-        (tmp_path / "pkg0001" / "mod0001.py").write_text("VALUE = 1\n", encoding="utf-8")
+        (tmp_path / "pkg0001" / "mod0001.py").write_text(
+            "VALUE = 1\n", encoding="utf-8"
+        )
         baseline = asyncio.run(tdb.measure(tmp_path, trials=2, contended=True))
         assert len(baseline.serial_ms) == 2
         assert len(baseline.concurrent_ms) == 2
         assert baseline.calls == len(tdb.MULTI_LOOKUP_TURN)
-        # The arms differ in the way the PLAN says they should, which is the thing the
-        # benchmark's two arms are actually selecting between.
         assert {r.mode for r in baseline.serial_rows} == {dispatch_plan.MODE_SERIAL}
         assert {r.widest for r in baseline.serial_rows} == {1}
-        assert {r.mode for r in baseline.concurrent_rows} == {dispatch_plan.MODE_CONCURRENT}
-        assert max(r.widest for r in baseline.concurrent_rows) == len(tdb.MULTI_LOOKUP_TURN)
+        assert {r.mode for r in baseline.concurrent_rows} == {
+            dispatch_plan.MODE_CONCURRENT
+        }
+        assert max(r.widest for r in baseline.concurrent_rows) == len(
+            tdb.MULTI_LOOKUP_TURN
+        )
         assert baseline.gate().verdict in tdb.VERDICTS
 
     def test_a_nonpositive_trial_count_is_refused(self, tmp_path: Path):

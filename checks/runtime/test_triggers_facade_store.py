@@ -18,9 +18,9 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import make_mocked_request
 
-from gideon.dashboard.handlers import triggers as T
-from gideon.triggers import tools as Tools
-from gideon.triggers.store import TriggerStore
+from gideon.automation.triggers import tools as Tools
+from gideon.automation.triggers.store import TriggerStore
+from gideon.interfaces.dashboard.handlers import triggers as T
 
 
 @pytest.fixture
@@ -32,7 +32,7 @@ def home(tmp_path, monkeypatch):
     also patches. Patching only the loader left `_runs_store()` pointing at the fixture's own tmp
     home — measured: every run-record read returned 0 rows.
     """
-    import gideon.config.loader as loader
+    import gideon.core.config.loader as loader
 
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(T, "config_dir", lambda: tmp_path)
@@ -52,7 +52,6 @@ def state(home):
 
 @pytest.fixture(autouse=True)
 def _patch_legacy(monkeypatch):
-    # Silence the legacy backends so the list contains only what we put in the store.
     monkeypatch.setattr(T, "_hook_store", lambda s: _EmptyStore())
     monkeypatch.setattr(T, "_event_store", lambda: _EmptyStore())
     monkeypatch.setattr(T, "_used_by_index", lambda: {})
@@ -70,7 +69,9 @@ def _store(home):
     return TriggerStore(base_dir=home)
 
 
-def _file_automation(home, name="Summarize notes", when="when a file in ~/notes changes"):
+def _file_automation(
+    home, name="Summarize notes", when="when a file in ~/notes changes"
+):
     Tools.create(_store(home), name=name, when=when, message="go")
 
 
@@ -99,9 +100,6 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-# ── 🔴 the present-and-inert gap this closes ──
-
-
 def test_a_chat_created_file_automation_is_LISTED(home, state):
     """🔴 THE gap. Before this slice, a file automation created via the chat tools fired (S93) but
     never appeared in `GET /api/triggers` — invisible on its own management page."""
@@ -126,7 +124,7 @@ def test_the_type_filter_selects_store_kinds(home, state):
 def test_a_clock_trigger_in_the_store_is_NOT_double_listed(home, state):
     """🔴 A `clock` trigger belongs to the schedule backend's namespace; listing it under `store`
     too would show every migrated cron twice once the store is populated."""
-    from gideon.triggers.models import Trigger
+    from gideon.automation.triggers.models import Trigger
 
     _store(home).upsert(
         Trigger(
@@ -144,15 +142,21 @@ def test_a_clock_trigger_in_the_store_is_NOT_double_listed(home, state):
 
 def test_a_broken_store_row_is_listed_not_hidden(home, state):
     _store(home).path.write_text(
-        json.dumps({"version": 1, "triggers": [{"id": "file:x", "name": "X", "kind": "file"}]})
+        json.dumps(
+            {"version": 1, "triggers": [{"id": "file:x", "name": "X", "kind": "file"}]}
+        )
     )
-    # A file row with no paths still parses as a file kind; make it genuinely broken instead.
     _store(home).path.write_text(
         json.dumps(
             {
                 "version": 1,
                 "triggers": [
-                    {"id": "web_watch:x", "name": "X", "kind": "web_watch", "spec": "not-a-dict"}
+                    {
+                        "id": "web_watch:x",
+                        "name": "X",
+                        "kind": "web_watch",
+                        "spec": "not-a-dict",
+                    }
                 ],
             }
         )
@@ -162,20 +166,17 @@ def test_a_broken_store_row_is_listed_not_hidden(home, state):
     assert rows and rows[0]["broken"]
 
 
-# ── id round-trip ──
-
-
 def test_split_id_round_trips_a_store_id():
     """🔴 A store id is itself `<kind>:<slug>`. Splitting on the first colon would hand the store
     `file` as the raw id and lose `summarize-notes`."""
-    assert T._split_id("store:file:summarize-notes") == ("store", "file:summarize-notes")
+    assert T._split_id("store:file:summarize-notes") == (
+        "store",
+        "file:summarize-notes",
+    )
 
 
 def test_a_bare_id_still_defaults_to_schedule():
     assert T._split_id("job1") == ("schedule", "job1")
-
-
-# ── toggle ──
 
 
 def test_toggle_pauses_and_resumes_a_store_trigger(home, state):
@@ -215,7 +216,10 @@ def test_resuming_a_broken_row_reports_400_not_a_silent_disable(home, state):
     leaving it disabled."""
     _store(home).path.write_text(
         json.dumps(
-            {"version": 1, "triggers": [{"id": "web_watch:x", "name": "X", "kind": "nonsense"}]}
+            {
+                "version": 1,
+                "triggers": [{"id": "web_watch:x", "name": "X", "kind": "nonsense"}],
+            }
         )
     )
     resp = _run(
@@ -232,15 +236,15 @@ def test_resuming_a_broken_row_reports_400_not_a_silent_disable(home, state):
     assert resp.status == 400
 
 
-# ── delete ──
-
-
 def test_delete_removes_a_store_trigger(home, state):
     _file_automation(home)
     resp = _run(
         T.api_trigger_detail(
             _req(
-                "DELETE", "/api/triggers/x", state, match_info={"id": "store:file:summarize-notes"}
+                "DELETE",
+                "/api/triggers/x",
+                state,
+                match_info={"id": "store:file:summarize-notes"},
             )
         )
     )
@@ -251,13 +255,15 @@ def test_delete_removes_a_store_trigger(home, state):
 def test_deleting_an_unknown_store_id_is_404(home, state):
     resp = _run(
         T.api_trigger_detail(
-            _req("DELETE", "/api/triggers/x", state, match_info={"id": "store:file:ghost"})
+            _req(
+                "DELETE",
+                "/api/triggers/x",
+                state,
+                match_info={"id": "store:file:ghost"},
+            )
         )
     )
     assert resp.status == 404
-
-
-# ── run ──
 
 
 def test_a_dry_run_reports_the_gate_plan_and_executes_nothing(home, state):
@@ -278,13 +284,12 @@ def test_a_dry_run_reports_the_gate_plan_and_executes_nothing(home, state):
     data = _body(resp)
     assert data["ok"] is True
     assert data["result"]["plan"]["executes"] is False
-    # The manual bypass boundary is preserved.
     assert set(data["result"]["plan"]["bypassed"]) == {"quiet", "duty"}
 
 
 def test_a_real_run_dispatches_the_action(home, state, monkeypatch):
     """A Run button fires through the same action-provider registry the autonomous path uses."""
-    from gideon.triggers.models import Trigger
+    from gideon.automation.triggers.models import Trigger
 
     _store(home).upsert(
         Trigger(
@@ -296,7 +301,7 @@ def test_a_real_run_dispatches_the_action(home, state, monkeypatch):
             workflow={"provider": "notify", "config": {"title_template": "t"}},
         )
     )
-    from gideon.action_providers.registry import (
+    from gideon.integrations.action_providers.registry import (
         _ensure_default_providers_registered,
         get_action_provider,
     )
@@ -313,16 +318,17 @@ def test_a_real_run_dispatches_the_action(home, state, monkeypatch):
     resp = _run(
         T.api_trigger_run(
             _req(
-                "POST", "/api/triggers/x/run", state, body={}, match_info={"id": "store:file:notes"}
+                "POST",
+                "/api/triggers/x/run",
+                state,
+                body={},
+                match_info={"id": "store:file:notes"},
             )
         )
     )
     assert _body(resp)["ok"] is True
     assert seen["trigger_id"] == "file:notes"
     assert seen["event"] == "manual.run"
-
-
-# ── 🔴 #395: Run now was a silent no-op for every NESTED action ──
 
 
 def _notify_spy(monkeypatch):
@@ -332,7 +338,7 @@ def _notify_spy(monkeypatch):
     differently: reading the provider from `inline` while leaving the config on the outer dict runs
     the right action with an empty config, which looks like success and is worse than the no-op.
     """
-    from gideon.action_providers.registry import (
+    from gideon.integrations.action_providers.registry import (
         _ensure_default_providers_registered,
         get_action_provider,
     )
@@ -348,7 +354,7 @@ def _notify_spy(monkeypatch):
 
 
 def _upsert_nested(home, *, tid="file:notes", title="nested-title"):
-    from gideon.triggers.models import Trigger
+    from gideon.automation.triggers.models import Trigger
 
     _store(home).upsert(
         Trigger(
@@ -357,9 +363,9 @@ def _upsert_nested(home, *, tid="file:notes", title="nested-title"):
             kind="file",
             enabled=True,
             spec={"paths": ["~/x/**"]},
-            # The MIGRATED shape, which is what the API create path, the CLI, the app-cron
-            # reconciler and the digest reconciler all write — i.e. essentially every real row.
-            workflow={"inline": {"provider": "notify", "config": {"title_template": title}}},
+            workflow={
+                "inline": {"provider": "notify", "config": {"title_template": title}}
+            },
         )
     )
 
@@ -378,7 +384,11 @@ def test_a_NESTED_action_actually_REACHES_its_provider(home, state, monkeypatch)
     resp = _run(
         T.api_trigger_run(
             _req(
-                "POST", "/api/triggers/x/run", state, body={}, match_info={"id": "store:file:notes"}
+                "POST",
+                "/api/triggers/x/run",
+                state,
+                body={},
+                match_info={"id": "store:file:notes"},
             )
         )
     )
@@ -391,14 +401,19 @@ def test_a_NESTED_action_actually_REACHES_its_provider(home, state, monkeypatch)
 def test_a_nested_action_carries_its_OWN_config(home, state, monkeypatch):
     """Provider AND config come from the SAME resolved dict. Taking the provider from `inline` and
     the config from the outer dict would dispatch the right action with an empty config — a run that
-    reports success and does the wrong thing, which is worse than the no-op it replaced."""
+    reports success and does the wrong thing, which is worse than the no-op it replaced.
+    """
     _upsert_nested(home, title="nested-title")
     calls = _notify_spy(monkeypatch)
 
     _run(
         T.api_trigger_run(
             _req(
-                "POST", "/api/triggers/x/run", state, body={}, match_info={"id": "store:file:notes"}
+                "POST",
+                "/api/triggers/x/run",
+                state,
+                body={},
+                match_info={"id": "store:file:notes"},
             )
         )
     )
@@ -410,7 +425,7 @@ def test_BOTH_action_shapes_dispatch(home, state, monkeypatch):
     """A real store holds both spellings (`screen.requested_capabilities` documents exactly this),
     so the manual path must read both — the property `gateway._fire_store_trigger` and
     `schedule_view._inline_action` already have and this one had lost."""
-    from gideon.triggers.models import Trigger
+    from gideon.automation.triggers.models import Trigger
 
     _upsert_nested(home, tid="file:nested", title="from-inline")
     _store(home).upsert(
@@ -429,12 +444,19 @@ def test_BOTH_action_shapes_dispatch(home, state, monkeypatch):
         _run(
             T.api_trigger_run(
                 _req(
-                    "POST", "/api/triggers/x/run", state, body={}, match_info={"id": f"store:{tid}"}
+                    "POST",
+                    "/api/triggers/x/run",
+                    state,
+                    body={},
+                    match_info={"id": f"store:{tid}"},
                 )
             )
         )
 
-    assert [c["config"]["title_template"] for c in calls] == ["from-inline", "from-flat"]
+    assert [c["config"]["title_template"] for c in calls] == [
+        "from-inline",
+        "from-flat",
+    ]
 
 
 def test_an_unresolvable_action_is_ok_FALSE_not_a_success_shaped_200(home, state):
@@ -445,7 +467,7 @@ def test_an_unresolvable_action_is_ok_FALSE_not_a_success_shaped_200(home, state
     Still 200 — the request was understood and answered honestly. A trigger whose action cannot be
     resolved is not a malformed request (the rule the kill-switch refusal already follows).
     """
-    from gideon.triggers.models import Trigger
+    from gideon.automation.triggers.models import Trigger
 
     _store(home).upsert(
         Trigger(
@@ -461,7 +483,11 @@ def test_an_unresolvable_action_is_ok_FALSE_not_a_success_shaped_200(home, state
     resp = _run(
         T.api_trigger_run(
             _req(
-                "POST", "/api/triggers/x/run", state, body={}, match_info={"id": "store:file:ghost"}
+                "POST",
+                "/api/triggers/x/run",
+                state,
+                body={},
+                match_info={"id": "store:file:ghost"},
             )
         )
     )
@@ -473,7 +499,7 @@ def test_an_unresolvable_action_is_ok_FALSE_not_a_success_shaped_200(home, state
 
 def test_an_actionless_trigger_is_ok_FALSE(home, state):
     """A row carrying no action at all reports honestly too, rather than "ran"."""
-    from gideon.triggers.models import Trigger
+    from gideon.automation.triggers.models import Trigger
 
     _store(home).upsert(
         Trigger(
@@ -489,7 +515,11 @@ def test_an_actionless_trigger_is_ok_FALSE(home, state):
     resp = _run(
         T.api_trigger_run(
             _req(
-                "POST", "/api/triggers/x/run", state, body={}, match_info={"id": "store:file:empty"}
+                "POST",
+                "/api/triggers/x/run",
+                state,
+                body={},
+                match_info={"id": "store:file:empty"},
             )
         )
     )
@@ -498,16 +528,13 @@ def test_an_actionless_trigger_is_ok_FALSE(home, state):
     assert _body(resp)["result"].startswith("no action provider configured")
 
 
-# ── 🔴 #308: a manual run executed but recorded NOTHING, so the pill stuck forever ──
-
-
 def _result_spy(monkeypatch, *, result=None, raises=None):
     """Register a spy on the `notify` provider that returns `result` (or raises `raises`).
 
     Unlike `_notify_spy`, this returns a real `ActionResult` so the recording path can classify the
     run's status — the whole point of #308 is that a run's OUTCOME reaches the ledger.
     """
-    from gideon.action_providers.registry import (
+    from gideon.integrations.action_providers.registry import (
         _ensure_default_providers_registered,
         get_action_provider,
     )
@@ -529,12 +556,12 @@ def test_a_manual_run_APPENDS_a_history_row_tagged_manual_and_advances_last_run(
     `GET .../history` gained no row and the trigger's last-run stamp never moved, so the completion
     watcher waited on a `last_run_ts` that would never change and the "Running…" pill stuck forever.
 
-    The autonomous fire path records via `gateway._record_fire_outcome` — a `ScheduleRun` in
-    `ScheduleRunStore` plus a `last_success_at` stamp. This asserts a manual run now leaves the SAME
+    The autonomous fire path records via `gateway._record_fire_outcome` — a `ExecutionRecord` in
+    `ExecutionJournal` plus a `last_success_at` stamp. This asserts a manual run now leaves the SAME
     evidence, tagged `manual`, reusing that ledger rather than a parallel one.
     """
-    from gideon.action_providers import ActionResult
-    from gideon.triggers.models import Trigger
+    from gideon.automation.triggers.models import Trigger
+    from gideon.integrations.action_providers import ActionResult
 
     _store(home).upsert(
         Trigger(
@@ -543,12 +570,13 @@ def test_a_manual_run_APPENDS_a_history_row_tagged_manual_and_advances_last_run(
             kind="file",
             enabled=True,
             spec={"paths": ["~/x/**"]},
-            workflow={"inline": {"provider": "notify", "config": {"title_template": "t"}}},
+            workflow={
+                "inline": {"provider": "notify", "config": {"title_template": "t"}}
+            },
         )
     )
     _result_spy(monkeypatch, result=ActionResult(success=True, stdout="notified: t"))
 
-    # Nothing recorded before the run — this is the state a fresh trigger is in.
     before_runs, before_total = _run(T._runs_store().list_for_job("file:notes", 0, 10))
     assert before_total == 0
     assert not _store(home).get("file:notes").trigger.last_success_at
@@ -556,19 +584,21 @@ def test_a_manual_run_APPENDS_a_history_row_tagged_manual_and_advances_last_run(
     resp = _run(
         T.api_trigger_run(
             _req(
-                "POST", "/api/triggers/x/run", state, body={}, match_info={"id": "store:file:notes"}
+                "POST",
+                "/api/triggers/x/run",
+                state,
+                body={},
+                match_info={"id": "store:file:notes"},
             )
         )
     )
     assert _body(resp)["ok"] is True
 
-    # A NEW row appeared, tagged `manual` and marked success.
     runs, total = _run(T._runs_store().list_for_job("file:notes", 0, 10))
     assert total == 1, "the manual run must append exactly one history row"
     assert runs[0]["trigger"] == "manual"
     assert runs[0]["status"] == "success"
 
-    # The last-run stamp advanced — this is what the completion watcher reads to clear the pill.
     live = _store(home).get("file:notes").trigger
     assert live.last_success_at, "last_success_at must advance so last_run_ts moves"
     assert live.last_run_id == runs[0]["run_id"]
@@ -586,8 +616,8 @@ def test_a_manual_run_does_NOT_spend_the_max_fires_budget(home, state, monkeypat
     So a manual run records HISTORY (which clears the pill) without spending the ALLOWANCE. The
     completion watcher keys on `last_run_ts`, never on `run_count`, so the UI fix does not need it.
     """
-    from gideon.action_providers import ActionResult
-    from gideon.triggers.models import Trigger
+    from gideon.automation.triggers.models import Trigger
+    from gideon.integrations.action_providers import ActionResult
 
     _store(home).upsert(
         Trigger(
@@ -605,7 +635,11 @@ def test_a_manual_run_does_NOT_spend_the_max_fires_budget(home, state, monkeypat
     _run(
         T.api_trigger_run(
             _req(
-                "POST", "/api/triggers/x/run", state, body={}, match_info={"id": "store:file:notes"}
+                "POST",
+                "/api/triggers/x/run",
+                state,
+                body={},
+                match_info={"id": "store:file:notes"},
             )
         )
     )
@@ -613,17 +647,19 @@ def test_a_manual_run_does_NOT_spend_the_max_fires_budget(home, state, monkeypat
     assert (
         _store(home).get("file:notes").trigger.run_count == 4
     ), "the fire budget must not be spent"
-    # And the manual row is excluded from the hourly cap the count feeds.
     import time as _time
 
     assert _run(T._runs_store().count_since("file:notes", _time.time() - 3600.0)) == 0
 
 
-def test_a_FAILED_manual_run_is_recorded_as_a_failure_not_swallowed(home, state, monkeypatch):
+def test_a_FAILED_manual_run_is_recorded_as_a_failure_not_swallowed(
+    home, state, monkeypatch
+):
     """A provider returning `success=False` must record a FAILED run and answer `ok: false` — not a
-    silent success. Mirrors `_record_fire_outcome`'s classification of a non-raising failure."""
-    from gideon.action_providers import ActionResult
-    from gideon.triggers.models import Trigger
+    silent success. Mirrors `_record_fire_outcome`'s classification of a non-raising failure.
+    """
+    from gideon.automation.triggers.models import Trigger
+    from gideon.integrations.action_providers import ActionResult
 
     _store(home).upsert(
         Trigger(
@@ -635,12 +671,19 @@ def test_a_FAILED_manual_run_is_recorded_as_a_failure_not_swallowed(home, state,
             workflow={"inline": {"provider": "notify", "config": {}}},
         )
     )
-    _result_spy(monkeypatch, result=ActionResult(success=False, error="notify failed: no channel"))
+    _result_spy(
+        monkeypatch,
+        result=ActionResult(success=False, error="notify failed: no channel"),
+    )
 
     resp = _run(
         T.api_trigger_run(
             _req(
-                "POST", "/api/triggers/x/run", state, body={}, match_info={"id": "store:file:notes"}
+                "POST",
+                "/api/triggers/x/run",
+                state,
+                body={},
+                match_info={"id": "store:file:notes"},
             )
         )
     )
@@ -655,10 +698,13 @@ def test_a_FAILED_manual_run_is_recorded_as_a_failure_not_swallowed(home, state,
     assert live.last_failure_at, "a failed manual run stamps last_failure_at"
 
 
-def test_a_RAISING_provider_is_recorded_as_a_failure_not_a_500(home, state, monkeypatch):
+def test_a_RAISING_provider_is_recorded_as_a_failure_not_a_500(
+    home, state, monkeypatch
+):
     """A provider that raises must be caught, recorded as a failed run, and reported `ok: false` —
-    the request completed and was answered honestly, and the ledger keeps the evidence."""
-    from gideon.triggers.models import Trigger
+    the request completed and was answered honestly, and the ledger keeps the evidence.
+    """
+    from gideon.automation.triggers.models import Trigger
 
     _store(home).upsert(
         Trigger(
@@ -675,7 +721,11 @@ def test_a_RAISING_provider_is_recorded_as_a_failure_not_a_500(home, state, monk
     resp = _run(
         T.api_trigger_run(
             _req(
-                "POST", "/api/triggers/x/run", state, body={}, match_info={"id": "store:file:notes"}
+                "POST",
+                "/api/triggers/x/run",
+                state,
+                body={},
+                match_info={"id": "store:file:notes"},
             )
         )
     )
@@ -691,8 +741,8 @@ def test_a_RAISING_provider_is_recorded_as_a_failure_not_a_500(home, state, monk
 def test_recording_a_manual_run_never_fails_the_request(home, state, monkeypatch):
     """A ledger write failure must not turn a completed run into a crashed request — the same
     best-effort contract `_record_fire_outcome` holds."""
-    from gideon.action_providers import ActionResult
-    from gideon.triggers.models import Trigger
+    from gideon.automation.triggers.models import Trigger
+    from gideon.integrations.action_providers import ActionResult
 
     _store(home).upsert(
         Trigger(
@@ -713,15 +763,20 @@ def test_recording_a_manual_run_never_fails_the_request(home, state, monkeypatch
     resp = _run(
         T.api_trigger_run(
             _req(
-                "POST", "/api/triggers/x/run", state, body={}, match_info={"id": "store:file:notes"}
+                "POST",
+                "/api/triggers/x/run",
+                state,
+                body={},
+                match_info={"id": "store:file:notes"},
             )
         )
     )
-    # The run itself succeeded; only the bookkeeping failed, and that is swallowed.
     assert _body(resp)["ok"] is True
 
 
-def test_the_manual_path_reads_the_SAME_shapes_as_the_autonomous_one(home, state, monkeypatch):
+def test_the_manual_path_reads_the_SAME_shapes_as_the_autonomous_one(
+    home, state, monkeypatch
+):
     """A STRUCTURAL guard on the property `_dispatch_store_action`'s docstring claims: "a manual Run
     and an autonomous fire share one dispatch so their behaviour cannot drift". They HAD drifted —
     the gateway unwrapped `inline` and the manual path did not — and a behavioural test on one row
@@ -730,24 +785,28 @@ def test_the_manual_path_reads_the_SAME_shapes_as_the_autonomous_one(home, state
     """
     import inspect
 
-    from gideon import gateway
-    from gideon.dashboard.handlers import triggers as handlers
+    from gideon.engine import gateway
+    from gideon.interfaces.dashboard.handlers import triggers as handlers
 
     manual = inspect.getsource(handlers._dispatch_store_action)
-    autonomous = inspect.getsource(gateway.GatewayOrchestrator._fire_store_trigger)
+    autonomous = inspect.getsource(gateway.RuntimeCoordinator._fire_store_trigger)
     for name, src in (("manual", manual), ("autonomous", autonomous)):
-        assert 'workflow.get("inline")' in src, f"{name} no longer unwraps the nested action shape"
-        assert "inline or workflow" in src, f"{name} no longer falls back to the flat shape"
+        assert (
+            'workflow.get("inline")' in src
+        ), f"{name} no longer unwraps the nested action shape"
+        assert (
+            "inline or workflow" in src
+        ), f"{name} no longer falls back to the flat shape"
 
 
 def test_a_paused_store_trigger_still_runs_by_hand(home, state, monkeypatch):
     """Pausing means "stop firing on its own"; a hand-driven run is how you test before re-enabling.
     The result notes it does not re-enable."""
-    from gideon.action_providers.registry import (
+    from gideon.automation.triggers.models import Trigger
+    from gideon.integrations.action_providers.registry import (
         _ensure_default_providers_registered,
         get_action_provider,
     )
-    from gideon.triggers.models import Trigger
 
     _store(home).upsert(
         Trigger(
@@ -766,7 +825,11 @@ def test_a_paused_store_trigger_still_runs_by_hand(home, state, monkeypatch):
     resp = _run(
         T.api_trigger_run(
             _req(
-                "POST", "/api/triggers/x/run", state, body={}, match_info={"id": "store:file:notes"}
+                "POST",
+                "/api/triggers/x/run",
+                state,
+                body={},
+                match_info={"id": "store:file:notes"},
             )
         )
     )
@@ -779,12 +842,20 @@ def test_a_paused_store_trigger_still_runs_by_hand(home, state, monkeypatch):
 def test_running_a_broken_row_is_400(home, state):
     _store(home).path.write_text(
         json.dumps(
-            {"version": 1, "triggers": [{"id": "web_watch:x", "name": "X", "kind": "nonsense"}]}
+            {
+                "version": 1,
+                "triggers": [{"id": "web_watch:x", "name": "X", "kind": "nonsense"}],
+            }
         )
     )
     resp = _run(
         T.api_trigger_run(
-            _req("POST", "/api/triggers/x/run", state, match_info={"id": "store:web_watch:x"})
+            _req(
+                "POST",
+                "/api/triggers/x/run",
+                state,
+                match_info={"id": "store:web_watch:x"},
+            )
         )
     )
     assert resp.status == 400
@@ -792,9 +863,6 @@ def test_running_a_broken_row_is_400(home, state):
 
 async def _noop():
     return None
-
-
-# ── the boundary: legacy paths untouched ──
 
 
 def test_store_only_kinds_excludes_clock_and_event():
@@ -806,14 +874,11 @@ def test_store_only_kinds_excludes_clock_and_event():
     assert "web_watch" in T._STORE_ONLY_KINDS
 
 
-# ── 🔴 §6's schedule re-point (S99) ──
-
-
 def test_the_schedule_list_is_read_from_the_store(home, state, monkeypatch):
     """🔴 §6's re-point: "the existing facade becomes the single API by re-pointing its three
     backends at one store". Verified before switching that the store lists the SAME job ids the
     legacy service does after the boot migration, so nothing vanishes from the page."""
-    from gideon.triggers import boot_migrate as BM
+    from gideon.automation.triggers import boot_migrate as BM
 
     (home / "crons.json").write_text(
         json.dumps(
@@ -832,12 +897,12 @@ def test_the_schedule_list_is_read_from_the_store(home, state, monkeypatch):
         )
     )
     BM.migrate_and_arm(home, now=1_800_000_000.0)
-    state.crons.list_jobs.return_value = []  # the legacy service is EMPTY on purpose
+    state.crons.list_jobs.return_value = []
     resp = _run(T.api_triggers(_req("GET", "/api/triggers", state)))
     rows = [t for t in _body(resp)["triggers"] if t["kind"] == "schedule"]
     assert [r["raw_id"] for r in rows] == ["j-cron"]
     assert rows[0]["cron_expr"] == "0 9 * * *"
-    assert rows[0]["next_run_ts"]  # armed by the boot migration
+    assert rows[0]["next_run_ts"]
 
 
 def test_a_legacy_job_is_visible_through_the_MIGRATION_not_a_fallback(home, state):
@@ -913,15 +978,16 @@ def test_a_legacy_job_the_conversion_REFUSES_is_still_imported(home, state):
     assert [r.trigger.id for r in rows] == ["broken1"]
     assert rows[0].ok is False, "it must be visibly broken"
     assert rows[0].trigger.enabled is False, "and must never fire"
-    # And it reaches the UI rather than vanishing.
     resp = _run(T.api_triggers(_req("GET", "/api/triggers", state)))
-    assert "broken1" in [t["raw_id"] for t in _body(resp)["triggers"] if t["kind"] == "schedule"]
+    assert "broken1" in [
+        t["raw_id"] for t in _body(resp)["triggers"] if t["kind"] == "schedule"
+    ]
 
 
 def test_a_store_backed_schedule_row_is_redacted(home, state):
     """The projection is a data mapping and knows nothing about credential scrubbing, so the handler
     still redacts on the way out — exactly as `_serialize_schedule` did."""
-    from gideon.triggers.models import Trigger
+    from gideon.automation.triggers.models import Trigger
 
     _store(home).upsert(
         Trigger(
@@ -944,16 +1010,18 @@ def test_a_broken_clock_row_is_listed_with_its_error(home, state):
     automation the user cannot otherwise debug."""
     _store(home).path.write_text(
         json.dumps(
-            {"version": 1, "triggers": [{"id": "clock:x", "name": "X", "kind": "clock", "spec": 5}]}
+            {
+                "version": 1,
+                "triggers": [
+                    {"id": "clock:x", "name": "X", "kind": "clock", "spec": 5}
+                ],
+            }
         )
     )
     state.crons.list_jobs.return_value = []
     resp = _run(T.api_triggers(_req("GET", "/api/triggers", state)))
     rows = [t for t in _body(resp)["triggers"] if t["kind"] == "schedule"]
     assert rows and rows[0]["broken"]
-
-
-# ── 🔴 §6's schedule WRITE re-point (S101) ──
 
 
 def _create_schedule(state, **over):
@@ -981,8 +1049,8 @@ def test_a_created_schedule_is_ARMED(home, state):
     and "runs after the user restarts the gateway"."""
     _create_schedule(state)
     trigger = _store(home).get("clock:nightly").trigger
-    assert trigger.next_fire_at  # not ""
-    from gideon.triggers import service as SVC
+    assert trigger.next_fire_at
+    from gideon.automation.triggers import service as SVC
 
     due_at = SVC.to_epoch(trigger.next_fire_at) + 1
     assert SVC.due_ids([trigger], now=due_at) == ["clock:nightly"]
@@ -990,7 +1058,10 @@ def test_a_created_schedule_is_ARMED(home, state):
 
 def test_the_spec_carries_every_schedule_field(home, state):
     _create_schedule(
-        state, timezone="America/New_York", skip_dates=["2027-12-25"], strict_schedule=True
+        state,
+        timezone="America/New_York",
+        skip_dates=["2027-12-25"],
+        strict_schedule=True,
     )
     spec = _store(home).get("clock:nightly").trigger.spec
     assert spec["kind"] == "cron"
@@ -1002,12 +1073,18 @@ def test_the_spec_carries_every_schedule_field(home, state):
 
 def test_channel_and_silent_become_DELIVERY(home, state):
     """`LEGACY_FIELD_MAP`: `channel → delivery`, `silent → delivery == none`. Writing them into the
-    action config (where they used to live) would make the projection render them empty."""
+    action config (where they used to live) would make the projection render them empty.
+    """
     _create_schedule(state, channel="C0AP3QR7Z4M")
     assert _store(home).get("clock:nightly").trigger.delivery == "channel:C0AP3QR7Z4M"
     _run(
         T.api_trigger_detail(
-            _req("DELETE", "/api/triggers/x", state, match_info={"id": "schedule:clock:nightly"})
+            _req(
+                "DELETE",
+                "/api/triggers/x",
+                state,
+                match_info={"id": "schedule:clock:nightly"},
+            )
         )
     )
     _create_schedule(state, silent=True)
@@ -1032,14 +1109,13 @@ def test_an_interval_and_a_one_shot_both_create(home, state):
     _create_schedule(state, name="Once", cron=None, at=4_000_000_000.0)
     spec = _store(home).get("clock:once").trigger.spec
     assert spec["kind"] == "at"
-    # `delete_after_run` so the tick RETIRES it instead of leaving an elapsed timestamp (S96).
     assert spec["delete_after_run"] is True
 
 
 def test_create_still_validates_before_writing(home, state):
     """The re-point moves where a row is PERSISTED, never what the API accepts."""
     assert _create_schedule(state, name="").status == 400
-    assert _create_schedule(state, cron=None).status == 400  # no cadence
+    assert _create_schedule(state, cron=None).status == 400
     assert _create_schedule(state, timezone="Mars/Olympus").status == 400
     assert _create_schedule(state, channel="not a channel id").status == 400
     assert _store(home).load() == []
@@ -1058,9 +1134,6 @@ def test_a_non_numeric_one_shot_at_is_400_not_500(home, state):
         assert resp.status == 400
         assert "'at'" in _body(resp)["error"]
     assert _store(home).load() == []
-
-
-# ── update ──
 
 
 def test_update_changes_the_cadence_and_RE_ARMS(home, state):
@@ -1157,7 +1230,7 @@ def test_a_new_skip_date_RE_ARMS_the_trigger(home, state):
     _create_schedule(state, timezone="UTC")
     armed_before = _store(home).get("clock:nightly").trigger.next_fire_at
     assert armed_before
-    skip_day = armed_before[:10]  # the ISO date the row is currently armed for
+    skip_day = armed_before[:10]
     _run(
         T.api_trigger_detail(
             _req(
@@ -1209,20 +1282,25 @@ def test_updating_an_unknown_schedule_is_404(home, state):
     assert resp.status == 404
 
 
-# ── toggle ──
-
-
 def test_toggle_pauses_and_re_enabling_ARMS(home, state):
     """🔴 Re-enabling must arm, or the trigger sits enabled and inert until the next boot sweep."""
     _create_schedule(state)
     nid = {"id": "schedule:clock:nightly"}
-    _run(T.api_trigger_toggle(_req("POST", "/x", state, body={"enabled": False}, match_info=nid)))
+    _run(
+        T.api_trigger_toggle(
+            _req("POST", "/x", state, body={"enabled": False}, match_info=nid)
+        )
+    )
     trigger = _store(home).get("clock:nightly").trigger
     assert trigger.enabled is False
-    trigger.next_fire_at = ""  # a disabled row that was never armed
+    trigger.next_fire_at = ""
     _store(home).upsert(trigger)
 
-    _run(T.api_trigger_toggle(_req("POST", "/x", state, body={"enabled": True}, match_info=nid)))
+    _run(
+        T.api_trigger_toggle(
+            _req("POST", "/x", state, body={"enabled": True}, match_info=nid)
+        )
+    )
     after = _store(home).get("clock:nightly").trigger
     assert after.enabled is True
     assert after.next_fire_at
@@ -1233,9 +1311,6 @@ def test_toggle_with_no_body_flips_the_current_state(home, state):
     nid = {"id": "schedule:clock:nightly"}
     _run(T.api_trigger_toggle(_req("POST", "/x", state, body={}, match_info=nid)))
     assert _store(home).get("clock:nightly").trigger.enabled is False
-
-
-# ── delete ──
 
 
 def test_delete_removes_the_store_row(home, state):
@@ -1250,7 +1325,7 @@ def test_delete_removes_the_store_row(home, state):
 
 
 def test_delete_still_drops_the_run_history(home, state):
-    """Run history lives in `ScheduleRunStore` (keyed by a plain id, so it survives the cutover), so
+    """Run history lives in `ExecutionJournal` (keyed by a plain id, so it survives the cutover), so
     a delete has two halves: drop the trigger AND drop its runs."""
     _append_run(home)
     _create_schedule(state)
@@ -1259,17 +1334,13 @@ def test_delete_still_drops_the_run_history(home, state):
             _req("DELETE", "/x", state, match_info={"id": "schedule:clock:nightly"})
         )
     )
-    # S105: the run half goes through the STORE now, so assert the rows are actually gone rather
-    # than that a service mock was awaited — a mock assertion would pass without the delete.
     assert _run(T._runs_store().list_for_job("clock:nightly", 0, 10)) == ([], 0)
-
-
-# ── 🔴 §6's manual-run re-point (S102) ──
 
 
 def test_a_schedule_run_goes_through_the_store_path(home, state):
     """🔴 A Run button and an autonomous tick must fire the same action the same way, so a
-    store-backed clock trigger routes through `_run_store` like every other store kind."""
+    store-backed clock trigger routes through `_run_store` like every other store kind.
+    """
     _create_schedule(state)
     resp = _run(
         T.api_trigger_run(
@@ -1284,7 +1355,6 @@ def test_a_schedule_run_goes_through_the_store_path(home, state):
     )
     data = _body(resp)
     assert resp.status == 200
-    # The store path reports the gate plan; the legacy path reported {ok, name, dry_run}.
     assert data["result"]["plan"]["executes"] is False
     assert "screen" in data["result"]["plan"]["enforced"]
 
@@ -1295,12 +1365,13 @@ def test_an_in_flight_claim_returns_409(home, state):
     answered "idle" for a trigger that was actively running."""
     import time as _time
 
-    from gideon.triggers import claims
-    from gideon.triggers.scheduling import Claim
+    from gideon.automation.triggers import claims
+    from gideon.automation.triggers.scheduling import Claim
 
     _create_schedule(state)
     claims.write_claim(
-        Claim(trigger_id="clock:nightly", holder="tick", claimed_at=_time.time()), base_dir=home
+        Claim(trigger_id="clock:nightly", holder="tick", claimed_at=_time.time()),
+        base_dir=home,
     )
     resp = _run(
         T.api_trigger_run(
@@ -1313,14 +1384,14 @@ def test_an_in_flight_claim_returns_409(home, state):
 
 def test_an_expired_claim_does_not_block_a_manual_run(home, state):
     """Read-time expiry (S97): a crashed run must not make the Run button permanently unusable."""
-    from gideon.triggers import claims
-    from gideon.triggers.scheduling import CLAIM_MAX_DURATION_SECS, Claim
+    from gideon.automation.triggers import claims
+    from gideon.automation.triggers.scheduling import CLAIM_MAX_DURATION_SECS, Claim
 
     _create_schedule(state)
     claims.write_claim(
         Claim(trigger_id="clock:nightly", holder="dead", claimed_at=1.0), base_dir=home
     )
-    assert CLAIM_MAX_DURATION_SECS > 0  # the expiry window the read applies
+    assert CLAIM_MAX_DURATION_SECS > 0
     resp = _run(
         T.api_trigger_run(
             _req(
@@ -1338,12 +1409,11 @@ def test_an_expired_claim_does_not_block_a_manual_run(home, state):
 def test_running_an_unknown_schedule_still_404s(home, state):
     state.crons.list_jobs.return_value = []
     resp = _run(
-        T.api_trigger_run(_req("POST", "/x/run", state, match_info={"id": "schedule:ghost"}))
+        T.api_trigger_run(
+            _req("POST", "/x/run", state, match_info={"id": "schedule:ghost"})
+        )
     )
     assert resp.status == 404
-
-
-# ── 🔴 §6's week-grid + doctor re-point (S103) ──
 
 
 def _week(state, *, start="2027-01-15T00:00:00", days=3):
@@ -1369,7 +1439,7 @@ def test_the_week_grid_now_PLOTS_A_CRON(home, state):
     _create_schedule(state, name="Nightly", cron="0 9 * * *", timezone="UTC")
     by = _occ_by_trigger(_week(state))
     assert "schedule:clock:nightly" in by
-    assert len(by["schedule:clock:nightly"]) == 3  # one per day in the window
+    assert len(by["schedule:clock:nightly"]) == 3
 
 
 def test_a_cron_plots_on_its_real_cadence_not_a_constant_step(home, state):
@@ -1415,9 +1485,14 @@ def test_a_one_shot_is_not_plotted_as_a_recurrence(home, state):
 
 def test_skip_dates_and_the_triggers_own_zone_still_annotate(home, state):
     """AUTO-A3's struck columns. The SCHEDULER compares skip dates against the date in the trigger's
-    OWN zone, so a grid on server time would strike the wrong column for a job that declares one."""
+    OWN zone, so a grid on server time would strike the wrong column for a job that declares one.
+    """
     _create_schedule(
-        state, name="Nightly", cron="0 9 * * *", timezone="UTC", skip_dates=["2027-01-16"]
+        state,
+        name="Nightly",
+        cron="0 9 * * *",
+        timezone="UTC",
+        skip_dates=["2027-01-16"],
     )
     occurrences = _occ_by_trigger(_week(state))["schedule:clock:nightly"]
     struck = [o for o in occurrences if o["suppressed_by"] == "skipped"]
@@ -1436,13 +1511,15 @@ def test_a_broken_clock_row_is_not_plotted(home, state):
     """A row the entity refuses has no knowable schedule; plotting a guess is worse than absence."""
     _store(home).path.write_text(
         json.dumps(
-            {"version": 1, "triggers": [{"id": "clock:x", "name": "X", "kind": "clock", "spec": 5}]}
+            {
+                "version": 1,
+                "triggers": [
+                    {"id": "clock:x", "name": "X", "kind": "clock", "spec": 5}
+                ],
+            }
         )
     )
     assert _occ_by_trigger(_week(state)) == {}
-
-
-# ── doctor ──
 
 
 def test_the_doctor_diagnoses_from_the_store(home, state):
@@ -1450,7 +1527,7 @@ def test_the_doctor_diagnoses_from_the_store(home, state):
     was ALWAYS empty — and a `watch_glob` that does not exist on a cron at all. The orphan-workflow
     and broad-glob checks were scanning blanks for every schedule trigger: present, reviewed, and
     diagnosing nothing. A `Trigger` carries `gates`/`workflow`/`spec` natively."""
-    from gideon.triggers.models import Trigger
+    from gideon.automation.triggers.models import Trigger
 
     _store(home).upsert(
         Trigger(
@@ -1462,7 +1539,9 @@ def test_the_doctor_diagnoses_from_the_store(home, state):
             workflow={"ref": "no-such-workflow"},
         )
     )
-    data = _body(_run(T.api_triggers_doctor(_req("GET", "/api/triggers/doctor", state))))
+    data = _body(
+        _run(T.api_triggers_doctor(_req("GET", "/api/triggers/doctor", state)))
+    )
     assert "findings" in data
     assert isinstance(data["count"], int)
 
@@ -1473,12 +1552,11 @@ def test_the_doctor_reads_the_real_workflow_ref(home, state):
     _create_schedule(state, name="Nightly", cron="0 9 * * *")
     store = _store(home)
     trigger = store.get("clock:nightly").trigger
-    assert trigger.workflow  # `workflow.inline`, which the doctor now sees
-    data = _body(_run(T.api_triggers_doctor(_req("GET", "/api/triggers/doctor", state))))
-    assert data["healthy"] in (True, False)  # it ran rather than erroring
-
-
-# ── 🔴 §6's chat-injection + history re-point (S104) ──
+    assert trigger.workflow
+    data = _body(
+        _run(T.api_triggers_doctor(_req("GET", "/api/triggers/doctor", state)))
+    )
+    assert data["healthy"] in (True, False)
 
 
 def test_the_job_shim_serves_the_injection_from_the_store(home, state):
@@ -1490,7 +1568,7 @@ def test_the_job_shim_serves_the_injection_from_the_store(home, state):
     assert shim is not None
     assert shim.id == "clock:nightly-backup"
     assert shim.name == "Nightly Backup"
-    assert shim.agent_id == ""  # present and empty, never absent
+    assert shim.agent_id == ""
 
 
 def test_the_shim_is_store_only(home, state):
@@ -1521,11 +1599,11 @@ def test_the_last_result_comes_from_the_RUN_STORE(home, state):
 def test_the_last_result_prefers_an_error_when_there_is_no_summary(home, state):
     """A failed run's output IS its error; returning "" would make a failure look like a silent
     run."""
-    from gideon.schedule_history import ScheduleRun, ScheduleRunStore
+    from gideon.automation.schedule_history import ExecutionJournal, ExecutionRecord
 
     _run(
-        ScheduleRunStore(home).append(
-            ScheduleRun(
+        ExecutionJournal(home).append(
+            ExecutionRecord(
                 run_id="r1",
                 job_id="x",
                 trigger="schedule",
@@ -1559,7 +1637,7 @@ def test_the_name_map_covers_EVERY_kind(home, state):
     """🔴 The unified history feed carries file/web_watch/event runs too, so a name map that only
     knew about schedules would blank exactly the rows the new kinds contribute — which reads in
     the UI as a run of a deleted automation."""
-    from gideon.triggers.models import Trigger
+    from gideon.automation.triggers.models import Trigger
 
     _create_schedule(state, name="Nightly")
     _store(home).upsert(
@@ -1592,16 +1670,13 @@ def test_the_name_map_survives_an_unreadable_legacy_service(home, state):
     assert T._trigger_names(state)["clock:nightly"] == "Nightly"
 
 
-# ── 🔴 §6's run-record re-point (S105) ──
-
-
 def _append_run(home, *, job_id="clock:nightly", run_id="r1", status="ok", summary="s"):
-    from gideon.schedule_history import ScheduleRun, ScheduleRunStore
+    from gideon.automation.schedule_history import ExecutionJournal, ExecutionRecord
 
-    store = ScheduleRunStore(home)
+    store = ExecutionJournal(home)
     _run(
         store.append(
-            ScheduleRun(
+            ExecutionRecord(
                 run_id=run_id,
                 job_id=job_id,
                 trigger="schedule",
@@ -1618,11 +1693,11 @@ def _append_run(home, *, job_id="clock:nightly", run_id="r1", status="ok", summa
 
 def test_the_run_store_is_held_directly_not_through_the_service(home, state):
     """🔴 All four run-record methods on `ScheduleService` are one-line passthroughs to
-    `ScheduleRunStore`, and the store answers standalone from a bare `base_dir` — so the facade's
+    `ExecutionJournal`, and the store answers standalone from a bare `base_dir` — so the facade's
     dependency on the legacy service for run HISTORY was pure indirection. Proven by DELETING the
     service's run methods: the reads still work."""
     _append_run(home)
-    del state.crons.list_runs  # the legacy service can no longer serve this
+    del state.crons.list_runs
     runs, total = _run(T._runs_store().list_for_job("clock:nightly", 0, 10))
     assert total == 1
     assert runs[0]["run_id"] == "r1"
@@ -1632,19 +1707,20 @@ def test_the_helper_is_named_runs_store_to_avoid_shadowing():
     """🔴 A REAL BUG this session hit: the module already has `async def _run_store(raw, request)`
     (S94's manual-fire path), so defining a second `_run_store()` silently SHADOWED it — driven, the
     history endpoint raised "missing 2 required positional arguments". Python reports a same-name
-    redefinition only at the call site, which in a 1400-line handler module is a real hazard."""
+    redefinition only at the call site, which in a 1400-line handler module is a real hazard.
+    """
     import inspect
 
     assert callable(T._runs_store)
-    # The S94 handler still takes its two arguments.
     assert list(inspect.signature(T._run_store).parameters) == ["raw", "request"]
 
 
 def test_the_last_run_status_is_read_from_the_store(home, state):
     """T7's honest badge: the PERSISTENT status survives restarts and keeps `launched` distinct from
-    `ok`, where a trigger's own field would report a fire-and-forget run as a success."""
+    `ok`, where a trigger's own field would report a fire-and-forget run as a success.
+    """
     _append_run(home, status="launched")
-    del state.crons.last_run_status  # no legacy service involvement
+    del state.crons.last_run_status
     assert T._last_run_status(state, "clock:nightly") == "launched"
 
 
@@ -1668,7 +1744,9 @@ def test_per_trigger_history_reads_the_store(home, state):
     del state.crons.list_runs
     resp = _run(
         T.api_trigger_history(
-            _req("GET", "/x/history", state, match_info={"id": "schedule:clock:nightly"})
+            _req(
+                "GET", "/x/history", state, match_info={"id": "schedule:clock:nightly"}
+            )
         )
     )
     data = _body(resp)
@@ -1698,7 +1776,9 @@ def test_the_cross_trigger_feed_reads_the_store_and_joins_names(home, state):
     _create_schedule(state, name="Nightly")
     del state.crons.list_all_runs
     resp = _run(
-        T.api_trigger_history_all(_req("GET", "/api/triggers/history", state, query="shape=legacy"))
+        T.api_trigger_history_all(
+            _req("GET", "/api/triggers/history", state, query="shape=legacy")
+        )
     )
     rows = _body(resp)["runs"]
     assert rows[0]["run_id"] == "r1"
@@ -1726,11 +1806,13 @@ def test_the_facade_no_longer_calls_any_run_method_on_the_service():
     import inspect
 
     src = inspect.getsource(T)
-    for method in ("crons.list_runs", "crons.list_all_runs", "crons.get_run", "crons.delete_runs"):
+    for method in (
+        "crons.list_runs",
+        "crons.list_all_runs",
+        "crons.get_run",
+        "crons.delete_runs",
+    ):
         assert method not in src, method
-
-
-# ── 🔴 the lifecycle state reached no surface (S164) ──
 
 
 def test_the_store_projection_EMITS_the_lifecycle_state():
@@ -1743,7 +1825,7 @@ def test_the_store_projection_EMITS_the_lifecycle_state():
     `health` cannot substitute. A PARKED trigger is `health: parked`, but an AUTOPAUSED one is
     `health: failing` — and "failing" does not tell the user the automation has STOPPED.
     """
-    from gideon.triggers.models import Trigger, TriggerState
+    from gideon.automation.triggers.models import Trigger, TriggerState
 
     trigger = Trigger(id="clock:x", name="x", kind="clock")
     trigger.state = TriggerState.AUTOPAUSED.value
@@ -1755,7 +1837,7 @@ def test_the_store_projection_EMITS_the_lifecycle_state():
 def test_health_and_state_are_BOTH_on_the_wire():
     """Two vocabularies, both needed: `health` says how it has been going, `state` says whether it
     will run at all. A surface given only one has to guess the other."""
-    from gideon.triggers.models import Trigger, TriggerHealth, TriggerState
+    from gideon.automation.triggers.models import Trigger, TriggerHealth, TriggerState
 
     trigger = Trigger(id="clock:y", name="y", kind="clock")
     trigger.state = TriggerState.PARKED.value
@@ -1767,13 +1849,10 @@ def test_health_and_state_are_BOTH_on_the_wire():
 def test_an_ACTIVE_trigger_still_reports_active():
     """The default path is unchanged — every trigger authored before this session projects the same
     way, with `state: "active"` added rather than anything reinterpreted."""
-    from gideon.triggers.models import Trigger
+    from gideon.automation.triggers.models import Trigger
 
     row = T._serialize_store(Trigger(id="clock:z", name="z", kind="clock"))
     assert row["state"] == "active"
-
-
-# ── 🔴 a store trigger's run history was reported as unsupported (S166) ──
 
 
 @pytest.mark.asyncio
@@ -1783,7 +1862,7 @@ async def test_a_STORE_trigger_SERVES_its_run_history(home, monkeypatch):
     with a reason naming LIFECYCLE triggers, a kind it is not.
 
     But a store trigger DOES have run records: `_record_fire_outcome` has written them to
-    `ScheduleRunStore` under `job_id=trigger.id` since S139. Measured: three fires persisted three
+    `ExecutionJournal` under `job_id=trigger.id` since S139. Measured: three fires persisted three
     rows and the endpoint reported none, so the detail panel read "No runs recorded yet" for an
     automation that had run three times.
 
@@ -1793,9 +1872,9 @@ async def test_a_STORE_trigger_SERVES_its_run_history(home, monkeypatch):
     """
     import types as _types
 
-    from gideon.gateway import GatewayOrchestrator
-    from gideon.triggers.models import Trigger
-    from gideon.triggers.store import TriggerStore
+    from gideon.automation.triggers.models import Trigger
+    from gideon.automation.triggers.store import TriggerStore
+    from gideon.engine.gateway import RuntimeCoordinator
 
     store = TriggerStore(base_dir=home)
     store.upsert(
@@ -1809,7 +1888,7 @@ async def test_a_STORE_trigger_SERVES_its_run_history(home, monkeypatch):
             workflow={"inline": {"provider": "notify", "config": {}}},
         )
     )
-    orch = object.__new__(GatewayOrchestrator)
+    orch = object.__new__(RuntimeCoordinator)
     orch.dashboard_state = None
     for _ in range(3):
         await orch._record_fire_outcome(
@@ -1817,7 +1896,9 @@ async def test_a_STORE_trigger_SERVES_its_run_history(home, monkeypatch):
             result=_types.SimpleNamespace(success=True, error=""),
         )
 
-    req = make_mocked_request("GET", "/api/triggers/store:web_watch:feed/history?limit=10")
+    req = make_mocked_request(
+        "GET", "/api/triggers/store:web_watch:feed/history?limit=10"
+    )
     req.match_info["id"] = "store:web_watch:feed"
     payload = json.loads((await T.api_trigger_history(req)).body.decode())
     assert payload["total"] == 3, "the rows the fire path wrote must be served"
@@ -1846,11 +1927,11 @@ async def test_an_UNRECOGNISED_prefix_falls_back_to_SCHEDULE_not_a_fake_reason()
     req = make_mocked_request("GET", "/api/triggers/mystery:x/history")
     req.match_info["id"] = "mystery:x"
     payload = json.loads((await T.api_trigger_history(req)).body.decode())
-    assert payload == {"runs": [], "total": 0}, "an unknown prefix reads as an empty schedule"
+    assert payload == {
+        "runs": [],
+        "total": 0,
+    }, "an unknown prefix reads as an empty schedule"
     assert "supported" not in payload, "no fabricated unsupported answer"
-
-
-# ── 🔴 the list handed out a run_id the detail route denied (S167) ──
 
 
 @pytest.mark.asyncio
@@ -1868,9 +1949,9 @@ async def test_a_STORE_trigger_RUN_can_be_OPENED(home, monkeypatch):
     """
     import types as _types
 
-    from gideon.gateway import GatewayOrchestrator
-    from gideon.triggers.models import Trigger
-    from gideon.triggers.store import TriggerStore
+    from gideon.automation.triggers.models import Trigger
+    from gideon.automation.triggers.store import TriggerStore
+    from gideon.engine.gateway import RuntimeCoordinator
 
     store = TriggerStore(base_dir=home)
     store.upsert(
@@ -1884,21 +1965,22 @@ async def test_a_STORE_trigger_RUN_can_be_OPENED(home, monkeypatch):
             workflow={"inline": {"provider": "notify", "config": {}}},
         )
     )
-    orch = object.__new__(GatewayOrchestrator)
+    orch = object.__new__(RuntimeCoordinator)
     orch.dashboard_state = None
     await orch._record_fire_outcome(
         store.get("web_watch:feed").trigger,
         result=_types.SimpleNamespace(success=True, error=""),
     )
 
-    # The id the LIST hands the UI — the exact round trip the expander performs.
     req = make_mocked_request("GET", "/api/triggers/store:web_watch:feed/history")
     req.match_info["id"] = "store:web_watch:feed"
     listing = json.loads((await T.api_trigger_history(req)).body.decode())
     run_id = listing["runs"][0]["run_id"]
     assert run_id
 
-    req2 = make_mocked_request("GET", f"/api/triggers/store:web_watch:feed/history/{run_id}")
+    req2 = make_mocked_request(
+        "GET", f"/api/triggers/store:web_watch:feed/history/{run_id}"
+    )
     req2.match_info["id"] = "store:web_watch:feed"
     req2.match_info["run_id"] = run_id
     resp = await T.api_trigger_history_detail(req2)

@@ -1,6 +1,6 @@
 """BA-2's behavioural clauses must be proven ON THE MERGE GATE, not on whoever's laptop.
 
-``GIDEON_REQUIRE_BROWSE_PROOF`` (``tests/browse_chrome.py``) already turns a missing
+``GIDEON_REQUIRE_BROWSE_PROOF`` (``checks/runtime/browse_chrome.py``) already turns a missing
 browser from a skip into a failure. That lever protects nothing on its own: **nothing in the
 repo set it**, and the ``test`` job installs no browser, so on the machine that gates every
 merge the behavioural layer skipped. Measured on a browser-less tree: **20 skipped**, spread
@@ -19,7 +19,7 @@ Deliberately derived, not pinned by name:
 
 * **The leg is found by what it does**, not by its job id — "the job that runs pytest on the
   browse-proof modules". A rename stays green; deleting the job does not.
-* **The module list comes from the source.** Every ``tests/test_*.py`` that imports
+* **The module list comes from the source.** Every ``checks/runtime/test_*.py`` that imports
   ``browse_chrome`` can skip on a missing browser, so every one of them must be named on the
   leg. A new ``test_browse_..._live.py`` that nobody adds to ``ci.yml`` would otherwise skip
   forever, which is the one-sided-inventory failure this repo keeps meeting.
@@ -42,20 +42,13 @@ import re
 import browse_chrome
 import pytest
 
-_ROOT = pathlib.Path(__file__).resolve().parents[1]
-_TESTS = _ROOT / "tests"
+_ROOT = pathlib.Path(__file__).resolve().parents[2]
+_TESTS = _ROOT / "checks/runtime"
 _CI = _ROOT / ".github" / "workflows" / "ci.yml"
 
-#: The job id as it stands today. Used only in failure messages — the assertions locate the leg
-#: by behaviour, so renaming the job is not a regression and must not read as one.
 EXPECTED_LEG = "browse-live"
 
-#: Job ids that have been in this workflow long enough that their absence means the parser
-#: broke rather than that CI changed. The vacuity floor for :func:`jobs`.
 LONG_STANDING_JOBS = frozenset({"lint", "test", "web", "rails", "harness", "client"})
-
-
-# ── the parser ────────────────────────────────────────────────────────────────
 
 
 def jobs(text: str) -> dict[str, str]:
@@ -74,7 +67,7 @@ def jobs(text: str) -> dict[str, str]:
         if not in_jobs:
             continue
         if line.strip() and not line.startswith(" ") and not line.startswith("#"):
-            break  # back to a top-level key: the jobs mapping ended
+            break
         header = re.match(r"^ {2}([A-Za-z][\w-]*):\s*(#.*)?$", line)
         if header:
             current = header.group(1)
@@ -137,7 +130,9 @@ def provisions_a_browser(block: str) -> bool:
     in several places, and treating a comment as an install is how a gate ends up certifying an
     intention. Matched by shape (``playwright install`` … ``chromium``) so the flags may change.
     """
-    return any("playwright install" in cmd and "chromium" in cmd for cmd in run_commands(block))
+    return any(
+        "playwright install" in cmd and "chromium" in cmd for cmd in run_commands(block)
+    )
 
 
 def modules_named(block: str) -> set[str]:
@@ -147,15 +142,11 @@ def modules_named(block: str) -> set[str]:
         if "pytest" not in cmd:
             continue
         for word in cmd.split():
-            if word.startswith("tests/") and word.endswith(".py"):
+            if word.startswith("checks/runtime/") and word.endswith(".py"):
                 named.add(word)
     return named
 
 
-#: The three ``browse_chrome`` entry points that can end a test without running it. Calling one
-#: is what makes a module skippable on a missing browser — and therefore what obliges it to be
-#: named on the leg. Merely importing the module is NOT enough: this very file imports it (for
-#: ``REQUIRE_ENV`` and the falsey rule) and can never skip for want of a browser.
 _GATE_CALLS = frozenset({"chrome_or_skip", "websockets_or_skip", "missing"})
 
 
@@ -187,7 +178,7 @@ def browse_proof_modules() -> set[str]:
     judgement call from a rail whose whole job is to not need one.
     """
     return {
-        f"tests/{path.name}"
+        f"checks/runtime/{path.name}"
         for path in sorted(_TESTS.glob("test_*.py"))
         if calls_the_browser_gate(path.read_text(encoding="utf-8"))
     }
@@ -196,7 +187,11 @@ def browse_proof_modules() -> set[str]:
 def the_leg(text: str) -> tuple[str, str]:
     """The job that runs the browse proof, located by behaviour. ``(job_id, block)``."""
     wanted = browse_proof_modules()
-    matches = [(name, block) for name, block in jobs(text).items() if modules_named(block) & wanted]
+    matches = [
+        (name, block)
+        for name, block in jobs(text).items()
+        if modules_named(block) & wanted
+    ]
     assert matches, (
         "no job in ci.yml runs pytest on any browse-proof module "
         f"({sorted(wanted)}), so BA-2's behavioural clauses are proven on no gate — their "
@@ -210,18 +205,13 @@ def the_leg(text: str) -> tuple[str, str]:
     return matches[0]
 
 
-# ── the rails ─────────────────────────────────────────────────────────────────
-
-
 def test_the_job_scan_is_not_vacuous() -> None:
     """If :func:`jobs` returned nothing, every assertion below would pass."""
     parsed = jobs(_CI.read_text(encoding="utf-8"))
     missing = LONG_STANDING_JOBS - set(parsed)
-    assert not missing, f"the job scan lost long-standing jobs {sorted(missing)} — parser broke"
-    # The pytest step's HOME is derived, not pinned to a job id (the same discipline the module
-    # docstring states for the browse leg): since #2720 the `test` job is an aggregation gate and
-    # the `uv run pytest …` step moved to `test-shard`, so anchor the run: scan on any job that
-    # runs it rather than on `test` specifically.
+    assert (
+        not missing
+    ), f"the job scan lost long-standing jobs {sorted(missing)} — parser broke"
     all_run = [cmd for block in parsed.values() for cmd in run_commands(block)]
     assert any(
         cmd.startswith("uv run pytest") for cmd in all_run
@@ -237,14 +227,16 @@ def test_the_module_walk_is_not_vacuous() -> None:
     """
     modules = browse_proof_modules()
     assert modules >= {
-        "tests/test_browse_safety_script.py",
-        "tests/test_browse_cdp_live.py",
-        "tests/test_browse_behavioural_proof_is_reachable.py",
+        "checks/runtime/test_browse_safety_script.py",
+        "checks/runtime/test_browse_cdp_live.py",
+        "checks/runtime/test_browse_behavioural_proof_is_reachable.py",
     }, f"the gate-call walk found {sorted(modules)} — the walk is wrong, not the repo"
     assert pathlib.Path(__file__).name not in {
         pathlib.PurePosixPath(m).name for m in modules
     }, "this file imports browse_chrome but calls no gate, so it must not be on the browser leg"
-    assert "tests/browse_chrome.py" not in modules, "the lookup module is not a test module"
+    assert (
+        "checks/runtime/browse_chrome.py" not in modules
+    ), "the lookup module is not a test module"
 
 
 def test_every_browse_proof_module_runs_on_the_merge_gate() -> None:
@@ -297,8 +289,8 @@ def test_the_strictness_is_confined_to_ci() -> None:
     for surface in (
         _ROOT / "Makefile",
         _ROOT / "pyproject.toml",
-        _ROOT / "tests" / "conftest.py",
-        _ROOT / "scripts" / "run_prepush.sh",
+        _ROOT / "checks/runtime" / "conftest.py",
+        _ROOT / "tooling/scripts" / "run_prepush.sh",
         _ROOT / ".env.example",
     ):
         if not surface.is_file():
@@ -318,7 +310,9 @@ def test_every_path_the_leg_names_exists() -> None:
     reads it on a green check.
     """
     name, block = the_leg(_CI.read_text(encoding="utf-8"))
-    absent = sorted(path for path in modules_named(block) if not (_ROOT / path).is_file())
+    absent = sorted(
+        path for path in modules_named(block) if not (_ROOT / path).is_file()
+    )
     assert not absent, f"job `{name}` names test paths that do not exist: {absent}"
 
 
@@ -331,11 +325,9 @@ def test_the_leg_runs_on_the_pull_request_gate() -> None:
     )
 
 
-# ── the detectors, both directions ────────────────────────────────────────────
-
 _INSTALL = "        run: npx playwright install --with-deps chromium"
 _REQUIRE = '      GIDEON_REQUIRE_BROWSE_PROOF: "1"'
-_PYTEST = "uv run pytest tests/test_browse_cdp_live.py -n0"
+_PYTEST = "uv run pytest checks/runtime/test_browse_cdp_live.py -n0"
 
 _SYNTHETIC = f"""\
 name: CI
@@ -357,7 +349,7 @@ jobs:
   rails:
     runs-on: ubuntu-latest
     steps:
-      - run: uv run pytest tests/test_provider_boundary_residue.py -n0
+      - run: uv run pytest checks/runtime/test_provider_boundary_residue.py -n0
 """
 
 
@@ -369,7 +361,9 @@ class TestTheDetectors:
         parsed = jobs(_SYNTHETIC)
         assert set(parsed) == {"lint", "browse-live", "rails"}
         assert "test_browse_cdp_live.py" in parsed["browse-live"]
-        assert "test_browse_cdp_live.py" not in parsed["rails"], "job blocks bled into each other"
+        assert (
+            "test_browse_cdp_live.py" not in parsed["rails"]
+        ), "job blocks bled into each other"
 
     def test_a_leg_with_no_install_step_is_caught(self) -> None:
         assert provisions_a_browser(jobs(_SYNTHETIC)["browse-live"])
@@ -387,20 +381,28 @@ class TestTheDetectors:
 
     @pytest.mark.parametrize("value", ["0", "false", "no", "off", '""'])
     def test_a_falsey_require_value_is_rejected(self, value: str) -> None:
-        weakened = _SYNTHETIC.replace(_REQUIRE, f"      {browse_chrome.REQUIRE_ENV}: {value}")
+        weakened = _SYNTHETIC.replace(
+            _REQUIRE, f"      {browse_chrome.REQUIRE_ENV}: {value}"
+        )
         read = env_value(jobs(weakened)["browse-live"], browse_chrome.REQUIRE_ENV)
-        assert browse_chrome._falsey(read), f"{value!r} read as {read!r}, which is not falsey"
+        assert browse_chrome._falsey(
+            read
+        ), f"{value!r} read as {read!r}, which is not falsey"
 
     def test_a_deleted_require_line_reads_as_absent(self) -> None:
         without = _SYNTHETIC.replace(_REQUIRE + "\n", "")
-        assert env_value(jobs(without)["browse-live"], browse_chrome.REQUIRE_ENV) is None
+        assert (
+            env_value(jobs(without)["browse-live"], browse_chrome.REQUIRE_ENV) is None
+        )
 
     def test_a_pytest_line_without_paths_names_no_modules(self) -> None:
         whole = _SYNTHETIC.replace(_PYTEST, "uv run pytest")
         assert modules_named(jobs(whole)["browse-live"]) == set()
 
     def test_a_non_pytest_step_does_not_count_as_running_a_module(self) -> None:
-        echoed = _SYNTHETIC.replace(_PYTEST, "echo tests/test_browse_cdp_live.py")
+        echoed = _SYNTHETIC.replace(
+            _PYTEST, "echo checks/runtime/test_browse_cdp_live.py"
+        )
         assert modules_named(jobs(echoed)["browse-live"]) == set()
 
     def test_the_leg_lookup_fails_when_no_job_runs_the_proof(self) -> None:
@@ -419,12 +421,13 @@ class TestTheDetectors:
         ],
     )
     def test_a_real_gate_call_is_caught(self, source: str) -> None:
-        assert calls_the_browser_gate(source), f"the detector missed a real gate:\n{source}"
+        assert calls_the_browser_gate(
+            source
+        ), f"the detector missed a real gate:\n{source}"
 
     @pytest.mark.parametrize(
         "source",
         [
-            # The shape of THIS file, which must not be dragged onto the browser leg.
             "import browse_chrome\nassert browse_chrome.REQUIRE_ENV\n",
             '"""A docstring naming chrome_or_skip and websockets_or_skip."""\n',
             'HELPERS = ["chrome_or_skip", "websockets_or_skip", "missing"]\n',

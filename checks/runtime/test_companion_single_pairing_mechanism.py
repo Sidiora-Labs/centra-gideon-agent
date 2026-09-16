@@ -16,10 +16,10 @@ COMPANION-APPS Success Criterion 1 and its S4 T4.2/T4.3 rows assert two properti
 
 **What is NOT a violation here.** A sanctioned native shell landing as its own tree with its own
 build once PLATFORM-REACH clears the platform is the recipe working, not a regression — which is
-why the platform census is scoped to ``src/gideon`` and ``web/src`` (the shared halves) and
-deliberately says nothing about a shell directory. ``desktop/`` is likewise out of scope: an
+why the platform census is scoped to ``runtime/gideon`` and ``apps/console/src`` (the shared halves) and
+deliberately says nothing about a shell directory. ``apps/desktop/`` is likewise out of scope: an
 Electron shell is DESKTOP-CAPABILITIES' to branch on host OS as it needs.
-``gideon.auth.enrollment`` is out of scope too — it is a documented deliberate sibling of
+``gideon.security.auth.enrollment`` is out of scope too — it is a documented deliberate sibling of
 ``auth.pairing`` with its own store file and its own surface, not a second device-pairing path.
 
 Every census here carries a **vacuity floor**. A pattern that matches nothing looks clean while
@@ -33,29 +33,18 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
-_ROOT = Path(__file__).resolve().parents[1]
+_ROOT = Path(__file__).resolve().parents[2]
 
-#: The shared surfaces: the backend every platform talks to, and the one SPA every platform
-#: renders. A native symbol here means a shell has leaked into the half it does not own.
-_SHARED_ROOTS = ("src/gideon", "web/src")
+_SHARED_ROOTS = ("runtime/gideon", "apps/console/src")
 
-#: Shared surfaces plus the shells, for censuses about the pairing mechanism itself.
 _CODE_ROOTS = (*_SHARED_ROOTS, "desktop")
 
 _EXTENSIONS = (".py", ".ts", ".tsx", ".js", ".mjs", ".cjs")
 
 _SKIP_DIRS = {"__pycache__", "node_modules", "dist", "build", ".venv"}
 
-#: The rival design's name in every IDENTIFIER spelling — ``device_token``, ``deviceToken``,
-#: ``device-token``, ``devicetoken``. The space-separated prose form is deliberately excluded:
-#: the mentions that survive in code are the mechanism denying itself ("**There is no device
-#: token.**", ``handlers/devices.py``), and a census that flags a negation flags the wrong
-#: thing. Prose in a code file should therefore say "device token" with a space; every spelling
-#: a symbol could actually take is caught.
 _DEVICE_TOKEN_RE = re.compile(r"device[_-]?token", re.I)
 
-#: Native platform SDKs. Each one is unambiguous: it cannot appear in a shared surface by
-#: coincidence, only because a shell was written there.
 _PLATFORM_SDK_MARKERS = (
     "@capacitor",
     "capacitor.config",
@@ -91,7 +80,7 @@ def _corpus(roots: tuple[str, ...]) -> tuple[tuple[str, tuple[str, ...]], ...]:
     """Read every file under ``roots`` ONCE, as ``((relative path, lines), …)``.
 
     `_census` is called once per pattern, and `test_no_speculative_per_platform_code` alone
-    walks nine markers — so re-walking and re-reading `src/gideon` plus `web/src` inside
+    walks nine markers — so re-walking and re-reading `runtime/gideon` plus `apps/console/src` inside
     every call made the cost O(files x patterns) for no benefit. Measured on an idle machine,
     that one test took **45.0s** of the module's 71.7s; under the load this repo is routinely
     developed at (several agents, load 40-70 on 18 cores) it ran past the suite's own 120s
@@ -128,13 +117,15 @@ def test_scanner_is_not_vacuous() -> None:
     """The floor under every census below: the roots resolve and the matcher matches."""
     assert len(_files(_CODE_ROOTS)) > 100, "the code roots resolved to almost nothing"
     for root in _SHARED_ROOTS:
-        assert (_ROOT / root).is_dir(), f"{root} does not exist — every census below is vacuous"
-    # A control pattern that IS present, proving a zero elsewhere means absence, not a broken
-    # scanner. `attach_device` is the device-provenance writer; `endpointSocketUrl` is the S3
-    # socket-URL helper the wrapper contract names.
-    assert _census("attach_device"), "control pattern missing — the Python census is broken"
-    assert _census("endpointSocketUrl"), "control pattern missing — the web census is broken"
-    # The device-token pattern itself can match, and matches the shapes a symbol takes.
+        assert (
+            _ROOT / root
+        ).is_dir(), f"{root} does not exist — every census below is vacuous"
+    assert _census(
+        "attach_device"
+    ), "control pattern missing — the Python census is broken"
+    assert _census(
+        "endpointSocketUrl"
+    ), "control pattern missing — the web census is broken"
     for spelling in ("device_token", "deviceToken", "device-token", "DEVICE_TOKEN"):
         assert _DEVICE_TOKEN_RE.search(spelling), f"the census cannot see {spelling}"
     assert (
@@ -157,15 +148,17 @@ def test_no_parallel_device_token_code() -> None:
 
 def test_pairing_code_store_has_one_production_importer() -> None:
     """``auth.pairing`` is the only pairing-code store, reached from exactly one route module."""
-    module = _ROOT / "src" / "gideon" / "auth" / "pairing.py"
+    module = _ROOT / "runtime" / "gideon" / "security" / "auth" / "pairing.py"
     source = module.read_text(encoding="utf-8")
     for symbol in ("def issue_code(", "def redeem_code(", "PAIR_CODE_TTL_SECS"):
-        assert symbol in source, f"{symbol} left auth/pairing.py — this census now measures nothing"
+        assert (
+            symbol in source
+        ), f"{symbol} left auth/pairing.py — this census now measures nothing"
 
-    importers = set(_census("auth import pairing", ("src/gideon",))) | set(
-        _census("auth.pairing", ("src/gideon",))
+    importers = set(_census("auth import pairing", ("runtime/gideon",))) | set(
+        _census("auth.pairing", ("runtime/gideon",))
     )
-    assert importers == {"src/gideon/dashboard/handlers/devices.py"}, (
+    assert importers == {"runtime/gideon/interfaces/dashboard/handlers/devices.py"}, (
         "pairing codes are redeemed from more than one place; COMPANION-APPS §C2 owns that "
         f"redemption once: {sorted(importers)}"
     )
@@ -175,16 +168,16 @@ def test_device_provenance_has_one_writer() -> None:
     """Only the C2 route module names a paired device or writes its provenance."""
     writers = {
         path
-        for path in _census("attach_device(", ("src/gideon",))
-        if not path.endswith("session_store.py")  # its own definition site
+        for path in _census("attach_device(", ("runtime/gideon",))
+        if not path.endswith("session_store.py")
     }
     assert writers == {
-        "src/gideon/dashboard/handlers/devices.py"
+        "runtime/gideon/interfaces/dashboard/handlers/devices.py"
     }, f"device provenance is written from more than one module: {sorted(writers)}"
 
-    users = set(_census("PAIRED_DEVICE_USER", ("src/gideon",)))
+    users = set(_census("PAIRED_DEVICE_USER", ("runtime/gideon",)))
     assert users == {
-        "src/gideon/dashboard/handlers/devices.py"
+        "runtime/gideon/interfaces/dashboard/handlers/devices.py"
     }, f"a second module mints paired-device sessions: {sorted(users)}"
 
 

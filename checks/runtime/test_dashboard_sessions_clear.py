@@ -15,11 +15,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from aiohttp import web
 
-from gideon.dashboard.handlers import api_sessions_clear
+from gideon.interfaces.dashboard.handlers import api_sessions_clear
 
 
 def _history_key_for(key: str) -> str:
-    from gideon.dashboard.chat import _history_key_for as _hkf
+    from gideon.interfaces.dashboard.chat import _history_key_for as _hkf
 
     return _hkf(key)
 
@@ -27,7 +27,9 @@ def _history_key_for(key: str) -> str:
 class _FakeSession:
     """Minimal stand-in for ``_ChatSession`` — carries only what the handler reads."""
 
-    def __init__(self, key: str, *, pinned: bool = False, running: bool = False) -> None:
+    def __init__(
+        self, key: str, *, pinned: bool = False, running: bool = False
+    ) -> None:
         self.key = key
         self.pinned = pinned
         self._running = running
@@ -77,7 +79,7 @@ async def _call_and_parse(request: web.Request) -> tuple[int, dict]:
     from unittest.mock import patch
 
     with patch(
-        "gideon.dashboard.handlers.sessions._remove_session_for_history_key",
+        "gideon.interfaces.dashboard.handlers.sessions._remove_session_for_history_key",
         new=AsyncMock(return_value=None),
     ):
         resp = await api_sessions_clear(request)
@@ -175,7 +177,7 @@ async def test_none_metadata_does_not_crash() -> None:
     """get_metadata returning None (corrupt/missing file) skips session (deny-by-default)."""
     k1, k2 = _history_key_for("chat-1"), _history_key_for("chat-2")
     sessions = [{"key": k1}, {"key": k2}]
-    metadata = {k1: None}  # simulate corrupt metadata
+    metadata = {k1: None}
     request, _state, deleted = _make_request(sessions, metadata=metadata)
 
     status, body = await _call_and_parse(request)
@@ -191,12 +193,12 @@ async def test_skips_open_session_with_filesystem_underscore_key() -> None:
     but _history_key_for returns colon keys (dashboard:chat-X). The handler must
     protect both formats so open sessions aren't deleted.
     """
-    # Simulate what list_sessions actually returns: underscore format from filesystem
-    fs_key_1 = _history_key_for("chat-1-123").replace(":", "_", 1)  # open in sidebar
-    fs_key_2 = _history_key_for("chat-2-456").replace(":", "_", 1)  # not open
+    fs_key_1 = _history_key_for("chat-1-123").replace(":", "_", 1)
+    fs_key_2 = _history_key_for("chat-2-456").replace(":", "_", 1)
     sessions = [{"key": fs_key_1}, {"key": fs_key_2}]
-    # Session key is the raw form without prefix
-    open_sessions = {"chat-1-123": _FakeSession("chat-1-123", pinned=False, running=False)}
+    open_sessions = {
+        "chat-1-123": _FakeSession("chat-1-123", pinned=False, running=False)
+    }
     request, _state, deleted = _make_request(sessions, open_sessions=open_sessions)
 
     status, body = await _call_and_parse(request)
@@ -234,7 +236,6 @@ async def test_skips_session_when_metadata_raises() -> None:
     sessions = [{"key": k1}, {"key": k2}]
     request, state, deleted = _make_request(sessions)
 
-    # k1 raises, k2 returns normal metadata
     def _meta(key: str) -> dict:
         if key == k1:
             raise json.JSONDecodeError("bad", "", 0)
@@ -256,7 +257,6 @@ async def test_delete_failure_tracked_as_failed() -> None:
     sessions = [{"key": k1}, {"key": k2}]
     request, state, _ = _make_request(sessions)
 
-    # k1 succeeds, k2 fails
     state.conversation_log.delete_session.side_effect = lambda k: k == k1
 
     status, body = await _call_and_parse(request)

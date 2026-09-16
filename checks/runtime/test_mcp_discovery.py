@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from gideon.mcp_discovery import (
+from gideon.integrations.mcp_discovery import (
     McpServerInfo,
     _cache_probe,
     _get_cached,
@@ -73,18 +73,19 @@ class TestMcpServerInfo:
         assert info.is_remote is False
 
     def test_cwd_round_trips_from_spec(self) -> None:
-        # An app-shipped stdio server carries a cwd (its app dir) so relative
-        # args resolve on probe. Parse from spec + expose in to_dict.
-        from gideon.mcp_discovery import _server_from_spec
+        from gideon.integrations.mcp_discovery import _server_from_spec
 
         info = _server_from_spec(
             "app:local",
-            {"command": "python3", "args": ["backend/mcp_server.py"], "cwd": "/opt/app"},
+            {
+                "command": "python3",
+                "args": ["backend/mcp_server.py"],
+                "cwd": "/opt/app",
+            },
             "mcp.json",
         )
         assert info.cwd == "/opt/app"
         assert info.to_dict()["cwd"] == "/opt/app"
-        # No cwd → field stays empty and is omitted from to_dict.
         bare = _server_from_spec("x", {"command": "c"}, "mcp.json")
         assert bare.cwd == ""
         assert "cwd" not in bare.to_dict()
@@ -113,13 +114,13 @@ class TestListServers:
             }
         }
         (agents_dir / "gideon.json").write_text(json.dumps(installed))
-        monkeypatch.setattr("gideon.mcp_discovery.Path.home", lambda: tmp_path)
-        # The installed agent config now resolves through config_dir(), so the ACTIVE
-        # home has to be redirected the way the product does it — patching Path.home
-        # alone pinned the hardcode this test was written against (issue 287).
+        monkeypatch.setattr(
+            "gideon.integrations.mcp_discovery.Path.home", lambda: tmp_path
+        )
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path / ".gideon"))
         monkeypatch.setattr(
-            "gideon.mcp_discovery._mcp_json_paths", lambda: (tmp_path / "nope.json",)
+            "gideon.integrations.mcp_discovery._mcp_json_paths",
+            lambda: (tmp_path / "nope.json",),
         )
         servers = list_servers()
         names = {s.name for s in servers}
@@ -144,12 +145,12 @@ class TestListServers:
     def test_list_empty_no_config(self, tmp_path, monkeypatch) -> None:
         monkeypatch.setenv("GIDEON_PROJECT_DIR", str(tmp_path))
         monkeypatch.setattr(
-            "gideon.mcp_discovery._mcp_json_paths", lambda: (tmp_path / "nope.json",)
+            "gideon.integrations.mcp_discovery._mcp_json_paths",
+            lambda: (tmp_path / "nope.json",),
         )
-        monkeypatch.setattr("gideon.mcp_discovery.Path.home", lambda: tmp_path)
-        # The installed agent config now resolves through config_dir(), so the ACTIVE
-        # home has to be redirected the way the product does it — patching Path.home
-        # alone pinned the hardcode this test was written against (issue 287).
+        monkeypatch.setattr(
+            "gideon.integrations.mcp_discovery.Path.home", lambda: tmp_path
+        )
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path / ".gideon"))
         servers = list_servers()
         assert servers == []
@@ -164,7 +165,9 @@ class TestListServers:
         mcp_json.write_text(
             json.dumps({"mcpServers": {"ext-srv": {"command": "b", "args": ["--x"]}}})
         )
-        monkeypatch.setattr("gideon.mcp_discovery._mcp_json_paths", lambda: (mcp_json,))
+        monkeypatch.setattr(
+            "gideon.integrations.mcp_discovery._mcp_json_paths", lambda: (mcp_json,)
+        )
         servers = list_servers()
         names = {s.name for s in servers}
         assert "agent-srv" in names
@@ -180,8 +183,12 @@ class TestListServers:
         (agent_dir / "defaults.json").write_text(json.dumps(cfg))
         monkeypatch.setenv("GIDEON_PROJECT_DIR", str(tmp_path))
         mcp_json = tmp_path / "mcp.json"
-        mcp_json.write_text(json.dumps({"mcpServers": {"shared": {"command": "mcp-cmd"}}}))
-        monkeypatch.setattr("gideon.mcp_discovery._mcp_json_paths", lambda: (mcp_json,))
+        mcp_json.write_text(
+            json.dumps({"mcpServers": {"shared": {"command": "mcp-cmd"}}})
+        )
+        monkeypatch.setattr(
+            "gideon.integrations.mcp_discovery._mcp_json_paths", lambda: (mcp_json,)
+        )
         servers = list_servers()
         shared = [s for s in servers if s.name == "shared"]
         assert len(shared) == 1
@@ -199,11 +206,13 @@ class TestListServers:
         }
         (agent_dir / "defaults.json").write_text(json.dumps(cfg))
         monkeypatch.setenv("GIDEON_PROJECT_DIR", str(tmp_path))
-        monkeypatch.setattr("gideon.mcp_discovery._mcp_json_paths", lambda: (tmp_path / "x",))
-        monkeypatch.setattr("gideon.mcp_discovery.Path.home", lambda: tmp_path)
-        # The installed agent config now resolves through config_dir(), so the ACTIVE
-        # home has to be redirected the way the product does it — patching Path.home
-        # alone pinned the hardcode this test was written against (issue 287).
+        monkeypatch.setattr(
+            "gideon.integrations.mcp_discovery._mcp_json_paths",
+            lambda: (tmp_path / "x",),
+        )
+        monkeypatch.setattr(
+            "gideon.integrations.mcp_discovery.Path.home", lambda: tmp_path
+        )
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path / ".gideon"))
         servers = list_servers()
         names = {s.name for s in servers}
@@ -213,10 +222,9 @@ class TestListServers:
     def test_list_skips_disabled_mcp_json_servers(self, tmp_path, monkeypatch) -> None:
         """Disabled servers in mcp.json are also excluded."""
         monkeypatch.setenv("GIDEON_PROJECT_DIR", str(tmp_path))
-        monkeypatch.setattr("gideon.mcp_discovery.Path.home", lambda: tmp_path)
-        # The installed agent config now resolves through config_dir(), so the ACTIVE
-        # home has to be redirected the way the product does it — patching Path.home
-        # alone pinned the hardcode this test was written against (issue 287).
+        monkeypatch.setattr(
+            "gideon.integrations.mcp_discovery.Path.home", lambda: tmp_path
+        )
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path / ".gideon"))
         mcp_json = tmp_path / "mcp.json"
         mcp_json.write_text(
@@ -229,7 +237,9 @@ class TestListServers:
                 }
             )
         )
-        monkeypatch.setattr("gideon.mcp_discovery._mcp_json_paths", lambda: (mcp_json,))
+        monkeypatch.setattr(
+            "gideon.integrations.mcp_discovery._mcp_json_paths", lambda: (mcp_json,)
+        )
         servers = list_servers()
         names = {s.name for s in servers}
         assert "active" in names
@@ -245,15 +255,18 @@ class TestListServers:
         mcp_json = tmp_path / "mcp.json"
         mcp_json.write_text(json.dumps({"mcpServers": {"srv": {"command": "b"}}}))
         monkeypatch.setenv("GIDEON_PROJECT_DIR", str(tmp_path))
-        monkeypatch.setattr("gideon.mcp_discovery._mcp_json_paths", lambda: (mcp_json,))
-        monkeypatch.setattr("gideon.mcp_discovery.Path.home", lambda: tmp_path)
-        # The installed agent config now resolves through config_dir(), so the ACTIVE
-        # home has to be redirected the way the product does it — patching Path.home
-        # alone pinned the hardcode this test was written against (issue 287).
+        monkeypatch.setattr(
+            "gideon.integrations.mcp_discovery._mcp_json_paths", lambda: (mcp_json,)
+        )
+        monkeypatch.setattr(
+            "gideon.integrations.mcp_discovery.Path.home", lambda: tmp_path
+        )
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path / ".gideon"))
         assert not any(s.name == "srv" for s in list_servers())
 
-    def test_disabled_mcp_json_still_carries_disabled_tools(self, tmp_path, monkeypatch) -> None:
+    def test_disabled_mcp_json_still_carries_disabled_tools(
+        self, tmp_path, monkeypatch
+    ) -> None:
         """disabledTools from a disabled mcp.json entry are applied to an existing agent server."""
         agent_dir = tmp_path / "agents"
         agent_dir.mkdir()
@@ -262,14 +275,17 @@ class TestListServers:
         )
         mcp_json = tmp_path / "mcp.json"
         mcp_json.write_text(
-            json.dumps({"mcpServers": {"srv": {"disabled": True, "disabledTools": ["t1"]}}})
+            json.dumps(
+                {"mcpServers": {"srv": {"disabled": True, "disabledTools": ["t1"]}}}
+            )
         )
         monkeypatch.setenv("GIDEON_PROJECT_DIR", str(tmp_path))
-        monkeypatch.setattr("gideon.mcp_discovery._mcp_json_paths", lambda: (mcp_json,))
-        monkeypatch.setattr("gideon.mcp_discovery.Path.home", lambda: tmp_path)
-        # The installed agent config now resolves through config_dir(), so the ACTIVE
-        # home has to be redirected the way the product does it — patching Path.home
-        # alone pinned the hardcode this test was written against (issue 287).
+        monkeypatch.setattr(
+            "gideon.integrations.mcp_discovery._mcp_json_paths", lambda: (mcp_json,)
+        )
+        monkeypatch.setattr(
+            "gideon.integrations.mcp_discovery.Path.home", lambda: tmp_path
+        )
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path / ".gideon"))
         servers = list_servers()
         assert len(servers) == 1
@@ -289,11 +305,13 @@ class TestListServers:
         }
         (agent_dir / "defaults.json").write_text(json.dumps(cfg))
         monkeypatch.setenv("GIDEON_PROJECT_DIR", str(tmp_path))
-        monkeypatch.setattr("gideon.mcp_discovery._mcp_json_paths", lambda: (tmp_path / "x",))
-        monkeypatch.setattr("gideon.mcp_discovery.Path.home", lambda: tmp_path)
-        # The installed agent config now resolves through config_dir(), so the ACTIVE
-        # home has to be redirected the way the product does it — patching Path.home
-        # alone pinned the hardcode this test was written against (issue 287).
+        monkeypatch.setattr(
+            "gideon.integrations.mcp_discovery._mcp_json_paths",
+            lambda: (tmp_path / "x",),
+        )
+        monkeypatch.setattr(
+            "gideon.integrations.mcp_discovery.Path.home", lambda: tmp_path
+        )
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path / ".gideon"))
         servers = list_servers()
         assert len(servers) == 1
@@ -326,11 +344,17 @@ class TestListServers:
         gideon_mcp = tmp_path / "gideon_mcp.json"
         gideon_mcp.write_text(
             json.dumps(
-                {"mcpServers": {"shared": {"command": "gideon"}, "mc-only": {"command": "m"}}}
+                {
+                    "mcpServers": {
+                        "shared": {"command": "gideon"},
+                        "mc-only": {"command": "m"},
+                    }
+                }
             )
         )
         monkeypatch.setattr(
-            "gideon.mcp_discovery._mcp_json_paths", lambda: (legacy_mcp, gideon_mcp)
+            "gideon.integrations.mcp_discovery._mcp_json_paths",
+            lambda: (legacy_mcp, gideon_mcp),
         )
 
         servers = list_servers()
@@ -339,7 +363,7 @@ class TestListServers:
         assert "mc-only" in names
         assert "shared" in names
         shared = [s for s in servers if s.name == "shared"][0]
-        assert shared.command == "legacy-cmd"  # first path wins
+        assert shared.command == "legacy-cmd"
 
     def test_mcp_json_malformed_file_skipped(self, tmp_path, monkeypatch) -> None:
         """A malformed mcp.json is skipped; valid file still loads."""
@@ -353,7 +377,9 @@ class TestListServers:
         bad.write_text("{invalid json")
         good = tmp_path / "good.json"
         good.write_text(json.dumps({"mcpServers": {"srv": {"command": "x"}}}))
-        monkeypatch.setattr("gideon.mcp_discovery._mcp_json_paths", lambda: (bad, good))
+        monkeypatch.setattr(
+            "gideon.integrations.mcp_discovery._mcp_json_paths", lambda: (bad, good)
+        )
 
         servers = list_servers()
         assert any(s.name == "srv" for s in servers)
@@ -370,7 +396,9 @@ class TestListServers:
         bad.write_text(json.dumps({"mcpServers": ["not", "a", "dict"]}))
         good = tmp_path / "good.json"
         good.write_text(json.dumps({"mcpServers": {"srv": {"command": "x"}}}))
-        monkeypatch.setattr("gideon.mcp_discovery._mcp_json_paths", lambda: (bad, good))
+        monkeypatch.setattr(
+            "gideon.integrations.mcp_discovery._mcp_json_paths", lambda: (bad, good)
+        )
 
         servers = list_servers()
         assert any(s.name == "srv" for s in servers)
@@ -387,16 +415,22 @@ class TestListServers:
         blocked.write_text("{}")
         good = tmp_path / "good.json"
         good.write_text(json.dumps({"mcpServers": {"srv": {"command": "x"}}}))
-        monkeypatch.setattr("gideon.mcp_discovery._mcp_json_paths", lambda: (blocked, good))
+        monkeypatch.setattr(
+            "gideon.integrations.mcp_discovery._mcp_json_paths", lambda: (blocked, good)
+        )
 
-        original = __import__("gideon.hooks", fromlist=["safe_read_file"]).safe_read_file
+        original = __import__(
+            "gideon.engine.hooks", fromlist=["safe_read_file"]
+        ).safe_read_file
 
         def _mock_safe_read(path: str) -> str:
             if "blocked" in path:
                 raise PermissionError("Blocked: sensitive path")
             return original(path)
 
-        monkeypatch.setattr("gideon.mcp_discovery.safe_read_file", _mock_safe_read)
+        monkeypatch.setattr(
+            "gideon.integrations.mcp_discovery.safe_read_file", _mock_safe_read
+        )
 
         servers = list_servers()
         assert any(s.name == "srv" for s in servers)
@@ -420,7 +454,9 @@ class TestDiscoverNew:
                 }
             )
         )
-        monkeypatch.setattr("gideon.mcp_discovery._mcp_json_paths", lambda: (mcp_json,))
+        monkeypatch.setattr(
+            "gideon.integrations.mcp_discovery._mcp_json_paths", lambda: (mcp_json,)
+        )
         new = discover_servers_to_sync()
         assert len(new) == 1
         assert new[0].name == "brand-new"
@@ -434,11 +470,15 @@ class TestDiscoverNew:
         monkeypatch.setenv("GIDEON_PROJECT_DIR", str(tmp_path))
         mcp_json = tmp_path / "mcp.json"
         mcp_json.write_text(json.dumps({"mcpServers": {"srv": {"command": "a"}}}))
-        monkeypatch.setattr("gideon.mcp_discovery._mcp_json_paths", lambda: (mcp_json,))
+        monkeypatch.setattr(
+            "gideon.integrations.mcp_discovery._mcp_json_paths", lambda: (mcp_json,)
+        )
         new = discover_servers_to_sync()
         assert new == []
 
-    def test_discover_includes_existing_with_divergent_env(self, tmp_path, monkeypatch) -> None:
+    def test_discover_includes_existing_with_divergent_env(
+        self, tmp_path, monkeypatch
+    ) -> None:
         """Existing servers with new env keys in mcp.json are included."""
         agent_dir = tmp_path / "agents"
         agent_dir.mkdir()
@@ -449,13 +489,17 @@ class TestDiscoverNew:
         mcp_json.write_text(
             json.dumps({"mcpServers": {"srv": {"command": "a", "env": {"KEY": "val"}}}})
         )
-        monkeypatch.setattr("gideon.mcp_discovery._mcp_json_paths", lambda: (mcp_json,))
+        monkeypatch.setattr(
+            "gideon.integrations.mcp_discovery._mcp_json_paths", lambda: (mcp_json,)
+        )
         result = discover_servers_to_sync()
         assert len(result) == 1
         assert result[0].name == "srv"
         assert result[0].env == {"KEY": "val"}
 
-    def test_discover_skips_existing_with_identical_env(self, tmp_path, monkeypatch) -> None:
+    def test_discover_skips_existing_with_identical_env(
+        self, tmp_path, monkeypatch
+    ) -> None:
         """Existing servers with identical env are not flagged for sync."""
         agent_dir = tmp_path / "agents"
         agent_dir.mkdir()
@@ -466,28 +510,40 @@ class TestDiscoverNew:
         mcp_json.write_text(
             json.dumps({"mcpServers": {"srv": {"command": "a", "env": {"KEY": "val"}}}})
         )
-        monkeypatch.setattr("gideon.mcp_discovery._mcp_json_paths", lambda: (mcp_json,))
+        monkeypatch.setattr(
+            "gideon.integrations.mcp_discovery._mcp_json_paths", lambda: (mcp_json,)
+        )
         result = discover_servers_to_sync()
         assert result == []
 
-    def test_discover_skips_existing_when_source_env_is_subset(self, tmp_path, monkeypatch) -> None:
+    def test_discover_skips_existing_when_source_env_is_subset(
+        self, tmp_path, monkeypatch
+    ) -> None:
         """Server not flagged when all mcp.json env keys already exist in agent config."""
         agent_dir = tmp_path / "agents"
         agent_dir.mkdir()
-        cfg = {"mcpServers": {"srv": {"command": "a", "env": {"EXISTING": "keep", "NEW": "val"}}}}
+        cfg = {
+            "mcpServers": {
+                "srv": {"command": "a", "env": {"EXISTING": "keep", "NEW": "val"}}
+            }
+        }
         (agent_dir / "defaults.json").write_text(json.dumps(cfg))
         monkeypatch.setenv("GIDEON_PROJECT_DIR", str(tmp_path))
         mcp_json = tmp_path / "mcp.json"
         mcp_json.write_text(
             json.dumps({"mcpServers": {"srv": {"command": "a", "env": {"NEW": "val"}}}})
         )
-        monkeypatch.setattr("gideon.mcp_discovery._mcp_json_paths", lambda: (mcp_json,))
+        monkeypatch.setattr(
+            "gideon.integrations.mcp_discovery._mcp_json_paths", lambda: (mcp_json,)
+        )
         result = discover_servers_to_sync()
         assert result == []
 
 
 class TestSyncToAgentConfig:
-    def test_sync_delegates_to_rebuild_agent_config(self, tmp_path, monkeypatch) -> None:
+    def test_sync_delegates_to_rebuild_agent_config(
+        self, tmp_path, monkeypatch
+    ) -> None:
         """sync_to_agent_config delegates the merge to rebuild_agent_config() for new servers.
 
         Registration is no longer done by shelling out to a CLI — rebuild_agent_config()
@@ -499,18 +555,22 @@ class TestSyncToAgentConfig:
         agents_dir = tmp_path / ".gideon" / "agents"
         agents_dir.mkdir(parents=True)
         config_path = agents_dir / "gideon.json"
-        config_path.write_text(json.dumps({"mcpServers": {}, "tools": [], "allowedTools": []}))
+        config_path.write_text(
+            json.dumps({"mcpServers": {}, "tools": [], "allowedTools": []})
+        )
 
         install_called: list[bool] = []
         monkeypatch.setattr(
-            "gideon.agent.rebuild_agent_config",
+            "gideon.engine.agent.rebuild_agent_config",
             lambda **kw: install_called.append(True) or config_path,
         )
 
         new_srv = McpServerInfo(name="new-srv", command="b", args=["--x"])
         ok = sync_to_agent_config([new_srv])
         assert ok is True
-        assert install_called, "rebuild_agent_config() should be called to merge the config"
+        assert (
+            install_called
+        ), "rebuild_agent_config() should be called to merge the config"
 
     def test_sync_fallback_writes_json(self, tmp_path, monkeypatch) -> None:
         """Without gideon-cli, delegates to rebuild_agent_config() for config merge."""
@@ -523,16 +583,15 @@ class TestSyncToAgentConfig:
         }
         config_path = agents_dir / "gideon.json"
         config_path.write_text(json.dumps(cfg))
-        monkeypatch.setattr("gideon.mcp_discovery.Path.home", lambda: tmp_path)
-        # The installed agent config now resolves through config_dir(), so the ACTIVE
-        # home has to be redirected the way the product does it — patching Path.home
-        # alone pinned the hardcode this test was written against (issue 287).
+        monkeypatch.setattr(
+            "gideon.integrations.mcp_discovery.Path.home", lambda: tmp_path
+        )
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path / ".gideon"))
         monkeypatch.setattr("shutil.which", lambda x, **kw: None)
 
         install_called = []
         monkeypatch.setattr(
-            "gideon.agent.rebuild_agent_config",
+            "gideon.engine.agent.rebuild_agent_config",
             lambda **kw: install_called.append(True) or config_path,
         )
 
@@ -546,16 +605,15 @@ class TestSyncToAgentConfig:
         agents_dir = tmp_path / ".gideon" / "agents"
         agents_dir.mkdir(parents=True)
         config_path = agents_dir / "gideon.json"
-        monkeypatch.setattr("gideon.mcp_discovery.Path.home", lambda: tmp_path)
-        # The installed agent config now resolves through config_dir(), so the ACTIVE
-        # home has to be redirected the way the product does it — patching Path.home
-        # alone pinned the hardcode this test was written against (issue 287).
+        monkeypatch.setattr(
+            "gideon.integrations.mcp_discovery.Path.home", lambda: tmp_path
+        )
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path / ".gideon"))
         monkeypatch.setattr("shutil.which", lambda x, **kw: None)
 
         install_called = []
         monkeypatch.setattr(
-            "gideon.agent.rebuild_agent_config",
+            "gideon.engine.agent.rebuild_agent_config",
             lambda **kw: install_called.append(True) or config_path,
         )
 
@@ -571,16 +629,15 @@ class TestSyncToAgentConfig:
         cfg: dict = {"mcpServers": {}, "tools": [], "allowedTools": []}
         config_path = agents_dir / "gideon.json"
         config_path.write_text(json.dumps(cfg))
-        monkeypatch.setattr("gideon.mcp_discovery.Path.home", lambda: tmp_path)
-        # The installed agent config now resolves through config_dir(), so the ACTIVE
-        # home has to be redirected the way the product does it — patching Path.home
-        # alone pinned the hardcode this test was written against (issue 287).
+        monkeypatch.setattr(
+            "gideon.integrations.mcp_discovery.Path.home", lambda: tmp_path
+        )
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path / ".gideon"))
         monkeypatch.setattr("shutil.which", lambda x, **kw: None)
 
         install_called = []
         monkeypatch.setattr(
-            "gideon.agent.rebuild_agent_config",
+            "gideon.engine.agent.rebuild_agent_config",
             lambda **kw: install_called.append(True) or config_path,
         )
 
@@ -602,11 +659,13 @@ class TestSyncToAgentConfig:
         agents_dir = tmp_path / ".gideon" / "agents"
         agents_dir.mkdir(parents=True)
         config_path = agents_dir / "gideon.json"
-        config_path.write_text(json.dumps({"mcpServers": {}, "tools": [], "allowedTools": []}))
+        config_path.write_text(
+            json.dumps({"mcpServers": {}, "tools": [], "allowedTools": []})
+        )
 
         install_called: list[bool] = []
         monkeypatch.setattr(
-            "gideon.agent.rebuild_agent_config",
+            "gideon.engine.agent.rebuild_agent_config",
             lambda **kw: install_called.append(True) or config_path,
         )
 
@@ -615,29 +674,34 @@ class TestSyncToAgentConfig:
         ok = sync_to_agent_config([remote, local])
 
         assert ok is True
-        assert install_called, "rebuild_agent_config() should be called once to merge both servers"
+        assert (
+            install_called
+        ), "rebuild_agent_config() should be called once to merge both servers"
 
-    def test_sync_merges_env_for_existing_local_server(self, tmp_path, monkeypatch) -> None:
+    def test_sync_merges_env_for_existing_local_server(
+        self, tmp_path, monkeypatch
+    ) -> None:
         """Existing server env changes are handled by rebuild_agent_config() re-merge."""
         agents_dir = tmp_path / ".gideon" / "agents"
         agents_dir.mkdir(parents=True)
         cfg = {
-            "mcpServers": {"email-mcp": {"command": "node", "args": ["server.js"], "env": {}}},
+            "mcpServers": {
+                "email-mcp": {"command": "node", "args": ["server.js"], "env": {}}
+            },
             "tools": ["@email-mcp"],
             "allowedTools": ["@email-mcp"],
         }
         config_path = agents_dir / "gideon.json"
         config_path.write_text(json.dumps(cfg))
-        monkeypatch.setattr("gideon.mcp_discovery.Path.home", lambda: tmp_path)
-        # The installed agent config now resolves through config_dir(), so the ACTIVE
-        # home has to be redirected the way the product does it — patching Path.home
-        # alone pinned the hardcode this test was written against (issue 287).
+        monkeypatch.setattr(
+            "gideon.integrations.mcp_discovery.Path.home", lambda: tmp_path
+        )
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path / ".gideon"))
         monkeypatch.setattr("shutil.which", lambda x, **kw: None)
 
         install_called = []
         monkeypatch.setattr(
-            "gideon.agent.rebuild_agent_config",
+            "gideon.engine.agent.rebuild_agent_config",
             lambda **kw: install_called.append(True) or config_path,
         )
 
@@ -667,16 +731,15 @@ class TestSyncToAgentConfig:
         }
         config_path = agents_dir / "gideon.json"
         config_path.write_text(json.dumps(cfg))
-        monkeypatch.setattr("gideon.mcp_discovery.Path.home", lambda: tmp_path)
-        # The installed agent config now resolves through config_dir(), so the ACTIVE
-        # home has to be redirected the way the product does it — patching Path.home
-        # alone pinned the hardcode this test was written against (issue 287).
+        monkeypatch.setattr(
+            "gideon.integrations.mcp_discovery.Path.home", lambda: tmp_path
+        )
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path / ".gideon"))
         monkeypatch.setattr("shutil.which", lambda x, **kw: None)
 
         install_called = []
         monkeypatch.setattr(
-            "gideon.agent.rebuild_agent_config",
+            "gideon.engine.agent.rebuild_agent_config",
             lambda **kw: install_called.append(True) or config_path,
         )
 
@@ -689,37 +752,43 @@ class TestSyncToAgentConfig:
         sync_to_agent_config([srv])
         assert install_called, "rebuild_agent_config() handles env merge"
 
-    def test_sync_updates_command_for_existing_local_server(self, tmp_path, monkeypatch) -> None:
+    def test_sync_updates_command_for_existing_local_server(
+        self, tmp_path, monkeypatch
+    ) -> None:
         """Existing servers are refreshed via rebuild_agent_config() which reads source files."""
         agents_dir = tmp_path / ".gideon" / "agents"
         agents_dir.mkdir(parents=True)
         cfg = {
-            "mcpServers": {"my-mcp": {"command": "old-cmd", "args": ["--old"], "env": {}}},
+            "mcpServers": {
+                "my-mcp": {"command": "old-cmd", "args": ["--old"], "env": {}}
+            },
             "tools": ["@my-mcp"],
             "allowedTools": ["@my-mcp"],
         }
         config_path = agents_dir / "gideon.json"
         config_path.write_text(json.dumps(cfg))
-        monkeypatch.setattr("gideon.mcp_discovery.Path.home", lambda: tmp_path)
-        # The installed agent config now resolves through config_dir(), so the ACTIVE
-        # home has to be redirected the way the product does it — patching Path.home
-        # alone pinned the hardcode this test was written against (issue 287).
+        monkeypatch.setattr(
+            "gideon.integrations.mcp_discovery.Path.home", lambda: tmp_path
+        )
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path / ".gideon"))
         monkeypatch.setattr("shutil.which", lambda x, **kw: None)
 
-        # rebuild_agent_config() is called internally — mock it to verify delegation
         install_called = []
         monkeypatch.setattr(
-            "gideon.agent.rebuild_agent_config",
+            "gideon.engine.agent.rebuild_agent_config",
             lambda **kw: install_called.append(True) or config_path,
         )
 
         srv = McpServerInfo(name="my-mcp", command="new-cmd", args=["--new"])
         result = sync_to_agent_config([srv])
         assert result is True
-        assert install_called, "rebuild_agent_config() should be called to re-merge config"
+        assert (
+            install_called
+        ), "rebuild_agent_config() should be called to re-merge config"
 
-    def test_sync_source_env_overrides_existing_on_conflict(self, tmp_path, monkeypatch) -> None:
+    def test_sync_source_env_overrides_existing_on_conflict(
+        self, tmp_path, monkeypatch
+    ) -> None:
         """Config changes are handled by rebuild_agent_config() re-merge, not direct edit."""
         agents_dir = tmp_path / ".gideon" / "agents"
         agents_dir.mkdir(parents=True)
@@ -736,16 +805,15 @@ class TestSyncToAgentConfig:
         }
         config_path = agents_dir / "gideon.json"
         config_path.write_text(json.dumps(cfg))
-        monkeypatch.setattr("gideon.mcp_discovery.Path.home", lambda: tmp_path)
-        # The installed agent config now resolves through config_dir(), so the ACTIVE
-        # home has to be redirected the way the product does it — patching Path.home
-        # alone pinned the hardcode this test was written against (issue 287).
+        monkeypatch.setattr(
+            "gideon.integrations.mcp_discovery.Path.home", lambda: tmp_path
+        )
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path / ".gideon"))
         monkeypatch.setattr("shutil.which", lambda x, **kw: None)
 
         install_called = []
         monkeypatch.setattr(
-            "gideon.agent.rebuild_agent_config",
+            "gideon.engine.agent.rebuild_agent_config",
             lambda **kw: install_called.append(True) or config_path,
         )
 
@@ -757,7 +825,9 @@ class TestSyncToAgentConfig:
         )
         result = sync_to_agent_config([srv])
         assert result is True
-        assert install_called, "rebuild_agent_config() should be called to re-merge config"
+        assert (
+            install_called
+        ), "rebuild_agent_config() should be called to re-merge config"
 
 
 class TestProbeCache:
@@ -788,7 +858,6 @@ class TestProbeCache:
             name="test-srv", command="x", status="ok", tools=["t1", "t2"], error=""
         )
         _cache_probe(server)
-        # Simulate expiry by backdating probed_at
         _probe_cache["test-srv"].probed_at = time.monotonic() - 2000
         status, tools, error = _get_cached("test-srv")
         assert status == "outdated"
@@ -810,21 +879,22 @@ class TestProbeCache:
         cfg = {"mcpServers": {"my-srv": {"command": "cmd"}}}
         (agent_dir / "defaults.json").write_text(json.dumps(cfg))
         monkeypatch.setenv("GIDEON_PROJECT_DIR", str(tmp_path))
-        monkeypatch.setattr("gideon.mcp_discovery._mcp_json_paths", lambda: (tmp_path / "x",))
-        monkeypatch.setattr("gideon.mcp_discovery.Path.home", lambda: tmp_path)
-        # The installed agent config now resolves through config_dir(), so the ACTIVE
-        # home has to be redirected the way the product does it — patching Path.home
-        # alone pinned the hardcode this test was written against (issue 287).
+        monkeypatch.setattr(
+            "gideon.integrations.mcp_discovery._mcp_json_paths",
+            lambda: (tmp_path / "x",),
+        )
+        monkeypatch.setattr(
+            "gideon.integrations.mcp_discovery.Path.home", lambda: tmp_path
+        )
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path / ".gideon"))
 
-        # Before probe: unknown
         servers = list_servers()
         assert servers[0].status == "unknown"
 
-        # Cache a probe result
-        _cache_probe(McpServerInfo(name="my-srv", command="cmd", status="ok", tools=["a"]))
+        _cache_probe(
+            McpServerInfo(name="my-srv", command="cmd", status="ok", tools=["a"])
+        )
 
-        # After probe: cached status and tools merged
         servers = list_servers()
         assert servers[0].status == "ok"
         assert servers[0].tools == ["a"]
@@ -842,7 +912,9 @@ class TestReadJsonrpcResponse:
     @pytest.mark.asyncio
     async def test_sse_content_type(self) -> None:
         sse_body = (
-            "event: message\n" 'data: {"jsonrpc": "2.0", "id": 1, "result": {"tools": []}}\n' "\n"
+            "event: message\n"
+            'data: {"jsonrpc": "2.0", "id": 1, "result": {"tools": []}}\n'
+            "\n"
         )
         resp = MagicMock()
         resp.content_type = "text/event-stream"
@@ -888,7 +960,9 @@ class TestProbeRemote:
         init_resp = MagicMock()
         init_resp.status = 200
         init_resp.content_type = "application/json"
-        init_resp.json = AsyncMock(return_value={"jsonrpc": "2.0", "id": 1, "result": {}})
+        init_resp.json = AsyncMock(
+            return_value={"jsonrpc": "2.0", "id": 1, "result": {}}
+        )
         init_resp.__aenter__ = AsyncMock(return_value=init_resp)
         init_resp.__aexit__ = AsyncMock(return_value=False)
 
@@ -910,12 +984,13 @@ class TestProbeRemote:
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("gideon.mcp_discovery.aiohttp.ClientSession", return_value=mock_session):
+        with patch(
+            "gideon.integrations.mcp_discovery.aiohttp.ClientSession",
+            return_value=mock_session,
+        ):
             result = await _probe_remote(server)
 
         assert result.status == "ok"
-        # _probe_remote now returns rich tool descriptors (name/description/
-        # inputSchema), not bare name strings.
         assert [t["name"] for t in result.tools] == ["search", "read"]
 
     @pytest.mark.asyncio
@@ -933,7 +1008,10 @@ class TestProbeRemote:
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("gideon.mcp_discovery.aiohttp.ClientSession", return_value=mock_session):
+        with patch(
+            "gideon.integrations.mcp_discovery.aiohttp.ClientSession",
+            return_value=mock_session,
+        ):
             result = await _probe_remote(server)
 
         assert result.status == "error"
@@ -949,7 +1027,10 @@ class TestProbeRemote:
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("gideon.mcp_discovery.aiohttp.ClientSession", return_value=mock_session):
+        with patch(
+            "gideon.integrations.mcp_discovery.aiohttp.ClientSession",
+            return_value=mock_session,
+        ):
             result = await _probe_remote(server)
 
         assert result.status == "error"
@@ -960,7 +1041,7 @@ class TestProbeRemote:
         server = McpServerInfo(name="remote", url="https://example.com/mcp")
 
         with patch(
-            "gideon.mcp_discovery._probe_remote", new_callable=AsyncMock
+            "gideon.integrations.mcp_discovery._probe_remote", new_callable=AsyncMock
         ) as mock_remote:
             mock_remote.return_value = server
             result = await probe_server(server)
@@ -974,7 +1055,7 @@ class TestProbeRemote:
         server = McpServerInfo(name="local", command="nonexistent-cmd-xyz")
 
         with patch(
-            "gideon.mcp_discovery._probe_remote", new_callable=AsyncMock
+            "gideon.integrations.mcp_discovery._probe_remote", new_callable=AsyncMock
         ) as mock_remote:
             result = await probe_server(server)
 
@@ -987,7 +1068,7 @@ class TestProbeServerProcessCleanup:
 
     def _make_mock_proc(self, *, wait_side_effect=None):
         proc = AsyncMock()
-        proc.returncode = None  # process still running
+        proc.returncode = None
         proc.stdin = MagicMock()
         proc.stdin.close = MagicMock()
         proc.kill = MagicMock()
@@ -1004,8 +1085,14 @@ class TestProbeServerProcessCleanup:
         server = McpServerInfo(name="test", command="echo")
 
         with (
-            patch("gideon.mcp_discovery.asyncio.create_subprocess_exec", return_value=proc),
-            patch("gideon.mcp_discovery.shutil.which", return_value="/usr/bin/echo"),
+            patch(
+                "gideon.integrations.mcp_discovery.asyncio.create_subprocess_exec",
+                return_value=proc,
+            ),
+            patch(
+                "gideon.integrations.mcp_discovery.shutil.which",
+                return_value="/usr/bin/echo",
+            ),
         ):
             proc.stdout = AsyncMock()
             proc.stdout.readline = AsyncMock(return_value=b"")
@@ -1023,8 +1110,14 @@ class TestProbeServerProcessCleanup:
         server = McpServerInfo(name="test", command="echo")
 
         with (
-            patch("gideon.mcp_discovery.asyncio.create_subprocess_exec", return_value=proc),
-            patch("gideon.mcp_discovery.shutil.which", return_value="/usr/bin/echo"),
+            patch(
+                "gideon.integrations.mcp_discovery.asyncio.create_subprocess_exec",
+                return_value=proc,
+            ),
+            patch(
+                "gideon.integrations.mcp_discovery.shutil.which",
+                return_value="/usr/bin/echo",
+            ),
         ):
             proc.stdout = AsyncMock()
             proc.stdout.readline = AsyncMock(return_value=b"")
@@ -1042,14 +1135,19 @@ class TestProbeServerProcessCleanup:
         server = McpServerInfo(name="test", command="echo")
 
         with (
-            patch("gideon.mcp_discovery.asyncio.create_subprocess_exec", return_value=proc),
-            patch("gideon.mcp_discovery.shutil.which", return_value="/usr/bin/echo"),
+            patch(
+                "gideon.integrations.mcp_discovery.asyncio.create_subprocess_exec",
+                return_value=proc,
+            ),
+            patch(
+                "gideon.integrations.mcp_discovery.shutil.which",
+                return_value="/usr/bin/echo",
+            ),
         ):
             proc.stdout = AsyncMock()
             proc.stdout.readline = AsyncMock(return_value=b"")
             await probe_server(server)
 
-        # Should not raise — the exception is caught and swallowed
         proc.stdin.close.assert_called_once()
         proc.kill.assert_called_once()
 
@@ -1061,14 +1159,19 @@ class TestProbeServerProcessCleanup:
         server = McpServerInfo(name="test", command="echo")
 
         with (
-            patch("gideon.mcp_discovery.asyncio.create_subprocess_exec", return_value=proc),
-            patch("gideon.mcp_discovery.shutil.which", return_value="/usr/bin/echo"),
+            patch(
+                "gideon.integrations.mcp_discovery.asyncio.create_subprocess_exec",
+                return_value=proc,
+            ),
+            patch(
+                "gideon.integrations.mcp_discovery.shutil.which",
+                return_value="/usr/bin/echo",
+            ),
         ):
             proc.stdout = AsyncMock()
             proc.stdout.readline = AsyncMock(return_value=b"")
             await probe_server(server)
 
-        # Should not raise — stdin None is handled gracefully
         proc.kill.assert_not_called()
 
 
@@ -1076,7 +1179,7 @@ class TestRebuildAgentConfigRemote:
     """Test that rebuild_agent_config preserves remote url-based MCP servers."""
 
     def test_install_preserves_remote_server(self, tmp_path, monkeypatch) -> None:
-        from gideon.agent import rebuild_agent_config
+        from gideon.engine.agent import rebuild_agent_config
 
         agent_dir = tmp_path / "agents"
         agent_dir.mkdir()
@@ -1096,11 +1199,10 @@ class TestRebuildAgentConfigRemote:
         }
         (agents_dir / "gideon.json").write_text(json.dumps(existing))
 
-        # Single user MCP source: ~/.gideon/mcp.json (none here).
         user_dir = tmp_path / ".gideon"
-        monkeypatch.setattr("gideon.agent.AGENTS_DIR", agents_dir)
-        monkeypatch.setattr("gideon.agent._USER_DIR", user_dir)
-        monkeypatch.setattr("gideon.agent._GIDEON_BIN", "/usr/bin/gideon")
+        monkeypatch.setattr("gideon.engine.agent.AGENTS_DIR", agents_dir)
+        monkeypatch.setattr("gideon.engine.agent._USER_DIR", user_dir)
+        monkeypatch.setattr("gideon.engine.agent._GIDEON_BIN", "/usr/bin/gideon")
         monkeypatch.setattr("shutil.which", lambda cmd, path=None: None)
 
         rebuild_agent_config()
@@ -1112,7 +1214,7 @@ class TestRebuildAgentConfigRemote:
 
     def test_install_merges_user_mcp_json(self, tmp_path, monkeypatch) -> None:
         """rebuild_agent_config picks up servers from ~/.gideon/mcp.json."""
-        from gideon.agent import rebuild_agent_config
+        from gideon.engine.agent import rebuild_agent_config
 
         agent_dir = tmp_path / "agents"
         agent_dir.mkdir()
@@ -1123,15 +1225,16 @@ class TestRebuildAgentConfigRemote:
         agents_dir = tmp_path / ".gideon" / "agents"
         agents_dir.mkdir(parents=True)
 
-        # Single consolidated user MCP source: ~/.gideon/mcp.json
         user_dir = tmp_path / ".gideon"
         (user_dir / "mcp.json").write_text(
-            json.dumps({"mcpServers": {"deepwiki": {"url": "https://mcp.deepwiki.com/mcp"}}})
+            json.dumps(
+                {"mcpServers": {"deepwiki": {"url": "https://mcp.deepwiki.com/mcp"}}}
+            )
         )
 
-        monkeypatch.setattr("gideon.agent.AGENTS_DIR", agents_dir)
-        monkeypatch.setattr("gideon.agent._USER_DIR", user_dir)
-        monkeypatch.setattr("gideon.agent._GIDEON_BIN", "/usr/bin/gideon")
+        monkeypatch.setattr("gideon.engine.agent.AGENTS_DIR", agents_dir)
+        monkeypatch.setattr("gideon.engine.agent._USER_DIR", user_dir)
+        monkeypatch.setattr("gideon.engine.agent._GIDEON_BIN", "/usr/bin/gideon")
         monkeypatch.setattr("shutil.which", lambda cmd, path=None: None)
 
         rebuild_agent_config()
@@ -1146,25 +1249,28 @@ class TestGetProbeTimeout:
 
     def test_get_probe_timeout_reads_config(self) -> None:
         """_get_probe_timeout() returns the config value when available."""
-        from gideon.mcp_discovery import _get_probe_timeout
+        from gideon.integrations.mcp_discovery import _get_probe_timeout
 
         mock_cfg = MagicMock()
         mock_cfg.dashboard.mcp_probe_timeout_secs = 45
         mock_cls = MagicMock()
         mock_cls.load.return_value = mock_cfg
 
-        with patch("gideon.config.loader.AppConfig", mock_cls):
+        with patch("gideon.core.config.loader.AppConfig", mock_cls):
             result = _get_probe_timeout()
         assert result == 45
 
     def test_get_probe_timeout_fallback(self) -> None:
         """_get_probe_timeout() returns 15 when config is unavailable."""
-        from gideon.mcp_discovery import _PROBE_TIMEOUT_SECS, _get_probe_timeout
+        from gideon.integrations.mcp_discovery import (
+            _PROBE_TIMEOUT_SECS,
+            _get_probe_timeout,
+        )
 
         mock_cls = MagicMock()
         mock_cls.load.side_effect = RuntimeError("no config")
 
-        with patch("gideon.config.loader.AppConfig", mock_cls):
+        with patch("gideon.core.config.loader.AppConfig", mock_cls):
             result = _get_probe_timeout()
         assert result == _PROBE_TIMEOUT_SECS
         assert result == 15
@@ -1175,24 +1281,28 @@ class TestProbeServerTimeout:
 
     @pytest.mark.asyncio
     async def test_probe_server_timeout_on_tools_list(self) -> None:
-        """probe_server times out on tools/list (second readline), covering L456."""
+        """probe_server times out on tooling/list (second readline), covering L456."""
         server = McpServerInfo(name="slow-server", command="sleep", args=["999"])
 
-        init_resp = json.dumps({"jsonrpc": "2.0", "id": 1, "result": {}}).encode() + b"\n"
+        init_resp = (
+            json.dumps({"jsonrpc": "2.0", "id": 1, "result": {}}).encode() + b"\n"
+        )
 
         mock_proc = AsyncMock()
         mock_proc.stdin = AsyncMock()
         mock_proc.stdin.write = MagicMock()
         mock_proc.stdin.close = MagicMock()
         mock_proc.stdout = AsyncMock()
-        mock_proc.stdout.readline = AsyncMock(side_effect=[init_resp, asyncio.TimeoutError])
+        mock_proc.stdout.readline = AsyncMock(
+            side_effect=[init_resp, asyncio.TimeoutError]
+        )
         mock_proc.returncode = None
         mock_proc.kill = MagicMock()
         mock_proc.wait = AsyncMock(return_value=0)
 
         with (
             patch("asyncio.create_subprocess_exec", return_value=mock_proc),
-            patch("gideon.config.loader.AppConfig") as mock_cls,
+            patch("gideon.core.config.loader.AppConfig") as mock_cls,
         ):
             mock_cfg = MagicMock()
             mock_cfg.dashboard.mcp_probe_timeout_secs = 42
@@ -1219,7 +1329,7 @@ class TestProbeServerTimeout:
 
         with (
             patch("asyncio.create_subprocess_exec", return_value=mock_proc),
-            patch("gideon.config.loader.AppConfig") as mock_cls,
+            patch("gideon.core.config.loader.AppConfig") as mock_cls,
         ):
             mock_cls.load.side_effect = RuntimeError("corrupt config")
 
@@ -1238,7 +1348,7 @@ class TestProbeRemoteTimeout:
         server = McpServerInfo(name="remote", url="https://example.com/mcp")
 
         with (
-            patch("gideon.config.loader.AppConfig") as mock_cls,
+            patch("gideon.core.config.loader.AppConfig") as mock_cls,
             patch("aiohttp.ClientSession") as mock_session_cls,
         ):
             mock_cfg = MagicMock()
@@ -1255,7 +1365,6 @@ class TestProbeRemoteTimeout:
 
         assert result.status == "error"
         assert result.error == "timeout"
-        # Verify the configured timeout was actually used
         timeout_used = mock_session_cls.call_args.kwargs.get("timeout")
         assert timeout_used is not None
         assert timeout_used.total == 60
@@ -1266,7 +1375,7 @@ class TestFixStaleManagedCommand:
 
     @pytest.fixture(autouse=True)
     def _reset_cache(self):
-        import gideon.mcp_discovery as _d
+        import gideon.integrations.mcp_discovery as _d
 
         _d._resolved_managed_bin = None
         yield
@@ -1274,26 +1383,27 @@ class TestFixStaleManagedCommand:
 
     def test_resolves_to_running_binary_via_which(self):
         """Resolve managed-server command to the gideon binary on PATH."""
-        from gideon.mcp_discovery import _fix_stale_managed_command
+        from gideon.integrations.mcp_discovery import _fix_stale_managed_command
 
         spec = {"command": "/stale/build/bin/gideon", "args": ["mcp-core"]}
         with patch(
-            "gideon.mcp_discovery.shutil.which", return_value="/runtime/bin/gideon"
+            "gideon.integrations.mcp_discovery.shutil.which",
+            return_value="/runtime/bin/gideon",
         ):
             _fix_stale_managed_command("gideon-core", spec)
         assert spec["command"] == "/runtime/bin/gideon"
 
     def test_no_resolution_leaves_command_unchanged(self):
         """When `gideon` is not on PATH, the stored command is left as-is."""
-        from gideon.mcp_discovery import _fix_stale_managed_command
+        from gideon.integrations.mcp_discovery import _fix_stale_managed_command
 
         spec = {"command": "/old/gideon", "args": ["mcp-core"]}
-        with patch("gideon.mcp_discovery.shutil.which", return_value=None):
+        with patch("gideon.integrations.mcp_discovery.shutil.which", return_value=None):
             _fix_stale_managed_command("gideon-core", spec)
         assert spec["command"] == "/old/gideon"
 
     def test_skips_non_managed_server(self):
-        from gideon.mcp_discovery import _fix_stale_managed_command
+        from gideon.integrations.mcp_discovery import _fix_stale_managed_command
 
         spec = {"command": "/nonexistent/path/other", "args": []}
         _fix_stale_managed_command("other-server", spec)
@@ -1301,56 +1411,54 @@ class TestFixStaleManagedCommand:
 
     def test_always_re_resolves_to_running_binary(self, tmp_path):
         """Even if the stored path exists, re-resolve to the running binary."""
-        from gideon.mcp_discovery import _fix_stale_managed_command
+        from gideon.integrations.mcp_discovery import _fix_stale_managed_command
 
         real = tmp_path / "gideon"
         real.write_text("#!/bin/sh")
-        # `gideon-core` because `gideon-schedule` is no longer a MANAGED server (S109
-        # retired it) — and this function is scoped to managed names, so the old sample made the
-        # test assert against a no-op.
         spec = {"command": str(real), "args": ["mcp-core"]}
         with patch(
-            "gideon.mcp_discovery.shutil.which", return_value="/new/path/gideon"
+            "gideon.integrations.mcp_discovery.shutil.which",
+            return_value="/new/path/gideon",
         ):
             _fix_stale_managed_command("gideon-core", spec)
         assert spec["command"] == "/new/path/gideon"
 
     def test_no_change_when_already_correct(self):
-        from gideon.mcp_discovery import _fix_stale_managed_command
+        from gideon.integrations.mcp_discovery import _fix_stale_managed_command
 
         spec = {"command": "/current/bin/gideon", "args": ["mcp-core"]}
         with patch(
-            "gideon.mcp_discovery.shutil.which", return_value="/current/bin/gideon"
+            "gideon.integrations.mcp_discovery.shutil.which",
+            return_value="/current/bin/gideon",
         ):
             _fix_stale_managed_command("gideon-core", spec)
         assert spec["command"] == "/current/bin/gideon"
 
     def test_resolution_is_cached_across_calls(self):
         """The resolved binary is cached so later managed servers reuse it."""
-        from gideon.mcp_discovery import _fix_stale_managed_command
+        from gideon.integrations.mcp_discovery import _fix_stale_managed_command
 
-        # Two calls for the SAME managed server rather than two different ones: `gideon-core`
-        # is the only managed server left (S109), and the property under test is that the resolved
-        # binary is cached across calls — not that two particular names exist.
         spec1 = {"command": "/old/gideon", "args": ["mcp-core"]}
         spec2 = {"command": "/old/gideon", "args": ["mcp-core"]}
         with patch(
-            "gideon.mcp_discovery.shutil.which", return_value="/resolved/gideon"
+            "gideon.integrations.mcp_discovery.shutil.which",
+            return_value="/resolved/gideon",
         ) as mock_which:
             _fix_stale_managed_command("gideon-core", spec1)
             _fix_stale_managed_command("gideon-core", spec2)
         assert spec1["command"] == "/resolved/gideon"
         assert spec2["command"] == "/resolved/gideon"
-        # Second call uses the cache — which() is only invoked once.
         assert mock_which.call_count == 1
 
 
 class TestSharedServerToolsRegistration:
-    """Tests for shared MCP servers being added to tools/allowedTools."""
+    """Tests for shared MCP servers being added to tooling/allowedTools."""
 
-    def test_shared_servers_added_to_tools_and_allowedtools(self, tmp_path, monkeypatch) -> None:
+    def test_shared_servers_added_to_tools_and_allowedtools(
+        self, tmp_path, monkeypatch
+    ) -> None:
         """Enabled shared servers appear in both tools and allowedTools."""
-        from gideon.agent import rebuild_agent_config
+        from gideon.engine.agent import rebuild_agent_config
 
         agent_dir = tmp_path / "agents"
         agent_dir.mkdir()
@@ -1372,9 +1480,9 @@ class TestSharedServerToolsRegistration:
             )
         )
 
-        monkeypatch.setattr("gideon.agent.AGENTS_DIR", agents_dir)
-        monkeypatch.setattr("gideon.agent._USER_DIR", user_dir)
-        monkeypatch.setattr("gideon.agent._GIDEON_BIN", "/usr/bin/gideon")
+        monkeypatch.setattr("gideon.engine.agent.AGENTS_DIR", agents_dir)
+        monkeypatch.setattr("gideon.engine.agent._USER_DIR", user_dir)
+        monkeypatch.setattr("gideon.engine.agent._GIDEON_BIN", "/usr/bin/gideon")
         monkeypatch.setattr("shutil.which", lambda cmd, path=None: "/usr/bin/srv")
 
         rebuild_agent_config()
@@ -1384,9 +1492,11 @@ class TestSharedServerToolsRegistration:
         assert "@my-srv" in data.get("tools", [])
         assert "@my-srv" in data.get("allowedTools", [])
 
-    def test_disabled_shared_server_removed_from_tools(self, tmp_path, monkeypatch) -> None:
-        """Disabled shared server is removed from tools/allowedTools."""
-        from gideon.agent import rebuild_agent_config
+    def test_disabled_shared_server_removed_from_tools(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """Disabled shared server is removed from tooling/allowedTools."""
+        from gideon.engine.agent import rebuild_agent_config
 
         agent_dir = tmp_path / "agents"
         agent_dir.mkdir()
@@ -1417,9 +1527,9 @@ class TestSharedServerToolsRegistration:
             )
         )
 
-        monkeypatch.setattr("gideon.agent.AGENTS_DIR", agents_dir)
-        monkeypatch.setattr("gideon.agent._USER_DIR", user_dir)
-        monkeypatch.setattr("gideon.agent._GIDEON_BIN", "/usr/bin/gideon")
+        monkeypatch.setattr("gideon.engine.agent.AGENTS_DIR", agents_dir)
+        monkeypatch.setattr("gideon.engine.agent._USER_DIR", user_dir)
+        monkeypatch.setattr("gideon.engine.agent._GIDEON_BIN", "/usr/bin/gideon")
         monkeypatch.setattr("shutil.which", lambda cmd, path=None: "/usr/bin/srv")
 
         rebuild_agent_config()
@@ -1429,8 +1539,8 @@ class TestSharedServerToolsRegistration:
         assert "@my-srv" not in data.get("allowedTools", [])
 
     def test_reenabled_server_added_back(self, tmp_path, monkeypatch) -> None:
-        """Server re-enabled in mcp.json gets added back to tools/allowedTools."""
-        from gideon.agent import rebuild_agent_config
+        """Server re-enabled in mcp.json gets added back to tooling/allowedTools."""
+        from gideon.engine.agent import rebuild_agent_config
 
         agent_dir = tmp_path / "agents"
         agent_dir.mkdir()
@@ -1461,9 +1571,9 @@ class TestSharedServerToolsRegistration:
             )
         )
 
-        monkeypatch.setattr("gideon.agent.AGENTS_DIR", agents_dir)
-        monkeypatch.setattr("gideon.agent._USER_DIR", user_dir)
-        monkeypatch.setattr("gideon.agent._GIDEON_BIN", "/usr/bin/gideon")
+        monkeypatch.setattr("gideon.engine.agent.AGENTS_DIR", agents_dir)
+        monkeypatch.setattr("gideon.engine.agent._USER_DIR", user_dir)
+        monkeypatch.setattr("gideon.engine.agent._GIDEON_BIN", "/usr/bin/gideon")
         monkeypatch.setattr("shutil.which", lambda cmd, path=None: "/usr/bin/srv")
 
         rebuild_agent_config()
@@ -1475,7 +1585,7 @@ class TestSharedServerToolsRegistration:
 
     def test_disabled_removal_no_tools_key(self, tmp_path, monkeypatch) -> None:
         """Disabled removal doesn't crash when config has no tools key."""
-        from gideon.agent import rebuild_agent_config
+        from gideon.engine.agent import rebuild_agent_config
 
         agent_dir = tmp_path / "agents"
         agent_dir.mkdir()
@@ -1497,9 +1607,9 @@ class TestSharedServerToolsRegistration:
             )
         )
 
-        monkeypatch.setattr("gideon.agent.AGENTS_DIR", agents_dir)
-        monkeypatch.setattr("gideon.agent._USER_DIR", user_dir)
-        monkeypatch.setattr("gideon.agent._GIDEON_BIN", "/usr/bin/gideon")
+        monkeypatch.setattr("gideon.engine.agent.AGENTS_DIR", agents_dir)
+        monkeypatch.setattr("gideon.engine.agent._USER_DIR", user_dir)
+        monkeypatch.setattr("gideon.engine.agent._GIDEON_BIN", "/usr/bin/gideon")
         monkeypatch.setattr("shutil.which", lambda cmd, path=None: None)
 
         rebuild_agent_config()

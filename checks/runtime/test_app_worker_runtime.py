@@ -19,7 +19,7 @@ ABOUT:
   declaring an incident.
 
 `apps/background.py` (the sibling half — the app-facing contract behind
-`sdk/background.py`) is NOT stubbed: the real module is imported, so
+`packages/python-client/background.py`) is NOT stubbed: the real module is imported, so
 `BACKGROUND_TASKS_PERMISSION`, `WORKER_ENTRY_POINT`, `WORKER_DEFAULT_NAME` and
 `WORKER_ID_ENV` are the shipped values rather than a fixture's guess at them. The one thing
 still injected is WHICH workers a manifest declares (`_stub_background` below), because the
@@ -49,20 +49,17 @@ from typing import Any, Callable, Iterator
 
 import pytest
 
-from gideon.apps import manager, worker_runtime
-from gideon.apps.manifest import AppManifest
-from gideon.apps.worker_runtime import SupervisedWorker, WorkerState, WorkerSupervisor
+from gideon.extensions.apps import manager, worker_runtime
+from gideon.extensions.apps.manifest import AppManifest
+from gideon.extensions.apps.worker_runtime import (
+    SupervisedWorker,
+    WorkerState,
+    WorkerSupervisor,
+)
 
-#: A spawn goes through a fresh interpreter (plus the ceiling shim), and under full-suite
-#: xdist load a 0.3s spawn can cost tens of seconds of wall time. Same headroom the sibling
-#: app-backend suites use.
 _WAIT_SECS = 90
 
-#: Poll granularity for every deadline wait below.
 _TICK = 0.02
-
-
-# ── worker bodies (real programs; the path they write is baked into the SOURCE) ──
 
 
 def _body_sleep() -> str:
@@ -104,9 +101,6 @@ def _body_dies() -> str:
     return "raise SystemExit(3)\n"
 
 
-# ── process bookkeeping ──
-
-
 def _pid_alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)
@@ -125,7 +119,9 @@ def _ppid_of(pid: int) -> int | None:
         return None
 
 
-def _wait_for(predicate: Callable[[], bool], *, what: str, timeout: float = _WAIT_SECS) -> None:
+def _wait_for(
+    predicate: Callable[[], bool], *, what: str, timeout: float = _WAIT_SECS
+) -> None:
     """Poll *predicate* to a deadline. Never a bare sleep — that measures a skeleton."""
     import time as _time
 
@@ -174,7 +170,9 @@ def spawned() -> Iterator[_Spawned]:
             what="every process this test spawned to be gone",
             timeout=30,
         )
-        assert all(p.poll() is not None for p in tracked.procs), "a supervised child survived"
+        assert all(
+            p.poll() is not None for p in tracked.procs
+        ), "a supervised child survived"
         assert all(
             not _pid_alive(pid) for pid in tracked.orphan_pids
         ), "an orphaned child survived the test"
@@ -193,25 +191,18 @@ def sup(spawned: _Spawned) -> Iterator[WorkerSupervisor]:
         supervisor.stop_all()
 
 
-# ── isolation ──
-
-
 @pytest.fixture(autouse=True)
 def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Apps, secrets, data dirs and guardrail state all live under a tmp home."""
-    from gideon.config import loader
+    from gideon.core.config import loader
 
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(manager, "config_dir", lambda: tmp_path)
-    # The suite-wide `_no_app_child_processes` fixture sets `GIDEON_SKIP_APP_WORKERS` so no
-    # OTHER test drives the real home's workers from a boot-started daemon thread. This suite is
-    # the one that drives the sweep on purpose, against the tmp home above, so it opts back in.
     monkeypatch.delenv(worker_runtime._SKIP_ENV, raising=False)
     return tmp_path
 
 
-#: The declaration registry the stub `apps.background` answers from — `app name -> specs`.
 _DECLARED: dict[str, list[Any]] = {}
 
 
@@ -230,7 +221,7 @@ def _stub_background(monkeypatch: pytest.MonkeyPatch) -> Iterator[types.ModuleTy
     `declared_workers` derives exactly one from the permission and these tests need several
     (a second worker, a missing entry point, an escaping path).
     """
-    from gideon.apps import worker_runtime as _wr
+    from gideon.extensions.apps import worker_runtime as _wr
 
     monkeypatch.setattr(
         _wr, "declared_workers", lambda manifest: list(_DECLARED.get(manifest.name, []))
@@ -242,7 +233,9 @@ def _stub_background(monkeypatch: pytest.MonkeyPatch) -> Iterator[types.ModuleTy
         _DECLARED.clear()
 
 
-def _spec(module: types.ModuleType, name: str, entry_point: str, *, restart: bool = True) -> Any:
+def _spec(
+    module: types.ModuleType, name: str, entry_point: str, *, restart: bool = True
+) -> Any:
     spec_cls = module.WorkerSpec
     return spec_cls(name=name, entry_point=entry_point, restart=restart)
 
@@ -276,35 +269,34 @@ def _install_worker_app(
         encoding="utf-8",
     )
     (appdir / "installed.json").write_text(
-        json.dumps({"name": app, "version": "1.0.0", "enabled": enabled}), encoding="utf-8"
+        json.dumps({"name": app, "version": "1.0.0", "enabled": enabled}),
+        encoding="utf-8",
     )
     (appdir / entry_name).write_text(body, encoding="utf-8")
     _DECLARED[app] = workers
     return AppManifest.from_json_file(appdir / "app.json")
 
 
-# ── notification capture ──
-
-
 class _RecordingState:
     def __init__(self) -> None:
         self.notes: list[tuple[str, str, str, dict]] = []
 
-    def notify(self, kind: str, title: str, body: str, *, meta: dict | None = None) -> None:
+    def notify(
+        self, kind: str, title: str, body: str, *, meta: dict | None = None
+    ) -> None:
         self.notes.append((kind, title, body, dict(meta or {})))
 
 
 @pytest.fixture
 def notes(monkeypatch: pytest.MonkeyPatch) -> _RecordingState:
     """Capture notifications instead of delivering them, at the real seam `_notify` uses."""
-    from gideon.action_providers import services
+    from gideon.integrations.action_providers import services
 
     state = _RecordingState()
-    monkeypatch.setattr(services, "get_action_services", lambda: types.SimpleNamespace(state=state))
+    monkeypatch.setattr(
+        services, "get_action_services", lambda: types.SimpleNamespace(state=state)
+    )
     return state
-
-
-# ══ runs: the permission means something ══
 
 
 def test_a_worker_needs_the_backgroundtasks_grant(
@@ -330,7 +322,9 @@ def test_a_worker_needs_the_backgroundtasks_grant(
         workers=[_spec(_stub_background, "tick", "worker.py")],
     )
     started = sup.start(granted)
-    assert len(started) == 1, "the grant path is broken, so the refusal above proves nothing"
+    assert (
+        len(started) == 1
+    ), "the grant path is broken, so the refusal above proves nothing"
     assert started[0].is_alive()
 
 
@@ -353,9 +347,6 @@ def test_a_started_worker_is_tracked_by_get_and_list(
     assert [r.key for r in sup.list_running()] == [("tracked", "beat")]
     assert [r.key for r in sup.list_workers("tracked")] == [("tracked", "beat")]
     assert sup.get("tracked", "nosuch") is None
-
-
-# ══ survives a crash (watchdog) ══
 
 
 def test_the_sweep_revives_a_worker_whose_process_died(
@@ -399,8 +390,6 @@ def test_the_crash_loop_bound_gives_up_observably(
     forms are asserted: the record's state/reason, the warning log, and the notification.
     """
     monkeypatch.setattr(worker_runtime, "_MAX_RESTARTS", 2)
-    # A large healthy-uptime means no revive can ever "count as healthy" and reset the
-    # counter, which is what makes this deterministic rather than a race with the clock.
     monkeypatch.setattr(worker_runtime, "_HEALTHY_UPTIME_SECS", 10_000.0)
 
     manifest = _install_worker_app(
@@ -411,7 +400,9 @@ def test_the_crash_loop_bound_gives_up_observably(
     )
     (rec,) = sup.start(manifest)
 
-    with caplog.at_level(logging.WARNING, logger="gideon.apps.worker_runtime"):
+    with caplog.at_level(
+        logging.WARNING, logger="gideon.extensions.apps.worker_runtime"
+    ):
         for _ in range(4):
             _wait_for(lambda: not rec.is_alive(), what="the doomed child to exit")
             sup.sweep()
@@ -422,18 +413,16 @@ def test_the_crash_loop_bound_gives_up_observably(
     assert rec.restarts == 3, "gave up at the wrong count for _MAX_RESTARTS=2"
     assert "crash-loop" in rec.reason and "gave up" in rec.reason
     assert not rec.is_alive()
-    assert any("crash-loop" in r.getMessage() for r in caplog.records), "the give-up was silent"
+    assert any(
+        "crash-loop" in r.getMessage() for r in caplog.records
+    ), "the give-up was silent"
     assert [n[1] for n in notes.notes] == ["A background worker keeps crashing"]
     assert notes.notes[0][3]["worker"] == "boom"
 
-    # Sticky: a FAILED worker is not quietly restarted by the next sweep.
     pid_at_give_up = rec.pid
     sup.sweep()
     assert rec.state is WorkerState.FAILED
     assert rec.pid == pid_at_give_up and rec.restarts == 3
-
-
-# ══ stops on disable: graceful first, kill second ══
 
 
 def test_stop_takes_the_graceful_path_when_the_worker_cooperates(
@@ -501,15 +490,13 @@ def test_a_disabled_app_loses_its_worker_on_the_next_sweep(
     assert rec.is_alive()
 
     (tmp_path / "apps" / "toggle" / "installed.json").write_text(
-        json.dumps({"name": "toggle", "version": "1.0.0", "enabled": False}), encoding="utf-8"
+        json.dumps({"name": "toggle", "version": "1.0.0", "enabled": False}),
+        encoding="utf-8",
     )
     sup.sweep()
 
     assert sup.get("toggle", "w") is None
     _wait_for(lambda: not rec.is_alive(), what="the disabled app's worker to die")
-
-
-# ══ pause is not stop ══
 
 
 def test_pause_keeps_the_row_that_stop_removes(
@@ -535,7 +522,6 @@ def test_pause_keeps_the_row_that_stop_removes(
     assert paused.state is WorkerState.PAUSED
     assert paused.reason == "a test reason"
     _wait_for(lambda: not paused.is_alive(), what="the paused worker's process to end")
-    # Idempotent: a second pause is not a new transition (so a caller notifies once).
     assert sup.pause("pausable", "w", "a test reason") is False
 
     resumed = sup.resume("pausable", "w")
@@ -544,20 +530,18 @@ def test_pause_keeps_the_row_that_stop_removes(
     assert resumed.pid != first_pid
     assert resumed.reason == ""
 
-    # And now the contrast, on the very same worker.
     assert sup.stop("pausable", "w") == 1
     assert sup.get("pausable", "w") is None, "stop must remove the row pause keeps"
-
-
-# ══ budget breach pauses it + notifies ══
 
 
 def _breach(monkeypatch: pytest.MonkeyPatch, *, exceeded: bool) -> None:
     """Drive the REAL budget seam `_budget_pause_reason` reads: `budgets.budget_from_config`
     plus the day-scope verdict from `budgets.get_meter().check_day`."""
-    from gideon.guardrails import budgets
+    from gideon.security.guardrails import budgets
 
-    monkeypatch.setattr(budgets, "budget_from_config", lambda: budgets.Budget(max_dollars=1.0))
+    monkeypatch.setattr(
+        budgets, "budget_from_config", lambda: budgets.Budget(max_dollars=1.0)
+    )
     verdict = budgets.BudgetVerdict.EXCEEDED if exceeded else budgets.BudgetVerdict.OK
     reason = "day dollar budget exceeded ($2.5/$1)" if exceeded else ""
     meter = types.SimpleNamespace(check_day=lambda budget: (verdict, reason))
@@ -572,7 +556,7 @@ def test_a_budget_breach_pauses_the_worker_and_notifies(
     _stub_background: types.ModuleType,
 ) -> None:
     """Both effects, or the clause is half-shipped: it pauses, AND the user is told."""
-    from gideon import notification_kinds
+    from gideon.workspace import notification_kinds
 
     manifest = _install_worker_app(
         tmp_path,
@@ -595,11 +579,9 @@ def test_a_budget_breach_pauses_the_worker_and_notifies(
     assert title == "A background worker was paused"
     assert "exceeded" in body and meta["app"] == "spender" and meta["worker"] == "w"
 
-    # A breach that persists does not re-notify every 30 seconds.
     sup.sweep()
     assert len(notes.notes) == 1
 
-    # And the pause is a deferral: clearing the breach resumes it, unattended.
     _breach(monkeypatch, exceeded=False)
     sup.sweep()
     assert rec.state is WorkerState.RUNNING and rec.is_alive()
@@ -635,7 +617,7 @@ def test_incident_mode_pauses_a_worker_too(
     _stub_background: types.ModuleType,
 ) -> None:
     """The kill-switch half of the same policy: unattended work is suspended."""
-    from gideon.guardrails import incident
+    from gideon.security.guardrails import incident
 
     manifest = _install_worker_app(
         tmp_path,
@@ -649,9 +631,6 @@ def test_incident_mode_pauses_a_worker_too(
     monkeypatch.setattr(incident, "incident_active", lambda: True)
     sup.sweep()
     assert rec.state is WorkerState.PAUSED and "incident" in rec.reason
-
-
-# ══ uninstall leaves no orphan (PPID-reaping, both directions) ══
 
 
 def _worker_entry(tmp_path: Path, app: str = "reapme") -> Path:
@@ -675,11 +654,12 @@ def test_reaping_takes_the_orphan_and_leaves_a_live_parented_process_alone(
     """
     entry = _worker_entry(tmp_path)
 
-    # (1) A genuine orphan: an intermediate shell backgrounds the worker and exits, so the
-    # worker is re-parented to init/launchd. fds are detached or `subprocess.run` would
-    # block on the pipe forever.
     out = subprocess.run(  # noqa: S603 — test fixture, static argv
-        ["/bin/sh", "-c", f'"{sys.executable}" "{entry}" >/dev/null 2>&1 </dev/null & echo $!'],
+        [
+            "/bin/sh",
+            "-c",
+            f'"{sys.executable}" "{entry}" >/dev/null 2>&1 </dev/null & echo $!',
+        ],
         capture_output=True,
         text=True,
         check=True,
@@ -687,12 +667,17 @@ def test_reaping_takes_the_orphan_and_leaves_a_live_parented_process_alone(
     orphan_pid = int(out.stdout.strip())
     spawned.orphan_pids.append(orphan_pid)
 
-    # (2) A sibling running the SAME entry path whose parent (this test) is alive.
-    parented = subprocess.Popen([sys.executable, str(entry)])  # noqa: S603 — test fixture
+    parented = subprocess.Popen(
+        [sys.executable, str(entry)]
+    )  # noqa: S603 — test fixture
     spawned.procs.append(parented)
 
-    _wait_for(lambda: _ppid_of(orphan_pid) == 1, what="the orphan to be re-parented to init")
-    assert _pid_alive(orphan_pid) and parented.poll() is None, "a fixture process died early"
+    _wait_for(
+        lambda: _ppid_of(orphan_pid) == 1, what="the orphan to be re-parented to init"
+    )
+    assert (
+        _pid_alive(orphan_pid) and parented.poll() is None
+    ), "a fixture process died early"
 
     reaped = sup.reap_orphans("reapme", entry)
 
@@ -748,10 +733,9 @@ def test_a_revoked_permission_stops_the_worker(
 
     sup.sweep()
     assert sup.get("revoked", "w") is None
-    _wait_for(lambda: not rec.is_alive(), what="the worker of a de-permissioned app to die")
-
-
-# ══ the child's contract ══
+    _wait_for(
+        lambda: not rec.is_alive(), what="the worker of a de-permissioned app to die"
+    )
 
 
 def test_the_worker_child_gets_its_name_and_not_the_gateway_environment(
@@ -767,7 +751,7 @@ def test_the_worker_child_gets_its_name_and_not_the_gateway_environment(
         "import json, os, pathlib\n"
         f"pathlib.Path({str(dump)!r}).write_text(json.dumps(dict(os.environ)))\n"
     )
-    from gideon.apps import worker_runtime as module
+    from gideon.extensions.apps import worker_runtime as module
 
     manifest = _install_worker_app(
         tmp_path,
@@ -776,7 +760,9 @@ def test_the_worker_child_gets_its_name_and_not_the_gateway_environment(
         workers=[_spec(module, "probe", "worker.py")],
     )
     (rec,) = sup.start(manifest)
-    _wait_for(lambda: dump.exists() and dump.stat().st_size > 0, what="the worker's env dump")
+    _wait_for(
+        lambda: dump.exists() and dump.stat().st_size > 0, what="the worker's env dump"
+    )
     env = json.loads(dump.read_text(encoding="utf-8"))
 
     assert env.get("GIDEON_APP_NAME") == "envprobe"
@@ -788,7 +774,6 @@ def test_the_worker_child_gets_its_name_and_not_the_gateway_environment(
     )
     assert "ACME_CLOUD_API_KEY" not in env, "the child inherited a gateway credential"
     assert "PATH" in env, "the child got no PATH — the spawn, not the filter, is broken"
-    # Storage was not declared, so no sanctioned place to persist was handed over.
     assert "GIDEON_APP_DATA_DIR" not in env
     assert isinstance(rec, SupervisedWorker)
 
@@ -797,7 +782,7 @@ def test_the_worker_spawn_actually_goes_through_the_ceiling_shim():
     """The spawn-ceiling AUDIT pins the classification; this pins the behaviour.
 
     Measured, not assumed: deleting `spawn_shim_argv` from `_spawn` and spawning the bare
-    command leaves `tests/test_spawn_ceiling_audit.py` fully GREEN (3 passed). That audit
+    command leaves `checks/runtime/test_spawn_ceiling_audit.py` fully GREEN (3 passed). That audit
     asserts every spawn site is *classified*, not that any site is *ceilinged* — so the entry
     reading "app background worker -> tool ceiling via spawn_shim_argv" is a claim nothing
     checked. An unceilinged worker matters more than an unceilinged one-shot: it is
@@ -810,13 +795,15 @@ def test_the_worker_spawn_actually_goes_through_the_ceiling_shim():
     import inspect
     import textwrap
 
-    from gideon.apps import worker_runtime as wr
+    from gideon.extensions.apps import worker_runtime as wr
 
-    # dedent first: `ast.parse` on an indented METHOD source raises IndentationError, which
-    # would make this rail a permanent false RED rather than a check (found by running it).
     tree = ast.parse(textwrap.dedent(inspect.getsource(wr.WorkerSupervisor._spawn)))
     called = {
-        (n.func.attr if isinstance(n.func, ast.Attribute) else getattr(n.func, "id", ""))
+        (
+            n.func.attr
+            if isinstance(n.func, ast.Attribute)
+            else getattr(n.func, "id", "")
+        )
         for n in ast.walk(tree)
         if isinstance(n, ast.Call)
     }
@@ -825,11 +812,7 @@ def test_the_worker_spawn_actually_goes_through_the_ceiling_shim():
         "worker spawns with no resource ceiling. The spawn-ceiling audit will not notice: it "
         "checks the classification table, not the call."
     )
-    # Vacuity floor: the AST walk really does see this function's calls.
     assert "Popen" in called or "subprocess" in str(called), called
-
-
-# ══ the two production call sites (audited 2026-08-24: both were asserted by nothing) ══
 
 
 def test_disable_through_app_manager_reaches_the_worker_teardown(
@@ -851,7 +834,7 @@ def test_disable_through_app_manager_reaches_the_worker_teardown(
     mechanism was tested; its only use was not. `uninstall()` needs no rail of its own — it
     delegates to `disable()` — but `force_uninstall` has its own copy, so both are pinned below.
     """
-    from gideon.apps import app_manager
+    from gideon.extensions.apps import app_manager
 
     manifest = _install_worker_app(
         tmp_path,
@@ -862,8 +845,6 @@ def test_disable_through_app_manager_reaches_the_worker_teardown(
     (rec,) = sup.start(manifest)
     assert rec.is_alive()
 
-    # `_stop_worker` resolves the supervisor through the module attribute at call time, so this
-    # points it at the test's own instance instead of the process-wide singleton.
     monkeypatch.setattr(worker_runtime, "get_worker_supervisor", lambda: sup)
     reaped: list[tuple[str, Path]] = []
     monkeypatch.setattr(
@@ -878,7 +859,9 @@ def test_disable_through_app_manager_reaches_the_worker_teardown(
         sup.get("teardown", "worker") is None
     ), "disable() left the worker supervised — the app is off and its worker is not"
     _wait_for(lambda: not rec.is_alive(), what="disable() to stop the worker process")
-    assert reaped == [("teardown", (tmp_path / "apps" / "teardown" / "worker.py").resolve())], (
+    assert reaped == [
+        ("teardown", (tmp_path / "apps" / "teardown" / "worker.py").resolve())
+    ], (
         "disable() did not reap orphans for the resolved entry path; a worker orphaned by a "
         f"prior ungraceful gateway exit would outlive the app forever (saw {reaped})"
     )
@@ -894,12 +877,16 @@ def test_force_uninstall_carries_its_own_copy_of_the_worker_teardown() -> None:
     import inspect
     import textwrap
 
-    from gideon.apps import app_manager
+    from gideon.extensions.apps import app_manager
 
     def _calls(fn: object) -> set[str]:
         tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))  # type: ignore[arg-type]
         return {
-            (n.func.attr if isinstance(n.func, ast.Attribute) else getattr(n.func, "id", ""))
+            (
+                n.func.attr
+                if isinstance(n.func, ast.Attribute)
+                else getattr(n.func, "id", "")
+            )
             for n in ast.walk(tree)
             if isinstance(n, ast.Call)
         }
@@ -910,8 +897,6 @@ def test_force_uninstall_carries_its_own_copy_of_the_worker_teardown() -> None:
             f"app_manager.{fn.__name__} no longer tears down the app's background worker; "
             "the app goes away and its unattended process does not"
         )
-        # Vacuity floor: the walk sees this function's calls, and the sibling backend teardown
-        # is the precedent this one is meant to sit beside.
         assert "_stop_backend" in called, called
 
 
@@ -934,11 +919,15 @@ def test_boot_starts_the_worker_watchdog_beside_the_backend_one() -> None:
     import inspect
     import textwrap
 
-    from gideon.providers import loader
+    from gideon.extensions.providers import loader
 
     tree = ast.parse(textwrap.dedent(inspect.getsource(loader.load_all_extensions)))
     called = {
-        (n.func.attr if isinstance(n.func, ast.Attribute) else getattr(n.func, "id", ""))
+        (
+            n.func.attr
+            if isinstance(n.func, ast.Attribute)
+            else getattr(n.func, "id", "")
+        )
         for n in ast.walk(tree)
         if isinstance(n, ast.Call)
     }
@@ -946,6 +935,4 @@ def test_boot_starts_the_worker_watchdog_beside_the_backend_one() -> None:
         "boot no longer starts the app-worker watchdog, so nothing sweeps: a crashed worker is "
         "never revived, a disabled app keeps its worker, and a budget breach never pauses one"
     )
-    # Vacuity floor: this really is the boot block, so the assertion is about the live call site
-    # and not about an empty set of calls.
     assert "start_backend_watchdog" in called, called

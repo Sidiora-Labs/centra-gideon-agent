@@ -14,8 +14,8 @@ advisory-only would leave that to template-author discipline.
 
 from __future__ import annotations
 
-from gideon.workflows.models import Node
-from gideon.workflows.validator import (
+from gideon.automation.workflows.models import Node
+from gideon.automation.workflows.validator import (
     contract_reads_for_root,
     dep_edges_for_root,
     validate_spec,
@@ -40,7 +40,10 @@ class TestValidSpecs:
                     {
                         "kind": "infer",
                         "id": "classify",
-                        "config": {"prompt": "Classify {{inputs.text}}", "model_tier": "fast"},
+                        "config": {
+                            "prompt": "Classify {{inputs.text}}",
+                            "model_tier": "fast",
+                        },
                     },
                     {
                         "kind": "parallel",
@@ -53,7 +56,12 @@ class TestValidSpecs:
                                 "config": {"prompt": "A {{nodes.classify.output}}"},
                             },
                             {"kind": "infer", "id": "b", "config": {"prompt": "B"}},
-                            {"kind": "infer", "id": "c", "config": {"prompt": "C"}, "needs": ["a"]},
+                            {
+                                "kind": "infer",
+                                "id": "c",
+                                "config": {"prompt": "C"},
+                                "needs": ["a"],
+                            },
                         ],
                     },
                     {
@@ -77,7 +85,12 @@ class TestValidSpecs:
                 "id": "p",
                 "children": [
                     {"kind": "infer", "id": "a", "config": {"prompt": "x"}},
-                    {"kind": "infer", "id": "c", "config": {"prompt": "y"}, "needs": ["a"]},
+                    {
+                        "kind": "infer",
+                        "id": "c",
+                        "config": {"prompt": "y"},
+                        "needs": ["a"],
+                    },
                 ],
             }
         )
@@ -106,8 +119,16 @@ class TestAccumulation:
                         ],
                     },
                     {"kind": "loop", "id": "l", "config": {"mode": "counted", "n": 0}},
-                    {"kind": "action", "id": "act", "config": {"token": "ghp_" + "a" * 26}},
-                    {"kind": "infer", "id": "g", "config": {"prompt": "{{nodes.nope.output}}"}},
+                    {
+                        "kind": "action",
+                        "id": "act",
+                        "config": {"token": "ghp_" + "a" * 26},
+                    },
+                    {
+                        "kind": "infer",
+                        "id": "g",
+                        "config": {"prompt": "{{nodes.nope.output}}"},
+                    },
                 ],
             },
         }
@@ -131,15 +152,21 @@ class TestAccumulation:
         assert "[error]" in line and "WF_MISSING_PROMPT" in line and "at root" in line
 
     def test_no_errors_means_ok_even_with_warnings(self) -> None:
-        spec = _wrap({"kind": "transform", "id": "t", "config": {"expr": "{{weird.thing}}"}})
+        spec = _wrap(
+            {"kind": "transform", "id": "t", "config": {"expr": "{{weird.thing}}"}}
+        )
         r = validate_spec(spec, strict=True)
         assert r.warnings and r.ok
 
 
 class TestStructuralRules:
     def test_empty_containers_are_rejected(self) -> None:
-        assert "WF_EMPTY_CONTAINER" in _codes(_wrap({"kind": "sequence", "children": []}))
-        assert "WF_EMPTY_CONTAINER" in _codes(_wrap({"kind": "parallel", "children": []}))
+        assert "WF_EMPTY_CONTAINER" in _codes(
+            _wrap({"kind": "sequence", "children": []})
+        )
+        assert "WF_EMPTY_CONTAINER" in _codes(
+            _wrap({"kind": "parallel", "children": []})
+        )
 
     def test_needs_naming_an_unknown_node_is_refused(self) -> None:
         """`WF_UNKNOWN_NEEDS` is now an EXISTENCE check over the whole spec (`PP-2`), no longer
@@ -150,7 +177,12 @@ class TestStructuralRules:
                 "kind": "parallel",
                 "id": "p",
                 "children": [
-                    {"kind": "infer", "id": "a", "config": {"prompt": "x"}, "needs": ["elsewhere"]}
+                    {
+                        "kind": "infer",
+                        "id": "a",
+                        "config": {"prompt": "x"},
+                        "needs": ["elsewhere"],
+                    }
                 ],
             }
         )
@@ -190,7 +222,9 @@ class TestStructuralRules:
     def test_loop_modes(self) -> None:
         body = {"kind": "transform", "id": "t", "config": {"expr": "{{iter}}"}}
         assert "WF_MISSING_CONDITION" in _codes(
-            _wrap({"kind": "loop", "id": "l", "config": {"mode": "until"}, "body": body})
+            _wrap(
+                {"kind": "loop", "id": "l", "config": {"mode": "until"}, "body": body}
+            )
         )
         assert "WF_BAD_STREAK" in _codes(
             _wrap(
@@ -203,7 +237,9 @@ class TestStructuralRules:
             )
         )
         assert "WF_BAD_LOOP_MODE" in _codes(
-            _wrap({"kind": "loop", "id": "l", "config": {"mode": "forever"}, "body": body})
+            _wrap(
+                {"kind": "loop", "id": "l", "config": {"mode": "forever"}, "body": body}
+            )
         )
 
     def test_gate_kinds_and_their_required_fields(self) -> None:
@@ -216,10 +252,18 @@ class TestStructuralRules:
         assert "WF_MISSING_EXPR" in _codes(
             _wrap({"kind": "gate", "id": "g", "config": {"kind": "expression"}})
         )
-        assert validate_spec(_wrap({"kind": "gate", "id": "g", "config": {"kind": "approval"}})).ok
+        assert validate_spec(
+            _wrap({"kind": "gate", "id": "g", "config": {"kind": "approval"}})
+        ).ok
 
     def test_model_tier_is_a_closed_set(self) -> None:
-        spec = _wrap({"kind": "infer", "id": "i", "config": {"prompt": "p", "model_tier": "turbo"}})
+        spec = _wrap(
+            {
+                "kind": "infer",
+                "id": "i",
+                "config": {"prompt": "p", "model_tier": "turbo"},
+            }
+        )
         assert "WF_BAD_MODEL_TIER" in _codes(spec)
 
     def test_subworkflow_ref_must_be_a_valid_name(self) -> None:
@@ -232,7 +276,9 @@ class TestStructuralRules:
         ).ok
 
     def test_wait_needs_a_duration_or_a_deadline(self) -> None:
-        assert "WF_MISSING_WAIT" in _codes(_wrap({"kind": "wait", "id": "w", "config": {}}))
+        assert "WF_MISSING_WAIT" in _codes(
+            _wrap({"kind": "wait", "id": "w", "config": {}})
+        )
 
 
 class TestBranchCoverage:
@@ -242,7 +288,13 @@ class TestBranchCoverage:
                 "kind": "branch",
                 "id": "r",
                 "config": {"on": "{{inputs.k}}", "enum": ["bug", "feat", "docs"]},
-                "cases": {"bug": {"kind": "action", "id": "f", "config": {"provider": "notify"}}},
+                "cases": {
+                    "bug": {
+                        "kind": "action",
+                        "id": "f",
+                        "config": {"provider": "notify"},
+                    }
+                },
             }
         )
         assert "WF_BRANCH_COVERAGE" in _codes(spec)
@@ -253,14 +305,26 @@ class TestBranchCoverage:
                 "kind": "branch",
                 "id": "r",
                 "config": {"on": "{{inputs.k}}", "enum": ["bug", "feat"]},
-                "cases": {"bug": {"kind": "action", "id": "f", "config": {"provider": "notify"}}},
-                "default": {"kind": "action", "id": "d", "config": {"provider": "notify"}},
+                "cases": {
+                    "bug": {
+                        "kind": "action",
+                        "id": "f",
+                        "config": {"provider": "notify"},
+                    }
+                },
+                "default": {
+                    "kind": "action",
+                    "id": "d",
+                    "config": {"provider": "notify"},
+                },
             }
         )
         assert validate_spec(spec).ok
 
     def test_branch_needs_an_on_binding_and_cases(self) -> None:
-        assert {"WF_MISSING_ON", "WF_EMPTY_BRANCH"} <= _codes(_wrap({"kind": "branch", "id": "b"}))
+        assert {"WF_MISSING_ON", "WF_EMPTY_BRANCH"} <= _codes(
+            _wrap({"kind": "branch", "id": "b"})
+        )
 
 
 class TestCycles:
@@ -270,14 +334,22 @@ class TestCycles:
                 "kind": "sequence",
                 "id": "root",
                 "children": [
-                    {"kind": "transform", "id": "a", "config": {"expr": "{{nodes.b.output}}"}},
-                    {"kind": "transform", "id": "b", "config": {"expr": "{{nodes.a.output}}"}},
+                    {
+                        "kind": "transform",
+                        "id": "a",
+                        "config": {"expr": "{{nodes.b.output}}"},
+                    },
+                    {
+                        "kind": "transform",
+                        "id": "b",
+                        "config": {"expr": "{{nodes.a.output}}"},
+                    },
                 ],
             }
         )
         r = validate_spec(spec)
         assert "WF_CYCLE" in {i.code for i in r.issues}
-        assert r.levels == []  # no schedule can be derived
+        assert r.levels == []
 
     def test_a_needs_cycle_is_rejected(self) -> None:
         spec = _wrap(
@@ -285,8 +357,18 @@ class TestCycles:
                 "kind": "parallel",
                 "id": "p",
                 "children": [
-                    {"kind": "infer", "id": "a", "config": {"prompt": "x"}, "needs": ["b"]},
-                    {"kind": "infer", "id": "b", "config": {"prompt": "y"}, "needs": ["a"]},
+                    {
+                        "kind": "infer",
+                        "id": "a",
+                        "config": {"prompt": "x"},
+                        "needs": ["b"],
+                    },
+                    {
+                        "kind": "infer",
+                        "id": "b",
+                        "config": {"prompt": "y"},
+                        "needs": ["a"],
+                    },
                 ],
             }
         )
@@ -335,9 +417,18 @@ class TestSecurityLint:
 
     def test_inline_credentials_are_flagged(self) -> None:
         """A literal key in a spec gets persisted to the journal the flywheel later reads."""
-        for value in ("sk-" + "a" * 32, "ghp_" + "b" * 26, "xoxb-" + "c" * 24, "hf_" + "d" * 30):
+        for value in (
+            "sk-" + "a" * 32,
+            "ghp_" + "b" * 26,
+            "xoxb-" + "c" * 24,
+            "hf_" + "d" * 30,
+        ):
             spec = _wrap(
-                {"kind": "action", "id": "a", "config": {"provider": "bash", "key": value}}
+                {
+                    "kind": "action",
+                    "id": "a",
+                    "config": {"provider": "bash", "key": value},
+                }
             )
             assert "WF_INLINE_SECRET" in _codes(spec), value
 
@@ -353,7 +444,9 @@ class TestSecurityLint:
 
     def test_unknown_pipes_are_rejected(self) -> None:
         """The closed pipe set is what keeps a spec from becoming an eval surface."""
-        spec = _wrap({"kind": "transform", "id": "t", "config": {"expr": "{{inputs.x | eval}}"}})
+        spec = _wrap(
+            {"kind": "transform", "id": "t", "config": {"expr": "{{inputs.x | eval}}"}}
+        )
         assert "WF_UNKNOWN_PIPE" in _codes(spec)
 
 
@@ -383,7 +476,9 @@ class TestMalformedInput:
                     "name": bad,
                     "root": {
                         "kind": "sequence",
-                        "children": [{"kind": "wait", "id": "w", "config": {"duration_secs": 1}}],
+                        "children": [
+                            {"kind": "wait", "id": "w", "config": {"duration_secs": 1}}
+                        ],
                     },
                 }
             )
@@ -407,10 +502,10 @@ class TestDependencyOrdering:
     @staticmethod
     def _msg(spec: dict) -> str:
         return "\n".join(
-            i.message for i in validate_spec(spec).issues if i.code == "WF_UNORDERED_DEP"
+            i.message
+            for i in validate_spec(spec).issues
+            if i.code == "WF_UNORDERED_DEP"
         )
-
-    # ── the `parallel` half: a binding now ORDERS its two branches (PP-2) ──
 
     def test_a_parallel_sibling_binding_is_ordered_by_derivation(self) -> None:
         """`PP-1` refused this; `PP-2` honours it. A `parallel` child that binds a sibling's
@@ -422,17 +517,25 @@ class TestDependencyOrdering:
                 "id": "p",
                 "children": [
                     {"kind": "infer", "id": "a", "config": {"prompt": "x"}},
-                    {"kind": "infer", "id": "b", "config": {"prompt": "{{nodes.a.output}}"}},
+                    {
+                        "kind": "infer",
+                        "id": "b",
+                        "config": {"prompt": "{{nodes.a.output}}"},
+                    },
                 ],
             }
         )
         assert validate_spec(spec).ok
         (edge,) = [
-            e for e in dep_edges_for_root(Node.from_dict(spec["root"])) if e.reader_id == "b"
+            e
+            for e in dep_edges_for_root(Node.from_dict(spec["root"]))
+            if e.reader_id == "b"
         ]
         assert edge.ordered and "concurrent legs" in edge.reason
 
-    def test_the_unordered_message_names_the_reader_the_producer_and_the_fix(self) -> None:
+    def test_the_unordered_message_names_the_reader_the_producer_and_the_fix(
+        self,
+    ) -> None:
         """Three facts, so an author can act without reading the engine. The refusal now fires
         only on a STRUCTURAL contradiction — here a `sequence` that runs the producer after the
         reader — because concurrency alone is no longer a refusal (`PP-2`)."""
@@ -441,15 +544,19 @@ class TestDependencyOrdering:
                 "kind": "sequence",
                 "id": "s",
                 "children": [
-                    {"kind": "infer", "id": "a", "config": {"prompt": "{{nodes.b.output}}"}},
+                    {
+                        "kind": "infer",
+                        "id": "a",
+                        "config": {"prompt": "{{nodes.b.output}}"},
+                    },
                     {"kind": "infer", "id": "b", "config": {"prompt": "x"}},
                 ],
             }
         )
         msg = self._msg(spec)
-        assert "'a'" in msg  # the reader
-        assert "'b'" in msg  # the producer
-        assert "move it before the reader" in msg  # the fix
+        assert "'a'" in msg
+        assert "'b'" in msg
+        assert "move it before the reader" in msg
 
     def test_a_needs_edge_satisfies_it(self) -> None:
         spec = _wrap(
@@ -477,7 +584,12 @@ class TestDependencyOrdering:
                 "id": "p",
                 "children": [
                     {"kind": "infer", "id": "a", "config": {"prompt": "x"}},
-                    {"kind": "infer", "id": "b", "config": {"prompt": "y"}, "needs": ["a"]},
+                    {
+                        "kind": "infer",
+                        "id": "b",
+                        "config": {"prompt": "y"},
+                        "needs": ["a"],
+                    },
                     {
                         "kind": "infer",
                         "id": "c",
@@ -489,7 +601,9 @@ class TestDependencyOrdering:
         )
         assert validate_spec(spec).ok
 
-    def test_a_binding_is_ordered_even_when_needs_names_a_different_sibling(self) -> None:
+    def test_a_binding_is_ordered_even_when_needs_names_a_different_sibling(
+        self,
+    ) -> None:
         """Under `PP-1` a `needs` that did not reach the bound producer left the binding
         unordered. Under `PP-2` the binding itself orders `b` after `a` by derivation, and the
         separate `needs: [c]` is just an additional (honourable) ordering edge onto `c` — so
@@ -525,7 +639,9 @@ class TestDependencyOrdering:
                     {
                         "kind": "sequence",
                         "id": "left",
-                        "children": [{"kind": "infer", "id": "prod", "config": {"prompt": "x"}}],
+                        "children": [
+                            {"kind": "infer", "id": "prod", "config": {"prompt": "x"}}
+                        ],
                     },
                     {
                         "kind": "sequence",
@@ -546,7 +662,8 @@ class TestDependencyOrdering:
     def test_an_anonymous_parallel_branch_producer_is_orderable(self) -> None:
         """`PP-1` refused this because `needs` addresses siblings by id and an anonymous branch
         could not be named. `PP-2` derives the edge from the BINDING, not from a `needs`-by-id,
-        so the producer's anonymity no longer matters — the reader is held until it finishes."""
+        so the producer's anonymity no longer matters — the reader is held until it finishes.
+        """
         spec = _wrap(
             {
                 "kind": "parallel",
@@ -554,7 +671,9 @@ class TestDependencyOrdering:
                 "children": [
                     {
                         "kind": "sequence",
-                        "children": [{"kind": "infer", "id": "prod", "config": {"prompt": "x"}}],
+                        "children": [
+                            {"kind": "infer", "id": "prod", "config": {"prompt": "x"}}
+                        ],
                     },
                     {
                         "kind": "infer",
@@ -566,8 +685,6 @@ class TestDependencyOrdering:
         )
         assert validate_spec(spec).ok
 
-    # ── the `sequence` half: earlier sibling, at whatever depth ──
-
     def test_an_earlier_sequence_sibling_can_be_read(self) -> None:
         spec = _wrap(
             {
@@ -575,7 +692,11 @@ class TestDependencyOrdering:
                 "id": "s",
                 "children": [
                     {"kind": "infer", "id": "a", "config": {"prompt": "x"}},
-                    {"kind": "infer", "id": "b", "config": {"prompt": "{{nodes.a.output}}"}},
+                    {
+                        "kind": "infer",
+                        "id": "b",
+                        "config": {"prompt": "{{nodes.a.output}}"},
+                    },
                 ],
             }
         )
@@ -587,7 +708,11 @@ class TestDependencyOrdering:
                 "kind": "sequence",
                 "id": "s",
                 "children": [
-                    {"kind": "infer", "id": "a", "config": {"prompt": "{{nodes.b.output}}"}},
+                    {
+                        "kind": "infer",
+                        "id": "a",
+                        "config": {"prompt": "{{nodes.b.output}}"},
+                    },
                     {"kind": "infer", "id": "b", "config": {"prompt": "x"}},
                 ],
             }
@@ -632,7 +757,11 @@ class TestDependencyOrdering:
                         "kind": "foreach",
                         "id": "each",
                         "config": {"items": "{{inputs.xs}}"},
-                        "body": {"kind": "infer", "id": "gen", "config": {"prompt": "{{item}}"}},
+                        "body": {
+                            "kind": "infer",
+                            "id": "gen",
+                            "config": {"prompt": "{{item}}"},
+                        },
                     },
                     {
                         "kind": "transform",
@@ -668,8 +797,6 @@ class TestDependencyOrdering:
         )
         assert "WF_UNORDERED_DEP" in _codes(spec)
 
-    # ── containment and exclusivity ──
-
     def test_a_container_cannot_be_read_by_its_own_descendant(self) -> None:
         """A container's output is not available until after the children that produce it."""
         spec = _wrap(
@@ -677,7 +804,11 @@ class TestDependencyOrdering:
                 "kind": "sequence",
                 "id": "outer",
                 "children": [
-                    {"kind": "infer", "id": "a", "config": {"prompt": "{{nodes.outer.output}}"}}
+                    {
+                        "kind": "infer",
+                        "id": "a",
+                        "config": {"prompt": "{{nodes.outer.output}}"},
+                    }
                 ],
             }
         )
@@ -705,7 +836,11 @@ class TestDependencyOrdering:
                 "config": {"on": "{{inputs.k}}"},
                 "cases": {
                     "yes": {"kind": "infer", "id": "y", "config": {"prompt": "x"}},
-                    "no": {"kind": "infer", "id": "n", "config": {"prompt": "{{nodes.y.output}}"}},
+                    "no": {
+                        "kind": "infer",
+                        "id": "n",
+                        "config": {"prompt": "{{nodes.y.output}}"},
+                    },
                 },
             }
         )
@@ -727,15 +862,23 @@ class TestDependencyOrdering:
                         "kind": "branch",
                         "id": "b",
                         "config": {"on": "{{inputs.k}}"},
-                        "cases": {"yes": {"kind": "infer", "id": "y", "config": {"prompt": "x"}}},
+                        "cases": {
+                            "yes": {
+                                "kind": "infer",
+                                "id": "y",
+                                "config": {"prompt": "x"},
+                            }
+                        },
                     },
-                    {"kind": "transform", "id": "t", "config": {"expr": "{{nodes.y.output}}"}},
+                    {
+                        "kind": "transform",
+                        "id": "t",
+                        "config": {"expr": "{{nodes.y.output}}"},
+                    },
                 ],
             }
         )
         assert validate_spec(spec).ok
-
-    # ── it does not double-report what another code already owns ──
 
     def test_a_cycle_suppresses_the_ordering_advice(self) -> None:
         """On a cyclic graph the only advice this rule can give is the advice that closes
@@ -745,8 +888,16 @@ class TestDependencyOrdering:
                 "kind": "parallel",
                 "id": "p",
                 "children": [
-                    {"kind": "transform", "id": "a", "config": {"expr": "{{nodes.b.output}}"}},
-                    {"kind": "transform", "id": "b", "config": {"expr": "{{nodes.a.output}}"}},
+                    {
+                        "kind": "transform",
+                        "id": "a",
+                        "config": {"expr": "{{nodes.b.output}}"},
+                    },
+                    {
+                        "kind": "transform",
+                        "id": "b",
+                        "config": {"expr": "{{nodes.a.output}}"},
+                    },
                 ],
             }
         )
@@ -760,7 +911,11 @@ class TestDependencyOrdering:
                 "kind": "sequence",
                 "id": "s",
                 "children": [
-                    {"kind": "transform", "id": "a", "config": {"expr": "{{nodes.a.output}}"}}
+                    {
+                        "kind": "transform",
+                        "id": "a",
+                        "config": {"expr": "{{nodes.a.output}}"},
+                    }
                 ],
             }
         )
@@ -774,7 +929,11 @@ class TestDependencyOrdering:
                 "kind": "sequence",
                 "id": "s",
                 "children": [
-                    {"kind": "transform", "id": "a", "config": {"expr": "{{nodes.ghost.output}}"}}
+                    {
+                        "kind": "transform",
+                        "id": "a",
+                        "config": {"expr": "{{nodes.ghost.output}}"},
+                    }
                 ],
             }
         )
@@ -857,27 +1016,35 @@ class TestNeedsCrossCheck:
             }
         )
         r = validate_spec(spec)
-        assert r.ok  # a warning, not an error
+        assert r.ok
         assert "WF_REDUNDANT_NEEDS" in {i.code for i in r.warnings}
 
     def test_a_non_dataflow_needs_is_neither_error_nor_warning(self) -> None:
         """The field's one legitimate use: ordering that is not dataflow. `b` runs after `a`
         (a lock, an external side-effect sequence) but binds nothing of `a`'s. It is honourable
         (concurrent legs) and not redundant, so it is silently accepted — no warning at every
-        save, which is the deliberate deviation from the plan's step-3 'warn on absence'."""
+        save, which is the deliberate deviation from the plan's step-3 'warn on absence'.
+        """
         spec = _wrap(
             {
                 "kind": "parallel",
                 "id": "p",
                 "children": [
                     {"kind": "infer", "id": "a", "config": {"prompt": "x"}},
-                    {"kind": "infer", "id": "b", "config": {"prompt": "y"}, "needs": ["a"]},
+                    {
+                        "kind": "infer",
+                        "id": "b",
+                        "config": {"prompt": "y"},
+                        "needs": ["a"],
+                    },
                 ],
             }
         )
         r = validate_spec(spec)
         assert r.ok
-        assert not any(i.code in ("WF_REDUNDANT_NEEDS", "WF_UNSATISFIABLE_NEEDS") for i in r.issues)
+        assert not any(
+            i.code in ("WF_REDUNDANT_NEEDS", "WF_UNSATISFIABLE_NEEDS") for i in r.issues
+        )
 
 
 class TestOutputContractCrossCheck:
@@ -903,7 +1070,9 @@ class TestOutputContractCrossCheck:
         return _wrap({"kind": "sequence", "id": "s", "children": list(children)}, name)
 
     @staticmethod
-    def _producer(node_id: str, contract: dict | None = None, prompt: str = "go") -> dict:
+    def _producer(
+        node_id: str, contract: dict | None = None, prompt: str = "go"
+    ) -> dict:
         config: dict = {"prompt": prompt}
         if contract is not None:
             config["output_contract"] = contract
@@ -913,11 +1082,7 @@ class TestOutputContractCrossCheck:
     def _reader(node_id: str, expr: str) -> dict:
         return {"kind": "infer", "id": node_id, "config": {"prompt": expr}}
 
-    #: The contract shape the rule can actually judge: both halves present, exactly as
-    #: `engine.check_output_contract` requires them.
     JSON_FINDINGS = {"must_be_json": True, "required_keys": ["findings"]}
-
-    # ── the error half: a path the producer's contract cannot satisfy ──
 
     def test_a_key_absent_from_required_keys_is_refused(self) -> None:
         spec = self._seq(
@@ -980,8 +1145,6 @@ class TestOutputContractCrossCheck:
         )
         assert "WF_UNSATISFIABLE_OUTPUT_REF" in _codes(spec)
 
-    # ── the deliberate limits: an under-declared contract must not refuse ──
-
     def test_required_keys_WITHOUT_must_be_json_never_errors(self) -> None:
         """The pairing is the signal. `required_keys` alone is what
         `batch_compile.schema_to_contract` emits for a schema that declared no `type` — an
@@ -1038,7 +1201,9 @@ class TestOutputContractCrossCheck:
         )
         assert validate_spec(spec).issues == []
 
-    def test_an_unordered_edge_and_an_unsatisfiable_path_are_both_reported(self) -> None:
+    def test_an_unordered_edge_and_an_unsatisfiable_path_are_both_reported(
+        self,
+    ) -> None:
         """Two independent defects, two fixes — unlike the unknown-id case, where one typo
         wears two hats. The unordered edge is a `sequence` that runs the producer AFTER the
         reader, since concurrency alone is no longer unordered (`PP-2`); the path defect
@@ -1057,9 +1222,9 @@ class TestOutputContractCrossCheck:
         assert "WF_UNORDERED_DEP" in codes
         assert "WF_UNSATISFIABLE_OUTPUT_REF" in codes
 
-    # ── the warning half: a producer read at a path but declaring nothing ──
-
-    def test_a_contractless_producer_read_at_a_path_warns_naming_its_readers(self) -> None:
+    def test_a_contractless_producer_read_at_a_path_warns_naming_its_readers(
+        self,
+    ) -> None:
         spec = self._seq(
             self._producer("a", self.JSON_FINDINGS),
             self._reader("b", "{{nodes.a.output.findings}}"),
@@ -1067,10 +1232,10 @@ class TestOutputContractCrossCheck:
         )
         (issue,) = self._issues(spec, "WF_UNCONTRACTED_OUTPUT_REF")
         assert issue["severity"] == "warning"
-        assert "'b'" in issue["message"]  # the producer that declares nothing
-        assert "'c' reads output.text" in issue["message"]  # the reader, named
-        assert issue["path"] == "root.children[1]"  # reported AT the producer: that is the fix
-        assert validate_spec(spec).ok  # a warning, never an error
+        assert "'b'" in issue["message"]
+        assert "'c' reads output.text" in issue["message"]
+        assert issue["path"] == "root.children[1]"
+        assert validate_spec(spec).ok
 
     def test_several_readers_aggregate_into_ONE_warning(self) -> None:
         """One warning per producer, not per read: three readers of one contract-less node is
@@ -1127,8 +1292,6 @@ class TestOutputContractCrossCheck:
         )
         assert "WF_UNCONTRACTED_OUTPUT_REF" in _codes(adopted)
 
-    # ── the vacuity floor ──
-
     def test_the_rule_RESOLVES_a_read_against_a_real_contract(self) -> None:
         """The floor. Every assertion above is satisfied by a rule that examined nothing and
         stayed silent, because silence is also what a satisfied rule produces. This counts the
@@ -1162,6 +1325,6 @@ class TestOutputContractCrossCheck:
             for e in dep_edges_for_root(spec["root"] and Node.from_dict(spec["root"]))
         }
         assert edges[("b", "a")].output_reads == (("findings",),)
-        assert edges[("c", "b")].output_reads == ((),)  # bare: a read with no path
+        assert edges[("c", "b")].output_reads == ((),)
         for read in contract_reads_for_root(Node.from_dict(spec["root"])):
             assert (read.reader_id, read.producer_id) in edges

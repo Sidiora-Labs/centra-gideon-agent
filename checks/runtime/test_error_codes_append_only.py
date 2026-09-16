@@ -25,12 +25,8 @@ from __future__ import annotations
 
 import re
 
-from gideon.errors import ERROR_CODES
+from gideon.core.errors import ERROR_CODES
 
-# The codes released as of PLATFORM-LEGIBILITY §2's initial slice. APPEND a row
-# here only when a code is actually released; never edit or delete an existing
-# row. This is deliberately a copy, not an import of a subset of ERROR_CODES —
-# the copy is what detects an in-place reword of the live meaning.
 _RELEASED: dict[str, str] = {
     "ERR_TOOL_ARG_INVALID": (
         "A tool argument failed validation (wrong type, out of range, or not in "
@@ -44,7 +40,9 @@ _RELEASED: dict[str, str] = {
         "A hook/trigger names an action provider that is not registered or not in "
         "the allowed set."
     ),
-    "ERR_ACTION_PROVIDER_FAILED": ("An action provider raised while executing a trigger's action."),
+    "ERR_ACTION_PROVIDER_FAILED": (
+        "An action provider raised while executing a trigger's action."
+    ),
 }
 
 _CODE_RE = re.compile(r"^ERR_[A-Z0-9]+(?:_[A-Z0-9]+)*$")
@@ -53,7 +51,9 @@ _CODE_RE = re.compile(r"^ERR_[A-Z0-9]+(?:_[A-Z0-9]+)*$")
 def test_every_released_code_is_still_present():
     """No released code may be removed — a branch that reads it must never break."""
     missing = [c for c in _RELEASED if c not in ERROR_CODES]
-    assert not missing, f"released error codes removed (append-only violation): {missing}"
+    assert (
+        not missing
+    ), f"released error codes removed (append-only violation): {missing}"
 
 
 def test_released_meanings_are_unchanged():
@@ -74,7 +74,9 @@ def test_all_codes_follow_the_err_upper_snake_convention():
 def test_no_agent_code_collides_with_the_http_lowercase_snake_space():
     """A code that is all-lowercase would be ambiguous with the HTTP envelope."""
     lowercased = [c for c in ERROR_CODES if c == c.lower()]
-    assert not lowercased, f"agent codes must not be lowercase (HTTP-envelope space): {lowercased}"
+    assert (
+        not lowercased
+    ), f"agent codes must not be lowercase (HTTP-envelope space): {lowercased}"
 
 
 def test_every_code_has_a_nonempty_meaning():

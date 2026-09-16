@@ -20,9 +20,9 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.apps import manager
-from gideon.apps.manifest import Permissions
-from gideon.apps.permissions import (
+from gideon.extensions.apps import manager
+from gideon.extensions.apps.manifest import Permissions
+from gideon.extensions.apps.permissions import (
     APP_SCOPED_PREFIXES,
     PermissionChecker,
     app_request_denial,
@@ -38,18 +38,18 @@ class TestCheckerLogic:
     def test_api_prefix_allows_declared_only(self):
         c = _checker(api=["/api/notes", "/api/tags/*"])
         assert c.can_use_api("/api/notes")
-        assert c.can_use_api("/api/notes/123")  # under the declared prefix
-        assert c.can_use_api("/api/tags/anything")  # wildcard
-        assert not c.can_use_api("/api/secrets")  # undeclared
+        assert c.can_use_api("/api/notes/123")
+        assert c.can_use_api("/api/tags/anything")
+        assert not c.can_use_api("/api/secrets")
 
     def test_no_api_scope_denies_all_gateway_api(self):
         c = _checker()
         assert not c.can_use_api("/api/notes")
 
     def test_own_backend_proxy_always_allowed(self):
-        c = _checker()  # no api scope at all
+        c = _checker()
         assert c.can_use_api("/apps/demo/api/anything")
-        assert not c.can_use_api("/apps/other/api/x")  # not its own backend
+        assert not c.can_use_api("/apps/other/api/x")
 
     def test_events_and_mcptools(self):
         c = _checker(events=["note.*"], mcpTools=["fs_read"])
@@ -61,7 +61,9 @@ class TestCheckerLogic:
     def test_memory_tiers(self):
         assert not _checker(memory="").can_use_memory("app-scoped")
         appc = _checker(memory="app-scoped")
-        assert appc.can_use_memory("app-scoped") and not appc.can_use_memory("shared")
+        assert apgideon.can_use_memory("app-scoped") and not apgideon.can_use_memory(
+            "shared"
+        )
         sharedc = _checker(memory="shared")
         assert sharedc.can_use_memory("app-scoped") and sharedc.can_use_memory("shared")
 
@@ -87,7 +89,8 @@ class TestCheckerLogic:
     def test_an_explicit_network_denial_survives_a_wire_roundtrip(self):
         """The declared-vs-silent distinction has to hold through the shape the catalog
         actually moves permissions in (``to_dict`` → JSON → ``from_dict``), not only on
-        the first hop — the Store re-parses a scanned manifest before consent sees it."""
+        the first hop — the Store re-parses a scanned manifest before consent sees it.
+        """
 
         def roundtrip(declared: dict) -> Permissions:
             wire = Permissions.from_dict(declared).to_dict()
@@ -108,9 +111,13 @@ class TestCheckerLogic:
         assert _checker(network=True, network_declared=True).can_use_network()
 
 
-# ── APE-12: the consent wire declares every permission this dict can emit ──
-
-_API_TS = Path(__file__).resolve().parent.parent / "web" / "src" / "lib" / "api.ts"
+_API_TS = (
+    Path(__file__).resolve().parent.parent.parent
+    / "apps/console"
+    / "src"
+    / "lib"
+    / "api.ts"
+)
 
 
 def _permissions_with_every_field_set() -> Permissions:
@@ -119,11 +126,11 @@ def _permissions_with_every_field_set() -> Permissions:
     without a wire declaration is exactly the defect this rail exists to catch."""
     kwargs: dict[str, object] = {}
     for f in fields(Permissions):
-        if f.name == "proposals":  # INU-7: a list of typed entries, not of name strings
-            from gideon.apps.manifest import ProposalKind
+        if f.name == "proposals":
+            from gideon.extensions.apps.manifest import ProposalKind
 
             kwargs[f.name] = [ProposalKind(kind_suffix="x", label="X")]
-        elif f.default_factory is not MISSING:  # the list scopes
+        elif f.default_factory is not MISSING:
             kwargs[f.name] = ["x"]
         elif isinstance(f.default, bool):
             kwargs[f.name] = True
@@ -135,11 +142,11 @@ def _permissions_with_every_field_set() -> Permissions:
 
 
 def _wire_declared_keys() -> set[str]:
-    """The optional fields of ``AppPermissionsWire`` in web/src/lib/api.ts."""
+    """The optional fields of ``AppPermissionsWire`` in apps/console/src/lib/api.ts."""
     src = _API_TS.read_text(encoding="utf-8")
     m = re.search(r"export interface AppPermissionsWire \{(.*?)\n\}", src, re.S)
-    assert m, "AppPermissionsWire not found in web/src/lib/api.ts"
-    body = re.sub(r"//[^\n]*", "", m.group(1))  # drop comments before scanning
+    assert m, "AppPermissionsWire not found in apps/console/src/lib/api.ts"
+    body = re.sub(r"//[^\n]*", "", m.group(1))
     return set(re.findall(r"(\w+)\?:", body))
 
 
@@ -159,10 +166,7 @@ def test_consent_wire_declares_exactly_the_permissions_the_server_emits():
         f"server-only (never disclosed): {sorted(emitted - declared)}; "
         f"wire-only (nothing sends them): {sorted(declared - emitted)}"
     )
-    assert "appMessaging" in emitted  # the rail is not vacuously comparing empty sets
-
-
-# ── middleware enforcement (HTTP) ──
+    assert "appMessaging" in emitted
 
 
 async def _ok(request: web.Request) -> web.Response:
@@ -189,9 +193,6 @@ async def _client(tmp_path, *, app_identity: str, permissions: dict):
         encoding="utf-8",
     )
     (appdir / "installed.json").write_text(
-        # An app dir with no `installed.json` is NOT installed (`_read_installed`), and the
-        # boundary now refuses that — so a fixture without one models a partial install and
-        # would be denied before any permission check ran.
         json.dumps({"name": name, "version": "1.0.0", "enabled": True}),
         encoding="utf-8",
     )
@@ -201,13 +202,8 @@ async def _client(tmp_path, *, app_identity: str, permissions: dict):
         request["app"] = app_identity
         return await handler(request)
 
-    # Re-create the enforcement middleware standalone (mirrors server.py).
     @web.middleware
     async def app_permission_middleware(request, handler):
-        # Calls the REAL decision (`permissions.app_request_denial`) rather than
-        # re-deriving it. The old copy inlined `if c is not None and ...`, which is the
-        # fail-open shape the boundary itself had: a mirror that reproduces the bug it is
-        # meant to catch. Only the logging/response half is local, as in `server.py`.
         app_name = request.get("app", "")
         if app_name and request.path.startswith(APP_SCOPED_PREFIXES):
             if app_request_denial(app_name, request.path):
@@ -215,7 +211,7 @@ async def _client(tmp_path, *, app_identity: str, permissions: dict):
         return await handler(request)
 
     with (
-        patch("gideon.config.loader.config_dir", return_value=tmp_path),
+        patch("gideon.core.config.loader.config_dir", return_value=tmp_path),
         patch.object(manager, "config_dir", return_value=tmp_path),
     ):
         app = web.Application(middlewares=[stub_identity, app_permission_middleware])
@@ -228,41 +224,34 @@ async def _client(tmp_path, *, app_identity: str, permissions: dict):
 
 @pytest.mark.asyncio
 async def test_middleware_allows_declared_denies_undeclared(tmp_path):
-    async with _client(tmp_path, app_identity="demo", permissions={"api": ["/api/notes"]}) as c:
+    async with _client(
+        tmp_path, app_identity="demo", permissions={"api": ["/api/notes"]}
+    ) as c:
         assert (await c.get("/api/notes")).status == 200
         assert (await c.get("/api/secrets")).status == 403
-        assert (await c.get("/apps/demo/api/ping")).status == 200  # own backend
+        assert (await c.get("/apps/demo/api/ping")).status == 200
 
 
 @pytest.mark.asyncio
 async def test_middleware_no_app_identity_passes(tmp_path):
-    # Empty app identity = owner/dashboard request → enforcement is a no-op.
     async with _client(tmp_path, app_identity="", permissions={"api": []}) as c:
         assert (await c.get("/api/secrets")).status == 200
 
 
 def test_checker_for_unknown_app_is_none(tmp_path):
     with (
-        patch("gideon.config.loader.config_dir", return_value=tmp_path),
+        patch("gideon.core.config.loader.config_dir", return_value=tmp_path),
         patch.object(manager, "config_dir", return_value=tmp_path),
     ):
         assert checker_for("ghost") is None
         assert checker_for("") is None
 
 
-# ── AuthMode.NONE app-identity adoption (dev-mode sandbox parity) ──
-# In none-mode token_auth is skipped entirely, so request["app"] was never set
-# from an app-scoped Bearer token — which silently disabled the WHOLE app
-# permission sandbox in dev mode (any app token reached any /api path). The
-# _dev_user_middleware must adopt the token's app claim exactly like token_auth
-# does, so enforcement behaves identically in both auth modes.
-
-
 @asynccontextmanager
 async def _none_mode_client(tmp_path, *, permissions: dict):
     """Mirror server.py's none-mode chain: _dev_user_middleware (with the app-claim
     adoption) + the real enforcement middleware."""
-    from gideon.dashboard.token_auth import validate_token_with_app
+    from gideon.interfaces.dashboard.token_auth import validate_token_with_app
 
     name = "demo"
     appdir = tmp_path / "apps" / name
@@ -280,9 +269,6 @@ async def _none_mode_client(tmp_path, *, permissions: dict):
         encoding="utf-8",
     )
     (appdir / "installed.json").write_text(
-        # An app dir with no `installed.json` is NOT installed (`_read_installed`), and the
-        # boundary now refuses that — so a fixture without one models a partial install and
-        # would be denied before any permission check ran.
         json.dumps({"name": name, "version": "1.0.0", "enabled": True}),
         encoding="utf-8",
     )
@@ -305,10 +291,6 @@ async def _none_mode_client(tmp_path, *, permissions: dict):
 
     @web.middleware
     async def app_permission_middleware(request, handler):
-        # Calls the REAL decision (`permissions.app_request_denial`) rather than
-        # re-deriving it. The old copy inlined `if c is not None and ...`, which is the
-        # fail-open shape the boundary itself had: a mirror that reproduces the bug it is
-        # meant to catch. Only the logging/response half is local, as in `server.py`.
         app_name = request.get("app", "")
         if app_name and request.path.startswith(APP_SCOPED_PREFIXES):
             if app_request_denial(app_name, request.path):
@@ -316,10 +298,12 @@ async def _none_mode_client(tmp_path, *, permissions: dict):
         return await handler(request)
 
     with (
-        patch("gideon.config.loader.config_dir", return_value=tmp_path),
+        patch("gideon.core.config.loader.config_dir", return_value=tmp_path),
         patch.object(manager, "config_dir", return_value=tmp_path),
     ):
-        app = web.Application(middlewares=[dev_user_middleware, app_permission_middleware])
+        app = web.Application(
+            middlewares=[dev_user_middleware, app_permission_middleware]
+        )
         app.router.add_get("/api/notes", _ok)
         app.router.add_get("/api/secrets", _ok)
         async with TestClient(TestServer(app)) as client:
@@ -328,31 +312,18 @@ async def _none_mode_client(tmp_path, *, permissions: dict):
 
 @pytest.mark.asyncio
 async def test_none_mode_adopts_app_claim_and_enforces(tmp_path):
-    from gideon.dashboard.token_auth import generate_token
+    from gideon.interfaces.dashboard.token_auth import generate_token
 
     async with _none_mode_client(tmp_path, permissions={"api": ["/api/notes"]}) as c:
         token = generate_token("dev-local", ttl_seconds=60, app="demo")
         hdr = {"Authorization": f"Bearer {token}"}
-        # App-scoped request: declared path passes, undeclared is 403.
         assert (await c.get("/api/notes", headers=hdr)).status == 200
         assert (await c.get("/api/secrets", headers=hdr)).status == 403
-        # ?app_token= (the WS handshake form) is adopted too.
         assert (await c.get(f"/api/secrets?app_token={token}")).status == 403
-        # No token → owner request, unrestricted.
         assert (await c.get("/api/secrets")).status == 200
-        # Garbage token → no identity adopted (fails closed to owner, not crash).
-        assert (await c.get("/api/secrets", headers={"Authorization": "Bearer junk"})).status == 200
-
-
-# ── APE-1: backgroundTasks + eventSubscriptions — declared here, enforced by nothing ──
-#
-# These two follow the same to_dict/from_dict parity pattern as every permission above,
-# and differ from all of them in one honest respect: NOTHING ENFORCES THEM TODAY. No core
-# code hosts an app worker (APE-3 does) and no platform event is delivered to any app,
-# declared or not (APE-2's ``app_events.py`` registry does not exist). So this section
-# pins the round trip and the consent leg, and deliberately adds no ``can_use_*``
-# accessor: an accessor with no call site would be an enforcement point that enforces
-# nothing, and the atom that builds the runtime should add the check WHERE it gates.
+        assert (
+            await c.get("/api/secrets", headers={"Authorization": "Bearer junk"})
+        ).status == 200
 
 
 def test_background_and_event_grants_round_trip():
@@ -379,14 +350,16 @@ def test_undeclared_and_empty_background_grants_emit_no_key():
         d = Permissions.from_dict(data).to_dict()
         assert "backgroundTasks" not in d
         assert "eventSubscriptions" not in d
-        assert Permissions.from_dict(d).to_dict() == d  # still a fixed point
+        assert Permissions.from_dict(d).to_dict() == d
 
 
 def test_event_subscription_names_survive_verbatim():
     """The names are APE-2's registry vocabulary, matched exactly and with no wildcard
     (like ``desktop``, unlike ``appMessaging``) — so ``session.created`` must arrive with
     its dot intact. Falsy entries drop, like every other list scope here."""
-    p = Permissions.from_dict({"eventSubscriptions": ["session.created", "", None, "a.b"]})
+    p = Permissions.from_dict(
+        {"eventSubscriptions": ["session.created", "", None, "a.b"]}
+    )
     assert p.eventSubscriptions == ["session.created", "a.b"]
     assert p.to_dict()["eventSubscriptions"] == ["session.created", "a.b"]
 
@@ -399,7 +372,6 @@ def test_event_subscriptions_do_not_widen_the_ws_event_allowlist():
     to the same data."""
     c = _checker(eventSubscriptions=["session.created"])
     assert not c.can_use_event("session.created")
-    # ...and the reverse: a WS grant is not a platform subscription.
     assert _checker(events=["session.created"]).permissions.eventSubscriptions == []
 
 
@@ -407,8 +379,8 @@ def test_declared_grants_reach_the_pre_install_consent_payload():
     """APE-12's leg, for the new grants: the Store's PRE-install panel renders
     ``CatalogEntry.permissions`` built by ``catalog._manifest_consent``, so a grant has to
     survive THAT extraction, not just ``Permissions.to_dict()``."""
-    from gideon.apps.catalog import _manifest_consent
-    from gideon.apps.manifest import AppManifest
+    from gideon.extensions.apps.catalog import _manifest_consent
+    from gideon.extensions.apps.manifest import AppManifest
 
     m = AppManifest.from_dict(
         {
@@ -428,21 +400,26 @@ def test_declared_grants_reach_the_pre_install_consent_payload():
 
 
 @pytest.mark.asyncio
-async def test_declared_grants_reach_the_installed_app_consent_wire(tmp_path, monkeypatch):
+async def test_declared_grants_reach_the_installed_app_consent_wire(
+    tmp_path, monkeypatch
+):
     """The other surface ``PermissionList`` serves is the installed-app panel, fed by
     ``GET /api/apps``. A component test alone would pass through the APE-12 defect shape
     (server emits it, endpoint drops it), so the HTTP payload is pinned too — including
     the declining app, which must send NEITHER key."""
-    from gideon.apps import app_manager
-    from gideon.dashboard.handlers.apps import register_app_routes
+    from gideon.extensions.apps import app_manager
+    from gideon.interfaces.dashboard.handlers.apps import register_app_routes
 
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     with (
-        patch("gideon.config.loader.config_dir", return_value=tmp_path),
+        patch("gideon.core.config.loader.config_dir", return_value=tmp_path),
         patch.object(manager, "config_dir", return_value=tmp_path),
     ):
         for name, perms in (
-            ("worker-app", {"backgroundTasks": True, "eventSubscriptions": ["task.completed"]}),
+            (
+                "worker-app",
+                {"backgroundTasks": True, "eventSubscriptions": ["task.completed"]},
+            ),
             ("quiet-app", None),
         ):
             d = tmp_path / "src" / name
@@ -472,14 +449,6 @@ async def test_declared_grants_reach_the_installed_app_consent_wire(tmp_path, mo
     assert "eventSubscriptions" not in apps["quiet-app"]["permissions"]
 
 
-# ── the boundary FAILS CLOSED (#410 residual) ─────────────────────────────────
-#
-# `app_request_denial` is the whole decision, so these drive it directly. Every check
-# used to read `if checker is not None and not checker.can_use_...`, which skipped ALL
-# of them when the manifest could not be resolved — so an app-scoped token for an
-# uninstalled app reached any path at all, including `/api/security/credentials`.
-
-
 def _install_on_disk(tmp_path, name, *, permissions, enabled=True, manifest_text=None):
     """An app as it exists on disk: `app.json` (permissions) + `installed.json` (lifecycle).
 
@@ -504,26 +473,26 @@ def _install_on_disk(tmp_path, name, *, permissions, enabled=True, manifest_text
     )
     (appdir / "app.json").write_text(body, encoding="utf-8")
     (appdir / "installed.json").write_text(
-        json.dumps({"name": name, "version": "1.0.0", "enabled": enabled}), encoding="utf-8"
+        json.dumps({"name": name, "version": "1.0.0", "enabled": enabled}),
+        encoding="utf-8",
     )
     return appdir
 
 
 @contextmanager
 def _isolated_apps(tmp_path):
-    # `manager.config_dir` is the only patch point that matters: `app_manager` never
-    # imports it and resolves every path through `manager.app_dir`. Patching a name a
-    # module does not have raises, and ASSIGNING one silently creates a no-op.
     with (
-        patch("gideon.config.loader.config_dir", return_value=tmp_path),
+        patch("gideon.core.config.loader.config_dir", return_value=tmp_path),
         patch.object(manager, "config_dir", return_value=tmp_path),
     ):
         yield
 
 
-#: Paths an app in this test declares nothing for. `/api/security/credentials` is the
-#: point: the fail-open hole was not scoped to harmless routes.
-_OFF_LIMITS = ("/api/memory/all", "/api/security/credentials", "/api/apps/other/agent-run")
+_OFF_LIMITS = (
+    "/api/memory/all",
+    "/api/security/credentials",
+    "/api/apps/other/agent-run",
+)
 
 
 def test_a_declared_path_is_still_allowed(tmp_path):
@@ -532,7 +501,10 @@ def test_a_declared_path_is_still_allowed(tmp_path):
         _install_on_disk(tmp_path, "demo", permissions={"api": ["/api/notes"]})
         assert app_request_denial("demo", "/api/notes") == ""
         assert app_request_denial("demo", "/api/notes/sub") == ""
-        assert app_request_denial("demo", "/api/secrets") == "api path not in declared permissions"
+        assert (
+            app_request_denial("demo", "/api/secrets")
+            == "api path not in declared permissions"
+        )
 
 
 def test_an_uninstalled_app_is_refused_rather_than_unscoped(tmp_path):
@@ -550,7 +522,9 @@ def test_an_app_that_corrupts_its_own_manifest_does_not_escape_its_sandbox(tmp_p
     with _isolated_apps(tmp_path):
         _install_on_disk(tmp_path, "broken", permissions={}, manifest_text="{ not json")
         for path in _OFF_LIMITS:
-            assert app_request_denial("broken", path) == "app manifest could not be read"
+            assert (
+                app_request_denial("broken", path) == "app manifest could not be read"
+            )
 
 
 def test_disabling_an_app_takes_effect_on_the_next_request(tmp_path):
@@ -558,7 +532,9 @@ def test_disabling_an_app_takes_effect_on_the_next_request(tmp_path):
     disabled app's permissions were unchanged, and while minting refuses a disabled app,
     a token minted before the flip kept working for the rest of its hour."""
     with _isolated_apps(tmp_path):
-        _install_on_disk(tmp_path, "off", permissions={"api": ["/api/notes"]}, enabled=False)
+        _install_on_disk(
+            tmp_path, "off", permissions={"api": ["/api/notes"]}, enabled=False
+        )
         assert app_request_denial("off", "/api/notes") == "app is disabled"
         for path in _OFF_LIMITS:
             assert app_request_denial("off", path) == "app is disabled"

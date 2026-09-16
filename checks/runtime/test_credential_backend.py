@@ -32,8 +32,8 @@ from pathlib import Path
 
 import pytest
 
-from gideon.config import loader
-from gideon.config.credentials import (
+from gideon.core.config import loader
+from gideon.core.config.credentials import (
     CREDENTIAL_BACKEND_ENV,
     credential_backend,
     credential_backend_warning,
@@ -42,13 +42,10 @@ from gideon.config.credentials import (
     requested_credential_backend,
     save_credential,
 )
-from gideon.config.loader import AppConfig
+from gideon.core.config.loader import AppConfig
 
 _KEY = "SH1_TEST_TOKEN"
 _OTHER = "SH1_TEST_OTHER"
-
-
-# ── keyring doubles ──────────────────────────────────────────────────────────
 
 
 class _ImportBlocker:
@@ -131,8 +128,6 @@ def home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     cfg = tmp_path / "home"
     cfg.mkdir()
     monkeypatch.setattr(loader, "config_dir", lambda: cfg)
-    # save_credential mirrors into os.environ; registering the keys with monkeypatch
-    # first means teardown restores the process environment.
     for key in (_KEY, _OTHER):
         monkeypatch.setenv(key, "")
         monkeypatch.delenv(key, raising=False)
@@ -142,9 +137,6 @@ def home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
 
 def _mode(path: Path) -> int:
     return stat.S_IMODE(path.stat().st_mode)
-
-
-# ── the selector ─────────────────────────────────────────────────────────────
 
 
 def test_the_default_backend_is_dotenv_and_warns_about_nothing(home: Path) -> None:
@@ -198,8 +190,6 @@ def test_a_fail_or_null_keyring_backend_is_refused(
 
     save_credential(_KEY, "landed-in-env")
     assert values == {}, "nothing may be handed to a fail/null backend"
-    # Mode BEFORE any read: `_dotenv_credentials()` repairs loose permissions, so a
-    # read placed first would make this assertion measure the repair, not the write.
     assert _mode(loader.env_path()) == 0o600
     assert get_credential(_KEY) == "landed-in-env"
 
@@ -211,7 +201,9 @@ def test_the_keychain_becomes_active_when_it_is_requested_and_present(
     monkeypatch.setenv(CREDENTIAL_BACKEND_ENV, "keychain")
     assert keychain_available() is True
     assert credential_backend() == "keychain"
-    assert credential_backend_warning() == "", "nothing fell back, so nothing to warn about"
+    assert (
+        credential_backend_warning() == ""
+    ), "nothing fell back, so nothing to warn about"
 
 
 def test_a_present_keychain_is_not_used_until_it_is_requested(
@@ -230,9 +222,6 @@ def test_a_present_keychain_is_not_used_until_it_is_requested(
     save_credential(_KEY, "still-dotenv")
     assert values == {}
     assert loader.env_path().exists()
-
-
-# ── fail-closed write path ───────────────────────────────────────────────────
 
 
 def test_the_headless_fallback_writes_env_at_0600_and_creates_nothing_else(
@@ -279,7 +268,9 @@ def test_the_keychain_backend_stores_secrets_in_the_keychain_and_not_in_env(
     save_credential(_KEY, "keychain-value")
 
     assert values[f"gideon\x00{_KEY}"] == "keychain-value"
-    assert not loader.env_path().exists(), "a keychain write must not also spill to .env"
+    assert (
+        not loader.env_path().exists()
+    ), "a keychain write must not also spill to .env"
     index = json.loads(values["gideon\x00__gideon_key_index__"])
     assert index == [_KEY], "the keychain must stay enumerable for load_credentials()"
 
@@ -292,14 +283,11 @@ def test_the_key_index_accumulates_and_stays_sorted(
 
     save_credential(_OTHER, "b")
     save_credential(_KEY, "a")
-    save_credential(_KEY, "a2")  # a re-save must not duplicate the index entry
+    save_credential(_KEY, "a2")
 
     index = json.loads(values["gideon\x00__gideon_key_index__"])
     assert index == sorted([_KEY, _OTHER])
     assert get_credential(_KEY) == "a2"
-
-
-# ── backend transparency ─────────────────────────────────────────────────────
 
 
 def test_the_read_api_gives_the_caller_no_way_to_name_a_backend() -> None:
@@ -328,19 +316,9 @@ def test_reads_are_transparent_across_both_stores_in_one_process(
     assert get_credential(_OTHER) == "from-dotenv"
     assert get_credential("SH1_NEVER_STORED") == ""
 
-    # …and the union survives the backend being switched back, which is why reads
-    # consult both stores regardless of which one is active: flipping the env var
-    # must not make an already-stored secret disappear.
     assert credential_backend() == "dotenv"
     assert get_credential(_KEY) == "from-keychain"
 
-    # …and in the direction that actually happens in the field: the keychain is
-    # ACTIVE and the key still lives only in `.env` (an install that opted in before
-    # SH-2's migration moved anything). A read that consulted only the active backend
-    # would return "" here and read as a lost credential.
-    #
-    # 🔴 This assertion exists because falsification found the gap: a mutation making
-    # `get_credential` active-backend-EXCLUSIVE passed the rest of this file untouched.
     monkeypatch.setenv(CREDENTIAL_BACKEND_ENV, "keychain")
     assert credential_backend() == "keychain"
     assert get_credential(_OTHER) == "from-dotenv"
@@ -360,34 +338,40 @@ def test_load_credentials_unions_both_backends_with_the_keychain_winning(
 
     creds = AppConfig.load().load_credentials()
     assert creds[_OTHER] == "dotenv-only"
-    assert creds[_KEY] == "fresh-keychain-copy", "a partly-migrated key resolves to keychain"
+    assert (
+        creds[_KEY] == "fresh-keychain-copy"
+    ), "a partly-migrated key resolves to keychain"
 
 
 def test_the_app_setup_context_reads_through_the_shared_chokepoint() -> None:
     """`app_cli` used to parse `.env` itself — a second read path that keychain-stored
     secrets would have been invisible to. It must now hold the loader's function."""
-    import gideon.app_cli as app_cli
+    import gideon.extensions.app_cli as app_cli
 
     src = Path(inspect.getsourcefile(app_cli) or "").read_text()
     assert "get_credential=get_credential" in src
-    assert "from gideon.config.credentials import get_credential" in src
-    assert "def _get_credential" not in src, "the ad-hoc .env parser must be gone, not shadowed"
-
-
-# ── doctor reports the ACTIVE backend ────────────────────────────────────────
+    assert "from gideon.core.config.credentials import get_credential" in src
+    assert (
+        "def _get_credential" not in src
+    ), "the ad-hoc .env parser must be gone, not shadowed"
 
 
 def test_doctor_reports_the_env_fallback_and_not_the_request(
-    home: Path, no_keyring, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+    home: Path,
+    no_keyring,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
 ) -> None:
-    from gideon.cli_doctor import _doctor_credentials
+    from gideon.interfaces.cli.doctor import _doctor_credentials
 
     monkeypatch.setenv(CREDENTIAL_BACKEND_ENV, "keychain")
     issues = _doctor_credentials()
     out = capsys.readouterr().out
 
     assert ".env 0600" in out
-    assert "OS keychain" not in out, "reporting the request instead of the outcome is the defect"
+    assert (
+        "OS keychain" not in out
+    ), "reporting the request instead of the outcome is the defect"
     assert "no usable OS keyring backend" in out
     assert issues == ["credential backend: keychain requested but unavailable"]
 
@@ -395,7 +379,7 @@ def test_doctor_reports_the_env_fallback_and_not_the_request(
 def test_doctor_reports_the_keychain_when_the_keychain_is_the_one_answering(
     home: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
-    from gideon.cli_doctor import _doctor_credentials
+    from gideon.interfaces.cli.doctor import _doctor_credentials
 
     _install_stub_keyring(monkeypatch)
     monkeypatch.setenv(CREDENTIAL_BACKEND_ENV, "keychain")
@@ -409,11 +393,13 @@ def test_doctor_reports_the_keychain_when_the_keychain_is_the_one_answering(
 
 def test_the_doctor_actually_calls_the_credential_line() -> None:
     """A reported backend nobody prints is an inert control. Assert the CALL SITE."""
-    import gideon.cli_doctor as cd
+    import gideon.interfaces.cli.doctor as cd
 
     tree = ast.parse(Path(inspect.getsourcefile(cd) or "").read_text())
     doctor = next(
-        n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_doctor"
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef) and n.name == "_doctor"
     )
     called = {
         n.func.id
@@ -423,17 +409,14 @@ def test_the_doctor_actually_calls_the_credential_line() -> None:
     assert "_doctor_credentials" in called
 
 
-# ── the doctor probe (the dashboard half) ────────────────────────────────────
-
-
 def _credential_probe():
-    from gideon.resilience import doctor as rd
+    from gideon.operations.resilience import doctor as rd
 
     return {p.id: p for p in rd.all_probes()}["security.credential_backend"]
 
 
 def test_the_credential_probe_is_registered_as_a_capability_probe() -> None:
-    from gideon.resilience.doctor import Tier
+    from gideon.operations.resilience.doctor import Tier
 
     probe = _credential_probe()
     assert (
@@ -446,7 +429,7 @@ def test_the_credential_probe_is_registered_as_a_capability_probe() -> None:
 async def test_the_probe_reports_the_resolved_backend_not_the_request(
     home: Path, no_keyring, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from gideon.resilience.doctor import DoctorContext
+    from gideon.operations.resilience.doctor import DoctorContext
 
     monkeypatch.setenv(CREDENTIAL_BACKEND_ENV, "keychain")
     save_credential(_KEY, "in-the-env-file")
@@ -464,7 +447,7 @@ async def test_the_probe_reports_the_resolved_backend_not_the_request(
 async def test_the_probe_is_ok_and_names_the_keychain_when_it_is_active(
     home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from gideon.resilience.doctor import DoctorContext
+    from gideon.operations.resilience.doctor import DoctorContext
 
     _install_stub_keyring(monkeypatch)
     monkeypatch.setenv(CREDENTIAL_BACKEND_ENV, "keychain")
@@ -477,8 +460,10 @@ async def test_the_probe_is_ok_and_names_the_keychain_when_it_is_active(
 
 
 @pytest.mark.asyncio
-async def test_the_probe_flags_a_group_readable_credential_file(home: Path, no_keyring) -> None:
-    from gideon.resilience.doctor import DoctorContext
+async def test_the_probe_flags_a_group_readable_credential_file(
+    home: Path, no_keyring
+) -> None:
+    from gideon.operations.resilience.doctor import DoctorContext
 
     save_credential(_KEY, "v")
     loader.env_path().chmod(0o644)
@@ -492,7 +477,7 @@ async def test_the_probe_flags_a_group_readable_credential_file(home: Path, no_k
 @pytest.mark.asyncio
 async def test_no_secret_value_reaches_the_probe_result(home: Path, no_keyring) -> None:
     """A health probe reports names, modes and states — never a value."""
-    from gideon.resilience.doctor import DoctorContext
+    from gideon.operations.resilience.doctor import DoctorContext
 
     save_credential(_KEY, "unmistakable-secret-9c3f")
     result = await _credential_probe().run(DoctorContext(home=home))

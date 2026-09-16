@@ -21,13 +21,13 @@ import os
 
 import pytest
 
-from gideon.triggers.pathguard import (
+from gideon.automation.triggers.pathguard import (
     canonicalize,
     is_within,
     path_allowed,
     unsafe_entries,
 )
-from gideon.triggers.screen import capability_allows
+from gideon.automation.triggers.screen import capability_allows
 
 
 @pytest.fixture
@@ -42,9 +42,6 @@ def tree(tmp_path):
     sibling.mkdir()
     (sibling / "p.txt").write_text("p")
     return tmp_path
-
-
-# ── canonicalize ──
 
 
 def test_it_resolves_dotdot(tree):
@@ -64,9 +61,6 @@ def test_an_empty_path_is_empty_not_the_cwd():
     assert canonicalize(None) == ""  # type: ignore[arg-type]
 
 
-# ── is_within ──
-
-
 def test_a_file_inside_the_root_is_within(tree):
     assert is_within(str(tree / "notes" / "today.md"), str(tree / "notes")) is True
 
@@ -77,12 +71,16 @@ def test_the_root_itself_is_within_the_root(tree):
 
 def test_a_PREFIX_SIBLING_is_NOT_within(tree):
     """🔴 The classic `startswith` bug: `/x/notes` "contains" `/x/notesEVIL`. It survives review
-    because the code looks obviously correct, which is why `commonpath` decides instead."""
+    because the code looks obviously correct, which is why `commonpath` decides instead.
+    """
     assert is_within(str(tree / "notesEVIL" / "p.txt"), str(tree / "notes")) is False
 
 
 def test_a_TRAVERSAL_out_of_the_root_is_not_within(tree):
-    assert is_within(str(tree / "notes" / ".." / "secrets.txt"), str(tree / "notes")) is False
+    assert (
+        is_within(str(tree / "notes" / ".." / "secrets.txt"), str(tree / "notes"))
+        is False
+    )
 
 
 def test_a_SYMLINK_pointing_out_of_the_root_is_not_within(tree):
@@ -104,17 +102,18 @@ def test_a_SYMLINKED_ROOT_is_matched_at_its_TARGET(tree):
     assert is_within(str(real / "a.md"), str(link_root)) is True
 
 
-# ── the fence, through the REAL capability_allows ──
-
-
 def test_a_file_in_scope_is_ALLOWED(tree):
     caps = {"paths": [f"{tree / 'notes'}/*"]}
-    assert capability_allows(caps, key="paths", value=str(tree / "notes" / "today.md")).allowed
+    assert capability_allows(
+        caps, key="paths", value=str(tree / "notes" / "today.md")
+    ).allowed
 
 
 def test_a_file_out_of_scope_is_DENIED(tree):
     caps = {"paths": [f"{tree / 'notes'}/*"]}
-    assert not capability_allows(caps, key="paths", value=str(tree / "secrets.txt")).allowed
+    assert not capability_allows(
+        caps, key="paths", value=str(tree / "secrets.txt")
+    ).allowed
 
 
 def test_THE_TRAVERSAL_IS_NOW_REFUSED(tree):
@@ -138,10 +137,9 @@ def test_the_refusal_names_BOTH_the_resolved_and_the_written_path(tree):
 
 def test_a_prefix_sibling_is_refused_through_the_fence(tree):
     caps = {"paths": [str(tree / "notes")]}
-    assert not capability_allows(caps, key="paths", value=str(tree / "notesEVIL")).allowed
-
-
-# ── the refusal discipline, mirrored from capability_allows ──
+    assert not capability_allows(
+        caps, key="paths", value=str(tree / "notesEVIL")
+    ).allowed
 
 
 def test_no_paths_block_denies():
@@ -159,7 +157,9 @@ def test_a_STRING_allowlist_is_refused_not_coerced():
 
 def test_a_non_string_entry_is_skipped_not_crashed(tree):
     caps = {"paths": [None, 42, f"{tree / 'notes'}/*"]}
-    assert capability_allows(caps, key="paths", value=str(tree / "notes" / "today.md")).allowed
+    assert capability_allows(
+        caps, key="paths", value=str(tree / "notes" / "today.md")
+    ).allowed
 
 
 def test_an_unresolvable_candidate_FAILS_CLOSED():
@@ -168,9 +168,6 @@ def test_an_unresolvable_candidate_FAILS_CLOSED():
     When in doubt about REACH, refuse."""
     assert path_allowed(["/tmp"], "")[0] is False
     assert path_allowed(["/tmp"], "\x00bad")[0] is False
-
-
-# ── bypass_immune ──
 
 
 def test_a_SENSITIVE_path_is_refused_even_when_ALLOWLISTED():
@@ -190,21 +187,21 @@ def test_the_sensitive_check_runs_BEFORE_the_allowlist():
     assert "sensitive" in reason, "a broad entry must not pre-empt the immunity check"
 
 
-# ── the other capability keys are untouched ──
-
-
 def test_the_TOOLS_key_still_uses_prefix_globs():
     """PathGuard is routed by key. A change that applied path semantics to `tools` would break
     every `mcp__github__*` fence in existence."""
-    assert capability_allows({"tools": ["mcp__github__*"]}, key="tools", value="mcp__github__x")
+    assert capability_allows(
+        {"tools": ["mcp__github__*"]}, key="tools", value="mcp__github__x"
+    )
 
 
 def test_the_PROVIDERS_key_still_matches_exactly():
-    assert capability_allows({"providers": ["bash"]}, key="providers", value="bash").allowed
-    assert not capability_allows({"providers": ["bash"]}, key="providers", value="bashx").allowed
-
-
-# ── the doctor's unbounded-fence finding ──
+    assert capability_allows(
+        {"providers": ["bash"]}, key="providers", value="bash"
+    ).allowed
+    assert not capability_allows(
+        {"providers": ["bash"]}, key="providers", value="bashx"
+    ).allowed
 
 
 def test_a_bare_star_is_reported_as_bounding_NOTHING():
@@ -215,7 +212,8 @@ def test_a_bare_star_is_reported_as_bounding_NOTHING():
 
 def test_a_RELATIVE_entry_is_reported():
     """It resolves against the GATEWAY's cwd, so it means different things depending on how the
-    gateway was started — indistinguishable from a broken fence when it eventually denies."""
+    gateway was started — indistinguishable from a broken fence when it eventually denies.
+    """
     found = unsafe_entries(["notes/*"])
     assert found and "relative" in found[0][1]
 
@@ -226,7 +224,7 @@ def test_an_absolute_scoped_entry_is_NOT_reported():
 
 
 def test_the_doctor_reports_an_unbounded_path_fence(tmp_path):
-    from gideon.triggers.calendar import diagnose
+    from gideon.automation.triggers.calendar import diagnose
 
     rows = [{"id": "schedule:file:notes", "capabilities": {"paths": ["*"]}}]
     findings = diagnose(rows, known_workflows=None).findings
@@ -236,8 +234,10 @@ def test_the_doctor_reports_an_unbounded_path_fence(tmp_path):
 
 
 def test_the_doctor_is_SILENT_for_a_real_scope():
-    from gideon.triggers.calendar import diagnose
+    from gideon.automation.triggers.calendar import diagnose
 
-    rows = [{"id": "schedule:file:notes", "capabilities": {"paths": ["/Users/me/notes/*"]}}]
+    rows = [
+        {"id": "schedule:file:notes", "capabilities": {"paths": ["/Users/me/notes/*"]}}
+    ]
     findings = diagnose(rows, known_workflows=None).findings
     assert not [f for f in findings if f.code == "unbounded_path_fence"]

@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from gideon.dashboard.server import _write_secret_file
+from gideon.interfaces.dashboard.server import _write_secret_file
 
 
 class TestWriteSecretFile:
@@ -20,7 +20,10 @@ class TestWriteSecretFile:
     def test_os_open_fails_removes_file(self, tmp_path):
         secret_path = tmp_path / ".local_secret"
 
-        with patch("gideon.dashboard.server.os.open", side_effect=OSError("disk full")):
+        with patch(
+            "gideon.interfaces.dashboard.server.os.open",
+            side_effect=OSError("disk full"),
+        ):
             with pytest.raises(OSError, match="disk full"):
                 _write_secret_file(secret_path, "s")
 
@@ -30,8 +33,13 @@ class TestWriteSecretFile:
         secret_path = tmp_path / ".local_secret"
 
         with (
-            patch("gideon.dashboard.server.os.open", side_effect=OSError("fail")),
-            patch.object(type(secret_path), "unlink", side_effect=OSError("unlink fail")),
+            patch(
+                "gideon.interfaces.dashboard.server.os.open",
+                side_effect=OSError("fail"),
+            ),
+            patch.object(
+                type(secret_path), "unlink", side_effect=OSError("unlink fail")
+            ),
         ):
             with pytest.raises(OSError, match="fail"):
                 _write_secret_file(secret_path, "s")

@@ -3,7 +3,7 @@
 Covers the atom's last two done_when clauses:
 
 * "*the morning-digest template produces ONE knowledge item + one notification through
-  ``notification_allowed()``*" (SC#10) — driven with a REAL ``DashboardState``, so the gate in
+  ``notification_allowed()``*" (SC#10) — driven with a REAL ``ConsoleState``, so the gate in
   the path is the shipped one. The vacuity assertion is ``mute_all``: the same run with the
   operator's notification setting muted delivers ZERO, which is only possible if
   ``notification_allowed()`` really is being consulted.
@@ -21,11 +21,11 @@ import json
 
 import pytest
 
-from gideon.knowledge import source_digest as sd
-from gideon.knowledge.source_engine import SourceEngine
-from gideon.knowledge.source_streams import SourceEventSpool
-from gideon.knowledge.store import KnowledgeStore
-from gideon.knowledge_providers.base import (
+from gideon.cognition.knowledge import source_digest as sd
+from gideon.cognition.knowledge.source_engine import SourceEngine
+from gideon.cognition.knowledge.source_streams import SourceEventSpool
+from gideon.cognition.knowledge.store import KnowledgeStore
+from gideon.integrations.knowledge_providers.base import (
     KnowledgeItem,
     KnowledgeSource,
     KnowledgeSourceProvider,
@@ -46,7 +46,7 @@ def _isolated_home(tmp_path, monkeypatch):
     🔴 MEASURED (2026-08-24), and the reason this fixture does NOT patch
     ``config.loader.config_dir``: a `monkeypatch.setattr` on that name that is live when a
     consumer module is imported for the FIRST time gets baked into the consumer permanently —
-    ``providers/entity_routes.py:22`` does ``from gideon.config.loader import config_dir``,
+    ``providers/entity_routes.py:22`` does ``from gideon.core.config.loader import config_dir``,
     so the consumer keeps the LAMBDA and monkeypatch's undo (which restores only the loader
     module's attribute) cannot reach it. Under xdist that made
     ``test_mute_all_suppresses_the_digest_notification`` read the PREVIOUS test's home in the
@@ -57,8 +57,8 @@ def _isolated_home(tmp_path, monkeypatch):
     ``entity_routes.config_dir`` is re-pointed at the REAL live function to undo any bake-in a
     sibling suite performed. Both, plus an assertion that the redirect actually binds.
     """
-    from gideon.config.loader import config_dir as live_config_dir
-    from gideon.providers import entity_routes
+    from gideon.core.config.loader import config_dir as live_config_dir
+    from gideon.extensions.providers import entity_routes
 
     home = tmp_path / "home"
     home.mkdir()
@@ -108,7 +108,7 @@ class _FakeQueue:
 
 
 def _cfg():
-    from gideon.config.loader import SourcesConfig
+    from gideon.core.config.loader import SourcesConfig
 
     return SourcesConfig(
         enabled=True,
@@ -142,16 +142,16 @@ async def _ingest(store, spool, items):
 
 
 def _state(tmp_path):
-    """A REAL DashboardState, so `notify` runs the shipped `notification_allowed()` gate."""
+    """A REAL ConsoleState, so `notify` runs the shipped `notification_allowed()` gate."""
     from unittest.mock import AsyncMock, MagicMock
 
-    from gideon.dashboard.state import DashboardState
-    from gideon.history import ConversationLog
+    from gideon.cognition.history import ConversationLog
+    from gideon.interfaces.dashboard.state import ConsoleState
 
     sessions = MagicMock(count=0)
     sessions.remove = AsyncMock()
     sessions.get_pid = MagicMock(return_value=None)
-    return DashboardState(
+    return ConsoleState(
         sessions=sessions,
         start_time=0.0,
         conversation_log=ConversationLog(base_dir=tmp_path / "conv"),
@@ -166,11 +166,10 @@ def _recorder(prompts, reply="Two releases shipped."):
     return _fn
 
 
-# ── ONE item + ONE notification through the gate (SC#10) ────────────────────────
-
-
 @pytest.mark.asyncio
-async def test_digest_makes_ONE_item_and_ONE_notification(store, tmp_path, _isolated_home):
+async def test_digest_makes_ONE_item_and_ONE_notification(
+    store, tmp_path, _isolated_home
+):
     spool = SourceEventSpool(tmp_path / "events.jsonl")
     await _ingest(
         store,
@@ -192,7 +191,6 @@ async def test_digest_makes_ONE_item_and_ONE_notification(store, tmp_path, _isol
         cursor_file=tmp_path / "cursor.json",
     )
 
-    # THREE items in, ONE digest item out — the "digest is one item" contract (§12's flood risk).
     assert result.item_count == 3
     assert result.item_id
     row = store.get_item(result.item_id)
@@ -203,34 +201,34 @@ async def test_digest_makes_ONE_item_and_ONE_notification(store, tmp_path, _isol
     ).fetchall()
     assert len(digest_rows) == 1, "three items in must produce exactly ONE digest item"
 
-    # ONE notification, delivered through the real gate.
     assert result.notified is True
     assert len(state._notification_log) == 1
 
-    # Background one-shot on the reasoning axis, exactly once.
     assert len(prompts) == 1
     assert prompts[0]["use_case"] == "background"
 
 
 @pytest.mark.asyncio
-async def test_mute_all_suppresses_the_digest_notification(store, tmp_path, _isolated_home):
+async def test_mute_all_suppresses_the_digest_notification(
+    store, tmp_path, _isolated_home
+):
     """🔴 VACUITY GUARD for the clause above. Same run, `mute_all` set: ZERO delivered.
 
     Only possible if `notification_allowed()` is genuinely in the path — a digest that pushed
-    its own notification would deliver here and the clause would be satisfied by a bypass."""
-    from gideon import notification_kinds
-    from gideon.providers import entity_routes
+    its own notification would deliver here and the clause would be satisfied by a bypass.
+    """
+    from gideon.extensions.providers import entity_routes
+    from gideon.workspace import notification_kinds
 
     settings_dir = _isolated_home / "entity_settings"
     settings_dir.mkdir(parents=True, exist_ok=True)
     (settings_dir / "notifications.json").write_text(json.dumps({"mute_all": True}))
-    # PRECONDITION, asserted rather than assumed: the gate must actually be closed. Without
-    # this line a home-isolation leak reads as "the digest bypassed the gate" — a confusing red
-    # pointing at the wrong file (measured; see `_isolated_home`).
     assert entity_routes.notification_allowed(notification_kinds.INFO) is False
 
     spool = SourceEventSpool(tmp_path / "events.jsonl")
-    await _ingest(store, spool, [SourceItem(guid="g1", title="Release 2.0", content="stable")])
+    await _ingest(
+        store, spool, [SourceItem(guid="g1", title="Release 2.0", content="stable")]
+    )
     state = _state(tmp_path)
 
     result = await sd.run_morning_digest(
@@ -241,7 +239,6 @@ async def test_mute_all_suppresses_the_digest_notification(store, tmp_path, _iso
         cursor_file=tmp_path / "cursor.json",
     )
 
-    # The digest ITEM is still written (the library is not a notification), but nothing delivered.
     assert result.item_id
     assert state._notification_log == []
 
@@ -268,7 +265,9 @@ async def test_an_empty_window_writes_nothing_and_notifies_nothing(store, tmp_pa
 async def test_the_cursor_makes_a_second_run_a_no_op(store, tmp_path):
     spool = SourceEventSpool(tmp_path / "events.jsonl")
     cursor = tmp_path / "cursor.json"
-    await _ingest(store, spool, [SourceItem(guid="g1", title="Release 2.0", content="x")])
+    await _ingest(
+        store, spool, [SourceItem(guid="g1", title="Release 2.0", content="x")]
+    )
     state = _state(tmp_path)
 
     first = await sd.run_morning_digest(
@@ -324,10 +323,15 @@ async def test_matching_reads_the_store_row_not_the_fenced_payload(store, tmp_pa
     """The spool payload's title is FENCED; the filter must read the structural row.
 
     If `collect_window` matched the payload, `intitle:release` would have to see through the
-    `<untrusted_content …>` wrapper — and this narrowing would silently match nothing."""
+    `<untrusted_content …>` wrapper — and this narrowing would silently match nothing.
+    """
     spool = SourceEventSpool(tmp_path / "events.jsonl")
-    await _ingest(store, spool, [SourceItem(guid="g1", title="Release 2.0", content="x")])
-    payload_titles = [r["payload"]["title"] for r in spool.read(events=("SourceItemIngested",))]
+    await _ingest(
+        store, spool, [SourceItem(guid="g1", title="Release 2.0", content="x")]
+    )
+    payload_titles = [
+        r["payload"]["title"] for r in spool.read(events=("SourceItemIngested",))
+    ]
     assert payload_titles and payload_titles[0].startswith("<untrusted_content")
 
     items, _ = sd.collect_window(
@@ -336,17 +340,20 @@ async def test_matching_reads_the_store_row_not_the_fenced_payload(store, tmp_pa
     assert [i["title"] for i in items] == ["Release 2.0"]
 
 
-# ── SC#8: an injection payload cannot steer the run ─────────────────────────────
-
-
 @pytest.mark.asyncio
-async def test_an_injection_in_scraped_content_is_fenced_at_the_llm_boundary(store, tmp_path):
+async def test_an_injection_in_scraped_content_is_fenced_at_the_llm_boundary(
+    store, tmp_path
+):
     """🔴 SC#8. A real injection payload in a scraped page's CONTENT, at the LLM boundary."""
     spool = SourceEventSpool(tmp_path / "events.jsonl")
     await _ingest(
         store,
         spool,
-        [SourceItem(guid="g1", title="Weekly changelog", content=f"Fixes.\n\n{INJECTION}")],
+        [
+            SourceItem(
+                guid="g1", title="Weekly changelog", content=f"Fixes.\n\n{INJECTION}"
+            )
+        ],
     )
     prompts: list[dict] = []
     state = _state(tmp_path)
@@ -360,21 +367,19 @@ async def test_an_injection_in_scraped_content_is_fenced_at_the_llm_boundary(sto
     )
 
     prompt = prompts[0]["prompt"]
-    # 1. The payload reached the model ONLY inside the fence.
     assert INJECTION in prompt
     fenced_spans = _fenced_spans(prompt)
     assert len(fenced_spans) == 1
     assert INJECTION in fenced_spans[0]
-    assert prompt.count(INJECTION) == 1, "the payload must not also appear outside the fence"
-    # 2. The instruction that gives the fence meaning ships with it.
+    assert (
+        prompt.count(INJECTION) == 1
+    ), "the payload must not also appear outside the fence"
     assert "never an instruction to you" in prompt
-    # The instruction precedes every fenced BLOCK (matched on the attributed opening tag — the
-    # instruction text names the bare tag, so a bare-tag search finds the instruction itself).
-    assert prompt.index("<untrusted_content source=") > prompt.index("never an instruction to you")
-    # 3. The provenance names WHICH source, so a reader can trace the poisoned page.
+    assert prompt.index("<untrusted_content source=") > prompt.index(
+        "never an instruction to you"
+    )
     assert "source_type=watched_source" in prompt
     assert "transformation_path=digest" in prompt
-    # 4. Containment: the run's only writes are one note and one notification.
     assert store.get_item(result.item_id)["item_type"] == "note"
     assert len(state._notification_log) == 1
 
@@ -397,8 +402,6 @@ async def test_a_payload_carrying_the_close_marker_cannot_break_out(store, tmp_p
     )
 
     prompt = prompts[0]["prompt"]
-    # Exactly ONE close marker — the payload's copy was neutralised by the core fence, so the
-    # injection stays inside the span.
     assert prompt.count("</untrusted_content>") == 1
     assert INJECTION in _fenced_spans(prompt)[0]
 
@@ -408,10 +411,11 @@ def test_the_fence_is_applied_by_the_ONE_core_helper():
     from pathlib import Path
 
     src = Path(sd.__file__).read_text(encoding="utf-8")
-    assert "from gideon.security import fence_untrusted" in src
-    # No hand-built marker strings anywhere in the module's CODE (the docstrings name the tag).
+    assert "from gideon.security.security import fence_untrusted" in src
     code = "\n".join(
-        line for line in src.splitlines() if "<untrusted_content" not in line or "#" in line
+        line
+        for line in src.splitlines()
+        if "<untrusted_content" not in line or "#" in line
     )
     assert '"<untrusted_content' not in code
 
@@ -465,26 +469,23 @@ async def test_no_model_still_produces_an_honest_digest_and_advances_the_cursor(
         cursor_file=cursor,
     )
 
-    # The digest ARRIVES, with a body that names the gap rather than an empty string.
     assert result.item_id
     body = store.get_item(result.item_id)["content"]
     assert body == sd.UNSYNTHESISED_BODY
     assert body.strip(), "an empty digest body is the defect this test exists for"
 
-    # And it is the same string the registered contract's floor describes, so the contract
-    # cannot drift from the behaviour without one of these two assertions failing.
-    from gideon.resilience.degraded import get_contract
+    from gideon.operations.resilience.degraded import get_contract
 
     contract = get_contract("source_digest")
-    assert contract is not None, "the surface must be registered, or the floor claim is vacuous"
+    assert (
+        contract is not None
+    ), "the surface must be registered, or the floor claim is vacuous"
     floor = contract.floor
     assert "still arrives" in floor and "already in the library" in floor
 
-    # The notification carries that real body, not "".
     assert result.notified is True
     assert len(state._notification_log) == 1
 
-    # Cursor advanced — the window is genuinely consumed, the items are in the library.
     assert sd.read_cursor(cursor) == result.cursor > 0
     second = await sd.run_morning_digest(
         knowledge_store=store,

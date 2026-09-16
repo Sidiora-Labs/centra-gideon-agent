@@ -22,7 +22,7 @@ import threading
 
 import pytest
 
-from gideon.workflows.confirmation import (
+from gideon.automation.workflows.confirmation import (
     DEFAULT_TTL_SECS,
     EXPIRY_POLICY,
     MAX_PREVIEW_CHARS,
@@ -48,9 +48,6 @@ from gideon.workflows.confirmation import (
 NOW = 1_700_000_000.0
 
 
-# ── single-use resolution, measured under contention ──
-
-
 def test_a_RACED_resolution_is_consumed_exactly_ONCE(tmp_path, monkeypatch):
     """The defect this session fixed. `consume_continuation` documented "only one unlink succeeds";
     with 8 threads racing one token, multiple callers received the payload in 36 of 40
@@ -59,12 +56,14 @@ def test_a_RACED_resolution_is_consumed_exactly_ONCE(tmp_path, monkeypatch):
     file. A double
     approval replays one clarification into downstream steps."""
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.workflows import human_input as hi
+    from gideon.automation.workflows import human_input as hi
 
     multi = 0
     trials = 25
     for trial in range(trials):
-        cont = hi.create_continuation(f"r{trial}", node_id="a", instance_path="p", epoch=1)
+        cont = hi.create_continuation(
+            f"r{trial}", node_id="a", instance_path="p", epoch=1
+        )
         got: dict[int, object] = {}
         barrier = threading.Barrier(8)
 
@@ -79,13 +78,15 @@ def test_a_RACED_resolution_is_consumed_exactly_ONCE(tmp_path, monkeypatch):
             t.join()
         if sum(1 for v in got.values() if v is not None) != 1:
             multi += 1
-    assert multi == 0, f"{multi}/{trials} trials let more than one caller consume one approval"
+    assert (
+        multi == 0
+    ), f"{multi}/{trials} trials let more than one caller consume one approval"
 
 
 def test_a_SEQUENTIAL_second_claim_gets_nothing(tmp_path, monkeypatch):
     """A retried POST or a widget-and-inbox race arrives sequentially as often as concurrently."""
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.workflows import human_input as hi
+    from gideon.automation.workflows import human_input as hi
 
     cont = hi.create_continuation("rx", node_id="a", instance_path="p", epoch=1)
     assert hi.consume_continuation("rx", cont.token) is not None
@@ -102,35 +103,36 @@ def test_the_claimed_record_is_RETAINED_for_audit(tmp_path, monkeypatch):
     `claimed`, so it would keep passing if the record itself were dropped.
     """
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.workflows import human_input as hi
+    from gideon.automation.workflows import human_input as hi
 
     cont = hi.create_continuation("rx", node_id="a", instance_path="p", epoch=1)
     hi.consume_continuation("rx", cont.token)
 
     retained = hi._claimed_dir("rx") / f"{cont.token}.json"
-    assert retained.is_file(), "the claim destroyed the record it was supposed to retain"
+    assert (
+        retained.is_file()
+    ), "the claim destroyed the record it was supposed to retain"
     assert json.loads(retained.read_text(encoding="utf-8"))["token"] == cont.token
-    # ...and it is NOT left where a pending listing would find it.
     assert list(hi._dir("rx").glob("*.json")) == []
 
 
 def test_a_TRAVERSAL_token_is_refused(tmp_path, monkeypatch):
     """A token arrives from an HTTP path and is not a trust boundary."""
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.workflows import human_input as hi
+    from gideon.automation.workflows import human_input as hi
 
     for bad in ("../../etc/passwd", "a/b", "a\\b", ".."):
         assert hi.consume_continuation("rx", bad) is None
-
-
-# ── the preview is redacted at construction ──
 
 
 def test_the_preview_redacts_a_provider_key_with_HYPHENS():
     """Measured: `sk-[A-Za-z0-9]{32,}` cannot match a key whose body contains hyphens, so
     `sk-live-…` survived into a redacted preview."""
     request = build_request(
-        run_id="r", gate_id="g", payload="the key sk-live-ABCDEFGH1234567890 here", now=NOW
+        run_id="r",
+        gate_id="g",
+        payload="the key sk-live-ABCDEFGH1234567890 here",
+        now=NOW,
     )
     assert "sk-live-ABCDEFGH1234567890" not in request.payload_preview
     assert "REDACTED" in request.payload_preview
@@ -139,7 +141,9 @@ def test_the_preview_redacts_a_provider_key_with_HYPHENS():
 def test_the_preview_redacts_a_GENERIC_key_assignment():
     """There was no assignment form at all, so `api_key=<anything>` survived — and an unknown
     provider's key format is exactly what a shape-based pattern misses."""
-    request = build_request(run_id="r", gate_id="g", payload="api_key=opaque12345678", now=NOW)
+    request = build_request(
+        run_id="r", gate_id="g", payload="api_key=opaque12345678", now=NOW
+    )
     assert "opaque12345678" not in request.payload_preview
 
 
@@ -193,16 +197,13 @@ def test_redaction_failure_WITHHOLDS_the_preview(monkeypatch):
     def boom(_text):
         raise RuntimeError("redactor unavailable")
 
-    monkeypatch.setattr("gideon.security.redact", boom)
+    monkeypatch.setattr("gideon.security.security.redact", boom)
     assert "withheld" in redact_preview("anything at all")
 
 
 def test_an_empty_payload_previews_as_empty():
     assert redact_preview("") == ""
     assert redact_preview(None) == ""
-
-
-# ── per-type expiry ──
 
 
 def test_a_DESTRUCTIVE_confirmation_auto_REJECTS_on_expiry():
@@ -221,7 +222,9 @@ def test_a_DESTRUCTIVE_confirmation_auto_REJECTS_on_expiry():
     assert "auto-REJECTED" in why
 
 
-@pytest.mark.parametrize("kind", [ConfirmationType.APPROVAL, ConfirmationType.NEEDS_INPUT])
+@pytest.mark.parametrize(
+    "kind", [ConfirmationType.APPROVAL, ConfirmationType.NEEDS_INPUT]
+)
 def test_an_answer_STILL_WANTED_is_held_not_rejected(kind):
     """The user being slow does not make the work unnecessary. Auto-rejecting a needs-input question
     throws away whatever was waiting on the answer."""
@@ -234,7 +237,9 @@ def test_an_answer_STILL_WANTED_is_held_not_rejected(kind):
 
 def test_the_expiry_policy_is_declared_PER_TYPE():
     """A single global default would have to be wrong for one of them."""
-    assert EXPIRY_POLICY[ConfirmationType.DESTRUCTIVE_CONFIRM] is ExpiryPolicy.AUTO_REJECT
+    assert (
+        EXPIRY_POLICY[ConfirmationType.DESTRUCTIVE_CONFIRM] is ExpiryPolicy.AUTO_REJECT
+    )
     assert EXPIRY_POLICY[ConfirmationType.NEEDS_INPUT] is ExpiryPolicy.HOLD
     assert set(EXPIRY_POLICY) == set(ConfirmationType)
 
@@ -260,9 +265,6 @@ def test_the_default_ttl_is_a_WEEK():
     """The realistic case is a user who is away; a gate expiring overnight turns travel into lost
     work."""
     assert DEFAULT_TTL_SECS == 7 * 24 * 3600
-
-
-# ── resolutions ──
 
 
 def test_APPROVE_resolves_and_resumes():
@@ -314,9 +316,6 @@ def test_the_resolution_vocabulary_is_the_FOUR_the_plan_names():
     assert set(RESOLUTIONS) == {"approve", "reject", "skip", "quit"}
 
 
-# ── identity ──
-
-
 def test_the_id_is_DETERMINISTIC_for_one_gate_and_epoch():
     """A re-emitted request for the same waiting gate must be recognizably the same record, not a
     second row in the inbox."""
@@ -330,9 +329,6 @@ def test_a_REWIND_produces_a_new_request():
 
 def test_two_gates_in_one_run_get_distinct_ids():
     assert request_id("r", "approve", 1) != request_id("r", "publish", 1)
-
-
-# ── round trip ──
 
 
 def test_a_request_round_trips():
@@ -381,13 +377,11 @@ def test_the_serialized_form_carries_the_DERIVED_policy():
     assert payload["expires_at"] > NOW
 
 
-# ── require_hitl ──
-
-
 def test_a_stage_can_declare_require_hitl():
     """Approval as a PROPERTY of the step, so an author gates a stage without structurally
     inserting a
-    gate node — which would change the graph shape and every path-addressed binding downstream."""
+    gate node — which would change the graph shape and every path-addressed binding downstream.
+    """
     assert requires_hitl({"prompt": "x", "require_hitl": True}) is True
 
 
@@ -400,9 +394,6 @@ def test_require_hitl_must_be_the_BOOLEAN_true():
     """A truthy string is an author mistake, and treating `"false"` as a gate would surprise them in
     the direction of extra prompts they cannot explain."""
     assert requires_hitl({"require_hitl": "yes"}) is False
-
-
-# ── per-stage mute ──
 
 
 @pytest.mark.parametrize("kind", sorted(MUTABLE_TYPES, key=lambda k: k.value))
@@ -419,9 +410,6 @@ def test_a_DESTRUCTIVE_confirmation_may_NOT_be_muted():
     assert "cannot be muted" in why
 
 
-# ── tool profiles ──
-
-
 @pytest.mark.parametrize("name", sorted(TOOL_PROFILES))
 def test_each_profile_resolves(name):
     found, error = profile(name)
@@ -431,7 +419,8 @@ def test_each_profile_resolves(name):
 
 def test_the_READ_ONLY_profile_confirms_nothing():
     """It cannot reach a write tool, so a confirmation would be a prompt about an action that cannot
-    happen — and prompts about impossible actions are how a user learns to click through."""
+    happen — and prompts about impossible actions are how a user learns to click through.
+    """
     found, _ = profile("read_only")
     assert found["confirm"] == ()
     assert found["capability"] == "research"
@@ -454,13 +443,10 @@ def test_an_UNKNOWN_profile_is_refused_not_defaulted():
 def test_the_profile_vocabulary_reuses_S48s_capability_words():
     """Two least-privilege vocabularies would disagree about a tool, and the
     looser one would win."""
-    from gideon.workflows.batch_compile import Capability
+    from gideon.automation.workflows.batch_compile import Capability
 
     words = {p["capability"] for p in TOOL_PROFILES.values()}
     assert words <= {c.value for c in Capability}
-
-
-# ── audit ──
 
 
 def test_a_resolution_audit_names_WHO_approved():
@@ -483,9 +469,6 @@ def test_an_unattributed_resolution_says_UNKNOWN_rather_than_empty():
     assert audit_fields(request, resolution)["resolved_by"] == "unknown"
 
 
-# ── the DagView card ──
-
-
 def test_a_PENDING_request_offers_both_verbs():
     """The backend seam the FE's declared-but-unwired `onApprove`/`onDeny` has been waiting for."""
     card = dag_card(build_request(run_id="r", gate_id="approve", now=NOW))
@@ -506,7 +489,9 @@ def test_a_RESOLVED_request_offers_NEITHER():
 def test_the_card_carries_the_REDACTED_preview():
     """One record, two surfaces. Two builders would drift, and the drift shows as a node offering
     Approve for a gate the inbox already resolved."""
-    request = build_request(run_id="r", gate_id="g", payload="api_key=opaque12345678", now=NOW)
+    request = build_request(
+        run_id="r", gate_id="g", payload="api_key=opaque12345678", now=NOW
+    )
     assert "opaque12345678" not in dag_card(request).preview
 
 

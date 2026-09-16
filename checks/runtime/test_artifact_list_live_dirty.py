@@ -17,9 +17,9 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.artifacts import registry
-from gideon.artifacts.handlers import register_artifact_routes
-from gideon.artifacts.native import NativeArtifactProvider
+from gideon.workspace.artifacts import registry
+from gideon.workspace.artifacts.handlers import register_artifact_routes
+from gideon.workspace.artifacts.native import NativeArtifactProvider
 
 
 @pytest.fixture
@@ -44,9 +44,12 @@ def dirty_artifact(prov, tmp_path):
     src = tmp_path / "notes.md"
     src.write_text("# v1", encoding="utf-8")
     art = prov.create(
-        name="notes", content="# v1", kind="markdown", source="chat", source_path=str(src)
+        name="notes",
+        content="# v1",
+        kind="markdown",
+        source="chat",
+        source_path=str(src),
     )
-    # Mutate the live source AFTER the snapshot — get() must now report dirty.
     src.write_text("# v2 drifted", encoding="utf-8")
     return art
 
@@ -60,10 +63,7 @@ class TestListLiveDirtyIsAbsentNotFabricated:
             rows = (await resp.json())["artifacts"]
         assert rows, "the fixture artifact must be listed"
         for row in rows:
-            # The measured bug: this key was present and False while the detail
-            # said True. Absent beats wrong.
             assert "live_dirty" not in row
-            # content stays list-omitted too — the pair travels together.
             assert "content" not in row
 
     @pytest.mark.asyncio
@@ -72,8 +72,6 @@ class TestListLiveDirtyIsAbsentNotFabricated:
             resp = await c.get(f"/api/artifacts/{dirty_artifact.slug}")
             assert resp.status == 200
             body = await resp.json()
-        # The acceptance half: the computed flag survives on the content-bearing
-        # response, and it is TRUE for the drifted source (not merely present).
         assert body["live_dirty"] is True
         assert body["content"] == "# v2 drifted"
 
@@ -84,5 +82,4 @@ class TestListLiveDirtyIsAbsentNotFabricated:
             resp = await c.get("/api/artifacts/clean")
             assert resp.status == 200
             body = await resp.json()
-        # False-by-computation is still served — only the fabricated list value died.
         assert body["live_dirty"] is False

@@ -25,17 +25,14 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-import gideon.tasks.native as nat
-from gideon.tasks import registry
-from gideon.tasks.handlers import register_task_routes
-from gideon.tasks.models import TaskStatus
+import gideon.engine.tasks.native as nat
+from gideon.engine.tasks import registry
+from gideon.engine.tasks.handlers import register_task_routes
+from gideon.engine.tasks.models import TaskStatus
 
 
 def _run(coro):
     return asyncio.run(coro)
-
-
-# ── #475: the DONE gate refuses an open prerequisite ──
 
 
 @pytest.fixture
@@ -53,7 +50,6 @@ class TestCompleteGateHonoursDependencies:
             )
             with pytest.raises(ValueError, match="unfinished prerequisite"):
                 await provider.update_task(b.id, status="done")
-            # The refusal is total: b stays not-done, so nothing counts it complete.
             again = await provider.get_task(b.id)
             assert again.status is not TaskStatus.DONE
 
@@ -65,17 +61,14 @@ class TestCompleteGateHonoursDependencies:
             b = await provider.create_task(
                 title="Dependent", dependencies=[{"depends_on_task_id": a.id}]
             )
-            await provider.update_task(a.id, status="done")  # prereq terminal → b unblocks
+            await provider.update_task(a.id, status="done")
             done_b = await provider.update_task(b.id, status="done")
             assert done_b.status is TaskStatus.DONE
-            # A completed task carries no residual auto-block stamp.
             assert done_b.blocked_reason_kind != "auto"
 
         _run(_t())
 
     def test_a_cancelled_prerequisite_is_terminal_and_unblocks(self, provider):
-        # reconcile treats cancel as terminal; the gate must agree, or a cancelled
-        # prereq would strand its dependent uncompletable forever.
         async def _t():
             a = await provider.create_task(title="Prereq")
             b = await provider.create_task(
@@ -88,11 +81,10 @@ class TestCompleteGateHonoursDependencies:
         _run(_t())
 
     def test_exit_criteria_gate_still_independently_enforced(self, provider):
-        # The dependency gate is additive — an un-blocked task with unmet exit
-        # criteria is still refused by the original gate.
         async def _t():
             t = await provider.create_task(
-                title="X", exit_criteria=[{"description": "tests pass", "status": "incomplete"}]
+                title="X",
+                exit_criteria=[{"description": "tests pass", "status": "incomplete"}],
             )
             with pytest.raises(ValueError, match="unfinished exit criteria"):
                 await provider.update_task(t.id, status="done")
@@ -101,9 +93,6 @@ class TestCompleteGateHonoursDependencies:
 
 
 class TestCreateHonoursTheDoneGate:
-    # create_task builds a Task from a caller-supplied `status`, so `status="done"`
-    # bypassed the gate update enforces — a backdoor to the same invalid state (#475).
-    # create now runs the identical exit-criteria + dependency gate.
     def test_create_done_with_unfinished_exit_criteria_is_refused(self, provider):
         async def _t():
             with pytest.raises(ValueError, match="unfinished exit criteria"):
@@ -128,12 +117,9 @@ class TestCreateHonoursTheDoneGate:
         _run(_t())
 
     def test_create_done_is_allowed_when_nothing_is_outstanding(self, provider):
-        # A genuinely-complete row (no unfinished criteria, no live prerequisite) must
-        # stay creatable — e.g. backfilling a historically-done task — so the gate refuses
-        # INVALID done, not done-on-create itself.
         async def _t():
             a = await provider.create_task(title="Prereq")
-            await provider.update_task(a.id, status="done")  # terminal prereq
+            await provider.update_task(a.id, status="done")
             b = await provider.create_task(
                 title="Born done, prereq terminal",
                 status="done",
@@ -145,15 +131,12 @@ class TestCreateHonoursTheDoneGate:
         _run(_t())
 
 
-# ── #457: deleting a project cascades its tasks ──
-
-
 @asynccontextmanager
 async def _client(tmp_path):
     registry._providers.clear()
     with (
-        patch("gideon.tasks.native.config_dir", return_value=tmp_path),
-        patch("gideon.tasks.hierarchy.config_dir", return_value=tmp_path),
+        patch("gideon.engine.tasks.native.config_dir", return_value=tmp_path),
+        patch("gideon.engine.tasks.hierarchy.config_dir", return_value=tmp_path),
     ):
         app = web.Application()
         register_task_routes(app)
@@ -166,18 +149,21 @@ class TestProjectDeleteCascadesTasks:
     @pytest.mark.asyncio
     async def test_deleting_a_project_deletes_its_tasks(self, tmp_path):
         async with _client(tmp_path) as client:
-            pid = (await (await client.post("/api/projects", json={"name": "Website"})).json())[
-                "id"
-            ]
+            pid = (
+                await (
+                    await client.post("/api/projects", json={"name": "Website"})
+                ).json()
+            )["id"]
             t = await (
-                await client.post("/api/tasks", json={"title": "Ship it", "project_id": pid})
+                await client.post(
+                    "/api/tasks", json={"title": "Ship it", "project_id": pid}
+                )
             ).json()
             tid = t["id"]
             assert (await client.get(f"/api/tasks/{tid}")).status == 200
 
             assert (await client.delete(f"/api/projects/{pid}")).status == 200
 
-            # The task is GONE, not orphaned pointing at a dead list id (#457).
             assert (await client.get(f"/api/tasks/{tid}")).status == 404
             listed, _ = await registry.list_all_tasks(limit=10_000)
             assert tid not in {x.id for x in listed}
@@ -185,14 +171,21 @@ class TestProjectDeleteCascadesTasks:
     @pytest.mark.asyncio
     async def test_a_sibling_projects_tasks_survive(self, tmp_path):
         async with _client(tmp_path) as client:
-            keep = (await (await client.post("/api/projects", json={"name": "Keep"})).json())["id"]
-            drop = (await (await client.post("/api/projects", json={"name": "Drop"})).json())["id"]
+            keep = (
+                await (await client.post("/api/projects", json={"name": "Keep"})).json()
+            )["id"]
+            drop = (
+                await (await client.post("/api/projects", json={"name": "Drop"})).json()
+            )["id"]
             kept = await (
-                await client.post("/api/tasks", json={"title": "Keeper", "project_id": keep})
+                await client.post(
+                    "/api/tasks", json={"title": "Keeper", "project_id": keep}
+                )
             ).json()
-            await client.post("/api/tasks", json={"title": "Doomed", "project_id": drop})
+            await client.post(
+                "/api/tasks", json={"title": "Doomed", "project_id": drop}
+            )
 
             assert (await client.delete(f"/api/projects/{drop}")).status == 200
 
-            # Only the deleted project's task is cascaded; the sibling is untouched.
             assert (await client.get(f"/api/tasks/{kept['id']}")).status == 200

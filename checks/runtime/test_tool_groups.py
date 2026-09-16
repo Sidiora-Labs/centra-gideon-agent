@@ -19,16 +19,20 @@ import json
 
 import pytest
 
-from gideon.agents.native.runtime import NativeAgentRuntime
-from gideon.agents.provider import AgentRuntimeDefinition
-from gideon.llm.events import (
+from gideon.engine.agents.native.runtime import NativeAgentRuntime
+from gideon.engine.agents.provider import AgentRuntimeDefinition
+from gideon.integrations.llm.events import (
     EVENT_COMPLETE,
     EVENT_TEXT_CHUNK,
     EVENT_TOOL_CALL,
     AgentEvent,
 )
-from gideon.tool_providers import groups as g
-from gideon.tool_providers.base import ToolDefinition, ToolProvider, ToolResult
+from gideon.integrations.tool_providers import groups as g
+from gideon.integrations.tool_providers.base import (
+    ToolDefinition,
+    ToolProvider,
+    ToolResult,
+)
 
 
 class _ScriptedModel:
@@ -55,7 +59,9 @@ class _ScriptedModel:
 class _Prov(ToolProvider):
     """A tool provider surfacing named tools under one provider name."""
 
-    def __init__(self, provider_name: str, tools: list[str], *, stamp: bool = True) -> None:
+    def __init__(
+        self, provider_name: str, tools: list[str], *, stamp: bool = True
+    ) -> None:
         self._p = provider_name
         self._tools = tools
         self._stamp = stamp
@@ -74,7 +80,6 @@ class _Prov(ToolProvider):
             ToolDefinition(
                 name=t,
                 description=f"does {t}",
-                # stamp=False models a provider that forgot to tag its tools.
                 provider=self._p if self._stamp else "",
                 parameters={"type": "object", "properties": {}},
                 requires_approval=False,
@@ -107,15 +112,14 @@ def _surfaced(model: _ScriptedModel, turn: int = 0) -> list[str]:
 
 
 def _sys_text(model: _ScriptedModel, turn: int = 0) -> str:
-    return "\n".join(m["content"] for m in model.seen_messages[turn] if m["role"] == "system")
+    return "\n".join(
+        m["content"] for m in model.seen_messages[turn] if m["role"] == "system"
+    )
 
 
 async def _run(rt: NativeAgentRuntime, message: str) -> None:
     async for _ in rt.stream(message):
         pass
-
-
-# ── the group model (§5.1) ──
 
 
 def test_group_name_derived_from_provider():
@@ -137,7 +141,9 @@ def test_core_locked_tool_is_core_wherever_it_lives():
     unrecoverable, so provider membership must not decide its fate."""
     d = ToolDefinition(name="grep", description="", provider="mcp-tools:github")
     assert g.group_of_tool(d) == g.CORE_GROUP
-    other = ToolDefinition(name="some_tool", description="", provider="mcp-tools:github")
+    other = ToolDefinition(
+        name="some_tool", description="", provider="mcp-tools:github"
+    )
     assert g.group_of_tool(other) == "mcp:github"
 
 
@@ -148,8 +154,8 @@ def test_partition_puts_core_first_and_is_deterministic():
         ToolDefinition(name="memory_recall", description="", provider="gideon-memory"),
     ]
     names = [grp.name for grp in g.partition(defs)]
-    assert names[0] == g.CORE_GROUP  # the always-on anchor leads
-    assert g.partition(defs) == g.partition(defs)  # stable ⇒ stable serialization
+    assert names[0] == g.CORE_GROUP
+    assert g.partition(defs) == g.partition(defs)
     assert next(x for x in g.partition(defs) if x.name == g.CORE_GROUP).always_on
 
 
@@ -162,9 +168,6 @@ def test_partition_honors_resolved_provider_override():
     assert grouped[0].name == "schedule"
 
 
-# ── per-surface defaults (§5.4) ──
-
-
 def test_default_groups_none_when_feature_off(monkeypatch):
     """Off ⇒ every group active ⇒ the runtime skips filtering entirely."""
     monkeypatch.setattr(g, "groups_enabled", lambda: False)
@@ -175,7 +178,6 @@ def test_default_groups_focus_background_surfaces(monkeypatch):
     monkeypatch.setattr(g, "groups_enabled", lambda: True)
     assert g.resolve_default_groups("background") == {g.CORE_GROUP, "memory"}
     assert g.resolve_default_groups("loops") == {g.CORE_GROUP, "workflows", "subagents"}
-    # Interactive chat has no entry → all groups active (today's behavior).
     assert g.resolve_default_groups("chat") is None
 
 
@@ -187,9 +189,8 @@ def test_config_group_defaults_override_builtin(monkeypatch, tmp_path):
             group_defaults = {"background": ["schedule"]}
 
     monkeypatch.setattr(
-        "gideon.config.loader.AppConfig.load", classmethod(lambda cls: _Cfg())
+        "gideon.core.config.loader.AppConfig.load", classmethod(lambda cls: _Cfg())
     )
-    # core is implied even when the config entry omits it.
     assert g.resolve_default_groups("background") == {g.CORE_GROUP, "schedule"}
 
 
@@ -201,12 +202,9 @@ def test_star_means_all_groups(monkeypatch):
             group_defaults = {"loops": ["*"]}
 
     monkeypatch.setattr(
-        "gideon.config.loader.AppConfig.load", classmethod(lambda cls: _Cfg())
+        "gideon.core.config.loader.AppConfig.load", classmethod(lambda cls: _Cfg())
     )
     assert g.resolve_default_groups("loops") is None
-
-
-# ── no regression: the byte-identical default path (Success Criterion #10) ──
 
 
 @pytest.mark.asyncio
@@ -215,25 +213,34 @@ async def test_ungrouped_schema_is_byte_identical_to_assembly():
     assembled schema — no reset_tools, no stubs, no reordering. This is the lock
     that keeps enabling the feature a no-op for interactive chat."""
     model = _ScriptedModel(
-        [[AgentEvent(kind=EVENT_TEXT_CHUNK, text="hi"), AgentEvent(kind=EVENT_COMPLETE)]]
+        [
+            [
+                AgentEvent(kind=EVENT_TEXT_CHUNK, text="hi"),
+                AgentEvent(kind=EVENT_COMPLETE),
+            ]
+        ]
     )
-    rt = NativeAgentRuntime(definition=_defn(), model_provider=model, tool_providers=_providers())
+    rt = NativeAgentRuntime(
+        definition=_defn(), model_provider=model, tool_providers=_providers()
+    )
     await rt.start()
-    assert rt._active_groups is None  # no grouping in effect
+    assert rt._active_groups is None
     await _run(rt, "hello there")
     assert json.dumps(model.tools_per_turn[0]) == json.dumps(rt._tool_schema)
     assert "reset_tools" not in _surfaced(model)
-    assert _sys_text(model) == ""  # no stub/catalog note injected
-
-
-# ── activation lifecycle (§5.2) ──
+    assert _sys_text(model) == ""
 
 
 @pytest.mark.asyncio
 async def test_inactive_group_schemas_are_dropped_but_stubbed():
     """Fail-open triad #2: an inactive group costs ONE line, not silence."""
     model = _ScriptedModel(
-        [[AgentEvent(kind=EVENT_TEXT_CHUNK, text="hi"), AgentEvent(kind=EVENT_COMPLETE)]]
+        [
+            [
+                AgentEvent(kind=EVENT_TEXT_CHUNK, text="hi"),
+                AgentEvent(kind=EVENT_COMPLETE),
+            ]
+        ]
     )
     rt = NativeAgentRuntime(
         definition=_defn(),
@@ -244,12 +251,12 @@ async def test_inactive_group_schemas_are_dropped_but_stubbed():
     await rt.start()
     await _run(rt, "hello")
     names = _surfaced(model)
-    assert "memory_recall" in names and "bash" in names  # active + core
-    assert "schedule_add" not in names and "artifact_save" not in names  # deactivated
-    assert "reset_tools" in names  # the activation affordance is always offered
+    assert "memory_recall" in names and "bash" in names
+    assert "schedule_add" not in names and "artifact_save" not in names
+    assert "reset_tools" in names
     note = _sys_text(model)
     assert "schedule (2 tools, INACTIVE)" in note
-    assert "artifacts (1 tool, INACTIVE)" in note  # singular reads correctly
+    assert "artifacts (1 tool, INACTIVE)" in note
     assert 'reset_tools({"schedule": true})' in note
 
 
@@ -266,7 +273,7 @@ async def test_reset_tools_is_final_state_not_delta():
     )
     await rt.start()
     out = rt._reset_tools({"groups": {"schedule": True}})
-    assert rt._active_groups == {g.CORE_GROUP, "schedule"}  # memory dropped
+    assert rt._active_groups == {g.CORE_GROUP, "schedule"}
     assert "memory" in out and "Inactive:" in out
     active = {getattr(d, "name", "") for d in rt._active_defs}
     assert "schedule_add" in active and "memory_recall" not in active
@@ -282,7 +289,7 @@ async def test_reset_tools_cannot_deactivate_core():
         tool_groups=["memory"],
     )
     await rt.start()
-    rt._reset_tools({"groups": {}})  # ask for nothing
+    rt._reset_tools({"groups": {}})
     assert g.CORE_GROUP in (rt._active_groups or set())
     assert "bash" in {getattr(d, "name", "") for d in rt._active_defs}
 
@@ -300,7 +307,6 @@ async def test_reset_tools_returns_newly_activated_instructions():
     await rt.start()
     out = rt._reset_tools({"groups": {"schedule": True}})
     assert "[schedule]" in out and "reminders" in out
-    # Re-activating an already-active group doesn't repeat its instructions.
     again = rt._reset_tools({"groups": {"schedule": True}})
     assert "[schedule]" not in again
 
@@ -318,7 +324,7 @@ async def test_reset_tools_rejects_bad_payload_and_names_unknown_groups():
     assert rt._reset_tools({"groups": "schedule"}).startswith("Error:")
     out = rt._reset_tools({"groups": {"nope": True, "schedule": True}})
     assert "Unknown group(s) ignored: nope" in out
-    assert rt._active_groups == {g.CORE_GROUP, "schedule"}  # the valid part applied
+    assert rt._active_groups == {g.CORE_GROUP, "schedule"}
 
 
 @pytest.mark.asyncio
@@ -336,7 +342,10 @@ async def test_group_change_takes_effect_next_turn_not_mid_turn():
                 ),
                 AgentEvent(kind=EVENT_COMPLETE),
             ],
-            [AgentEvent(kind=EVENT_TEXT_CHUNK, text="ok"), AgentEvent(kind=EVENT_COMPLETE)],
+            [
+                AgentEvent(kind=EVENT_TEXT_CHUNK, text="ok"),
+                AgentEvent(kind=EVENT_COMPLETE),
+            ],
         ]
     )
     rt = NativeAgentRuntime(
@@ -347,16 +356,11 @@ async def test_group_change_takes_effect_next_turn_not_mid_turn():
     )
     await rt.start()
     await _run(rt, "schedule a reminder")
-    # Both inferences WITHIN this turn saw the same (pre-change) tool block.
     assert _surfaced(model, 0) == _surfaced(model, 1)
     assert "schedule_add" not in _surfaced(model, 1)
-    # The next turn carries the new block + the change note.
     await _run(rt, "now do it")
     assert "schedule_add" in _surfaced(model, -1)
     assert "[tool groups]" in _sys_text(model, -1)
-
-
-# ── the fail-open triad (§5.3) ──
 
 
 @pytest.mark.asyncio
@@ -409,18 +413,13 @@ async def test_grouping_composes_with_retrieval_reduction():
         tool_groups=["memory"],
     )
     await rt.start()
-    # Force retrieval to actually reduce within the active pool (41 active > k).
     rt._tool_retriever._k = 10
     await _run(rt, "remember something about mem_7")
     surfaced = _surfaced(model)
-    # Nothing from the inactive group carries a schema...
     assert not any(n.startswith("sched_") for n in surfaced)
     note = _sys_text(model)
-    # ...and none of its tools appear in the deferred-schema CATALOG either — the
-    # group's single stub line represents them instead.
     assert "sched_0:" not in note
     assert "schedule (40 tools, INACTIVE)" in note
-    # The active group's deferred tail IS catalogued (progressive disclosure intact).
     assert "[tool catalog]" in note
     assert "mem_" in note
 
@@ -437,7 +436,9 @@ async def test_tool_schema_expands_an_inactive_group_tool():
         tool_groups=[],
     )
     await rt.start()
-    out = json.loads(await rt._invoke("tool_schema", {"tool_name": "artifact_save"}, meta_sink={}))
+    out = json.loads(
+        await rt._invoke("tool_schema", {"tool_name": "artifact_save"}, meta_sink={})
+    )
     assert out["name"] == "artifact_save"
 
 
@@ -447,7 +448,10 @@ async def test_reset_tools_needs_no_approval():
     must never park the loop on the approval gate."""
     model = _ScriptedModel([[AgentEvent(kind=EVENT_COMPLETE)]])
     rt = NativeAgentRuntime(
-        definition=_defn(), model_provider=model, tool_providers=_providers(), tool_groups=[]
+        definition=_defn(),
+        model_provider=model,
+        tool_providers=_providers(),
+        tool_groups=[],
     )
     await rt.start()
     assert rt._requires_approval("reset_tools") is False
@@ -458,11 +462,12 @@ async def test_user_disabled_tool_stays_gone_regardless_of_groups(monkeypatch):
     """Assembly ORDER matters: the hard gates run BEFORE grouping, so activating a
     group can never resurrect a user-disabled tool."""
     monkeypatch.setattr(
-        "gideon.tool_providers.tool_prefs.load_disabled",
+        "gideon.integrations.tool_providers.tool_prefs.load_disabled",
         lambda: {"gideon-schedule:schedule_add"},
     )
     monkeypatch.setattr(
-        "gideon.tool_providers.tool_prefs.load_disabled_providers", lambda: set()
+        "gideon.integrations.tool_providers.tool_prefs.load_disabled_providers",
+        lambda: set(),
     )
     model = _ScriptedModel([[AgentEvent(kind=EVENT_COMPLETE)]])
     rt = NativeAgentRuntime(
@@ -474,7 +479,7 @@ async def test_user_disabled_tool_stays_gone_regardless_of_groups(monkeypatch):
     await rt.start()
     rt._reset_tools({"groups": {"schedule": True}})
     assert "schedule_add" not in {getattr(d, "name", "") for d in rt._active_defs}
-    assert "schedule_add" not in rt._tool_index  # not dispatchable either
+    assert "schedule_add" not in rt._tool_index
     assert "schedule_list" in {getattr(d, "name", "") for d in rt._active_defs}
 
 
@@ -496,31 +501,36 @@ async def test_unattended_strip_precedes_grouping():
     assert "schedule_add" in names
 
 
-# ── per-capability gating (§5.5) ──
-
-
 def test_capability_probe_fails_open_on_every_uncertainty(monkeypatch):
     """A wrongly-HIDDEN group is the capability regression this module promises not
     to cause, so every uncertainty resolves toward available."""
-    assert g.capability_available("") is True  # no declaration
-    assert g.capability_available("bogus_kind:x") is True  # unknown probe kind
+    assert g.capability_available("") is True
+    assert g.capability_available("bogus_kind:x") is True
     assert g.capability_available("tool_provider:definitely-not-registered") is False
 
     def _boom(_use_case):
         raise RuntimeError("probe exploded")
 
-    monkeypatch.setattr("gideon.providers.provider_bridge.can_resolve_use_case", _boom)
-    assert g.capability_available("model:orchestration") is True  # error → available
+    monkeypatch.setattr(
+        "gideon.extensions.providers.provider_bridge.can_resolve_use_case", _boom
+    )
+    assert g.capability_available("model:orchestration") is True
 
 
 def test_always_on_group_is_never_gated(monkeypatch):
     """No probe may remove `core` — it holds the primitives an agent can't recover
     from losing."""
     gated_core = g.ToolGroup(
-        name=g.CORE_GROUP, display="Core", always_on=True, capability="tool_provider:nope"
+        name=g.CORE_GROUP,
+        display="Core",
+        always_on=True,
+        capability="tool_provider:nope",
     )
     assert g.offerable(gated_core) is True
-    assert g.offerable(g.ToolGroup(name="x", display="X", capability="tool_provider:nope")) is False
+    assert (
+        g.offerable(g.ToolGroup(name="x", display="X", capability="tool_provider:nope"))
+        is False
+    )
 
 
 @pytest.mark.asyncio
@@ -528,7 +538,12 @@ async def test_unofferable_group_is_neither_active_nor_stubbed(monkeypatch):
     """§5.5: the model never sees tools that cannot work — no schemas AND no stub."""
     monkeypatch.setattr(g, "_GROUP_CAPABILITY", {"schedule": "tool_provider:nope"})
     model = _ScriptedModel(
-        [[AgentEvent(kind=EVENT_TEXT_CHUNK, text="hi"), AgentEvent(kind=EVENT_COMPLETE)]]
+        [
+            [
+                AgentEvent(kind=EVENT_TEXT_CHUNK, text="hi"),
+                AgentEvent(kind=EVENT_COMPLETE),
+            ]
+        ]
     )
     rt = NativeAgentRuntime(
         definition=_defn(),
@@ -538,12 +553,12 @@ async def test_unofferable_group_is_neither_active_nor_stubbed(monkeypatch):
     )
     await rt.start()
     assert "schedule" in rt._unofferable
-    assert "schedule" not in (rt._active_groups or set())  # requested, but withheld
+    assert "schedule" not in (rt._active_groups or set())
     await _run(rt, "hello")
     assert "schedule_add" not in _surfaced(model)
     note = _sys_text(model)
-    assert "schedule (" not in note  # NOT stub-listed either
-    assert "artifacts (" in note  # an offerable inactive group still stubs
+    assert "schedule (" not in note
+    assert "artifacts (" in note
 
 
 @pytest.mark.asyncio
@@ -552,14 +567,16 @@ async def test_reset_tools_refuses_an_unofferable_group_and_says_why(monkeypatch
     monkeypatch.setattr(g, "_GROUP_CAPABILITY", {"schedule": "tool_provider:nope"})
     model = _ScriptedModel([[AgentEvent(kind=EVENT_COMPLETE)]])
     rt = NativeAgentRuntime(
-        definition=_defn(), model_provider=model, tool_providers=_providers(), tool_groups=[]
+        definition=_defn(),
+        model_provider=model,
+        tool_providers=_providers(),
+        tool_groups=[],
     )
     await rt.start()
     out = rt._reset_tools({"groups": {"schedule": True, "memory": True}})
     assert "Unavailable in this install" in out and "schedule" in out
-    assert "memory" in (rt._active_groups or set())  # the valid part still applied
+    assert "memory" in (rt._active_groups or set())
     assert "schedule" not in (rt._active_groups or set())
-    # ...and it isn't listed as merely "Inactive" (which would imply activatable).
     inactive_line = next((p for p in out.split(". ") if p.startswith("Inactive:")), "")
     assert "schedule" not in inactive_line
 
@@ -568,5 +585,7 @@ def test_subagents_group_declares_its_model_capability():
     """The shipped gating: subagent tools inference through a ModelProvider, so with
     no model resolvable they'd fail at the first turn."""
     assert g._GROUP_CAPABILITY.get("subagents") == "model:orchestration"
-    defs = [ToolDefinition(name="subagent_run", description="", provider="gideon-subagents")]
+    defs = [
+        ToolDefinition(name="subagent_run", description="", provider="gideon-subagents")
+    ]
     assert g.partition(defs)[0].capability == "model:orchestration"

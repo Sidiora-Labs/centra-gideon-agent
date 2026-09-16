@@ -26,13 +26,16 @@ import asyncio
 
 import pytest
 
-from gideon.acp.adapter import acp_event_to_agent_event
-from gideon.acp.session import AcpSession
-from gideon.acp.types import METHOD_METADATA, AcpEvent, AcpPromptStats, JsonRpcMessage
-from gideon.dashboard.chat_runner import _turn_complete_line
-from gideon.llm.events import AgentEvent
-
-# ── the printed surface: dashboard/chat_runner._turn_complete_line ────────────────
+from gideon.integrations.acp.adapter import acp_event_to_agent_event
+from gideon.integrations.acp.session import AcpSession
+from gideon.integrations.acp.types import (
+    METHOD_METADATA,
+    AcpEvent,
+    AcpPromptStats,
+    JsonRpcMessage,
+)
+from gideon.integrations.llm.events import AgentEvent
+from gideon.interfaces.dashboard.chat_runner import _turn_complete_line
 
 
 def _line(pct: float | None) -> str:
@@ -52,28 +55,18 @@ class TestTurnCompleteLine:
 
     def test_unmeasured_states_no_percentage_at_all(self):
         line = _line(None)
-        # Not "reports 0" — states NO number. Both the word and the sign must be gone,
-        # so a future ``context ?%`` or ``context 0%`` regression reddens here.
         assert "context" not in line
         assert "%" not in line
-        # The rest of the line is untouched: omitting the chip is not dropping telemetry.
         assert line == "Turn complete: 12 events, 3 tool calls"
 
     def test_measured_zero_states_zero(self):
-        # A genuinely empty context is a real answer and must be shown as one.
         assert "context 0%" in _line(0.0)
 
     def test_measured_value_states_the_value(self):
         assert "context 42%" in _line(41.6)
 
     def test_unmeasured_and_measured_zero_disagree(self):
-        # THE load-bearing assertion. Both directions collapse to one output if the
-        # producer loses its ability to say "unknown" OR if a consumer starts folding a
-        # legitimate 0 into the absent marker — this reddens for either.
         assert _line(None) != _line(0.0)
-
-
-# ── the ACP producer: acp/session.py ──────────────────────────────────────────────
 
 
 def _mk_session(session_id: str = "A"):
@@ -119,7 +112,7 @@ async def _run_turn(s, q, sent_futs, frames: list[JsonRpcMessage]) -> None:
         while not sent_futs:
             await asyncio.sleep(0)
         rid, fut = sent_futs[-1]
-        await asyncio.sleep(0.05)  # let the drain consume the queued frames first
+        await asyncio.sleep(0.05)
         fut.set_result(JsonRpcMessage(id=rid, result={"stopReason": "end_turn"}))
 
     task = asyncio.ensure_future(_resolve())
@@ -142,7 +135,6 @@ class TestAcpProducer:
 
     @pytest.mark.asyncio
     async def test_metadata_frame_without_the_key_stays_unknown(self):
-        # A metadata frame arrives but carries no percentage — still nothing measured.
         s, q, futs = _mk_session()
         await _run_turn(s, q, futs, [_metadata("A", None)])
         assert s.context_usage_pct() is None
@@ -171,7 +163,7 @@ class TestAcpProducer:
         s, q, futs = _mk_session()
         await _run_turn(s, q, futs, [_metadata("A", 61.5)])
         assert s.context_usage_pct() == 61.5
-        await _run_turn(s, q, futs, [])  # silent turn
+        await _run_turn(s, q, futs, [])
         assert s.context_usage_pct() == 61.5
 
     @pytest.mark.asyncio
@@ -184,9 +176,6 @@ class TestAcpProducer:
             assert s.context_usage_pct() is None
 
 
-# ── the neutral event + its ACP→neutral adapter ───────────────────────────────────
-
-
 class TestNeutralEvent:
     def test_defaults_are_unknown_not_zero(self):
         assert AgentEvent(kind="complete").context_usage_pct is None
@@ -195,7 +184,9 @@ class TestNeutralEvent:
 
     def test_adapter_preserves_both_answers(self):
         unknown = acp_event_to_agent_event(AcpEvent(kind="complete"))
-        measured = acp_event_to_agent_event(AcpEvent(kind="complete", context_usage_pct=0.0))
+        measured = acp_event_to_agent_event(
+            AcpEvent(kind="complete", context_usage_pct=0.0)
+        )
         assert unknown.context_usage_pct is None
         assert measured.context_usage_pct == 0.0
         assert unknown.context_usage_pct != measured.context_usage_pct

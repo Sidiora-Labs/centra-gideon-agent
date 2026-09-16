@@ -1,0 +1,93 @@
+"""Security floors every scanned byte passes — reusing ours, not new ones.
+
+Reading another tool's config is reading a directory full of things the user never
+meant to hand over: an OAuth token cache, a `.env`, an API key in an MCP server's
+`env` block. Three floors apply, in this order, and all three are counting floors —
+the user is told how much was withheld, never what it was:
+
+1. :func:`refuses` — a credential-bearing PATH is never opened. ``is_sensitive_path``
+   (the same predicate that blocks the agent's file reads) plus a filename denylist,
+   because a fixture/foreign root outside ``$HOME`` doesn't match the home-relative
+   rules.
+2. :func:`strip_secrets` — a secret-NAMED key inside a config we DO read is dropped
+   before the value is ever copied into an :class:`~.model.ImportItem`.
+3. :func:`safe_text` — free text keeps its body but loses embedded credentials and
+   exfiltration URLs (``redact_credentials`` / ``redact_exfiltration_urls``).
+
+Nothing here returns a secret value. Every function returns a count, so a caller
+*cannot* accidentally log one.
+
+This module never writes: the foreign root is strictly read-only.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import sys
+from pathlib import Path
+from typing import Any
+
+from gideon.cognition.onboarding_import.capture_pipeline import SecretTree
+from gideon.security.security import (
+    is_sensitive_path,
+    redact_credentials,
+    redact_exfiltration_urls,
+)
+
+_SECRET_FILE_RE = re.compile(
+    r"(^\.env($|\.)|credential|\.pem$|\.key$|id_[rd]sa|(^|[._-])secrets?($|[._-])"
+    r"|(^|[._-])tokens?($|[._-])|\.netrc$|\.htpasswd$)",
+    re.IGNORECASE,
+)
+
+_SECRET_KEY_RE = re.compile(
+    r"(api[_-]?key|secret|token|password|passwd|credential|bearer|private[_-]?key"
+    r"|access[_-]?key|auth)",
+    re.IGNORECASE,
+)
+
+
+def refuses(path: Path | str) -> bool:
+    """True when this path must not be opened at all (floor 1)."""
+    candidate = Path(path)
+    filename_denied = bool(_SECRET_FILE_RE.search(candidate.name))
+    return filename_denied or is_sensitive_path(str(candidate))
+
+
+def strip_secrets(value: Any) -> tuple[Any, int]:
+    """Drop every secret-named key, recursively. Returns ``(clean, dropped_count)``.
+
+    Dicts lose the whole key/value pair; lists are walked. Scalars pass through —
+    a bare string is redacted by :func:`safe_text`, not here, because at scalar
+    depth there is no key name to judge by.
+    """
+    return SecretTree.project(sys.modules[__name__], value)
+
+
+def safe_text(text: str) -> tuple[str, int]:
+    """Redact credentials + exfiltration URLs from free text (floor 3).
+
+    Returns ``(redacted_text, redaction_count)``. The matched values are discarded
+    here on purpose: the count is the only thing a caller can propagate.
+    """
+    return SecretTree.text(sys.modules[__name__], text)
+
+
+def read_text_safely(path: Path) -> tuple[str, int, int]:
+    """Read a text file through floors 1 and 3.
+
+    Returns ``(text, redactions, secrets_skipped)``. A refused path yields
+    ``("", 0, 1)`` — counted as withheld and never opened.
+    """
+    return SecretTree.read(sys.modules[__name__], path, structured=False)
+
+
+def read_json_safely(path: Path) -> tuple[Any, int]:
+    """Read a JSON file through floors 1 and 2.
+
+    Returns ``(secret_free_object_or_None, secrets_skipped)``. Malformed JSON is
+    treated as "nothing to import" (a foreign tool's half-written config is not our
+    problem to repair), and a refused path is counted, not parsed.
+    """
+    return SecretTree.read(sys.modules[__name__], path, structured=True)

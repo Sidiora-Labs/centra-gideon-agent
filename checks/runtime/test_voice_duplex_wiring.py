@@ -15,20 +15,20 @@ from aiohttp import FormData, web
 from aiohttp.test_utils import TestClient, TestServer
 from chat_test_helpers import _make_app, _make_state
 
-from gideon.config.loader import AppConfig, VoiceConfig
-from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
-from gideon.voice.duplex import (
+from gideon.core.config.loader import AppConfig, VoiceConfig
+from gideon.integrations.voice.duplex import (
     DEFAULT_CONFIRMATION_PHRASES,
     DEFAULT_EXIT_PHRASES,
     DEFAULT_PUSH_TO_TALK_CHORD,
     VOICE_DISCLAIMER,
 )
+from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
 _SPOKEN = "The deployment finished and everything looks healthy."
 
 
 def _voice_app(state):
-    from gideon.dashboard.chat_voice import api_voice_synthesize
+    from gideon.interfaces.dashboard.chat_voice import api_voice_synthesize
 
     app = web.Application()
     app["state"] = state
@@ -37,7 +37,7 @@ def _voice_app(state):
 
 
 def _stt_app(state):
-    from gideon.dashboard.handlers.core import api_stt_transcribe
+    from gideon.interfaces.dashboard.handlers.core import api_stt_transcribe
 
     app = web.Application()
     app["state"] = state
@@ -53,14 +53,16 @@ def _write_voice_config(tmp_path, **fields):
 def voice_home(tmp_path, monkeypatch):
     """Isolate config_dir for every reader the voice path touches."""
 
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
-    monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+    )
     return tmp_path
 
 
 def _stub_synthesis(monkeypatch, sentences):
     monkeypatch.setattr(
-        "gideon.dashboard.chat_voice.active_voice_params",
+        "gideon.interfaces.dashboard.chat_voice.active_voice_params",
         lambda **_kw: {
             "provider": MagicMock(),
             "voice": "en_US-lessac-medium",
@@ -75,13 +77,13 @@ def _stub_synthesis(monkeypatch, sentences):
         sentences.append(text)
         yield 0, text, b"\x00\x01\x02"
 
-    monkeypatch.setattr("gideon.dashboard.chat_voice.streaming_voice_reply", mock_stream)
     monkeypatch.setattr(
-        "gideon.dashboard.chat_voice.stitch_wavs", AsyncMock(return_value=None)
+        "gideon.interfaces.dashboard.chat_voice.streaming_voice_reply", mock_stream
     )
-
-
-# ── §4.3 clean_for_speech on the synthesis path ──
+    monkeypatch.setattr(
+        "gideon.interfaces.dashboard.chat_voice.stitch_wavs",
+        AsyncMock(return_value=None),
+    )
 
 
 class TestSynthesisCleaning:
@@ -96,7 +98,8 @@ class TestSynthesisCleaning:
                 "/api/voice/synthesize",
                 json={
                     "text": (
-                        "Edit src/gideon/voice/duplex.py — " "see https://docs.example.com/x"
+                        "Edit runtime/gideon/integrations/voice/duplex.py — "
+                        "see https://docs.example.com/x"
                     ),
                     "session": "s1",
                 },
@@ -120,13 +123,17 @@ class TestSynthesisCleaning:
         assert spoken == ["Run `pytest --no-cov` now"]
 
     @pytest.mark.asyncio
-    async def test_synthesis_records_the_spoken_text_for_the_session(self, voice_home, monkeypatch):
+    async def test_synthesis_records_the_spoken_text_for_the_session(
+        self, voice_home, monkeypatch
+    ):
         _stub_synthesis(monkeypatch, [])
         state = _make_state(voice_home)
         state.broadcast_ws = MagicMock()
         assert state.last_spoken("s1") == ""
         async with TestClient(TestServer(_voice_app(state))) as client:
-            await client.post("/api/voice/synthesize", json={"text": _SPOKEN, "session": "s1"})
+            await client.post(
+                "/api/voice/synthesize", json={"text": _SPOKEN, "session": "s1"}
+            )
         assert state.last_spoken("s1") == _SPOKEN
         assert state.last_spoken("other") == ""
 
@@ -136,45 +143,47 @@ class TestSynthesisCleaning:
         for i in range(limit + 5):
             state.record_spoken(f"s{i}", f"line {i}")
         assert len(state._last_spoken) == limit
-        assert state.last_spoken("s0") == ""  # oldest evicted
+        assert state.last_spoken("s0") == ""
         assert state.last_spoken(f"s{limit + 4}") == f"line {limit + 4}"
         state.record_spoken("s0", "first")
         state.record_spoken("s0", "second")
         assert state.last_spoken("s0") == "second"
         state.record_spoken("s0", "   ")
-        assert state.last_spoken("s0") == "second"  # blank never overwrites
-
-
-# ── §4.2 echo consult on the transcribe path ──
+        assert state.last_spoken("s0") == "second"
 
 
 class TestTranscribeEchoConsult:
     async def _transcribe(self, client, query=""):
         form = FormData()
         form.add_field(
-            "audio", b"\x00\x01\x02", filename="recording.webm", content_type="audio/webm"
+            "audio",
+            b"\x00\x01\x02",
+            filename="recording.webm",
+            content_type="audio/webm",
         )
         return await client.post(f"/api/stt/transcribe{query}", data=form)
 
     @pytest.fixture(autouse=True)
     def _stub_stt(self, monkeypatch):
-        monkeypatch.setattr("gideon.transcribe.is_available", AsyncMock(return_value=True))
+        monkeypatch.setattr(
+            "gideon.integrations.transcribe.is_available", AsyncMock(return_value=True)
+        )
         self.heard = "the deployment finished and everything"
         monkeypatch.setattr(
-            "gideon.transcribe.transcribe_audio",
+            "gideon.integrations.transcribe.transcribe_audio",
             AsyncMock(side_effect=lambda *_a, **_kw: self.heard),
         )
 
     @pytest.mark.asyncio
-    async def test_duplex_request_filters_the_assistants_own_speech(self, voice_home, monkeypatch):
+    async def test_duplex_request_filters_the_assistants_own_speech(
+        self, voice_home, monkeypatch
+    ):
         state = _make_state(voice_home)
         state.record_spoken("s1", _SPOKEN)
         async with TestClient(TestServer(_stt_app(state))) as client:
             resp = await self._transcribe(client, "?duplex=true&session=s1")
             assert resp.status == 200
             body = await resp.json()
-        # Empty text with a stated reason — the dashboard can say why, instead of
-        # looking deaf.
         assert body == {"text": "", "filtered": "echo"}
 
     @pytest.mark.asyncio
@@ -192,7 +201,9 @@ class TestTranscribeEchoConsult:
         state = _make_state(voice_home)
         state.record_spoken("s1", _SPOKEN)
         async with TestClient(TestServer(_stt_app(state))) as client:
-            body = await (await self._transcribe(client, "?duplex=true&session=s1")).json()
+            body = await (
+                await self._transcribe(client, "?duplex=true&session=s1")
+            ).json()
         assert body["text"] == self.heard
         assert "filtered" not in body
 
@@ -202,7 +213,9 @@ class TestTranscribeEchoConsult:
         state.record_spoken("s1", _SPOKEN)
         self.heard = "open the door and check the logs"
         async with TestClient(TestServer(_stt_app(state))) as client:
-            body = await (await self._transcribe(client, "?duplex=true&session=s1")).json()
+            body = await (
+                await self._transcribe(client, "?duplex=true&session=s1")
+            ).json()
         assert body["text"] == self.heard
         assert "filtered" not in body
 
@@ -210,7 +223,9 @@ class TestTranscribeEchoConsult:
     async def test_nothing_spoken_yet_cannot_filter(self, voice_home):
         state = _make_state(voice_home)
         async with TestClient(TestServer(_stt_app(state))) as client:
-            body = await (await self._transcribe(client, "?duplex=true&session=s1")).json()
+            body = await (
+                await self._transcribe(client, "?duplex=true&session=s1")
+            ).json()
         assert body["text"] == self.heard
 
     @pytest.mark.asyncio
@@ -231,29 +246,20 @@ class TestTranscribeEchoConsult:
         assert "disclaimer" not in body
 
 
-# ── §4.4 disclaimer + input_origin into the session JSONL ──
-
-
 class TestVoiceOriginTurn:
     @pytest.fixture(autouse=True)
     def _stub_runner(self, monkeypatch):
         monkeypatch.setattr(
-            "gideon.dashboard.chat_handlers.run_chat", AsyncMock(return_value=None)
+            "gideon.interfaces.dashboard.chat_handlers.run_chat",
+            AsyncMock(return_value=None),
         )
 
     async def _send(self, client, state, **body):
-        # The session must EXIST before a send names it: a send to a key that exists
-        # nowhere is refused `session_not_found`
-        # (tests/test_chat_session_resurrection_audit.py), and the real flow creates it
-        # first — the dashboard's `ensureSession` POSTs /api/chat/sessions before the
-        # first turn. `_user_turn` below already assumes this same session exists.
         state.get_or_create_session("s1")
         return await client.post("/api/chat?ws=1", json={"session": "s1", **body})
 
     def _user_turn(self, state, tmp_path):
-        # Persist through the product's own writer, then read what landed on disk —
-        # the atom's claim is about the session JSONL, not an in-memory list.
-        from gideon.dashboard.chat_persistence import save_session_to_history
+        from gideon.interfaces.dashboard.chat_persistence import save_session_to_history
 
         save_session_to_history(state, state.get_or_create_session("s1"))
         matches = list(tmp_path.rglob("*.jsonl"))
@@ -273,7 +279,9 @@ class TestVoiceOriginTurn:
         state = _make_state(voice_home)
         state.broadcast_ws = MagicMock()
         async with TestClient(TestServer(_make_app(state))) as client:
-            resp = await self._send(client, state, message="deploy the beta", input_origin="voice")
+            resp = await self._send(
+                client, state, message="deploy the beta", input_origin="voice"
+            )
             assert resp.status == 200
         turn = self._user_turn(state, voice_home)
         assert turn["content"].startswith("deploy the beta")
@@ -285,7 +293,9 @@ class TestVoiceOriginTurn:
         state = _make_state(voice_home)
         state.broadcast_ws = MagicMock()
         async with TestClient(TestServer(_make_app(state))) as client:
-            assert (await self._send(client, state, message="deploy the beta")).status == 200
+            assert (
+                await self._send(client, state, message="deploy the beta")
+            ).status == 200
         turn = self._user_turn(state, voice_home)
         assert turn["content"] == "deploy the beta"
         assert VOICE_DISCLAIMER not in turn["content"]
@@ -297,26 +307,29 @@ class TestVoiceOriginTurn:
         state.broadcast_ws = MagicMock()
         async with TestClient(TestServer(_make_app(state))) as client:
             assert (
-                await self._send(client, state, message="deploy it", input_origin="telepathy")
+                await self._send(
+                    client, state, message="deploy it", input_origin="telepathy"
+                )
             ).status == 200
         turn = self._user_turn(state, voice_home)
         assert VOICE_DISCLAIMER not in turn["content"]
 
     @pytest.mark.asyncio
-    async def test_origin_recorded_without_the_disclaimer_when_disabled(self, voice_home):
+    async def test_origin_recorded_without_the_disclaimer_when_disabled(
+        self, voice_home
+    ):
         _write_voice_config(voice_home, voice_disclaimer_enabled=False)
         state = _make_state(voice_home)
         state.broadcast_ws = MagicMock()
         async with TestClient(TestServer(_make_app(state))) as client:
             assert (
-                await self._send(client, state, message="deploy the beta", input_origin="voice")
+                await self._send(
+                    client, state, message="deploy the beta", input_origin="voice"
+                )
             ).status == 200
         turn = self._user_turn(state, voice_home)
         assert VOICE_DISCLAIMER not in turn["content"]
         assert turn["meta"]["input_origin"] == "voice"
-
-
-# ── §4.5 VoiceConfig through the four wiring points ──
 
 
 class TestVoiceConfigRoundTrip:
@@ -326,9 +339,6 @@ class TestVoiceConfigRoundTrip:
         "echo_filter_enabled",
         "duplex_mute_enabled",
         "clean_for_speech_enabled",
-        # DESKTOP-CAPABILITIES S3 — the desktop push-to-talk chord. A string among
-        # booleans, and the only field here a NON-gateway process consumes (the Electron
-        # shell binds it), which is why its round trip is worth the same ratchet.
         "push_to_talk_chord",
         "voice_disclaimer_enabled",
     )
@@ -376,9 +386,9 @@ class TestVoiceConfigRoundTrip:
         assert AppConfig.load().voice == VoiceConfig()
 
     def test_load_falls_back_when_a_phrase_list_empties(self, voice_home):
-        # Hands-free must stay operable: an empty list would make the mode deaf to
-        # every confirmation.
-        _write_voice_config(voice_home, confirmation_phrases=[], exit_phrases=["", "  "])
+        _write_voice_config(
+            voice_home, confirmation_phrases=[], exit_phrases=["", "  "]
+        )
         cfg = AppConfig.load().voice
         assert cfg.confirmation_phrases == list(DEFAULT_CONFIRMATION_PHRASES)
         assert cfg.exit_phrases == list(DEFAULT_EXIT_PHRASES)

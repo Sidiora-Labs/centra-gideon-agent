@@ -9,7 +9,7 @@ it back through its own default base_dir, rather than mocking ``is_running``. A 
 predicate proves the branch; only a real claim proves the two sides agree on the claim id
 AND on which directory the claim store lives in — the two ways this idempotency has to fail.
 
-The sibling persistence module (``gideon.knowledge.research_reports``) is landing in a
+The sibling persistence module (``gideon.cognition.knowledge.research_reports``) is landing in a
 parallel change, so these tests run against a stub installed in ``sys.modules`` that
 implements its frozen contract. That is deliberate, not a stopgap: it pins the API to the
 CONTRACT, so the suite passes today and keeps passing once the real module arrives.
@@ -27,9 +27,9 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.dashboard.handlers import research_reports as rr_api
+from gideon.interfaces.dashboard.handlers import research_reports as rr_api
 
-_MODULE_PATH = "gideon.knowledge.research_reports"
+_MODULE_PATH = "gideon.cognition.knowledge.research_reports"
 
 CITATION_POLICIES = ("cite-source-only", "allow-citing-context")
 
@@ -104,7 +104,10 @@ def _make_stub() -> ModuleType:
             "prompt": defn.prompt,
             "schedule": dict(defn.schedule),
             "tz": defn.tz,
-            "source": {"tags": list(defn.source.tags), "window_secs": defn.source.window_secs},
+            "source": {
+                "tags": list(defn.source.tags),
+                "window_secs": defn.source.window_secs,
+            },
             "context": (
                 None
                 if defn.context is None
@@ -165,7 +168,7 @@ class _Sel:
 
 @pytest.fixture
 def sel_log(monkeypatch):
-    import gideon.sel as sel_mod
+    import gideon.security.sel as sel_mod
 
     recorder = _Sel()
     monkeypatch.setattr(sel_mod, "sel", lambda: recorder)
@@ -175,8 +178,8 @@ def sel_log(monkeypatch):
 @pytest.fixture(autouse=True)
 def isolated(tmp_path, monkeypatch, sel_log):
     """Home → tmp_path, and the sibling module → the contract stub."""
-    import gideon.config.loader as cfg
-    import gideon.knowledge as knowledge_pkg
+    import gideon.cognition.knowledge as knowledge_pkg
+    import gideon.core.config.loader as cfg
 
     monkeypatch.setattr(cfg, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(cfg, "config_path", lambda: tmp_path / "config.json")
@@ -228,18 +231,21 @@ class TestCrud:
             listed = await (await c.get("/api/knowledge/reports")).json()
             assert [r["id"] for r in listed["reports"]] == [rid]
 
-            updated = await c.put(f"/api/knowledge/reports/{rid}", json={"enabled": False})
+            updated = await c.put(
+                f"/api/knowledge/reports/{rid}", json={"enabled": False}
+            )
             assert updated.status == 200
             after = (await updated.json())["report"]
             assert after["enabled"] is False
-            # An update touches only what it names.
             assert after["name"] == "Weekly AI digest"
             assert after["created_ts"] == report["created_ts"]
 
             deleted = await c.delete(f"/api/knowledge/reports/{rid}")
             assert deleted.status == 200
             assert await deleted.json() == {"ok": True}
-            assert (await (await c.get("/api/knowledge/reports")).json())["reports"] == []
+            assert (await (await c.get("/api/knowledge/reports")).json())[
+                "reports"
+            ] == []
 
         ops = [call["operation"] for call in sel_log.calls]
         assert ops == [
@@ -252,10 +258,14 @@ class TestCrud:
     async def test_every_and_at_schedules(self):
         async with TestClient(TestServer(_app())) as c:
             body = dict(BODY, schedule={"kind": "every", "every_secs": 3600})
-            got = (await (await c.post("/api/knowledge/reports", json=body)).json())["report"]
+            got = (await (await c.post("/api/knowledge/reports", json=body)).json())[
+                "report"
+            ]
             assert got["schedule"]["every_secs"] == 3600
             body = dict(BODY, schedule={"kind": "at", "at_ts": 1_800_000_000})
-            got = (await (await c.post("/api/knowledge/reports", json=body)).json())["report"]
+            got = (await (await c.post("/api/knowledge/reports", json=body)).json())[
+                "report"
+            ]
             assert got["schedule"]["at_ts"] == 1_800_000_000
 
 
@@ -268,13 +278,16 @@ class TestValidation:
             resp = await c.post("/api/knowledge/reports", json=body)
             assert resp.status == 400
             assert "'0 99 * * *'" in (await resp.json())["error"]["message"]
-            # Nothing was stored.
-            assert (await (await c.get("/api/knowledge/reports")).json())["reports"] == []
+            assert (await (await c.get("/api/knowledge/reports")).json())[
+                "reports"
+            ] == []
 
     @pytest.mark.asyncio
     async def test_bad_cron_on_update_is_400(self):
         async with TestClient(TestServer(_app())) as c:
-            rid = (await (await c.post("/api/knowledge/reports", json=BODY)).json())["report"]["id"]
+            rid = (await (await c.post("/api/knowledge/reports", json=BODY)).json())[
+                "report"
+            ]["id"]
             resp = await c.put(
                 f"/api/knowledge/reports/{rid}",
                 json={"schedule": {"kind": "cron", "cron_expr": "not a cron"}},
@@ -298,7 +311,9 @@ class TestValidation:
     @pytest.mark.asyncio
     async def test_unknown_citation_policy_on_update_is_400(self):
         async with TestClient(TestServer(_app())) as c:
-            rid = (await (await c.post("/api/knowledge/reports", json=BODY)).json())["report"]["id"]
+            rid = (await (await c.post("/api/knowledge/reports", json=BODY)).json())[
+                "report"
+            ]["id"]
             resp = await c.put(
                 f"/api/knowledge/reports/{rid}", json={"citation_policy": "whatever"}
             )
@@ -311,12 +326,21 @@ class TestValidation:
                 ({"prompt": "p", "schedule": BODY["schedule"]}, "name is required"),
                 ({"name": "n", "schedule": BODY["schedule"]}, "prompt is required"),
                 ({"name": "n", "prompt": "p"}, "schedule is required"),
-                (dict(BODY, schedule={"kind": "weekly"}), "schedule.kind must be one of"),
-                (dict(BODY, schedule={"kind": "every"}), "every_secs must be a positive integer"),
+                (
+                    dict(BODY, schedule={"kind": "weekly"}),
+                    "schedule.kind must be one of",
+                ),
+                (
+                    dict(BODY, schedule={"kind": "every"}),
+                    "every_secs must be a positive integer",
+                ),
                 (dict(BODY, schedule={"kind": "cron"}), "cron_expr is required"),
                 (dict(BODY, iteration_cap=0), "iteration_cap must be an integer >= 1"),
                 (dict(BODY, enabled="yes"), "enabled must be a boolean"),
-                (dict(BODY, source={"tags": [1]}), "source.tags must be a list of strings"),
+                (
+                    dict(BODY, source={"tags": [1]}),
+                    "source.tags must be a list of strings",
+                ),
                 (dict(BODY, context={"window_secs": -1}), "context.window_secs"),
             ):
                 resp = await c.post("/api/knowledge/reports", json=body)
@@ -365,7 +389,7 @@ class _FakeProvider:
 
 @pytest.fixture
 def fake_provider(monkeypatch):
-    from gideon.action_providers import registry
+    from gideon.integrations.action_providers import registry
 
     provider = _FakeProvider()
     monkeypatch.setitem(registry._providers, rr_api.RUN_ACTION_PROVIDER, provider)
@@ -376,27 +400,31 @@ class TestManualRun:
     @pytest.mark.asyncio
     async def test_run_dispatches_the_action_provider(self, fake_provider):
         async with TestClient(TestServer(_app())) as c:
-            rid = (await (await c.post("/api/knowledge/reports", json=BODY)).json())["report"]["id"]
+            rid = (await (await c.post("/api/knowledge/reports", json=BODY)).json())[
+                "report"
+            ]["id"]
             resp = await c.post(f"/api/knowledge/reports/{rid}/run")
             assert resp.status == 200
             assert (await resp.json())["ok"] is True
         assert len(fake_provider.calls) == 1
         config, ctx = fake_provider.calls[0]
-        # `manual: True` rides the CONFIG as well as the payload now: the provider's dueness
-        # pre-flight reads its config, because that is the surface a trigger row also fills —
-        # and a trigger row never sets this key, so a scheduled fire cannot skip the window
-        # check by accident.
         assert config == {"report_id": rid, "manual": True}
         assert ctx.payload["report_id"] == rid and ctx.payload["manual"] is True
 
     @pytest.mark.asyncio
     async def test_run_reports_an_unresolvable_provider_as_ok_false(self, monkeypatch):
-        from gideon.action_providers import registry
+        from gideon.integrations.action_providers import registry
 
-        monkeypatch.delitem(registry._providers, rr_api.RUN_ACTION_PROVIDER, raising=False)
-        monkeypatch.setattr(registry, "_ensure_default_providers_registered", lambda: None)
+        monkeypatch.delitem(
+            registry._providers, rr_api.RUN_ACTION_PROVIDER, raising=False
+        )
+        monkeypatch.setattr(
+            registry, "_ensure_default_providers_registered", lambda: None
+        )
         async with TestClient(TestServer(_app())) as c:
-            rid = (await (await c.post("/api/knowledge/reports", json=BODY)).json())["report"]["id"]
+            rid = (await (await c.post("/api/knowledge/reports", json=BODY)).json())[
+                "report"
+            ]["id"]
             resp = await c.post(f"/api/knowledge/reports/{rid}/run")
             assert resp.status == 200
             body = await resp.json()
@@ -404,13 +432,17 @@ class TestManualRun:
             assert rr_api.RUN_ACTION_PROVIDER in body["result"]
 
     @pytest.mark.asyncio
-    async def test_run_is_409_while_a_scheduled_fire_holds_the_lease(self, fake_provider):
+    async def test_run_is_409_while_a_scheduled_fire_holds_the_lease(
+        self, fake_provider
+    ):
         """A REAL claim, taken through the same default base_dir the handler reads."""
-        from gideon.triggers import claims
-        from gideon.triggers.scheduling import Claim
+        from gideon.automation.triggers import claims
+        from gideon.automation.triggers.scheduling import Claim
 
         async with TestClient(TestServer(_app())) as c:
-            rid = (await (await c.post("/api/knowledge/reports", json=BODY)).json())["report"]["id"]
+            rid = (await (await c.post("/api/knowledge/reports", json=BODY)).json())[
+                "report"
+            ]["id"]
             claim_id = rr_api.report_claim_id(rid)
             assert claim_id == f"research-report:{rid}"
             claims.write_claim(
@@ -428,11 +460,8 @@ class TestManualRun:
             body = await resp.json()
             assert body["reason"] == "already_running"
             assert body["error"]
-            # The refusal is a REFUSAL: nothing was dispatched.
             assert fake_provider.calls == []
 
-            # Releasing the lease makes the same request succeed — the 409 was the lease,
-            # not a permanently broken route.
             claims.release_claim(claim_id)
             assert (await c.post(f"/api/knowledge/reports/{rid}/run")).status == 200
             assert len(fake_provider.calls) == 1
@@ -440,7 +469,9 @@ class TestManualRun:
 
 class TestModuleAbsent:
     @pytest.mark.asyncio
-    async def test_every_route_answers_503_without_the_sibling_module(self, monkeypatch):
+    async def test_every_route_answers_503_without_the_sibling_module(
+        self, monkeypatch
+    ):
         """A build without the persistence module refuses cleanly — never a 500 at boot."""
         monkeypatch.setattr(rr_api, "_reports_module", lambda: None)
         async with TestClient(TestServer(_app())) as c:

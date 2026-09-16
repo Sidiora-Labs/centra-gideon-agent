@@ -14,17 +14,16 @@ from pathlib import Path
 
 import pytest
 
-from gideon.apps import app_manager, manager
-from gideon.supply_chain import Verdict
+from gideon.extensions.apps import app_manager, manager
+from gideon.security.supply_chain import Verdict
 
 
 @pytest.fixture(autouse=True)
 def _isolate_apps(tmp_path, monkeypatch):
     """Point config_dir at a tmp dir so apps install into an isolated tree."""
-    import gideon.config.loader as loader
+    import gideon.core.config.loader as loader
 
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
-    # apps.manager imported config_dir by reference — patch there too.
     monkeypatch.setattr(manager, "config_dir", lambda: tmp_path)
     return tmp_path
 
@@ -59,7 +58,9 @@ class TestNativeLock:
     all refuse, leaving it installed + enabled. Only its config is editable."""
 
     def _install_native(self, tmp_path):
-        src = _make_app_source(tmp_path, name="native-demo", manifest_extra={"native": True})
+        src = _make_app_source(
+            tmp_path, name="native-demo", manifest_extra={"native": True}
+        )
         res = app_manager.install(src, confirm=True)
         assert res.ok
         return "native-demo"
@@ -78,10 +79,9 @@ class TestNativeLock:
     def test_native_force_uninstall_refused(self, tmp_path):
         name = self._install_native(tmp_path)
         assert app_manager.force_uninstall(name) is False
-        assert (manager.app_dir(name) / "app.json").is_file()  # files intact
+        assert (manager.app_dir(name) / "app.json").is_file()
 
     def test_non_native_still_uninstallable(self, tmp_path):
-        # Control: a normal (Tier-2) app disables/uninstalls as before.
         src = _make_app_source(tmp_path, name="normal-demo")
         assert app_manager.install(src, confirm=True).ok
         assert app_manager.uninstall("normal-demo") is True
@@ -97,7 +97,6 @@ class TestInstall:
         assert meta is not None and meta.enabled and meta.version == "1.0.0"
 
     def test_install_runs_oninstall_hook(self, tmp_path):
-        # onInstall writes a marker file into the app dir.
         src = _make_app_source(
             tmp_path,
             manifest_extra={"setup": {"onInstall": "echo hi > installed_marker.txt"}},
@@ -107,7 +106,6 @@ class TestInstall:
         assert (manager.app_dir("demo-app") / "installed_marker.txt").is_file()
 
     def test_oninstall_hook_can_write_data_dir(self, tmp_path):
-        # Regression: data/ must exist before the hook runs (apps seed state there).
         src = _make_app_source(
             tmp_path,
             manifest_extra={"setup": {"onInstall": "echo seeded > data/seed.txt"}},
@@ -119,25 +117,24 @@ class TestInstall:
     def test_dangerous_content_refused_non_overridable(self, tmp_path):
         src = _make_app_source(
             tmp_path,
-            files={"scripts/evil.sh": "rm -rf / --no-preserve-root\n"},
+            files={"tooling/scripts/evil.sh": "rm -rf / --no-preserve-root\n"},
         )
-        # Even with confirm=True, a dangerous verdict is terminal.
         res = app_manager.install(src, confirm=True)
         assert not res.ok and res.scan.verdict is Verdict.DANGEROUS
-        assert not manager.app_dir("demo-app").exists()  # never landed live
+        assert not manager.app_dir("demo-app").exists()
 
     def test_warning_needs_consent_then_installs(self, tmp_path):
         src = _make_app_source(
             tmp_path,
-            files={"scripts/fetch.sh": "curl https://api.example.com/data\n"},
+            files={"tooling/scripts/fetch.sh": "curl https://api.example.com/data\n"},
         )
-        # Community/local tier: a plain curl is a warning → needs consent.
         res1 = app_manager.install(src, origin="local")
-        assert not res1.ok and res1.needs_consent and res1.scan.verdict is Verdict.WARNING
+        assert (
+            not res1.ok and res1.needs_consent and res1.scan.verdict is Verdict.WARNING
+        )
         assert not manager.app_dir("demo-app").exists()
-        # With confirm, it installs.
         res2 = app_manager.install(src, origin="local", confirm=True)
-        assert res2.ok and manager.app_dir("demo-app").is_file() is False  # dir, not file
+        assert res2.ok and manager.app_dir("demo-app").is_file() is False
         assert manager.app_dir("demo-app").is_dir()
 
     def test_oninstall_failure_rolls_back(self, tmp_path):
@@ -147,7 +144,7 @@ class TestInstall:
         )
         res = app_manager.install(src)
         assert not res.ok and "onInstall" in res.error
-        assert not manager.app_dir("demo-app").exists()  # rolled back
+        assert not manager.app_dir("demo-app").exists()
 
     def test_double_install_refused(self, tmp_path):
         src = _make_app_source(tmp_path)
@@ -158,7 +155,9 @@ class TestInstall:
     def test_invalid_manifest_refused(self, tmp_path):
         src = tmp_path / "src" / "bad"
         src.mkdir(parents=True)
-        (src / "app.json").write_text('{"name": "Bad Name", "version": "nope"}', encoding="utf-8")
+        (src / "app.json").write_text(
+            '{"name": "Bad Name", "version": "nope"}', encoding="utf-8"
+        )
         res = app_manager.install(src)
         assert not res.ok and "manifest" in res.error.lower()
 
@@ -178,24 +177,22 @@ class TestEnableDisable:
 
 class TestUninstall:
     def test_uninstall_deactivates_keeps_files(self, tmp_path):
-        # Uninstall = deactivate: files stay on disk, enabled flips to false.
         src = _make_app_source(tmp_path)
         app_manager.install(src)
         assert manager.app_dir("demo-app").is_dir()
         assert app_manager.uninstall("demo-app")
-        assert manager.app_dir("demo-app").exists()  # files kept
+        assert manager.app_dir("demo-app").exists()
         meta = manager._read_installed("demo-app")
-        assert meta is not None and meta.enabled is False  # turned off
+        assert meta is not None and meta.enabled is False
 
     def test_force_uninstall_removes_dir(self, tmp_path):
         src = _make_app_source(tmp_path)
         app_manager.install(src)
         assert manager.app_dir("demo-app").is_dir()
         assert app_manager.force_uninstall("demo-app")
-        assert not manager.app_dir("demo-app").exists()  # files gone
+        assert not manager.app_dir("demo-app").exists()
 
     def test_force_uninstall_runs_onuninstall_hook(self, tmp_path):
-        # onUninstall writes a marker into a sibling dir that survives removal.
         out = tmp_path / "out"
         out.mkdir()
         src = _make_app_source(
@@ -209,9 +206,6 @@ class TestUninstall:
     def test_uninstall_unknown_is_false(self, tmp_path):
         assert app_manager.uninstall("ghost") is False
         assert app_manager.force_uninstall("ghost") is False
-
-
-# ── path-traversal guard on app_dir (defense-in-depth, #44) ──────────────────
 
 
 def test_app_dir_rejects_path_traversal():
@@ -228,16 +222,18 @@ def test_app_dir_allows_real_and_special_names():
     """Real app ids AND legitimate special on-disk dirs (e.g. .quarantine from the
     skill supply-chain) must pass — the guard blocks escape, not enumeration."""
     for ok in ["brave-search", ".quarantine", "app_v2", "a"]:
-        # resolves under apps/ without raising; must not escape the apps root
         p = manager.app_dir(ok).resolve()
-        assert manager.apps_dir().resolve() in p.parents or p.parent == manager.apps_dir().resolve()
+        assert (
+            manager.apps_dir().resolve() in p.parents
+            or p.parent == manager.apps_dir().resolve()
+        )
 
 
 def test_config_path_helpers_are_traversal_safe():
     """The config read/write helpers (app_config + ProviderSettings) go through
     app_dir, so a traversal name can't reach the filesystem via them either."""
-    from gideon.apps.app_config import read_config
-    from gideon.providers.settings import ProviderSettings
+    from gideon.extensions.apps.app_config import read_config
+    from gideon.extensions.providers.settings import ProviderSettings
 
     with pytest.raises(ValueError):
         read_config("../../etc/passwd")
@@ -270,11 +266,9 @@ class TestPlatformGate:
             "shell": "brew install --cask sampleapp",
             "postInstall": "open ~/Applications/SampleApp.app",
         }
-        # Nothing committed to the live tree.
         assert not (manager.app_dir("sampleapp")).exists()
 
     def test_unsupported_os_short_circuits(self, tmp_path):
-        # An app that only supports an OS this machine isn't → client-install result.
         import sys
 
         other = "windows" if sys.platform != "win32" else "linux"
@@ -290,7 +284,6 @@ class TestPlatformGate:
         assert not (manager.app_dir("winonly")).exists()
 
     def test_supported_server_app_installs_normally(self, tmp_path):
-        # Default platform (macos/linux, server) → installs on darwin/linux CI, no gate.
         import sys
 
         if sys.platform not in ("darwin", "linux"):
@@ -311,4 +304,6 @@ class TestPlatformGate:
             ok=False, name="x", needs_client_install=True, client_install={"shell": "s"}
         )
         d = r.to_dict()
-        assert d["needs_client_install"] is True and d["client_install"] == {"shell": "s"}
+        assert d["needs_client_install"] is True and d["client_install"] == {
+            "shell": "s"
+        }

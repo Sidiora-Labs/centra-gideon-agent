@@ -5,11 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from gideon.knowledge.llm_pool import AcpWorker, LLMPool, Worker
-
-# ---------------------------------------------------------------------------
-# Fixtures — mock workers that don't spawn real processes
-# ---------------------------------------------------------------------------
+from gideon.cognition.knowledge.llm_pool import AcpWorker, LLMPool, Worker
 
 
 class FakeWorker(Worker):
@@ -62,7 +58,9 @@ class DeadOnSecondCallWorker(Worker):
         return self._alive
 
 
-def _make_pool_with_fake_workers(pool_size: int = 3, responses: list[str] | None = None) -> LLMPool:
+def _make_pool_with_fake_workers(
+    pool_size: int = 3, responses: list[str] | None = None
+) -> LLMPool:
     """Create a pool pre-loaded with FakeWorkers (skips real process spawn)."""
     pool = LLMPool(pool_size=pool_size)
     pool._started = True
@@ -73,11 +71,6 @@ def _make_pool_with_fake_workers(pool_size: int = 3, responses: list[str] | None
         pool._workers.append(worker)
         pool._available.put_nowait(i)
     return pool
-
-
-# ---------------------------------------------------------------------------
-# Tests: Pool basics
-# ---------------------------------------------------------------------------
 
 
 class TestLLMPoolBasics:
@@ -116,11 +109,6 @@ class TestLLMPoolBasics:
         assert pool._started is False
 
 
-# ---------------------------------------------------------------------------
-# Tests: Semaphore and concurrency
-# ---------------------------------------------------------------------------
-
-
 class TestLLMPoolConcurrency:
     @pytest.mark.asyncio
     async def test_acquire_release_cycle(self):
@@ -132,10 +120,8 @@ class TestLLMPoolConcurrency:
     @pytest.mark.asyncio
     async def test_semaphore_blocks_when_all_busy(self):
         pool = _make_pool_with_fake_workers(pool_size=1, responses=["slow"])
-        # Acquire the only worker
         idx, worker = await pool.acquire()
 
-        # Second acquire should block
         acquired = asyncio.Event()
 
         async def _try_acquire():
@@ -146,7 +132,6 @@ class TestLLMPoolConcurrency:
         await asyncio.sleep(0.05)
         assert not acquired.is_set()
 
-        # Release unblocks
         pool.release(idx)
         await asyncio.sleep(0.05)
         assert acquired.is_set()
@@ -187,16 +172,10 @@ class TestLLMPoolConcurrency:
         assert max_in_flight <= 2
 
 
-# ---------------------------------------------------------------------------
-# Tests: Dead worker replacement
-# ---------------------------------------------------------------------------
-
-
 class TestLLMPoolWorkerReplacement:
     @pytest.mark.asyncio
     async def test_dead_worker_gets_replaced(self):
         pool = _make_pool_with_fake_workers(pool_size=1, responses=["alive"])
-        # Kill the worker
         fake = pool._workers[0]
         assert isinstance(fake, FakeWorker)
         fake._alive = False
@@ -234,11 +213,6 @@ class TestLLMPoolWorkerReplacement:
         assert result == "recovered"
 
 
-# ---------------------------------------------------------------------------
-# Tests: send_batch error handling
-# ---------------------------------------------------------------------------
-
-
 class TestLLMPoolBatchErrors:
     @pytest.mark.asyncio
     async def test_batch_item_failure_returns_empty_string(self):
@@ -268,15 +242,8 @@ class TestLLMPoolBatchErrors:
         pool._available.put_nowait(0)
 
         results = await pool.send_batch(["a", "b", "c"])
-        # Second item failed, gets ""
         assert results[1] == ""
-        # Others succeed (order may vary due to serial with pool_size=1)
         assert "ok" in results[0] or results[0] == ""
-
-
-# ---------------------------------------------------------------------------
-# Tests: Pool start (mocked workers)
-# ---------------------------------------------------------------------------
 
 
 class TestLLMPoolStart:
@@ -284,7 +251,6 @@ class TestLLMPoolStart:
     async def test_start_creates_workers(self):
         pool = LLMPool(pool_size=2)
 
-        # Mock _create_worker to avoid spawning real processes
         workers_created = []
 
         async def _mock_create():
@@ -314,14 +280,9 @@ class TestLLMPoolStart:
 
         pool._create_worker = _mock_create  # type: ignore[assignment]
         await pool.start()
-        await pool.start()  # second call should no-op
+        await pool.start()
 
         assert call_count == 1
-
-
-# ---------------------------------------------------------------------------
-# Tests: Context manager
-# ---------------------------------------------------------------------------
 
 
 class TestLLMPoolContextManager:
@@ -342,11 +303,6 @@ class TestLLMPoolContextManager:
             assert result == "ctx"
 
         assert p._started is False
-
-
-# ---------------------------------------------------------------------------
-# Tests: AcpWorker (mocked AcpClient)
-# ---------------------------------------------------------------------------
 
 
 class TestAcpWorker:
@@ -389,11 +345,6 @@ class TestAcpWorker:
         assert worker._client is None
 
 
-# ---------------------------------------------------------------------------
-# ProviderWorker surfaces a model failure instead of returning "" (#759)
-# ---------------------------------------------------------------------------
-
-
 class TestProviderWorkerSurfacesFailure:
     """A failure and an empty answer are different facts, and `""` cannot say which.
 
@@ -406,8 +357,8 @@ class TestProviderWorkerSurfacesFailure:
 
     @pytest.mark.asyncio
     async def test_a_timeout_raises_rather_than_returning_empty(self, monkeypatch):
-        from gideon import llm_helpers
-        from gideon.knowledge.llm_pool import ProviderWorker, WorkerError
+        from gideon.cognition.knowledge.llm_pool import ProviderWorker, WorkerError
+        from gideon.integrations import llm_helpers
 
         async def _hang(prompt, use_case=""):
             await asyncio.sleep(10)
@@ -419,9 +370,11 @@ class TestProviderWorkerSurfacesFailure:
             await ProviderWorker().send_message("p", timeout=0.01)
 
     @pytest.mark.asyncio
-    async def test_a_provider_error_raises_rather_than_returning_empty(self, monkeypatch):
-        from gideon import llm_helpers
-        from gideon.knowledge.llm_pool import ProviderWorker, WorkerError
+    async def test_a_provider_error_raises_rather_than_returning_empty(
+        self, monkeypatch
+    ):
+        from gideon.cognition.knowledge.llm_pool import ProviderWorker, WorkerError
+        from gideon.integrations import llm_helpers
 
         async def _boom(prompt, use_case=""):
             raise RuntimeError("no model bound")
@@ -436,8 +389,8 @@ class TestProviderWorkerSurfacesFailure:
         """The other half of the distinction: a model that genuinely answers nothing
         must NOT raise, or every best-effort caller starts reporting failures it did
         not have."""
-        from gideon import llm_helpers
-        from gideon.knowledge.llm_pool import ProviderWorker
+        from gideon.cognition.knowledge.llm_pool import ProviderWorker
+        from gideon.integrations import llm_helpers
 
         async def _empty(prompt, use_case=""):
             return ""
@@ -451,8 +404,8 @@ class TestProviderWorkerSurfacesFailure:
         """`send_batch` is a best-effort caller and already caught per item, which is
         why raising in the worker did not need a change here — pinned so a later
         "simplification" of that except cannot silently start propagating."""
-        from gideon import llm_helpers
-        from gideon.knowledge.llm_pool import LLMPool, ProviderWorker
+        from gideon.cognition.knowledge.llm_pool import LLMPool, ProviderWorker
+        from gideon.integrations import llm_helpers
 
         calls = {"n": 0}
 
@@ -471,5 +424,4 @@ class TestProviderWorkerSurfacesFailure:
 
         out = await pool.send_batch(["a", "b", "c"])
 
-        # pool_size=1 serializes, so the failing item is deterministic here.
         assert out == ["ok-1", "", "ok-3"]

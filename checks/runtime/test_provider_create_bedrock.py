@@ -15,7 +15,7 @@ import json
 
 from aiohttp.test_utils import make_mocked_request
 
-from gideon.dashboard.handlers import providers as H
+from gideon.interfaces.dashboard.handlers import providers as H
 
 
 async def _coro(v):
@@ -34,8 +34,8 @@ def _run(coro):
 
 def _ensure_bedrock_type():
     """Simulate the installed bedrock-models app having registered its type."""
-    from gideon.llm.capabilities import Capability, ProviderCapability
-    from gideon.llm.registry import get_default_registry
+    from gideon.integrations.llm.capabilities import Capability, ProviderCapability
+    from gideon.integrations.llm.registry import get_default_registry
 
     reg = get_default_registry()
     if "bedrock" not in reg._capabilities:  # noqa: SLF001
@@ -55,8 +55,7 @@ def _ensure_bedrock_type():
 
 def test_create_accepts_bedrock_with_region_and_profile(tmp_path, monkeypatch):
     cfg = tmp_path / "config.json"
-    monkeypatch.setattr("gideon.config.loader.config_path", lambda: cfg)
-    # Don't perturb the process-wide registry / media registries.
+    monkeypatch.setattr("gideon.core.config.loader.config_path", lambda: cfg)
     monkeypatch.setattr(H, "_refresh_media_registries", lambda: None)
     _ensure_bedrock_type()
 
@@ -74,6 +73,5 @@ def test_create_accepts_bedrock_with_region_and_profile(tmp_path, monkeypatch):
     entry = next(p for p in saved if p["name"] == "my-bedrock")
     assert entry["type"] == "bedrock"
     assert entry["options"] == {"region": "us-west-2", "profile": "work"}
-    # No api_key / endpoint stored — boto3 credential chain authenticates.
     assert "api_key" not in entry["options"]
     assert "endpoint" not in entry["options"]

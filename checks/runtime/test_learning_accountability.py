@@ -16,7 +16,7 @@ live callers, because a gate cannot suppress a path nobody routes through it.
 
 from __future__ import annotations
 
-from gideon.learning.accountability import (
+from gideon.cognition.learning.accountability import (
     DELTA_EPS,
     MIN_RUNS,
     REVERT_VERDICTS,
@@ -33,11 +33,9 @@ from gideon.learning.accountability import (
 
 def _attr(predicted, before, after, runs=5):
     return attribute(
-        predicted_fixes=predicted, outcome=Outcome(before=before, after=after, runs_after=runs)
+        predicted_fixes=predicted,
+        outcome=Outcome(before=before, after=after, runs_after=runs),
     )
-
-
-# ── the verdict vocabulary is shared, not forked ──
 
 
 def test_the_verdict_names_match_the_refiners():
@@ -46,7 +44,7 @@ def test_the_verdict_names_match_the_refiners():
     Two verdict scales would make one proposal's history unreadable when it passed through both
     paths.
     """
-    from gideon.learning.refiner import canary_verdict
+    from gideon.cognition.learning.refiner import canary_verdict
 
     produced = {
         canary_verdict(before=0.9, after=0.5, runs=5),
@@ -59,11 +57,10 @@ def test_the_verdict_names_match_the_refiners():
 
 def test_pending_is_a_distinct_state_not_a_guess():
     assert Verdict.PENDING.value in VERDICTS
-    assert _attr(["schema"], {"schema": 0.5}, {"schema": 0.0}, runs=1).verdict == "PENDING"
+    assert (
+        _attr(["schema"], {"schema": 0.5}, {"schema": 0.0}, runs=1).verdict == "PENDING"
+    )
     assert MIN_RUNS == 3
-
-
-# ── the five-way ladder ──
 
 
 def test_every_prediction_landing_and_nothing_regressing_is_EFFECTIVE():
@@ -74,7 +71,9 @@ def test_every_prediction_landing_and_nothing_regressing_is_EFFECTIVE():
 
 def test_some_predictions_landing_is_PARTIALLY_EFFECTIVE():
     result = _attr(
-        ["schema", "timeout"], {"schema": 0.5, "timeout": 0.4}, {"schema": 0.0, "timeout": 0.4}
+        ["schema", "timeout"],
+        {"schema": 0.5, "timeout": 0.4},
+        {"schema": 0.0, "timeout": 0.4},
     )
     assert result.verdict == Verdict.PARTIALLY_EFFECTIVE.value
     assert result.precision == 0.5
@@ -90,13 +89,17 @@ def test_nothing_moving_is_INEFFECTIVE_not_harmful():
 def test_a_regression_alongside_a_real_fix_is_MIXED_not_harmful():
     """Deliberately not harmful: the change did something the user wanted, so reverting is theirs
     rather than an automatic rollback."""
-    result = _attr(["schema"], {"schema": 0.5, "code": 0.1}, {"schema": 0.0, "code": 0.7})
+    result = _attr(
+        ["schema"], {"schema": 0.5, "code": 0.1}, {"schema": 0.0, "code": 0.7}
+    )
     assert result.verdict == Verdict.MIXED.value
     assert not result.owes_revert
 
 
 def test_damage_with_no_upside_is_HARMFUL():
-    result = _attr(["schema"], {"schema": 0.5, "code": 0.1}, {"schema": 0.5, "code": 0.7})
+    result = _attr(
+        ["schema"], {"schema": 0.5, "code": 0.1}, {"schema": 0.5, "code": 0.7}
+    )
     assert result.verdict == Verdict.HARMFUL.value
     assert result.owes_revert
 
@@ -121,12 +124,11 @@ def test_the_verdict_carries_its_reasoning():
         assert _attr(predicted, before, after).reason
 
 
-# ── the scariest class ──
-
-
 def test_a_regression_nobody_predicted_is_surfaced():
     """§3.1: "the scariest class, surfaced loudly"."""
-    result = _attr(["schema"], {"schema": 0.5, "code": 0.1}, {"schema": 0.0, "code": 0.8})
+    result = _attr(
+        ["schema"], {"schema": 0.5, "code": 0.1}, {"schema": 0.0, "code": 0.8}
+    )
     assert result.unattributed_regressions == ["code"]
 
 
@@ -159,9 +161,6 @@ def test_rates_are_used_so_a_busier_week_is_not_a_regression():
     assert outcome.fixed == ["s"] and outcome.regressed == []
 
 
-# ── the auto-filed revert ──
-
-
 def test_only_a_HARMFUL_verdict_owes_a_revert():
     """An INEFFECTIVE change is clutter; auto-filing a revert for everything that did not help would
     bury the queue — which is how the one revert that mattered gets skipped."""
@@ -171,14 +170,21 @@ def test_only_a_HARMFUL_verdict_owes_a_revert():
         (["s"], {"s": 0.5}, {"s": 0.5}),
         (["s"], {"s": 0.5, "c": 0.1}, {"s": 0.0, "c": 0.7}),
     ):
-        assert revert_proposal(target="t", attribution=_attr(predicted, before, after)) is None
+        assert (
+            revert_proposal(target="t", attribution=_attr(predicted, before, after))
+            is None
+        )
 
 
 def test_a_harmful_change_files_a_revert_that_NAMES_what_broke():
     """A proposal saying only "this made things worse" is un-reviewable: the user cannot weigh a
     rollback without knowing what broke."""
-    result = _attr(["schema"], {"schema": 0.5, "code": 0.1}, {"schema": 0.5, "code": 0.7})
-    proposal = revert_proposal(target="nightly-digest", attribution=result, run_ids=["r1", "r2"])
+    result = _attr(
+        ["schema"], {"schema": 0.5, "code": 0.1}, {"schema": 0.5, "code": 0.7}
+    )
+    proposal = revert_proposal(
+        target="nightly-digest", attribution=result, run_ids=["r1", "r2"]
+    )
     assert proposal is not None
     assert "nightly-digest" in proposal.title
     assert "code" in proposal.body
@@ -187,7 +193,9 @@ def test_a_harmful_change_files_a_revert_that_NAMES_what_broke():
 
 def test_a_revert_names_predictions_that_never_landed():
     result = _attr(
-        ["schema", "timeout"], {"schema": 0.5, "code": 0.1}, {"schema": 0.5, "code": 0.7}
+        ["schema", "timeout"],
+        {"schema": 0.5, "code": 0.1},
+        {"schema": 0.5, "code": 0.7},
     )
     proposal = revert_proposal(target="t", attribution=result)
     assert proposal is not None
@@ -197,7 +205,9 @@ def test_a_revert_names_predictions_that_never_landed():
 def test_revert_evidence_is_deduped_and_bounded():
     result = _attr(["s"], {"s": 0.5, "c": 0.1}, {"s": 0.5, "c": 0.7})
     proposal = revert_proposal(
-        target="t", attribution=result, run_ids=["r1"] * 30 + [f"x{i}" for i in range(40)]
+        target="t",
+        attribution=result,
+        run_ids=["r1"] * 30 + [f"x{i}" for i in range(40)],
     )
     assert proposal is not None
     assert len(proposal.evidence_refs) <= 20
@@ -212,7 +222,7 @@ def test_a_revert_is_a_PROPOSAL_never_an_application():
     """
     import inspect
 
-    from gideon.learning import accountability
+    from gideon.cognition.learning import accountability
 
     src = inspect.getsource(accountability)
     for forbidden in ("proposals.accept(", "installer(", "atomic_write", "sqlite3"):
@@ -222,17 +232,22 @@ def test_a_revert_is_a_PROPOSAL_never_an_application():
 def test_a_revert_proposal_serializes():
     result = _attr(["s"], {"s": 0.5, "c": 0.1}, {"s": 0.5, "c": 0.7})
     payload = revert_proposal(target="t", attribution=result).to_dict()
-    assert set(payload) == {"target", "kind", "title", "body", "evidence_refs", "provenance"}
+    assert set(payload) == {
+        "target",
+        "kind",
+        "title",
+        "body",
+        "evidence_refs",
+        "provenance",
+    }
     assert payload["provenance"] == "accountability"
-
-
-# ── proposer trust ──
 
 
 def test_trust_is_aggregated_per_source():
     """§3.1: "the flywheel learns which of its own proposers to believe"."""
     trust = {
-        t.source: t for t in proposer_trust([("refiner", "HARMFUL"), ("detector", "EFFECTIVE")])
+        t.source: t
+        for t in proposer_trust([("refiner", "HARMFUL"), ("detector", "EFFECTIVE")])
     }
     assert set(trust) == {"refiner", "detector"}
     assert trust["refiner"].harm_rate == 1.0
@@ -251,7 +266,9 @@ def test_harm_rate_is_over_DECIDED_not_total():
 def test_the_worst_proposer_sorts_first():
     """The useful question is which proposer to trust less, and a name-sorted list buries it."""
     records = (
-        [("safe", "EFFECTIVE")] * 9 + [("risky", "HARMFUL")] * 5 + [("risky", "EFFECTIVE")] * 5
+        [("safe", "EFFECTIVE")] * 9
+        + [("risky", "HARMFUL")] * 5
+        + [("risky", "EFFECTIVE")] * 5
     )
     assert [t.source for t in proposer_trust(records)][0] == "risky"
 
@@ -284,16 +301,13 @@ def test_an_empty_history_is_handled():
     assert proposer_trust([]) == []
 
 
-# ── §7: the incognito capture gate ──
-
-
 def test_the_permission_gate_refuses_a_restricted_session_on_every_cadence():
     """The half that IS closed, asserted across the whole cadence enum rather than spot-checked.
 
     Probed with both an idle turn and a busy one with a correction: neither can teach an incognito
     session, which is the property §7 names.
     """
-    from gideon.learning.gate import Cadence, LearningGate
+    from gideon.cognition.learning.gate import Cadence, LearningGate
 
     gate = LearningGate(enabled=True, is_restricted=True)
     for cadence in Cadence:
@@ -302,7 +316,7 @@ def test_the_permission_gate_refuses_a_restricted_session_on_every_cadence():
 
 
 def test_an_ephemeral_or_disabled_session_teaches_nothing_either():
-    from gideon.learning.gate import Cadence, LearningGate
+    from gideon.cognition.learning.gate import Cadence, LearningGate
 
     for gate in (LearningGate(is_ephemeral=True), LearningGate(enabled=False)):
         for cadence in Cadence:
@@ -312,7 +326,7 @@ def test_an_ephemeral_or_disabled_session_teaches_nothing_either():
 def test_a_permitted_session_still_gates_on_worthwhileness():
     """Permission and worthwhileness are separate questions; collapsing them is what produced the
     facet-capture carve-out `gate.py` was written to remove."""
-    from gideon.learning.gate import Cadence, LearningGate
+    from gideon.cognition.learning.gate import Cadence, LearningGate
 
     gate = LearningGate(enabled=True)
     assert not gate.decide(Cadence.PER_TURN, tool_calls=0).allowed
@@ -341,14 +355,11 @@ def test_the_coverage_checker_does_not_find_ITSELF():
     distinguish real coverage from the bug. Instead, prove the checker still SEES a phantom cadence:
     a name with no call site anywhere must surface as a gap.
     """
-    import gideon.learning.gate as gate_mod
+    import gideon.cognition.learning.gate as gate_mod
 
     class _Phantom:
-        # A cadence member no source file references — the checker must report it as uncovered.
         name = "PHANTOM_CADENCE"
 
-    # The checker resolves `Cadence` by a call-time `from ...gate import Cadence`, so the phantom
-    # has to be injected on the gate module, not on accountability.
     real_cadence = gate_mod.Cadence
     try:
         gate_mod.Cadence = [_Phantom]  # type: ignore[assignment]

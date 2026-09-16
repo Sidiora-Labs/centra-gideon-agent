@@ -17,9 +17,11 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.dashboard.handlers.model_telemetry import register_model_telemetry_routes
-from gideon.routing import stats
-from gideon.routing.telemetry import _dominates, _percentile, telemetry_rows
+from gideon.engine.routing import stats
+from gideon.engine.routing.telemetry import _dominates, _percentile, telemetry_rows
+from gideon.interfaces.dashboard.handlers.model_telemetry import (
+    register_model_telemetry_routes,
+)
 
 
 class TestPercentile:
@@ -40,24 +42,19 @@ class TestDominance:
         assert _dominates(a, b) and not _dominates(b, a)
 
     def test_tradeoff_neither_dominates(self):
-        # a cheaper+faster but lower quality; b higher quality but slow+costly → both on frontier.
         a = {"success": 0.7, "p50_ms": 100.0, "avg_cost_usd": 0.0}
         b = {"success": 0.95, "p50_ms": 500.0, "avg_cost_usd": 0.02}
         assert not _dominates(a, b) and not _dominates(b, a)
 
     def test_unknown_latency_never_dominates_on_latency(self):
-        # a has no latency samples (p50=0 → treated as unknown/inf) — it can't knock b off on speed.
         a = {"success": 0.9, "p50_ms": 0.0, "avg_cost_usd": 0.0}
         b = {"success": 0.8, "p50_ms": 50.0, "avg_cost_usd": 0.0}
-        # a still dominates here on success+cost with latency no-better (inf !<= 50 → not no_worse),
-        # so a does NOT dominate b (its unknown latency is worse), and b doesn't dominate a either.
         assert not _dominates(a, b)
 
 
 class TestRows:
     def _stats(self):
         s = {"use_cases": {}}
-        # Two refs under reasoning/summarize.
         stats.fold_record(
             s,
             {
@@ -87,7 +84,6 @@ class TestRows:
         return s
 
     def _audit(self):
-        # JSONL tail rows for percentile derivation (ref spelling matches the fold).
         rows = []
         for ms in (1800.0, 2000.0, 2200.0, 5000.0):
             rows.append(
@@ -120,13 +116,11 @@ class TestRows:
         assert local["p50_ms"] > 0 and local["p95_ms"] >= local["p50_ms"]
 
     def test_frontier_marks_both_when_tradeoff(self):
-        # local: free but slower; cloud: costs but faster → both on the frontier.
         rows = telemetry_rows(self._stats(), self._audit(), "reasoning", "summarize")
         assert all(r["on_frontier"] for r in rows)
 
     def test_dominated_row_is_off_frontier(self):
         s = {"use_cases": {}}
-        # good: high success, will get fast latency; bad: lower success, no cost edge, slow.
         for _ in range(1):
             stats.fold_record(
                 s,
@@ -172,7 +166,7 @@ class TestRows:
         ]
         rows = {r["ref"]: r for r in telemetry_rows(s, audit, "chat", "short_chat")}
         assert rows["P:good"]["on_frontier"] is True
-        assert rows["P:bad"]["on_frontier"] is False  # dominated on all three axes
+        assert rows["P:bad"]["on_frontier"] is False
 
     def test_empty_bucket_is_empty_rows(self):
         assert telemetry_rows({"use_cases": {}}, [], "nope", "nope") == []
@@ -180,7 +174,7 @@ class TestRows:
 
 @pytest.fixture(autouse=True)
 def _home(tmp_path, monkeypatch):
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     return tmp_path
 
 
@@ -198,13 +192,14 @@ class TestRoute:
         c = await _client()
         try:
             assert (await c.get("/api/models/telemetry")).status == 400
-            assert (await c.get("/api/models/telemetry?use_case=reasoning")).status == 400
+            assert (
+                await c.get("/api/models/telemetry?use_case=reasoning")
+            ).status == 400
         finally:
             await c.close()
 
     @pytest.mark.asyncio
     async def test_returns_rows_for_a_bucket(self, _home, monkeypatch):
-        # Seed the fold on disk so the route reads it.
         s = {"use_cases": {}}
         stats.fold_record(
             s,
@@ -222,10 +217,14 @@ class TestRoute:
         stats.save_stats(_home, s)
         c = await _client()
         try:
-            resp = await c.get("/api/models/telemetry?use_case=reasoning&query_class=summarize")
+            resp = await c.get(
+                "/api/models/telemetry?use_case=reasoning&query_class=summarize"
+            )
             assert resp.status == 200
             body = await resp.json()
-            assert body["use_case"] == "reasoning" and body["query_class"] == "summarize"
+            assert (
+                body["use_case"] == "reasoning" and body["query_class"] == "summarize"
+            )
             assert body["rows"][0]["ref"] == "ollama-models:qwen3:8b"
             assert body["rows"][0]["on_frontier"] is True
         finally:
@@ -235,21 +234,16 @@ class TestRoute:
     async def test_empty_bucket_is_200_empty(self, _home):
         c = await _client()
         try:
-            body = await (await c.get("/api/models/telemetry?use_case=x&query_class=y")).json()
+            body = await (
+                await c.get("/api/models/telemetry?use_case=x&query_class=y")
+            ).json()
             assert body["rows"] == []
         finally:
             await c.close()
 
 
-# ── the write path: PUT /api/models/routing-policy, ``order`` lever (§6.2) ───────
-
-#: The use case / class every write rail below addresses. One cell, so "the order changed" is a
-#: statement about a specific cell rather than about the file as a whole.
 _UC = "reasoning"
 _QC = "summarize"
-#: What the fixture puts on disk before each rail runs. Every rail's assertion is stated against
-#: this, which is what keeps "the order is what I sent" and "the bytes did not move" from both
-#: being satisfiable by a file that was never written at all.
 _SEEDED = ["seed:a", "seed:b"]
 
 
@@ -259,8 +253,8 @@ def policy_home(tmp_path, monkeypatch):
 
     The handler calls ``set_order(use_case, query_class, order)`` with no ``home=``, so the write
     lands wherever :func:`policy._default_home` resolves — and that does
-    ``from gideon.config import config_dir``, a binding ``gideon/config/__init__.py``
-    made at import time. Patching ``gideon.config.loader.config_dir`` (which is all the
+    ``from gideon.core.config import config_dir``, a binding ``gideon/config/__init__.py``
+    made at import time. Patching ``gideon.core.config.loader.config_dir`` (which is all the
     module-level ``_home`` fixture above does) therefore does NOT reach it, so a rail built on that
     fixture alone would drive a real write into ``~/.gideon``. Both bindings are patched here
     and the redirect is ASSERTED rather than assumed.
@@ -269,16 +263,20 @@ def policy_home(tmp_path, monkeypatch):
     before-state that differs from what it sends, and it makes every byte-identity assertion a
     comparison of a real file's bytes rather than the trivially-true ``absent == absent``.
     """
-    import gideon.config as config_pkg
-    import gideon.config.loader as config_loader
-    from gideon.routing import policy
+    import gideon.core.config as config_pkg
+    import gideon.core.config.loader as config_loader
+    from gideon.engine.routing import policy
 
     monkeypatch.setattr(config_pkg, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(config_loader, "config_dir", lambda: tmp_path)
-    assert policy._default_home() == tmp_path, "the fixture did not redirect the home it meant to"
+    assert (
+        policy._default_home() == tmp_path
+    ), "the fixture did not redirect the home it meant to"
 
     policy.set_order(_UC, _QC, _SEEDED, home=tmp_path)
-    assert (tmp_path / "routing_policy.json").exists(), "the seed did not write the table"
+    assert (
+        tmp_path / "routing_policy.json"
+    ).exists(), "the seed did not write the table"
     assert _stored_order(tmp_path, _UC, _QC) == _SEEDED
     return tmp_path
 
@@ -334,7 +332,9 @@ class TestRoutingPolicyWrite:
     async def test_an_accepted_order_is_persisted(self, policy_home):
         """A 200 that claims ``applied: ["order"]`` must be backed by a changed table on disk."""
         sent = ["anthropic:claude", "ollama-models:qwen3:8b"]
-        assert sent != _SEEDED, "vacuity floor: the sent order must differ from the seeded one"
+        assert (
+            sent != _SEEDED
+        ), "vacuity floor: the sent order must differ from the seeded one"
 
         status, body = await _put({"use_case": _UC, "query_class": _QC, "order": sent})
 
@@ -343,7 +343,9 @@ class TestRoutingPolicyWrite:
         assert _stored_order(policy_home, _UC, _QC) == sent
 
     @pytest.mark.asyncio
-    async def test_the_persisted_order_keeps_the_ref_order_it_was_sent(self, policy_home):
+    async def test_the_persisted_order_keeps_the_ref_order_it_was_sent(
+        self, policy_home
+    ):
         """Sending the same refs in the reverse order must persist the REVERSE order.
 
         A write that stored the refs as a set, or sorted them, would satisfy "the same refs came
@@ -355,31 +357,50 @@ class TestRoutingPolicyWrite:
         assert status == 200
         assert _stored_order(policy_home, _UC, _QC) == first
 
-        status, _ = await _put({"use_case": _UC, "query_class": _QC, "order": first[::-1]})
+        status, _ = await _put(
+            {"use_case": _UC, "query_class": _QC, "order": first[::-1]}
+        )
         assert status == 200
         assert _stored_order(policy_home, _UC, _QC) == first[::-1]
 
     @pytest.mark.asyncio
-    async def test_the_write_is_scoped_to_the_query_class_it_was_sent(self, policy_home):
+    async def test_the_write_is_scoped_to_the_query_class_it_was_sent(
+        self, policy_home
+    ):
         """``set_order``'s signature is ``(use_case, query_class, order)`` — a write that ignored
         the class would look identical on the cell being read back, so the OTHER class is asserted
         untouched too."""
-        await _put({"use_case": _UC, "query_class": "long_reasoning", "order": ["p:other"]})
+        await _put(
+            {"use_case": _UC, "query_class": "long_reasoning", "order": ["p:other"]}
+        )
         assert _stored_order(policy_home, _UC, "long_reasoning") == ["p:other"]
-        assert _stored_order(policy_home, _UC, _QC) == _SEEDED, "the write leaked across classes"
+        assert (
+            _stored_order(policy_home, _UC, _QC) == _SEEDED
+        ), "the write leaked across classes"
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "body,why",
         [
             ({"use_case": _UC, "order": ["p:one"]}, "order with no query_class"),
-            ({"use_case": _UC, "query_class": _QC, "order": "p:one"}, "order is not a list"),
-            ({"use_case": _UC, "query_class": _QC, "order": ["p:one", 7]}, "a non-string ref"),
-            ({"use_case": "nope", "query_class": _QC, "order": ["p:one"]}, "unknown use_case"),
+            (
+                {"use_case": _UC, "query_class": _QC, "order": "p:one"},
+                "order is not a list",
+            ),
+            (
+                {"use_case": _UC, "query_class": _QC, "order": ["p:one", 7]},
+                "a non-string ref",
+            ),
+            (
+                {"use_case": "nope", "query_class": _QC, "order": ["p:one"]},
+                "unknown use_case",
+            ),
             ({"use_case": _UC, "query_class": _QC}, "nothing to change"),
         ],
     )
-    async def test_a_rejected_write_leaves_the_table_byte_identical(self, policy_home, body, why):
+    async def test_a_rejected_write_leaves_the_table_byte_identical(
+        self, policy_home, body, why
+    ):
         """The other half, and the easy one to forget: a 400 must persist NOTHING.
 
         A handler that wrote first and validated afterwards would pass the accepted-order rail and
@@ -396,7 +417,9 @@ class TestRoutingPolicyWrite:
 
         assert status == 400, why
         assert payload["error"]["code"] == "bad_request"
-        assert _policy_bytes(policy_home) == before, f"a rejected write ({why}) moved the table"
+        assert (
+            _policy_bytes(policy_home) == before
+        ), f"a rejected write ({why}) moved the table"
 
     @pytest.mark.asyncio
     async def test_the_byte_harness_can_see_an_accepted_write(self, policy_home):
@@ -408,18 +431,14 @@ class TestRoutingPolicyWrite:
         same helper and prove the bytes move.
         """
         before = _policy_bytes(policy_home)
-        status, _ = await _put({"use_case": _UC, "query_class": _QC, "order": ["p:moved"]})
+        status, _ = await _put(
+            {"use_case": _UC, "query_class": _QC, "order": ["p:moved"]}
+        )
         assert status == 200
         assert _policy_bytes(policy_home) != before
 
 
-# ── the write path: PUT /api/models/routing-policy, ``mode`` + ``pin`` levers (§6.2) ──
-
-#: The pin the fixture seeds. A provider:model shape, so a rail that reads it back is reading
-#: something a real client would have sent.
 _SEEDED_PIN = "seedprov:seedmodel"
-#: What the fixture seeds for the mode lever. Deliberately NOT what any rail below writes, so
-#: "the mode on disk is the one I sent" cannot be satisfied by the seed standing still.
 _SEEDED_MODE = "heuristic"
 
 
@@ -465,16 +484,19 @@ def lever_home(policy_home):
     Seeding both levers first is load-bearing: it gives every byte-identity assertion a real file
     to compare against instead of the trivially-true ``absent == absent``.
     """
-    from gideon.providers import use_cases as use_cases_mod
-    from gideon.routing import policy
+    from gideon.engine.routing import policy
+    from gideon.extensions.providers import use_cases as use_cases_mod
 
     assert (
-        use_cases_mod._settings_dir() == policy_home / "extensions" / "use_case_settings"
+        use_cases_mod._settings_dir()
+        == policy_home / "extensions" / "use_case_settings"
     ), "the fixture did not redirect the mode/pin store"
 
     policy.set_mode(_UC, _SEEDED_MODE)
     policy.set_pin(_UC, _SEEDED_PIN)
-    assert _settings_path(policy_home).is_file(), "the seed did not write the settings file"
+    assert _settings_path(
+        policy_home
+    ).is_file(), "the seed did not write the settings file"
     assert _stored_setting(policy_home, policy.MODE_KEY) == _SEEDED_MODE
     assert _stored_setting(policy_home, policy.PIN_KEY) == _SEEDED_PIN
     return policy_home
@@ -484,7 +506,7 @@ class TestRoutingPolicyModeAndPinWrite:
     """``policy::set_mode`` and ``policy::set_pin`` were reachable from this route and railed by
     nothing at all.
 
-    Measured on this branch's base: ``git grep -l routing-policy -- tests/`` returned exactly one
+    Measured on this branch's base: ``git grep -l routing-policy -- checks/runtime/`` returned exactly one
     file, whose only write section is headed *"the ``order`` lever"*. With the ``set_mode`` call at
     ``model_telemetry.py:119`` deleted the suite stayed green; same for ``set_pin`` at ``:122``.
 
@@ -499,21 +521,19 @@ class TestRoutingPolicyModeAndPinWrite:
     @pytest.mark.asyncio
     async def test_an_accepted_mode_is_persisted(self, lever_home):
         """A 200 claiming ``applied: ["mode"]`` must be backed by a changed file on disk."""
-        from gideon.routing import policy
+        from gideon.engine.routing import policy
 
         status, payload = await _put({"use_case": _UC, "mode": "learned"})
 
         assert status == 200
         assert payload["applied"] == ["mode"]
         assert _stored_setting(lever_home, policy.MODE_KEY) == "learned"
-        # The store is a read-modify-write of one dict; a write that replaced it would silently
-        # drop the sibling lever, which no response body would ever show.
         assert _stored_setting(lever_home, policy.PIN_KEY) == _SEEDED_PIN
 
     @pytest.mark.asyncio
     async def test_an_accepted_pin_is_persisted(self, lever_home):
         """Same contract for lever 2, including that it leaves the mode alone."""
-        from gideon.routing import policy
+        from gideon.engine.routing import policy
 
         status, payload = await _put({"use_case": _UC, "pin": "other:model"})
 
@@ -527,7 +547,7 @@ class TestRoutingPolicyModeAndPinWrite:
         """``pin: ""`` is the documented CLEAR, and it must remove the key rather than store an
         empty string — ``pin_for`` treats both as "no pin", so only the file shows the difference,
         and a stored ``""`` would make the table claim a pin it does not have."""
-        from gideon.routing import policy
+        from gideon.engine.routing import policy
 
         status, payload = await _put({"use_case": _UC, "pin": ""})
 
@@ -543,8 +563,6 @@ class TestRoutingPolicyModeAndPinWrite:
             ({"use_case": _UC, "mode": "nope"}, "unknown mode"),
             ({"use_case": "nope", "mode": "off"}, "unknown use_case"),
             ({"use_case": _UC}, "nothing to change"),
-            # The two regressions. Each carries a VALID lever alongside an invalid one, which is
-            # what a partial write needs to happen at all.
             (
                 {"use_case": _UC, "mode": "learned", "order": "notalist"},
                 "a valid mode beside a malformed order",
@@ -555,7 +573,9 @@ class TestRoutingPolicyModeAndPinWrite:
             ),
         ],
     )
-    async def test_a_rejected_write_leaves_both_stores_byte_identical(self, lever_home, body, why):
+    async def test_a_rejected_write_leaves_both_stores_byte_identical(
+        self, lever_home, body, why
+    ):
         """A 400 must persist NOTHING — in EITHER store.
 
         Byte identity rather than "the value I read back is still the old one", so a rewrite that
@@ -598,7 +618,8 @@ class TestRoutingPolicyModeAndPinWrite:
 class _CapturedSel:
     """A stand-in for the SEL singleton. The real one is a ``__new__``-based singleton whose
     ``__init__`` no-ops after first construction, so patching the accessor
-    ``policy._sel_policy_change`` reaches for is the only capture guaranteed to see the row."""
+    ``policy._sel_policy_change`` reaches for is the only capture guaranteed to see the row.
+    """
 
     def __init__(self):
         self.rows: list[dict] = []
@@ -610,7 +631,7 @@ class _CapturedSel:
 @pytest.fixture()
 def sel_rows(monkeypatch):
     cap = _CapturedSel()
-    import gideon.sel as sel_mod
+    import gideon.security.sel as sel_mod
 
     monkeypatch.setattr(sel_mod, "sel", lambda: cap)
     return cap.rows
@@ -633,12 +654,7 @@ class TestRoutingPolicyChangeIsAudited:
         [
             ("mode", {"use_case": _UC, "mode": "learned"}, "learned"),
             ("pin", {"use_case": _UC, "pin": "other:model"}, "other:model"),
-            # The documented CLEAR is audited as a change too — "the pin was removed" is exactly
-            # the event an auditor needs, and an empty value would read as no event at all.
             ("pin", {"use_case": _UC, "pin": ""}, "(cleared)"),
-            # Lever 3's row, so all three of ``_sel_policy_change``'s call sites are observed
-            # rather than two of three. It names the class as well, because an order is recorded
-            # per class and a row without one does not identify what moved.
             (
                 "order",
                 {"use_case": _UC, "query_class": _QC, "order": ["p:one", "p:two"]},
@@ -662,7 +678,9 @@ class TestRoutingPolicyChangeIsAudited:
         assert status == 200
 
         rows = [r for r in sel_rows if r.get("operation") == operation]
-        assert len(rows) == len(before) + 1, f"expected exactly one new {operation} row, got {rows}"
+        assert (
+            len(rows) == len(before) + 1
+        ), f"expected exactly one new {operation} row, got {rows}"
         assert rows[-1]["resources"] == f"{_UC}:{expected_value}"
         assert rows[-1]["source"] == "routing_policy"
         assert rows[-1]["outcome"] == "success"

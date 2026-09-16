@@ -1,0 +1,20 @@
+{
+  "name": "gideon-project-tools",
+  "version": "1.0.0",
+  "displayName": "Projects Tools",
+  "description": "Operate autonomous project runs \u2014 create/start/list and read live progress of code (SDLC), goal, research, design, and general runs. Loops are the project feature's autonomous execution kinds.",
+  "icon": "FolderKanban",
+  "author": "Gideon",
+  "tags": [
+    "tool",
+    "bundled"
+  ],
+  "provider": {
+    "type": "tool",
+    "implementation": "gideon.engine.agents.native.builtin_tools:create_project_tools_provider",
+    "capabilities": [
+      "projects"
+    ]
+  },
+  "native": true
+}

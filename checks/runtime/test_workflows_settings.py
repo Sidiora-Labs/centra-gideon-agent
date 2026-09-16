@@ -24,9 +24,9 @@ from pathlib import Path
 
 import pytest
 
-from gideon.config.loader import AppConfig, WorkflowsConfig
-from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
-from gideon.workflows import settings as wf_settings
+from gideon.automation.workflows import settings as wf_settings
+from gideon.core.config.loader import AppConfig, WorkflowsConfig
+from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
 FIELDS = (
     "surface_mode_default",
@@ -41,14 +41,13 @@ def _load(workflows: dict) -> AppConfig:
         json.dump({"workflows": workflows}, handle)
         tmp = Path(handle.name)
     try:
-        with unittest.mock.patch("gideon.config.loader.config_path", return_value=tmp):
+        with unittest.mock.patch(
+            "gideon.core.config.loader.config_path", return_value=tmp
+        ):
             return AppConfig.load()
     finally:
         tmp.unlink(missing_ok=True)
         tmp.with_suffix(".json.bak").unlink(missing_ok=True)
-
-
-# ── point (a): the dataclass, with meta ──
 
 
 @pytest.mark.parametrize("name", FIELDS)
@@ -79,12 +78,7 @@ def test_match_threshold_is_config_editable_and_clamped():
     to_dict (asdict), and the PATCH allowlist."""
     assert "workflows.match_threshold" in _EDITABLE_CONFIG
     assert _load({"match_threshold": 0.4}).workflows.match_threshold == 0.4
-    # Out of range is clamped, not stored raw — a stored value the runtime silently narrows reads
-    # back wrong.
     assert _load({"match_threshold": 5.0}).workflows.match_threshold == 1.0
-
-
-# ── point (b): load() maps it ──
 
 
 def test_a_configured_value_SURVIVES_load():
@@ -100,13 +94,18 @@ def test_the_new_def_default_is_OFF():
 
 
 def test_surface_mode_default_is_case_insensitive():
-    assert _load({"surface_mode_default": "SUGGEST"}).workflows.surface_mode_default == "suggest"
+    assert (
+        _load({"surface_mode_default": "SUGGEST"}).workflows.surface_mode_default
+        == "suggest"
+    )
 
 
 def test_an_UNKNOWN_surface_mode_reads_as_off():
     """One tolerance rule, shared with `DefMetadata.from_dict`: a typo must not silently start
     surfacing every newly authored def, which is the direction that spends tokens."""
-    assert _load({"surface_mode_default": "vibes"}).workflows.surface_mode_default == "off"
+    assert (
+        _load({"surface_mode_default": "vibes"}).workflows.surface_mode_default == "off"
+    )
 
 
 def test_a_NON_NUMERIC_int_falls_back_to_the_default():
@@ -120,16 +119,10 @@ def test_the_approval_lifetime_defaults_to_a_WEEK():
     assert _load({}).workflows.confirmation_ttl_secs == 7 * 24 * 3600
 
 
-# ── point (c): to_dict ──
-
-
 @pytest.mark.parametrize("name", FIELDS)
 def test_the_field_ROUND_TRIPS_through_to_dict(name):
     """A field that serializes to nothing cannot survive a save."""
     assert name in _load({}).to_dict()["workflows"]
-
-
-# ── point (d): the PATCH allowlist ──
 
 
 @pytest.mark.parametrize("name", FIELDS)
@@ -148,14 +141,15 @@ def test_the_surfacing_default_is_an_ENUM_not_free_text():
 
 def test_the_lease_bound_matches_the_RECORD_s_ceiling():
     """Accepting a larger number would store a week-long lease the runtime silently shortens."""
-    from gideon.workflows.pool import MAX_LEASE_SECS
+    from gideon.automation.workflows.pool import MAX_LEASE_SECS
 
     assert _EDITABLE_CONFIG["workflows.lease_ttl_secs"]["max"] == MAX_LEASE_SECS
 
 
 def test_the_approval_lifetime_allows_ZERO():
     """`ttl: 0` means "wait for me" — `ConfirmationRequest.expires_at` reads `<= 0` as no expiry, so
-    refusing 0 here would make an intent the record supports unreachable through the API."""
+    refusing 0 here would make an intent the record supports unreachable through the API.
+    """
     assert _EDITABLE_CONFIG["workflows.confirmation_ttl_secs"]["min"] == 0
 
 
@@ -165,29 +159,29 @@ def test_the_fanout_cap_cannot_be_set_to_ZERO():
     assert _EDITABLE_CONFIG["workflows.max_materialized_per_foreach"]["min"] >= 1
 
 
-# ── the fifth point: the knobs are actually READ ──
-
-
 @pytest.fixture
 def _home(tmp_path, monkeypatch):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.workflows import store as wstore
+    from gideon.automation.workflows import store as wstore
 
     monkeypatch.setattr(wstore, "config_dir", lambda: tmp_path)
     return tmp_path
 
 
 def _write_config(home: Path, workflows: dict) -> None:
-    (home / "config.json").write_text(json.dumps({"workflows": workflows}), encoding="utf-8")
+    (home / "config.json").write_text(
+        json.dumps({"workflows": workflows}), encoding="utf-8"
+    )
 
 
 def test_the_fanout_cap_is_HONOURED_by_materialization(_home):
     """The whole point. Before this, the config was storable and the runtime used 20."""
-    from gideon.workflows import materialize
+    from gideon.automation.workflows import materialize
 
     _write_config(_home, {"max_materialized_per_foreach": 3})
     nodes = [
-        {"id": f"n{i}", "kind": "action", "config": {}, "path": f"root.body[{i}]"} for i in range(6)
+        {"id": f"n{i}", "kind": "action", "config": {}, "path": f"root.body[{i}]"}
+        for i in range(6)
     ]
     plan = materialize.plan_materialization("r-1", nodes)
     assert len(plan.create) == 3
@@ -196,14 +190,14 @@ def test_the_fanout_cap_is_HONOURED_by_materialization(_home):
 
 
 def test_the_approval_lifetime_is_HONOURED_by_build_request(_home):
-    from gideon.workflows.confirmation import build_request
+    from gideon.automation.workflows.confirmation import build_request
 
     _write_config(_home, {"confirmation_ttl_secs": 60})
     assert build_request(run_id="r", gate_id="g", now=1000.0).ttl_seconds == 60
 
 
 def test_the_lease_lifetime_is_HONOURED_by_claim_task(_home):
-    from gideon.workflows import pool
+    from gideon.automation.workflows import pool
 
     _write_config(_home, {"lease_ttl_secs": 45})
     lease, error = pool.claim_task("t-1", holder="a", now=1000.0)
@@ -213,23 +207,25 @@ def test_the_lease_lifetime_is_HONOURED_by_claim_task(_home):
 
 def test_an_EXPLICIT_argument_still_wins_over_config(_home):
     """The config is the DEFAULT, not an override. A caller that names a ttl means it — a template
-    declaring its own gate lifetime must not be silently rewritten by a global preference."""
-    from gideon.workflows.confirmation import build_request
+    declaring its own gate lifetime must not be silently rewritten by a global preference.
+    """
+    from gideon.automation.workflows.confirmation import build_request
 
     _write_config(_home, {"confirmation_ttl_secs": 60})
-    assert build_request(run_id="r", gate_id="g", now=0.0, ttl_seconds=999).ttl_seconds == 999
-
-
-# ── the resolvers degrade safely ──
+    assert (
+        build_request(run_id="r", gate_id="g", now=0.0, ttl_seconds=999).ttl_seconds
+        == 999
+    )
 
 
 def test_an_UNREADABLE_config_falls_back_to_the_shipped_constants(_home):
     """A malformed `config.json` must not stop a run from materializing its tasks. Each getter
-    degrades to the module constant, which is the value that shipped and is known good."""
+    degrades to the module constant, which is the value that shipped and is known good.
+    """
     (_home / "config.json").write_text("{not json", encoding="utf-8")
-    from gideon.workflows.confirmation import DEFAULT_TTL_SECS
-    from gideon.workflows.materialize import FANOUT_TASK_CAP
-    from gideon.workflows.pool import DEFAULT_LEASE_SECS
+    from gideon.automation.workflows.confirmation import DEFAULT_TTL_SECS
+    from gideon.automation.workflows.materialize import FANOUT_TASK_CAP
+    from gideon.automation.workflows.pool import DEFAULT_LEASE_SECS
 
     assert wf_settings.fanout_task_cap() == FANOUT_TASK_CAP
     assert wf_settings.confirmation_ttl_secs() == DEFAULT_TTL_SECS
@@ -239,7 +235,7 @@ def test_an_UNREADABLE_config_falls_back_to_the_shipped_constants(_home):
 
 def test_an_over_ceiling_lease_is_CLAMPED_not_returned_raw(_home):
     """A getter returning 86400 while the lease expires in 3600 is a lie a debugger would chase."""
-    from gideon.workflows.pool import MAX_LEASE_SECS
+    from gideon.automation.workflows.pool import MAX_LEASE_SECS
 
     _write_config(_home, {"lease_ttl_secs": 999_999})
     assert wf_settings.lease_ttl_secs() == MAX_LEASE_SECS
@@ -247,7 +243,7 @@ def test_an_over_ceiling_lease_is_CLAMPED_not_returned_raw(_home):
 
 def test_a_zero_or_negative_fanout_cap_falls_back(_home):
     _write_config(_home, {"max_materialized_per_foreach": 0})
-    from gideon.workflows.materialize import FANOUT_TASK_CAP
+    from gideon.automation.workflows.materialize import FANOUT_TASK_CAP
 
     assert wf_settings.fanout_task_cap() == FANOUT_TASK_CAP
 
@@ -269,16 +265,13 @@ def test_the_resolvers_are_NOT_cached(_home):
     assert wf_settings.lease_ttl_secs() == 120
 
 
-# ── the call sites go through the resolver, not the constant ──
-
-
 def test_materialization_resolves_the_cap_from_SETTINGS():
     """Structural: a call site that reads `FANOUT_TASK_CAP` directly is the drift `settings` exists
     to prevent, and a behavioural test alone would pass again the next time someone "simplified" it
     back to the constant."""
     import inspect
 
-    from gideon.workflows import materialize
+    from gideon.automation.workflows import materialize
 
     source = inspect.getsource(materialize.plan_materialization)
     assert "fanout_task_cap" in source
@@ -287,7 +280,7 @@ def test_materialization_resolves_the_cap_from_SETTINGS():
 def test_build_request_resolves_the_ttl_from_SETTINGS():
     import inspect
 
-    from gideon.workflows import confirmation
+    from gideon.automation.workflows import confirmation
 
     assert "confirmation_ttl_secs" in inspect.getsource(confirmation.build_request)
 
@@ -295,6 +288,6 @@ def test_build_request_resolves_the_ttl_from_SETTINGS():
 def test_claim_task_resolves_the_ttl_from_SETTINGS():
     import inspect
 
-    from gideon.workflows import pool
+    from gideon.automation.workflows import pool
 
     assert "lease_ttl_secs" in inspect.getsource(pool.claim_task)

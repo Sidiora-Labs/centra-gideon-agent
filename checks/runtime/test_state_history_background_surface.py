@@ -26,21 +26,18 @@ from pathlib import Path
 import pytest
 
 import gideon
-from gideon.durability import state_history as sh
+from gideon.operations.durability import state_history as sh
 
 SRC = Path(gideon.__file__).resolve().parent
 
-#: The producer that already existed. It is the census's vacuity floor: if the walker stops
-#: matching calls (a rename, an alias, a bad AST assumption) this row disappears too, so a census
-#: that has quietly stopped seeing anything fails here instead of reading clean.
-KNOWN_SCHEDULED_PRODUCER = "durability/state_history.py"
+KNOWN_SCHEDULED_PRODUCER = "operations/durability/state_history.py"
 
 #: The producer this atom adds.
-EXPECTED_BACKGROUND_PRODUCER = "gateway.py"
+EXPECTED_BACKGROUND_PRODUCER = "engine/gateway.py"
 
 
 def _writing_surface_calls() -> dict[str, set[str]]:
-    """Map ``<path relative to src/gideon>`` -> surface constants passed to a CALL of
+    """Map ``<path relative to runtime/gideon>`` -> surface constants passed to a CALL of
     ``writing_surface(...)``.
 
     Deliberately an AST walk over calls, not a text scan for the constant's name. A file that only
@@ -62,12 +59,11 @@ def _writing_surface_calls() -> dict[str, set[str]]:
             if called != "writing_surface":
                 continue
             arg = node.args[0]
-            surface = arg.attr if isinstance(arg, ast.Attribute) else getattr(arg, "id", "")
+            surface = (
+                arg.attr if isinstance(arg, ast.Attribute) else getattr(arg, "id", "")
+            )
             found.setdefault(str(path.relative_to(SRC)), set()).add(surface)
     return found
-
-
-# ── the census ─────────────────────────────────────────────────────────────
 
 
 def test_the_census_still_sees_the_KNOWN_producer():
@@ -112,7 +108,7 @@ def test_the_producer_is_APPLIED_to_the_unattended_dispatch():
     decorated function too — the same "assert the call SITE, not the mechanism" reason the census
     exists at all.
     """
-    tree = ast.parse((SRC / "gateway.py").read_text(encoding="utf-8"))
+    tree = ast.parse((SRC / "engine/gateway.py").read_text(encoding="utf-8"))
     dispatches = [
         node
         for node in ast.walk(tree)
@@ -139,27 +135,26 @@ def test_a_MENTION_of_the_constant_does_not_count_as_a_producer():
     coalesced burst contains one) and `gateway`'s wrap carries it in prose. Neither of those is a
     writer; a text scan would have scored both.
     """
-    debounce = SRC / "durability" / "history_debounce.py"
+    debounce = SRC / "operations" / "durability" / "history_debounce.py"
     text = debounce.read_text(encoding="utf-8")
     assert (
         "SURFACE_BACKGROUND" in text
     ), "this discriminator is vacuous unless the file really does mention the constant"
     calls = _writing_surface_calls()
     assert "SURFACE_BACKGROUND" not in calls.get(
-        "durability/history_debounce.py", set()
+        "operations/durability/history_debounce.py", set()
     ), "a READ of the constant was scored as a producer"
 
-    gateway_text = (SRC / "gateway.py").read_text(encoding="utf-8")
+    gateway_text = (SRC / "engine/gateway.py").read_text(encoding="utf-8")
     prose = [
         line
         for line in gateway_text.splitlines()
         if "SURFACE_BACKGROUND" in line and line.lstrip().startswith("#")
     ]
     for line in prose:
-        assert "writing_surface(" not in line, f"a commented-out call would score: {line!r}"
-
-
-# ── the behaviour ──────────────────────────────────────────────────────────
+        assert (
+            "writing_surface(" not in line
+        ), f"a commented-out call would score: {line!r}"
 
 
 class _SurfaceProbe:
@@ -172,7 +167,7 @@ class _SurfaceProbe:
     async def execute(self, config, ctx, timeout=30):  # noqa: ANN001, ARG002
         self.seen.append(sh.current_surface())
         if self._write_to is not None:
-            from gideon.atomic_write import atomic_write
+            from gideon.core.atomic_write import atomic_write
 
             atomic_write(self._write_to, "fired")
         return types.SimpleNamespace(success=True)
@@ -192,7 +187,7 @@ def isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(home))
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: home)
     return home
 
 
@@ -202,35 +197,48 @@ def probe(monkeypatch, isolated_home):
     dispatch seams use."""
     p = _SurfaceProbe(write_to=isolated_home / "probe.json")
     monkeypatch.setattr(
-        "gideon.action_providers.get_action_provider", lambda name: p, raising=True
+        "gideon.integrations.action_providers.get_action_provider",
+        lambda name: p,
+        raising=True,
     )
     monkeypatch.setattr(
-        "gideon.action_providers.registry.get_action_provider", lambda name: p, raising=False
+        "gideon.integrations.action_providers.registry.get_action_provider",
+        lambda name: p,
+        raising=False,
     )
     return p
 
 
 def _orch():
-    from gideon.gateway import GatewayOrchestrator
+    from gideon.engine.gateway import RuntimeCoordinator
 
-    return object.__new__(GatewayOrchestrator)
+    return object.__new__(RuntimeCoordinator)
 
 
 def test_an_UNATTENDED_trigger_dispatch_runs_on_the_background_surface(probe):
     """🔴 The producer, driven. The dispatch every clock / file / webhook / chained fire passes
     through must put its writes on the surface the "while I slept" filter reads."""
-    asyncio.run(_orch()._fire_store_trigger(_trigger(), {"trigger_id": "clock:surface"}))
+    asyncio.run(
+        _orch()._fire_store_trigger(_trigger(), {"trigger_id": "clock:surface"})
+    )
     assert probe.seen == [
         sh.SURFACE_BACKGROUND
     ], f"the unattended dispatch ran on {probe.seen!r}, not the background surface"
-    assert sh.is_unattended_surface(probe.seen[0]), "the filter must count this as 'while I slept'"
+    assert sh.is_unattended_surface(
+        probe.seen[0]
+    ), "the filter must count this as 'while I slept'"
 
 
-def test_the_wrap_reaches_the_ATOMIC_WRITE_seam_the_debouncer_reads(probe, isolated_home):
+def test_the_wrap_reaches_the_ATOMIC_WRITE_seam_the_debouncer_reads(
+    probe, isolated_home
+):
     """Scope, not intent. The surface is read by the post-write hook in the WRITER's context
     (`history_debounce.notify` calls `current_surface()`), so a wrap that did not survive to the
     `atomic_write` seam would leave the commit unlabelled anyway."""
-    from gideon.atomic_write import register_post_write_hook, unregister_post_write_hook
+    from gideon.core.atomic_write import (
+        register_post_write_hook,
+        unregister_post_write_hook,
+    )
 
     at_write: list[str] = []
 
@@ -239,7 +247,9 @@ def test_the_wrap_reaches_the_ATOMIC_WRITE_seam_the_debouncer_reads(probe, isola
 
     register_post_write_hook(_hook)
     try:
-        asyncio.run(_orch()._fire_store_trigger(_trigger(), {"trigger_id": "clock:surface"}))
+        asyncio.run(
+            _orch()._fire_store_trigger(_trigger(), {"trigger_id": "clock:surface"})
+        )
     finally:
         unregister_post_write_hook(_hook)
 
@@ -277,9 +287,11 @@ def test_the_ATTENDED_dispatch_is_NOT_background(probe):
     human-watched path. Labelling it `background` would put the user's own click into "what changed
     while I slept" — so the default `interactive` surface must survive here.
     """
-    from gideon.dashboard.handlers.triggers import _dispatch_store_action
+    from gideon.interfaces.dashboard.handlers.triggers import _dispatch_store_action
 
-    ran, note = asyncio.run(_dispatch_store_action(_trigger(), {"trigger_id": "clock:surface"}))
+    ran, note = asyncio.run(
+        _dispatch_store_action(_trigger(), {"trigger_id": "clock:surface"})
+    )
     assert ran, f"the attended path did not dispatch, so nothing was measured: {note}"
     assert probe.seen == [
         sh.SURFACE_INTERACTIVE

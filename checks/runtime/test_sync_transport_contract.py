@@ -1,7 +1,7 @@
 """DAS-6a — the sync-transport contract (DURABILITY-AND-SYNC §4.3).
 
 The contract-owner slice re-scoped out of DAS-6: the ``SyncTransportProvider`` ABC
-+ its data types, the flat ``sync_transports`` registry, the ``sdk/sync`` re-export,
++ its data types, the flat ``sync_transports`` registry, the ``packages/python-client/sync`` re-export,
 and the ``sync`` provider type with a real ``SyncTypeHandler`` (the #47 rule — a
 manifest type and its live handler land together). The sync CYCLE that consumes
 this (pull→merge→push, CAS registry, outbox) is a later DAS-6 sub-atom.
@@ -9,14 +9,14 @@ this (pull→merge→push, CAS registry, outbox) is a later DAS-6 sub-atom.
 
 from __future__ import annotations
 
-from gideon.providers.registry import SyncTypeHandler, get_provider_registry
-from gideon.sync_transports import (
+from gideon.extensions.providers.registry import SyncTypeHandler, get_provider_registry
+from gideon.integrations.sync_transports import (
     get_transport,
     list_transports,
     register_transport,
     unregister_transport,
 )
-from gideon.sync_transports.base import (
+from gideon.integrations.sync_transports.base import (
     ConnectionResult,
     PushResult,
     RemoteRef,
@@ -37,7 +37,7 @@ class _FixtureTransport(SyncTransportProvider):
     def push(self, objects: list[SyncObject]) -> PushResult:
         pushed = skipped = 0
         for o in objects:
-            if o.key in self._store:  # insert-only, idempotent on key
+            if o.key in self._store:
                 skipped += 1
             else:
                 self._store[o.key] = o.data
@@ -46,12 +46,16 @@ class _FixtureTransport(SyncTransportProvider):
 
     def list_remote(self, prefix: str = "") -> list[RemoteRef]:
         return [
-            RemoteRef(key=k, size=len(v)) for k, v in self._store.items() if k.startswith(prefix)
+            RemoteRef(key=k, size=len(v))
+            for k, v in self._store.items()
+            if k.startswith(prefix)
         ]
 
     def pull(self, refs: list[RemoteRef]) -> list[SyncObject]:
         return [
-            SyncObject(key=r.key, data=self._store[r.key]) for r in refs if r.key in self._store
+            SyncObject(key=r.key, data=self._store[r.key])
+            for r in refs
+            if r.key in self._store
         ]
 
     def cas_registry(self, expected_sha: str | None, data: bytes) -> bool:
@@ -69,7 +73,7 @@ def test_sync_type_is_registered_handler():
 
 
 def test_sync_type_in_provider_types():
-    from gideon.apps.manifest import PROVIDER_TYPES
+    from gideon.extensions.apps.manifest import PROVIDER_TYPES
 
     assert "sync" in PROVIDER_TYPES
 
@@ -81,7 +85,7 @@ def test_handler_registers_and_deregisters_transport():
     handler = SyncTypeHandler()
     inst = _FixtureTransport()
     try:
-        handler.register(None, inst)  # ext unused by register()
+        handler.register(None, inst)
         assert get_transport("fixture-sync") is inst
         assert "fixture-sync" in list_transports()
 
@@ -93,7 +97,7 @@ def test_handler_registers_and_deregisters_transport():
 
 
 def test_contract_reexported_via_sdk():
-    """An app implements the transport by importing from sdk/sync, not core."""
+    """An app implements the transport by importing from packages/python-client/sync, not core."""
     from gideon.sdk.sync import ConnectionResult as SdkConn
     from gideon.sdk.sync import PushResult as SdkPush
     from gideon.sdk.sync import RemoteRef as SdkRef
@@ -116,7 +120,6 @@ def test_push_is_insert_only_and_idempotent():
     obj = SyncObject(key="machines/m1/seq-0001/tasks/tasks.jsonl", data=b"v1")
     r1 = t.push([obj])
     assert r1.pushed == 1 and r1.skipped == 0
-    # Retried push of the SAME key (even with different bytes) is skipped, not overwritten.
     r2 = t.push([SyncObject(key=obj.key, data=b"v2-should-not-win")])
     assert r2.pushed == 0 and r2.skipped == 1
     pulled = t.pull(t.list_remote())
@@ -129,5 +132,5 @@ def test_deregister_without_ext_uses_instance_name():
     handler = SyncTypeHandler()
     inst = _FixtureTransport()
     register_transport(inst)
-    handler.deregister(None, inst)  # must not raise on ext=None
+    handler.deregister(None, inst)
     assert get_transport("fixture-sync") is None

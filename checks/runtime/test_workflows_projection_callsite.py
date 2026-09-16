@@ -24,7 +24,7 @@ import pathlib
 
 import pytest
 
-from gideon.workflows.journal import TASK_MATERIALIZED, ledger
+from gideon.automation.workflows.journal import TASK_MATERIALIZED, ledger
 
 
 def _spec(children: list) -> dict:
@@ -42,14 +42,11 @@ def _action(node_id: str, **config) -> dict:
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.workflows import store as wstore
+    from gideon.automation.workflows import store as wstore
 
     monkeypatch.setattr(wstore, "config_dir", lambda: tmp_path)
-    from gideon.action_providers import registry as apreg
+    from gideon.integrations.action_providers import registry as apreg
 
-    # `bash` is a core-native provider but is only registered on demand. Without this the probe
-    # run fails with "unknown action provider 'bash'" and the success path — the one that projects —
-    # never executes. Measured while writing this file.
     apreg._ensure_default_providers_registered()
     yield
 
@@ -62,15 +59,17 @@ def _run(spec: dict, run_id: str = "r-1") -> tuple[object, list]:
     test that returned at `run_to_completion` would race it. The controller tracks the handles for
     exactly this — a sleep-based version of this helper would be a flake generator.
     """
-    from gideon.workflows import store as wstore
-    from gideon.workflows.controller import EngineServices, RunController
-    from gideon.workflows.models import WorkflowRun
+    from gideon.automation.workflows import store as wstore
+    from gideon.automation.workflows.controller import EngineServices, RunController
+    from gideon.automation.workflows.models import WorkflowRun
 
     published: list = []
     run = WorkflowRun(id=run_id, workflow_name="t")
     wstore.create(run)
     controller = RunController(
-        run, spec, services=EngineServices(publish=lambda e, b: published.append((e, b)))
+        run,
+        spec,
+        services=EngineServices(publish=lambda e, b: published.append((e, b))),
     )
 
     async def _go() -> None:
@@ -84,9 +83,6 @@ def _run(spec: dict, run_id: str = "r-1") -> tuple[object, list]:
 
 def _materialized(run_id: str = "r-1") -> list[dict]:
     return [r for r in ledger(run_id) if r["kind"] == TASK_MATERIALIZED]
-
-
-# ── the call site fires on a real run ──
 
 
 def test_a_completed_leaf_node_PROJECTS():
@@ -108,7 +104,8 @@ def test_EVERY_leaf_projects_with_its_own_fingerprint():
 
 def test_a_projection_reaches_BOTH_channels():
     """The SSE stream is what the board folds live; the ledger is what a rebuild reads. A node that
-    projected to only one of them shows on the board and vanishes on reload, or the reverse."""
+    projected to only one of them shows on the board and vanishes on reload, or the reverse.
+    """
     _run(_spec([_action("impl")]))
     _run_obj, published = _run(_spec([_action("impl")]), run_id="r-2")
     assert "workflow_task_materialized" in [e for e, _b in published]
@@ -121,7 +118,11 @@ def test_a_CONTAINER_does_not_project():
     _run(
         _spec(
             [
-                {"kind": "parallel", "id": "fan", "children": [_action("one"), _action("two")]},
+                {
+                    "kind": "parallel",
+                    "id": "fan",
+                    "children": [_action("one"), _action("two")],
+                },
             ]
         )
     )
@@ -156,16 +157,13 @@ def test_a_FAILED_node_does_not_project():
     assert _materialized() == []
 
 
-# ── idempotency ──
-
-
 def test_projecting_the_SAME_node_twice_in_one_run_is_a_REFRESH():
     """`plan_materialization` dedups on `(run_id, node_id)` AND fingerprint. The second call must
     report a refresh rather than a second create — §1 makes idempotent recompute the normal path, so
     this is not a rare case."""
-    from gideon.workflows import store as wstore
-    from gideon.workflows.controller import EngineServices, RunController
-    from gideon.workflows.models import WorkflowRun
+    from gideon.automation.workflows import store as wstore
+    from gideon.automation.workflows.controller import EngineServices, RunController
+    from gideon.automation.workflows.models import WorkflowRun
 
     spec = _spec([_action("impl")])
     run = WorkflowRun(id="r-1", workflow_name="t")
@@ -173,12 +171,12 @@ def test_projecting_the_SAME_node_twice_in_one_run_is_a_REFRESH():
     controller = RunController(run, spec, services=EngineServices())
     asyncio.run(controller.run_to_completion())
 
-    # Re-project the same settled node through the same controller. Inside a loop, because the
-    # write (and therefore the event) is now scheduled rather than inline.
     async def _reproject() -> None:
         item = next(i for i in controller.instances)
         controller._project_task(
-            type("_I", (), {"node": controller.root.children[0], "path": item})(), None, None
+            type("_I", (), {"node": controller.root.children[0], "path": item})(),
+            None,
+            None,
         )
         if controller._projection_writes:
             await asyncio.gather(*list(controller._projection_writes))
@@ -186,31 +184,33 @@ def test_projecting_the_SAME_node_twice_in_one_run_is_a_REFRESH():
     asyncio.run(_reproject())
     flags = [r["refreshed"] for r in _materialized()]
     assert flags[0] is False
-    assert True in flags, "a re-projection must be recorded as a refresh, not a second create"
+    assert (
+        True in flags
+    ), "a re-projection must be recorded as a refresh, not a second create"
 
 
 def test_the_controller_REMEMBERS_what_it_projected():
     """The dedup set lives on the controller because it is the single writer for its own run — a
-    per-node read of the per-entity JSON store would be one file scan per settled node."""
-    from gideon.workflows import store as wstore
-    from gideon.workflows.controller import EngineServices, RunController
-    from gideon.workflows.models import WorkflowRun
+    per-node read of the per-entity JSON store would be one file scan per settled node.
+    """
+    from gideon.automation.workflows import store as wstore
+    from gideon.automation.workflows.controller import EngineServices, RunController
+    from gideon.automation.workflows.models import WorkflowRun
 
     run = WorkflowRun(id="r-1", workflow_name="t")
     wstore.create(run)
-    controller = RunController(run, _spec([_action("a"), _action("b")]), services=EngineServices())
+    controller = RunController(
+        run, _spec([_action("a"), _action("b")]), services=EngineServices()
+    )
     asyncio.run(controller.run_to_completion())
     assert [b.node_id for b in controller._projected] == ["a", "b"]
     assert all(b.managed for b in controller._projected)
 
 
-# ── the hook must never break the run ──
-
-
 def test_a_PROJECTION_FAILURE_does_not_fail_the_run(monkeypatch):
     """The node has already succeeded and its output is already journaled, so turning a board-row
     problem into a run failure would lose real work over a presentation concern."""
-    from gideon.workflows import materialize
+    from gideon.automation.workflows import materialize
 
     def boom(*_a, **_kw):
         raise RuntimeError("materialize exploded")
@@ -223,16 +223,15 @@ def test_a_PROJECTION_FAILURE_does_not_fail_the_run(monkeypatch):
 
 def test_the_step_is_still_JOURNALED_when_projection_fails(monkeypatch):
     """The durable record of the WORK must not depend on the projection succeeding."""
-    from gideon.workflows import materialize
+    from gideon.automation.workflows import materialize
 
     monkeypatch.setattr(
-        materialize, "should_materialize", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError())
+        materialize,
+        "should_materialize",
+        lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError()),
     )
     _run(_spec([_action("impl")]))
     assert any(r["kind"] == "step_completed" for r in ledger("r-1"))
-
-
-# ── the measured API contract ──
 
 
 def test_the_hook_passes_the_keys_materialize_actually_READS():
@@ -241,7 +240,7 @@ def test_the_hook_passes_the_keys_materialize_actually_READS():
     swallows."""
     import inspect
 
-    from gideon.workflows.controller import RunController
+    from gideon.automation.workflows.controller import RunController
 
     source = inspect.getsource(RunController._project_task)
     assert '"id": item.node.id' in source
@@ -258,7 +257,7 @@ def test_the_hook_reads_TaskSpec_attributes_not_dict_keys():
     """
     import inspect
 
-    from gideon.workflows.controller import RunController
+    from gideon.automation.workflows.controller import RunController
 
     source = "".join(
         inspect.getsource(fn)
@@ -277,7 +276,7 @@ def test_the_projection_hook_runs_on_the_SUCCESS_branch_only():
     future edit that moves it out shows up here rather than as tasks for failed work."""
     import inspect
 
-    from gideon.workflows.controller import RunController
+    from gideon.automation.workflows.controller import RunController
 
     source = inspect.getsource(RunController)
     success_at = source.index("if result.state in SUCCESS_STATES:")
@@ -288,5 +287,7 @@ def test_the_projection_hook_runs_on_the_SUCCESS_branch_only():
 def test_materialize_now_HAS_a_caller():
     """The inverse of the grep that motivated the session: `materialize` is imported by the
     controller. A module with no caller is a module whose rules are decoration."""
-    source = pathlib.Path("src/gideon/workflows/controller.py").read_text(encoding="utf-8")
+    source = pathlib.Path(
+        "runtime/gideon/automation/workflows/controller.py"
+    ).read_text(encoding="utf-8")
     assert "materialize" in source

@@ -6,7 +6,7 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.dashboard.handlers.files import api_reveal_path
+from gideon.interfaces.dashboard.handlers.files import api_reveal_path
 
 
 def _make_app() -> web.Application:
@@ -17,7 +17,7 @@ def _make_app() -> web.Application:
 
 @pytest.fixture
 def mock_sel():
-    with patch("gideon.sel.sel") as m:
+    with patch("gideon.security.sel.sel") as m:
         instance = MagicMock()
         m.return_value = instance
         yield instance
@@ -32,13 +32,15 @@ async def test_reveal_path_no_crash(mock_sel, tmp_path, monkeypatch):
     endpoint accepted any path at all — which was the bug. The test's subject is unchanged: that
     the full path through to the SEL call executes without a TypeError.
     """
-    import gideon.dashboard.handlers.files as files_mod
+    import gideon.interfaces.dashboard.handlers.files as files_mod
 
     monkeypatch.setattr(files_mod, "_dashboard_roots", lambda: [("Tmp", str(tmp_path))])
     f = tmp_path / "hello.txt"
     f.write_text("hi")
-    # Mock xdg-open as available so the full code path (including SEL) executes
-    with patch("shutil.which", return_value="/usr/bin/xdg-open"), patch("subprocess.Popen"):
+    with (
+        patch("shutil.which", return_value="/usr/bin/xdg-open"),
+        patch("subprocess.Popen"),
+    ):
         async with TestClient(TestServer(_make_app())) as client:
             resp = await client.post(
                 "/api/reveal",
@@ -47,7 +49,6 @@ async def test_reveal_path_no_crash(mock_sel, tmp_path, monkeypatch):
             assert resp.status == 200
             body = await resp.json()
             assert body == {"ok": True}
-            # Verify log_tool_invocation called with correct kwargs (no TypeError)
             mock_sel.log_tool_invocation.assert_called_with(
                 session_key="api",
                 source="api",
@@ -62,7 +63,10 @@ async def test_reveal_path_no_crash(mock_sel, tmp_path, monkeypatch):
 async def test_reveal_path_sensitive_denied(mock_sel):
     """Given a path containing ~/.ssh/id_rsa, when POST /api/reveal is called,
     then response is 403 with {"error": "access denied"} and SEL logs the denial."""
-    with patch("gideon.dashboard.handlers.files.is_sensitive_path", return_value=True):
+    with patch(
+        "gideon.interfaces.dashboard.handlers.files.is_sensitive_path",
+        return_value=True,
+    ):
         async with TestClient(TestServer(_make_app())) as client:
             resp = await client.post(
                 "/api/reveal",

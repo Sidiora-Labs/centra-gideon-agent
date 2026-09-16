@@ -46,20 +46,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from gideon.dashboard.handlers.loop_routes import api_loop_classify
-from gideon.errors import AgentError
-from gideon.http_errors import HTTP_ERROR_CODES
-from gideon.knowledge.pipeline.runner import ingest_item
-from gideon.knowledge.store import KnowledgeStore
-from gideon.providers.provider_bridge import (
+from gideon.cognition.knowledge.pipeline.runner import ingest_item
+from gideon.cognition.knowledge.store import KnowledgeStore
+from gideon.cognition.suggestions import _FALLBACK_SUGGESTIONS, generate_suggestions
+from gideon.core.errors import AgentError
+from gideon.extensions.providers.provider_bridge import (
     ProviderResolutionError,
     resolve_provider_for_use_case,
 )
-from gideon.suggestions import _FALLBACK_SUGGESTIONS, generate_suggestions
+from gideon.http_errors import HTTP_ERROR_CODES
+from gideon.interfaces.dashboard.handlers.loop_routes import api_loop_classify
 
-# The surfaces this rail covers. A set, not prose, so it is greppable and a new surface
-# is a one-line addition here + a probe below. Anything model-dependent and first-run
-# NOT in this set is the rail's declared blind spot.
 COVERED_SURFACES: frozenset[str] = frozenset(
     {
         "POST /api/chat",
@@ -70,10 +67,6 @@ COVERED_SURFACES: frozenset[str] = frozenset(
     }
 )
 
-# The two substrings the FE `isNoModelSetupError` matcher keys on
-# (`web/src/pages/chat/NoModelSetupState.tsx`). Ported here so the backend rail speaks the
-# same contract; `test_no_model_text_matches_backend_renders` pins the port against the
-# real renders so a backend reword reds this file, not just the FE test.
 _NO_MODEL_TEXT_SUBSTRINGS = (
     "no model provider resolves for use case",
     "no provider in config.json declares the capability",
@@ -124,7 +117,9 @@ def assert_calm_http_no_model(status: int, body: object) -> None:
     """The shared gate every HTTP surface probe (and the meta-guards) route through."""
     text = _body_text(body)
     assert status != 500, f"raw 500 is never the calm signal (body={text[:200]!r})"
-    assert not _looks_like_traceback(text), f"traceback leaked to the client: {text[:200]!r}"
+    assert not _looks_like_traceback(
+        text
+    ), f"traceback leaked to the client: {text[:200]!r}"
     assert is_no_model_signal_http(status, body), (
         "surface did not carry the calm no-model signal — a silent success? "
         f"(status={status}, body={text[:200]!r})"
@@ -145,16 +140,21 @@ class _RaisingPool:
     real pool does ("No provider entries registered"), so the ingest runner marks the
     item ``partial`` rather than silently ``done`` with empty insights."""
 
-    async def send(self, prompt: str, timeout: float | None = None) -> str:  # noqa: D401
+    async def send(
+        self, prompt: str, timeout: float | None = None
+    ) -> str:  # noqa: D401
         raise RuntimeError("No provider entries registered")
 
-    async def send_batch(self, prompts: list[str], timeout: float | None = None) -> list[str]:
+    async def send_batch(
+        self, prompts: list[str], timeout: float | None = None
+    ) -> list[str]:
         raise RuntimeError("No provider entries registered")
 
 
 class _AnswerPool:
     """A working model: returns a valid insights bundle. Used to prove the SAME ingest
-    reaches a clean ``done`` when a provider IS bound (no behaviour change when bound)."""
+    reaches a clean ``done`` when a provider IS bound (no behaviour change when bound).
+    """
 
     async def send(self, prompt: str, timeout: float | None = None) -> str:
         return json.dumps(
@@ -166,50 +166,63 @@ class _AnswerPool:
             }
         )
 
-    async def send_batch(self, prompts: list[str], timeout: float | None = None) -> list[str]:
+    async def send_batch(
+        self, prompts: list[str], timeout: float | None = None
+    ) -> list[str]:
         return [await self.send(p, timeout) for p in prompts]
 
 
-# --------------------------------------------------------------------------- #
-# Surface 5 — POST /api/loops/classify (the must-fail-on-main anchor)
-# --------------------------------------------------------------------------- #
 @pytest.mark.asyncio
 async def test_classify_no_provider_surfaces_calm_signal():
     """On a no-provider home classify must answer the calm ``model_unresolved`` envelope,
     NOT ``200 {"classified": false}``. This is the assertion that reds on ``origin/main``
     (which has no preflight and returns 200) and greens after the fix."""
-    with patch("gideon.providers.provider_bridge.can_resolve_use_case", return_value=False):
+    with patch(
+        "gideon.extensions.providers.provider_bridge.can_resolve_use_case",
+        return_value=False,
+    ):
         status, body = await _classify_response(
-            {"kind": "goal", "task": "Summarize the weekly team status into three bullets"}
+            {
+                "kind": "goal",
+                "task": "Summarize the weekly team status into three bullets",
+            }
         )
     assert status == 409, f"expected the calm 409, got {status}: {body}"
     assert_calm_http_no_model(status, body)
-    # A plain `classified:false` (the origin/main silent-success shape) must be gone.
     assert "classified" not in body, f"leaked the silent-success shape: {body}"
 
 
 @pytest.mark.asyncio
 async def test_classify_with_provider_bound_is_unchanged():
     """When a model resolves, the preflight must NOT fire — no ``model_unresolved`` — so a
-    bound instance is byte-for-byte the pre-OU-12 behaviour (a normal 200 classification)."""
+    bound instance is byte-for-byte the pre-OU-12 behaviour (a normal 200 classification).
+    """
     valid = json.dumps({"title": "Weekly status", "goal_type": "open_ended"})
     with (
-        patch("gideon.providers.provider_bridge.can_resolve_use_case", return_value=True),
-        patch("gideon.llm_helpers.one_shot_completion", new=AsyncMock(return_value=valid)),
+        patch(
+            "gideon.extensions.providers.provider_bridge.can_resolve_use_case",
+            return_value=True,
+        ),
+        patch(
+            "gideon.integrations.llm_helpers.one_shot_completion",
+            new=AsyncMock(return_value=valid),
+        ),
     ):
         status, body = await _classify_response(
-            {"kind": "goal", "task": "Summarize the weekly team status into three bullets"}
+            {
+                "kind": "goal",
+                "task": "Summarize the weekly team status into three bullets",
+            }
         )
-    assert status == 200, f"a bound instance must classify normally, got {status}: {body}"
+    assert (
+        status == 200
+    ), f"a bound instance must classify normally, got {status}: {body}"
     err = body.get("error")
     assert not (
         isinstance(err, dict) and err.get("code") == "model_unresolved"
     ), "the no-model preflight fired even though a provider resolves"
 
 
-# --------------------------------------------------------------------------- #
-# Surface 1 — POST /api/chat (regression guard, #2856 → #2865)
-# --------------------------------------------------------------------------- #
 def test_chat_no_provider_resolution_carries_calm_signal():
     """The chat surface streams whatever ``resolve_provider_for_use_case('chat')`` raises;
     on a no-provider home that is ``ERR_MODEL_UNRESOLVED``, whose render matches
@@ -217,14 +230,14 @@ def test_chat_no_provider_resolution_carries_calm_signal():
     with pytest.raises(ProviderResolutionError) as ei:
         resolve_provider_for_use_case("chat")
     err = ei.value
-    # str(exc) is the AgentError.render() when one is attached (provider_bridge).
-    assert matches_no_model_text(str(err)), f"chat's no-model error is not the calm signal: {err}"
-    assert err.agent_error is not None and err.agent_error.code == "ERR_MODEL_UNRESOLVED"
+    assert matches_no_model_text(
+        str(err)
+    ), f"chat's no-model error is not the calm signal: {err}"
+    assert (
+        err.agent_error is not None and err.agent_error.code == "ERR_MODEL_UNRESOLVED"
+    )
 
 
-# --------------------------------------------------------------------------- #
-# Surface 2 — GET /api/suggestions (regression guard, #2866 → #2868)
-# --------------------------------------------------------------------------- #
 @pytest.mark.asyncio
 async def test_suggestions_no_provider_returns_declared_empty_state():
     """A no-provider home must yield the declared fallback list quietly — never a per-poll
@@ -243,9 +256,9 @@ async def test_suggestions_no_provider_returns_declared_empty_state():
         )
     )
     with (
-        patch("gideon.suggestions._build_context", return_value="x" * 120),
+        patch("gideon.cognition.suggestions._build_context", return_value="x" * 120),
         patch(
-            "gideon.prompt_providers.runtime.render_use_case_prompt",
+            "gideon.integrations.prompt_providers.runtime.render_use_case_prompt",
             return_value="a prompt",
         ),
     ):
@@ -255,11 +268,10 @@ async def test_suggestions_no_provider_returns_declared_empty_state():
     ), "suggestions must degrade to the declared fallback, not crash or return empty"
 
 
-# --------------------------------------------------------------------------- #
-# Surfaces 3+4 — knowledge ingest (regression guard, OU-3 runner fix)
-# --------------------------------------------------------------------------- #
 @pytest.mark.asyncio
-@pytest.mark.parametrize("reingest", [False, True], ids=["create", "generate-intelligence"])
+@pytest.mark.parametrize(
+    "reingest", [False, True], ids=["create", "generate-intelligence"]
+)
 async def test_knowledge_ingest_no_provider_is_not_silent_done(tmp_path, reingest):
     """``POST /api/knowledge/items`` (create) and ``generate-intelligence`` (re-enqueue)
     both funnel to ``ingest_item``. On a no-provider home the model-backed insights stage
@@ -276,20 +288,21 @@ async def test_knowledge_ingest_no_provider_is_not_silent_done(tmp_path, reinges
         ),
     )
     if reingest:
-        # generate-intelligence's effect: re-queue, then the SAME runner runs again.
         store.update_item(item_id, processing_status="queued", touch=False)
 
-    status = await ingest_item(store, item_id, insights_pool=_RaisingPool(), embedder=None)
+    status = await ingest_item(
+        store, item_id, insights_pool=_RaisingPool(), embedder=None
+    )
 
     item = store.get_item(item_id)
     node_phases = (item.get("file_metadata") or {}).get("node_phases") or {}
-    # The invariant: the item is NOT reported as a clean, fully-enriched success.
-    assert status != "done", f"silent-fail-open: no-provider ingest reported done ({item!r})"
+    assert (
+        status != "done"
+    ), f"silent-fail-open: no-provider ingest reported done ({item!r})"
     assert item["processing_status"] != "done", f"item persisted as done: {item!r}"
     assert (
         node_phases.get("insights") != "done"
     ), f"the model-backed insights stage falsely claimed done: {node_phases}"
-    # And it says WHY, legibly — a degraded state a user can act on, not a blank.
     assert item.get("processing_error"), f"partial item carries no reason: {item!r}"
 
 
@@ -303,23 +316,24 @@ async def test_knowledge_ingest_with_provider_bound_reaches_done(tmp_path):
         title="OU12 note",
         content="A note about distributed consensus and the Raft algorithm.",
     )
-    status = await ingest_item(store, item_id, insights_pool=_AnswerPool(), embedder=None)
+    status = await ingest_item(
+        store, item_id, insights_pool=_AnswerPool(), embedder=None
+    )
     item = store.get_item(item_id)
     assert status == "done", f"a bound provider must reach done, got {status}: {item!r}"
     assert item["processing_status"] == "done"
-    assert item.get("insights"), f"insights should be populated when the model works: {item!r}"
+    assert item.get(
+        "insights"
+    ), f"insights should be populated when the model works: {item!r}"
 
 
-# --------------------------------------------------------------------------- #
-# The rail's own floors — a rail that inspects nothing must never read as clean.
-# --------------------------------------------------------------------------- #
 class TestRailIsNotVacuous:
     def test_covered_surfaces_match_the_documented_enumeration(self):
         """The enumeration is the whole rail; its size is pinned so a surface cannot be
         dropped silently, and adding one is a deliberate edit here."""
         assert len(COVERED_SURFACES) == 5, COVERED_SURFACES
-        assert "POST /api/loops/classify" in COVERED_SURFACES  # the anchor
-        assert "POST /api/chat" in COVERED_SURFACES  # a regression guard
+        assert "POST /api/loops/classify" in COVERED_SURFACES
+        assert "POST /api/chat" in COVERED_SURFACES
 
     def test_a_bare_500_surface_fails_the_rail(self):
         """A deliberately-added surface that answers a bare 500 on no-provider MUST fail —
@@ -328,7 +342,9 @@ class TestRailIsNotVacuous:
         with pytest.raises(AssertionError):
             assert_calm_http_no_model(500, {"error": "unhandled: UnboundLocalError"})
         with pytest.raises(AssertionError):
-            assert_calm_http_no_model(200, 'Traceback (most recent call last):\n  File "x"')
+            assert_calm_http_no_model(
+                200, 'Traceback (most recent call last):\n  File "x"'
+            )
 
     def test_a_silent_success_fails_the_rail(self):
         """The origin/main classify shape — 200 with ``classified:false`` and no signal —
@@ -349,8 +365,9 @@ class TestRailIsNotVacuous:
                 }
             },
         )
-        # A different surface could carry the signal as text alone — also accepted.
-        assert_calm_http_no_model(409, {"error": "no model provider resolves for use case 'chat'"})
+        assert_calm_http_no_model(
+            409, {"error": "no model provider resolves for use case 'chat'"}
+        )
 
     def test_no_model_text_matches_backend_renders(self):
         """Pin the ``isNoModelSetupError`` port against the REAL backend renders: the

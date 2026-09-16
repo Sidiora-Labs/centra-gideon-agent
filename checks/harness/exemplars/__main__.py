@@ -1,7 +1,7 @@
-"""``python -m harness.exemplars`` — run every discovered exemplar's smoke script.
+"""``python -m checks.harness.exemplars`` — run every discovered exemplar's smoke script.
 
-This is the concrete command the ``exemplars`` profile resolves to (harness/profiles.py), so
-``python -m harness run <task>`` on a task that requires the ``exemplars`` profile runs the
+This is the concrete command the ``exemplars`` profile resolves to (checks/harness/profiles.py), so
+``python -m checks.harness run <task>`` on a task that requires the ``exemplars`` profile runs the
 whole set as regression anchors. Each smoke script isolates its own GIDEON_HOME and
 self-asserts; a non-zero exit from any one fails the run and names it.
 
@@ -15,7 +15,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from harness.exemplars import discover_exemplars, incomplete_slices
+from checks.harness.exemplars import discover_exemplars, incomplete_slices
 
 
 def main() -> int:
@@ -30,20 +30,25 @@ def main() -> int:
 
     exemplars = discover_exemplars()
     if not exemplars:
-        print("⚠️  no exemplars discovered under harness/exemplars/")
+        print("⚠️  no exemplars discovered under checks/harness/exemplars/")
         return 0
 
-    repo_root = Path(__file__).resolve().parent.parent.parent
+    repo_root = Path(__file__).resolve().parent.parent.parent.parent
     failures: list[str] = []
     for ex in exemplars:
         print(f"» {ex.slice}: {ex.smoke.relative_to(repo_root)}")
         proc = subprocess.run(["bash", str(ex.smoke)], cwd=repo_root, check=False)
         if proc.returncode != 0:
             failures.append(ex.slice)
-            print(f"❌ {ex.slice} smoke failed (exit {proc.returncode})", file=sys.stderr)
+            print(
+                f"❌ {ex.slice} smoke failed (exit {proc.returncode})", file=sys.stderr
+            )
 
     if failures:
-        print(f"\n❌ {len(failures)} exemplar(s) failed: {', '.join(failures)}", file=sys.stderr)
+        print(
+            f"\n❌ {len(failures)} exemplar(s) failed: {', '.join(failures)}",
+            file=sys.stderr,
+        )
         return 1
     print(f"\n✅ {len(exemplars)} exemplar(s) passed")
     return 0

@@ -31,21 +31,18 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer, make_mocked_request
 
-from gideon.auth import pairing
-from gideon.browse import target as bt
-from gideon.dashboard import session_store as ss
-from gideon.dashboard import token_auth
-from gideon.dashboard.handlers import auth as auth_h
-from gideon.dashboard.handlers import browse_connector as bc
-from gideon.dashboard.handlers import devices as devices_h
+from gideon.integrations.browse import target as bt
+from gideon.interfaces.dashboard import session_store as ss
+from gideon.interfaces.dashboard import token_auth
+from gideon.interfaces.dashboard.handlers import auth as auth_h
+from gideon.interfaces.dashboard.handlers import browse_connector as bc
+from gideon.interfaces.dashboard.handlers import devices as devices_h
+from gideon.security.auth import pairing
 
 PORT = 10001
-COOKIE = f"pc_token_{PORT}"
+COOKIE = f"gideon_token_{PORT}"
 
-# A page-target endpoint on loopback — the shape ``resolve_cdp_url`` hands the CDP transport.
 CDP_URL = "ws://127.0.0.1:9333/devtools/page/MYOWNBROWSER"
-# RFC 5737 documentation address: a non-loopback host that resolves to itself as an IP
-# literal (so the guard denies it without any real DNS), for the "public endpoint" leg.
 PUBLIC_CDP_URL = "ws://203.0.113.7:9222/devtools/page/SOMEWHEREELSE"
 
 
@@ -53,14 +50,18 @@ PUBLIC_CDP_URL = "ws://203.0.113.7:9222/devtools/page/SOMEWHEREELSE"
 def _isolated(tmp_path, monkeypatch):
     """Every store this surface touches points at *tmp_path*, and the connector starts and
     ends DETACHED — the process-global reset ``test_browse_target`` also relies on."""
-    import gideon.config.loader as loader
+    import gideon.core.config.loader as loader
 
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(pairing, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(ss, "config_dir", lambda: tmp_path, raising=False)
     (tmp_path / "config.json").write_text(json.dumps({"auth": {}}), encoding="utf-8")
-    assert ss.sessions_path().is_relative_to(tmp_path), "the session store escaped tmp_path"
-    assert pairing.codes_path().is_relative_to(tmp_path), "the code store escaped tmp_path"
+    assert ss.sessions_path().is_relative_to(
+        tmp_path
+    ), "the session store escaped tmp_path"
+    assert pairing.codes_path().is_relative_to(
+        tmp_path
+    ), "the code store escaped tmp_path"
     for var in ("GIDEON_DEV_NO_AUTH", "GIDEON_BYPASS_LOCAL_NETWORKS"):
         monkeypatch.delenv(var, raising=False)
     token_auth.use_persistent_secret()
@@ -84,7 +85,8 @@ def enabled(monkeypatch):
 
 def _app() -> web.Application:
     """The connector route behind the REAL auth middleware, with the device routes it pairs
-    through. This is the dashboard server's own wiring, minus the rest of the surface."""
+    through. This is the dashboard server's own wiring, minus the rest of the surface.
+    """
     app = web.Application(middlewares=[token_auth.token_auth_middleware(port=PORT)])
     app["port"] = PORT
     app["allowed_origins"] = {f"http://localhost:{PORT}"}
@@ -101,7 +103,9 @@ def _client(server: TestServer) -> TestClient:
 async def _pair_a_device(owner: TestClient, device: TestClient) -> tuple[str, str]:
     """Mint a code as the owner, redeem it as the device. Returns (device cookie, device id)."""
     owner_token = token_auth.generate_token("owner", ttl_seconds=3600)
-    started = await owner.post("/api/devices/pair/start", json={}, cookies={COOKIE: owner_token})
+    started = await owner.post(
+        "/api/devices/pair/start", json={}, cookies={COOKIE: owner_token}
+    )
     assert started.status == 200, await started.text()
     code = (await started.json())["code"]
     done = await device.post(
@@ -112,11 +116,10 @@ async def _pair_a_device(owner: TestClient, device: TestClient) -> tuple[str, st
     return done.cookies[COOKIE].value, (await done.json())["device_id"]
 
 
-# ── Clause: "a paired device attaches, and register_connector is actually driven" ──
-
-
 @pytest.mark.asyncio
-async def test_a_paired_device_attaches_as_the_user_browser_connector(_isolated, enabled) -> None:
+async def test_a_paired_device_attaches_as_the_user_browser_connector(
+    _isolated, enabled
+) -> None:
     """THE CLAUSE: the route is the non-test writer of the connector registry.
 
     The vacuity partner is the pre-attach read on the SAME (switched-on) status: it must say
@@ -126,7 +129,9 @@ async def test_a_paired_device_attaches_as_the_user_browser_connector(_isolated,
     async with _client(server) as owner, _client(server) as device:
         token, device_id = await _pair_a_device(owner, device)
 
-        assert bt.connector_status().connected is False, "vacuity floor: nothing attached yet"
+        assert (
+            bt.connector_status().connected is False
+        ), "vacuity floor: nothing attached yet"
 
         attached = await device.post(
             "/api/browse/connector", json={"cdp_url": CDP_URL}, cookies={COOKIE: token}
@@ -136,14 +141,21 @@ async def test_a_paired_device_attaches_as_the_user_browser_connector(_isolated,
 
         status = bt.connector_status()
         assert status.connected is True, "the POST must have driven register_connector"
-        assert status.cdp_url == CDP_URL, "the announced endpoint is what resolve_cdp_url returns"
-        assert status.device_id == device_id, "the connector's identity is the paired device id"
+        assert (
+            status.cdp_url == CDP_URL
+        ), "the announced endpoint is what resolve_cdp_url returns"
+        assert (
+            status.device_id == device_id
+        ), "the connector's identity is the paired device id"
 
 
 @pytest.mark.asyncio
-async def test_the_attached_connector_is_listed_as_a_connected_device(_isolated, enabled) -> None:
+async def test_the_attached_connector_is_listed_as_a_connected_device(
+    _isolated, enabled
+) -> None:
     """The attached browser IS a paired-device row (§C1/C2 consumed, not forked): it shows in
-    the same registry ``GET /api/devices`` renders, and the connector status names it."""
+    the same registry ``GET /api/devices`` renders, and the connector status names it.
+    """
     server = TestServer(_app())
     async with _client(server) as owner, _client(server) as device:
         token, device_id = await _pair_a_device(owner, device)
@@ -158,7 +170,9 @@ async def test_the_attached_connector_is_listed_as_a_connected_device(_isolated,
         rows = (await listed.json())["devices"]
         row = next((r for r in rows if r["id"] == device_id), None)
         assert row is not None, "the connector must be a listed device"
-        assert row["issuer"] == ss.ISSUER_PAIR, "listed via the shipped pairing, not a fork"
+        assert (
+            row["issuer"] == ss.ISSUER_PAIR
+        ), "listed via the shipped pairing, not a fork"
 
         seen = await device.get("/api/browse/connector", cookies={COOKIE: token})
         assert seen.status == 200
@@ -166,22 +180,28 @@ async def test_the_attached_connector_is_listed_as_a_connected_device(_isolated,
         assert payload["connected"] is True and payload["device_id"] == device_id
 
 
-# ── Clause: "loopback only" ──
-
-
 @pytest.mark.asyncio
-async def test_a_public_cdp_url_is_refused_on_the_loopback_rail(_isolated, enabled) -> None:
+async def test_a_public_cdp_url_is_refused_on_the_loopback_rail(
+    _isolated, enabled
+) -> None:
     """A non-loopback endpoint is refused via ``LOOPBACK_INTERNAL`` — the connector stays
-    detached. The loopback endpoint accepted in the test above is the vacuity partner."""
+    detached. The loopback endpoint accepted in the test above is the vacuity partner.
+    """
     server = TestServer(_app())
     async with _client(server) as owner, _client(server) as device:
         token, _device_id = await _pair_a_device(owner, device)
         resp = await device.post(
-            "/api/browse/connector", json={"cdp_url": PUBLIC_CDP_URL}, cookies={COOKIE: token}
+            "/api/browse/connector",
+            json={"cdp_url": PUBLIC_CDP_URL},
+            cookies={COOKIE: token},
         )
         assert resp.status == 400, await resp.text()
-        assert (await resp.json())["error"]["code"] == "browse_connector_endpoint_invalid"
-        assert bt.connector_status().connected is False, "a refused endpoint must not attach"
+        assert (await resp.json())["error"][
+            "code"
+        ] == "browse_connector_endpoint_invalid"
+        assert (
+            bt.connector_status().connected is False
+        ), "a refused endpoint must not attach"
 
 
 @pytest.mark.asyncio
@@ -197,7 +217,9 @@ async def test_a_non_websocket_endpoint_is_refused(_isolated, enabled) -> None:
             cookies={COOKIE: token},
         )
         assert resp.status == 400, await resp.text()
-        assert (await resp.json())["error"]["code"] == "browse_connector_endpoint_invalid"
+        assert (await resp.json())["error"][
+            "code"
+        ] == "browse_connector_endpoint_invalid"
 
 
 @pytest.mark.asyncio
@@ -206,9 +228,13 @@ async def test_a_missing_endpoint_is_refused(_isolated) -> None:
     server = TestServer(_app())
     async with _client(server) as owner, _client(server) as device:
         token, _device_id = await _pair_a_device(owner, device)
-        resp = await device.post("/api/browse/connector", json={}, cookies={COOKIE: token})
+        resp = await device.post(
+            "/api/browse/connector", json={}, cookies={COOKIE: token}
+        )
         assert resp.status == 400, await resp.text()
-        assert (await resp.json())["error"]["code"] == "browse_connector_endpoint_invalid"
+        assert (await resp.json())["error"][
+            "code"
+        ] == "browse_connector_endpoint_invalid"
 
 
 @pytest.mark.asyncio
@@ -223,31 +249,33 @@ async def test_a_non_loopback_caller_is_refused() -> None:
         ("198.51.100.9", 40000) if key == "peername" else default
     )
     req = make_mocked_request("POST", "/api/browse/connector", transport=transport)
-    assert req.remote == "198.51.100.9", "the peer must be the non-loopback address under test"
+    assert (
+        req.remote == "198.51.100.9"
+    ), "the peer must be the non-loopback address under test"
     resp = await bc.api_browse_connector_attach(req)
     assert resp.status == 403
-    assert json.loads(resp.body.decode())["error"]["code"] == "browse_connector_loopback_only"
-
-
-# ── Clause: "paired via the shipped pairing — an owner session may not attach" ──
+    assert (
+        json.loads(resp.body.decode())["error"]["code"]
+        == "browse_connector_loopback_only"
+    )
 
 
 @pytest.mark.asyncio
 async def test_an_owner_session_cannot_attach_a_connector(_isolated, enabled) -> None:
     """Only a paired device may attach: an owner token has no ``device`` row, so it is refused
-    and nothing is registered — which is what keeps the connector from forking pairing."""
+    and nothing is registered — which is what keeps the connector from forking pairing.
+    """
     server = TestServer(_app())
     async with _client(server) as owner:
         owner_token = token_auth.generate_token("owner", ttl_seconds=3600)
         resp = await owner.post(
-            "/api/browse/connector", json={"cdp_url": CDP_URL}, cookies={COOKIE: owner_token}
+            "/api/browse/connector",
+            json={"cdp_url": CDP_URL},
+            cookies={COOKIE: owner_token},
         )
         assert resp.status == 403, await resp.text()
         assert (await resp.json())["error"]["code"] == "browse_connector_unpaired"
         assert bt.connector_status().connected is False
-
-
-# ── detach ──
 
 
 @pytest.mark.asyncio
@@ -260,14 +288,15 @@ async def test_detach_clears_the_connector(_isolated, enabled) -> None:
         await device.post(
             "/api/browse/connector", json={"cdp_url": CDP_URL}, cookies={COOKIE: token}
         )
-        assert bt.connector_status().connected is True, "vacuity floor: attached before detach"
+        assert (
+            bt.connector_status().connected is True
+        ), "vacuity floor: attached before detach"
 
         gone = await device.delete("/api/browse/connector", cookies={COOKIE: token})
         assert gone.status == 200, await gone.text()
-        assert bt.connector_status().connected is False, "detach must clear the registry"
-
-
-# ── Clause: "zero browser-vendor strings in core" ──
+        assert (
+            bt.connector_status().connected is False
+        ), "detach must clear the registry"
 
 
 def test_the_connector_module_names_no_browser_vendor() -> None:

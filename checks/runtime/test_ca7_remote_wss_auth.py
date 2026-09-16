@@ -32,11 +32,11 @@ import pytest
 from aiohttp import ClientSession, WSServerHandshakeError, web
 from aiohttp.test_utils import TestServer
 
-from gideon.dashboard import origin as origin_mod
-from gideon.dashboard import session_store as ss
-from gideon.dashboard import token_auth
-from gideon.dashboard import ws as ws_mod
-from gideon.dashboard.origin import build_allowed_origins
+from gideon.interfaces.dashboard import origin as origin_mod
+from gideon.interfaces.dashboard import session_store as ss
+from gideon.interfaces.dashboard import token_auth
+from gideon.interfaces.dashboard import ws as ws_mod
+from gideon.interfaces.dashboard.origin import build_allowed_origins
 
 PORT = 10000
 
@@ -45,29 +45,30 @@ PORT = 10000
 def _isolated(tmp_path, monkeypatch):
     """Both `config_dir` bindings, and a proof the redirect actually took.
 
-    `session_store` does `from gideon.config.loader import config_dir` at import time, so
+    `session_store` does `from gideon.core.config.loader import config_dir` at import time, so
     patching only the loader would leave the store writing to the REAL home. The assertion below
     is the point of the fixture: without it a silent miss looks exactly like a passing test.
     """
-    import gideon.config.loader as loader
+    import gideon.core.config.loader as loader
 
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(ss, "config_dir", lambda: tmp_path, raising=False)
     token_auth.use_persistent_secret()
     token_auth.revoke_all_sessions()
-    assert ss.sessions_path().parent == tmp_path, "session store still points at the real home"
+    assert (
+        ss.sessions_path().parent == tmp_path
+    ), "session store still points at the real home"
     yield tmp_path
     token_auth.revoke_all_sessions()
-
-
-# ── the app under test: the real route, the real middleware ──────────────────────────────────
 
 
 def _app(allowed: set[str] | None = None) -> web.Application:
     app = web.Application(
         middlewares=[token_auth.token_auth_middleware(port=PORT, local_only=False)]
     )
-    app["allowed_origins"] = allowed if allowed is not None else build_allowed_origins(PORT, False)
+    app["allowed_origins"] = (
+        allowed if allowed is not None else build_allowed_origins(PORT, False)
+    )
     state = mock.MagicMock()
     state._sessions = {}
     state.is_yolo_active.return_value = False
@@ -81,8 +82,12 @@ def _paired_token(*, device: bool = True) -> str:
     token = token_auth.generate_token("owner")
     if device:
         nonce = token_auth.token_nonce(token)
-        assert nonce, "the minted token must carry a nonce for the test to mean anything"
-        assert ss.attach_device(nonce, ss.DeviceInfo(id="dev-1", name="Phone", kind="mobile"))
+        assert (
+            nonce
+        ), "the minted token must carry a nonce for the test to mean anything"
+        assert ss.attach_device(
+            nonce, ss.DeviceInfo(id="dev-1", name="Phone", kind="mobile")
+        )
     return token
 
 
@@ -108,9 +113,6 @@ async def _upgrade(app: web.Application, token: str, *, origin: str | None) -> i
                     return int(exc.status)
     finally:
         await server.close()
-
-
-# ── the admission, at its call site ──────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -142,14 +144,20 @@ async def test_the_public_origin_is_refused_with_a_device_session_too() -> None:
     allowlist, so a WebView loading the SPA over the tunnel is still refused. Pinning it keeps
     the next reader from assuming this atom fixed it.
     """
-    assert await _upgrade(_app(), _paired_token(), origin="https://pc.example.com") == 403
+    assert (
+        await _upgrade(_app(), _paired_token(), origin="https://gideon.example.com")
+        == 403
+    )
 
 
 @pytest.mark.asyncio
 async def test_an_allowed_origin_still_works_unchanged() -> None:
     """The browser path is byte-identical — the whole point of gating on Origin ABSENCE."""
     assert (
-        await _upgrade(_app(), _paired_token(device=False), origin="http://localhost:10000") == 101
+        await _upgrade(
+            _app(), _paired_token(device=False), origin="http://localhost:10000"
+        )
+        == 101
     )
 
 
@@ -162,11 +170,10 @@ async def test_the_refusal_it_replaces_was_bypassable_by_forging_an_origin() -> 
     both halves; only the header changed.
     """
     honest = await _upgrade(_app(), _paired_token(device=False), origin=None)
-    lying = await _upgrade(_app(), _paired_token(device=False), origin=f"http://localhost:{PORT}")
+    lying = await _upgrade(
+        _app(), _paired_token(device=False), origin=f"http://localhost:{PORT}"
+    )
     assert (honest, lying) == (403, 101)
-
-
-# ── fail-closed on every unknown ─────────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -177,7 +184,9 @@ async def test_an_unreadable_device_registry_fails_closed() -> None:
 
 @pytest.mark.asyncio
 async def test_a_session_nonce_the_registry_does_not_know_fails_closed() -> None:
-    with mock.patch.object(ss, "device_sessions", return_value={"someone-else": object()}):
+    with mock.patch.object(
+        ss, "device_sessions", return_value={"someone-else": object()}
+    ):
         assert await _upgrade(_app(), _paired_token(), origin=None) == 403
 
 
@@ -189,13 +198,12 @@ def test_the_predicate_refuses_when_no_middleware_published_a_nonce() -> None:
 
 
 @pytest.mark.parametrize("nonce", ["", None, 123, b"bytes"])
-def test_the_predicate_refuses_a_nonce_that_is_not_a_non_empty_string(nonce: Any) -> None:
+def test_the_predicate_refuses_a_nonce_that_is_not_a_non_empty_string(
+    nonce: Any,
+) -> None:
     request = mock.MagicMock()
     request.get.return_value = nonce
     assert ws_mod._paired_device_session(request) == ""
-
-
-# ── the nonce plumbing (the new middleware call site) ────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -235,14 +243,9 @@ def test_token_nonce_reads_the_claim() -> None:
     assert token_auth.token_nonce(token) == payload["nonce"]
 
 
-@pytest.mark.parametrize(
-    "bad", ["", "no-dot", "!!!.sig", "e30.sig", "W10.sig"]  # e30 == {}, W10 == []
-)
+@pytest.mark.parametrize("bad", ["", "no-dot", "!!!.sig", "e30.sig", "W10.sig"])
 def test_token_nonce_fails_closed_on_anything_unreadable(bad: str) -> None:
     assert token_auth.token_nonce(bad) == ""
-
-
-# ── "no new origin exemption" (the atom's own clause) ────────────────────────────────────────
 
 
 def test_the_allowed_origin_set_is_byte_identical(monkeypatch) -> None:

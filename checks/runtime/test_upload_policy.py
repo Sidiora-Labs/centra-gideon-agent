@@ -1,8 +1,8 @@
-"""Tests for the shared filetype-keyed upload size policy (gideon.uploads.policy)."""
+"""Tests for the shared filetype-keyed upload size policy (gideon.workspace.uploads.policy)."""
 
 import pytest
 
-from gideon.uploads import policy as P
+from gideon.workspace.uploads import policy as P
 
 _MB = 1024 * 1024
 _GB = 1024 * _MB
@@ -36,7 +36,6 @@ class TestCategoryMapping:
         assert P.category_for(filename) == expected
 
     def test_mime_disambiguates_webm_audio_vs_video(self):
-        # A browser audio recording is audio/webm; the extension alone is video.
         assert P.category_for("rec.webm", "audio/webm") == "audio"
         assert P.category_for("clip.webm", "video/webm") == "video"
 
@@ -87,19 +86,16 @@ class TestCheckUpload:
         assert not c.ok and c.status == 413 and "200 MB" in c.reason
 
     def test_no_size_is_ok(self):
-        # Called up front without a known size (streaming) → accept, carry the limit.
         c = P.check_upload("x.mp4")
         assert c.ok and c.limit == 2 * _GB
 
     def test_override_limit_caps_lower(self):
-        # STT surface may cap audio lower than the 1 GB category default.
         c = P.check_upload("long.mp3", size=100 * _MB, override_limit=25 * _MB)
         assert not c.ok and c.status == 413 and "25 MB" in c.reason
 
     def test_override_higher_than_category_ignored(self):
-        # override only ever caps LOWER; a higher override can't exceed the policy.
         c = P.check_upload("shot.png", size=250 * _MB, override_limit=5 * _GB)
-        assert not c.ok  # still gated at 200 MB image cap
+        assert not c.ok
         assert c.limit == 200 * _MB
 
 

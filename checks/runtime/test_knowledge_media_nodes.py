@@ -6,11 +6,11 @@ import asyncio
 
 import pytest
 
-import gideon.knowledge.pipeline.executor as ex
-import gideon.knowledge.pipeline.registry as reg
-from gideon.knowledge.pipeline import ensure_nodes_registered, graph_for
-from gideon.knowledge.pipeline.executor import PipelineExecutor
-from gideon.knowledge.pipeline.types import NodeContext
+import gideon.cognition.knowledge.pipeline.executor as ex
+import gideon.cognition.knowledge.pipeline.registry as reg
+from gideon.cognition.knowledge.pipeline import ensure_nodes_registered, graph_for
+from gideon.cognition.knowledge.pipeline.executor import PipelineExecutor
+from gideon.cognition.knowledge.pipeline.types import NodeContext
 
 
 def _set_resolvable(monkeypatch, fn):
@@ -29,31 +29,26 @@ def _nodes():
     ensure_nodes_registered()
 
 
-# ── use-case wiring (Q1 hybrid) ──
-
-
 def test_ingestion_nodes_use_default_capability_bindings():
     """Ingestion has NO dedicated use-cases — each model-backed node resolves DIRECTLY
     to the relevant default capability (image-understanding → image_modality, reasoning
     → chat, transcription → stt). There is no per-role ingestion override."""
-    from gideon.knowledge.pipeline.nodes.media_nodes import (
+    from gideon.cognition.knowledge.pipeline.nodes.media_nodes import (
         OcrNode,
         TranscriptionNode,
         VideoClassifyNode,
         VideoConsolidateNode,
         VisionNode,
     )
-    from gideon.providers.use_cases import VALID_USE_CASES
+    from gideon.extensions.providers.use_cases import VALID_USE_CASES
 
     assert OcrNode.uses_use_case == "image_modality"
     assert VisionNode.uses_use_case == "image_modality"
     assert VideoClassifyNode.uses_use_case == "image_modality"
     assert VideoConsolidateNode.uses_use_case == "chat"
     assert TranscriptionNode.uses_use_case == "stt"
-    # every use-case a node points at is a real capability
     for uc in ("image_modality", "chat", "stt"):
         assert uc in VALID_USE_CASES
-    # the old ingestion use-cases are GONE (removed dead override rows)
     for uc in (
         "pdf_extraction",
         "ocr",
@@ -65,37 +60,27 @@ def test_ingestion_nodes_use_default_capability_bindings():
 
 
 def test_use_case_parent_no_ingestion_fallback():
-    from gideon.providers.use_cases import parent_capability
+    from gideon.extensions.providers.use_cases import parent_capability
 
-    # chat sub-categories still fall back to chat; everything else is its own parent.
     assert parent_capability("reasoning") == "chat"
     assert parent_capability("code_tools") == "chat"
     assert parent_capability("image_modality") == "image_modality"
     assert parent_capability("stt") == "stt"
 
 
-# ── graph shapes ──
-
-
 def test_video_graph_is_conditional_dag():
     g = graph_for("video")
-    g.validate()  # acyclic
+    g.validate()
     conds = [(e.from_node, e.to_node, e.when) for e in g.edges if e.when]
     assert ("video_classify", "ocr", "text-heavy") in conds
     assert ("video_classify", "vision", "visual") in conds
-    # fan-in to consolidate — the transcript arm now flows through lexicon_correction
-    # (LEX.4) before consolidation; ocr/vision arms fan in directly.
     preds = {e.from_node for e in g.predecessors("video_consolidate")}
     assert {"lexicon_correction", "ocr", "vision"} <= preds
     assert "lexicon_correction" in set(g.nodes)
 
 
 def test_image_and_audio_graphs():
-    # Thumbnail is made inline at upload (not a graph node); the graph extracts.
     assert {"exif", "ocr", "vision", "consolidate"} == set(graph_for("image").nodes)
-    # audio → (transcription ‖ diarization) → speaker_fusion → lexicon_correction. The
-    # diarization + fusion + correction nodes all skip gracefully when their model/lexicon
-    # is absent, so they're always in the graph.
     assert set(graph_for("audio").nodes) == {
         "transcription",
         "diarization",
@@ -105,9 +90,7 @@ def test_image_and_audio_graphs():
 
 
 def test_speaker_fusion_assigns_by_max_overlap():
-    # Deterministic fusion (L1.3): each word gets the speaker whose turn overlaps it most,
-    # splitting a segment when the speaker changes mid-segment.
-    from gideon.knowledge.pipeline.nodes import media_nodes as mn
+    from gideon.cognition.knowledge.pipeline.nodes import media_nodes as mn
 
     transcript = {
         "text": "hello there",
@@ -135,25 +118,21 @@ def test_speaker_fusion_assigns_by_max_overlap():
 
 
 def test_speaker_fusion_passthrough_without_turns():
-    # No diarization turns (no model) → transcript passes through unchanged (L0 works
-    # with or without L1).
-    from gideon.knowledge.pipeline.nodes import media_nodes as mn
+    from gideon.cognition.knowledge.pipeline.nodes import media_nodes as mn
 
-    transcript = {"text": "x", "segments": [{"start": 0, "end": 1, "text": "x", "words": []}]}
+    transcript = {
+        "text": "x",
+        "segments": [{"start": 0, "end": 1, "text": "x", "words": []}],
+    }
     fused = mn._fuse_speakers(transcript, [])
     assert fused["segments"][0].get("speaker") is None
 
 
-# ── executor over the video DAG with stubbed models ──
-
-
 def test_video_dag_routes_conditional_branch(monkeypatch, tmp_path):
-    # All use-cases resolvable; stub each model-backed node's run via the registry.
     _set_resolvable(monkeypatch, lambda uc: True)
 
-    from gideon.knowledge.pipeline.types import NodeOutput
+    from gideon.cognition.knowledge.pipeline.types import NodeOutput
 
-    # Stub ffmpeg-backed structural nodes to emit fake audio + frames.
     async def _split(inputs, ctx):
         return NodeOutput(
             node_type="av_split",
@@ -167,7 +146,10 @@ def test_video_dag_routes_conditional_branch(monkeypatch, tmp_path):
         f = tmp_path / "f1.jpg"
         f.write_text("x")
         return NodeOutput(
-            node_type="frame_extract", backend="ffmpeg", pooled=False, artifacts=[str(f)]
+            node_type="frame_extract",
+            backend="ffmpeg",
+            pooled=False,
+            artifacts=[str(f)],
         )
 
     async def _classify(inputs, ctx):
@@ -180,7 +162,10 @@ def test_video_dag_routes_conditional_branch(monkeypatch, tmp_path):
 
     async def _ocr(inputs, ctx):
         return NodeOutput(
-            node_type="ocr", backend="vision-llm", text="OCR TEXT", classification="text-heavy"
+            node_type="ocr",
+            backend="vision-llm",
+            text="OCR TEXT",
+            classification="text-heavy",
         )
 
     async def _vision(inputs, ctx):
@@ -211,33 +196,31 @@ def test_video_dag_routes_conditional_branch(monkeypatch, tmp_path):
         monkeypatch.setattr(node, "run", fn)
 
     g = graph_for("video")
-    ctx = NodeContext(item_id="v1", item_type="video", file_path=str(tmp_path / "vid.mp4"))
+    ctx = NodeContext(
+        item_id="v1", item_type="video", file_path=str(tmp_path / "vid.mp4")
+    )
     res = _run(PipelineExecutor(g).run(ctx))
-    # text-heavy verdict → ocr ran, vision skipped
     assert "ocr" in res.ran
     assert "vision" in res.skipped
     assert "transcription" in res.ran
     assert res.outputs["video_consolidate"].text == "MERGED"
-    # consolidate saw transcription + ocr (not vision)
     assert "ocr" in res.outputs["video_consolidate"].metadata["got"]
 
 
 def test_audio_partial_when_no_stt(monkeypatch):
-    # No model for stt → transcription skips → the downstream lexicon_correction has no
-    # transcript to act on and skips too → nothing ran → failed (item survives).
     _set_resolvable(monkeypatch, lambda uc: uc is None)
     g = graph_for("audio")
     res = _run(
-        PipelineExecutor(g).run(NodeContext(item_id="a1", item_type="audio", file_path="/x.wav"))
+        PipelineExecutor(g).run(
+            NodeContext(item_id="a1", item_type="audio", file_path="/x.wav")
+        )
     )
     assert "transcription" in res.skipped
-    assert not res.ran  # neither transcription nor its dependent correction ran
-    assert res.status == "failed"  # nothing ran, but no exception raised
+    assert not res.ran
+    assert res.status == "failed"
 
 
 def test_image_partial_with_thumbnail_only(monkeypatch, tmp_path):
-    # exif/thumbnail (pure-python) run on a real image; ocr/vision skip (no model)
-    # → at least one node ran → status 'partial', item NOT hard-failed.
     _set_resolvable(monkeypatch, lambda uc: uc is None)
     img = tmp_path / "p.png"
     try:
@@ -248,7 +231,9 @@ def test_image_partial_with_thumbnail_only(monkeypatch, tmp_path):
         pytest.skip("Pillow not available")
     g = graph_for("image")
     res = _run(
-        PipelineExecutor(g).run(NodeContext(item_id="i1", item_type="image", file_path=str(img)))
+        PipelineExecutor(g).run(
+            NodeContext(item_id="i1", item_type="image", file_path=str(img))
+        )
     )
     assert "exif" in res.ran
     assert "ocr" in res.skipped and "vision" in res.skipped
@@ -259,14 +244,13 @@ def test_guess_mime_canonical_web_types():
     """Override Python mimetypes' legacy/nonstandard audio/video MIMEs with the
     canonical web types so inline <audio>/<video> playback works (e.g. .m4a must be
     audio/mp4, not the unplayable audio/mp4a-latm; .wav audio/wav, not audio/x-wav)."""
-    from gideon.knowledge.media import guess_mime
+    from gideon.cognition.knowledge.media import guess_mime
 
     assert guess_mime("clip.wav") == "audio/wav"
     assert guess_mime("voice.m4a") == "audio/mp4"
     assert guess_mime("song.flac") == "audio/flac"
     assert guess_mime("rec.ogg") == "audio/ogg"
     assert guess_mime("movie.mov") == "video/quicktime"
-    # Non-overridden types pass through unchanged.
     assert guess_mime("a.mp3") == "audio/mpeg"
     assert guess_mime("a.png") == "image/png"
     assert guess_mime("a.pdf") == "application/pdf"
@@ -275,12 +259,12 @@ def test_guess_mime_canonical_web_types():
 def test_transcription_empty_is_success_not_failure(monkeypatch):
     """A silent / no-speech audio yields an empty transcript — that's a VALID result,
     not a failure (the item should land 'done', not an alarming 'failed')."""
-    from gideon.knowledge.pipeline.nodes.media_nodes import TranscriptionNode
+    from gideon.cognition.knowledge.pipeline.nodes.media_nodes import TranscriptionNode
 
     async def _empty(_audio):
         return ""
 
-    monkeypatch.setattr("gideon.transcribe.transcribe_audio", _empty)
+    monkeypatch.setattr("gideon.integrations.transcribe.transcribe_audio", _empty)
     node = TranscriptionNode()
     ctx = NodeContext(item_id="x", item_type="audio", file_path="/tmp/silent.wav")
     out = _run(node.run({}, ctx))
@@ -290,9 +274,9 @@ def test_transcription_empty_is_success_not_failure(monkeypatch):
 
 def test_transcription_no_audio_still_fails(monkeypatch):
     """No audio at all is still a genuine failure (distinct from empty transcript)."""
-    from gideon.knowledge.pipeline.nodes.media_nodes import TranscriptionNode
+    from gideon.cognition.knowledge.pipeline.nodes.media_nodes import TranscriptionNode
 
     node = TranscriptionNode()
-    ctx = NodeContext(item_id="x", item_type="audio", file_path="")  # no audio
+    ctx = NodeContext(item_id="x", item_type="audio", file_path="")
     out = _run(node.run({}, ctx))
     assert out.success is False and out.error == "no audio"

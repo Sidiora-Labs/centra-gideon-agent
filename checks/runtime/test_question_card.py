@@ -16,15 +16,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from gideon.dashboard.chat_runner import _emit_question_card
-from gideon.validation import (
+from gideon.assurance.validation import (
     _AUQ_MAX_OPTIONS,
     _AUQ_MAX_QUESTIONS,
     ValidationError,
     validate_ask_user_question,
 )
-
-# ── validate_ask_user_question ──
+from gideon.interfaces.dashboard.chat_runner import _emit_question_card
 
 
 class TestValidateAskUserQuestion:
@@ -68,7 +66,6 @@ class TestValidateAskUserQuestion:
         assert out[0]["header"] == ""
 
     def test_drops_question_with_no_usable_options(self) -> None:
-        # One good, one optionless → only the good one survives.
         out = validate_ask_user_question(
             {
                 "questions": [
@@ -86,7 +83,9 @@ class TestValidateAskUserQuestion:
                 "questions": [
                     {
                         "question": f"q{i}",
-                        "options": [{"label": f"o{j}"} for j in range(_AUQ_MAX_OPTIONS + 5)],
+                        "options": [
+                            {"label": f"o{j}"} for j in range(_AUQ_MAX_OPTIONS + 5)
+                        ],
                     }
                     for i in range(_AUQ_MAX_QUESTIONS + 5)
                 ]
@@ -97,10 +96,14 @@ class TestValidateAskUserQuestion:
 
     def test_truncates_long_strings(self) -> None:
         out = validate_ask_user_question(
-            {"questions": [{"question": "x" * 5000, "options": [{"label": "y" * 5000}]}]}
+            {
+                "questions": [
+                    {"question": "x" * 5000, "options": [{"label": "y" * 5000}]}
+                ]
+            }
         )
-        assert len(out[0]["question"]) == 2000  # _AUQ_TEXT_CAP
-        assert len(out[0]["options"][0]["label"]) == 400  # _AUQ_LABEL_CAP
+        assert len(out[0]["question"]) == 2000
+        assert len(out[0]["options"][0]["label"]) == 400
 
     @pytest.mark.parametrize(
         "payload",
@@ -108,17 +111,14 @@ class TestValidateAskUserQuestion:
             "not a dict",
             {"questions": "not a list"},
             {"questions": []},
-            {"questions": [{"question": "", "options": [{"label": "a"}]}]},  # blank prompt
-            {"questions": [{"question": "q", "options": []}]},  # no options
+            {"questions": [{"question": "", "options": [{"label": "a"}]}]},
+            {"questions": [{"question": "q", "options": []}]},
             {"no_questions": True},
         ],
     )
     def test_rejects_unusable_payload(self, payload) -> None:
         with pytest.raises(ValidationError):
             validate_ask_user_question(payload)
-
-
-# ── _emit_question_card (broadcast wiring) ──
 
 
 class TestEmitQuestionCard:
@@ -152,14 +152,18 @@ class TestEmitQuestionCard:
 
     def test_redacts_every_user_facing_string(self) -> None:
         state = self._state()
-        secret = "AKIAIOSFODNN7EXAMPLE"  # AWS access-key id → redact_credentials catches it
+        secret = (
+            "AKIAIOSFODNN7EXAMPLE"  # AWS access-key id → redact_credentials catches it
+        )
         tool_input = json.dumps(
             {
                 "questions": [
                     {
                         "question": f"Use key {secret}?",
                         "header": secret,
-                        "options": [{"label": secret, "description": f"the {secret} key"}],
+                        "options": [
+                            {"label": secret, "description": f"the {secret} key"}
+                        ],
                     }
                 ]
             }
@@ -169,7 +173,7 @@ class TestEmitQuestionCard:
         payload = state.broadcast_ws.call_args[0][1]
         q = payload["questions"][0]
         blob = json.dumps(q)
-        assert secret not in blob  # redacted in question, header, label, and description
+        assert secret not in blob
         assert "[REDACTED" in q["question"]
         assert "[REDACTED" in q["header"]
         assert "[REDACTED" in q["options"][0]["label"]

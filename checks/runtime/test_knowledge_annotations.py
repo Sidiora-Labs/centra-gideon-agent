@@ -26,7 +26,7 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import make_mocked_request
 
-from gideon.knowledge.store import KnowledgeStore
+from gideon.cognition.knowledge.store import KnowledgeStore
 
 
 @pytest.fixture()
@@ -57,18 +57,17 @@ def _call(store, handler_name, method, path, *, match_info=None, body=None):
             return body
 
         req.json = _json
-    from gideon.dashboard.handlers import knowledge as H
+    from gideon.interfaces.dashboard.handlers import knowledge as H
 
     resp = _run(getattr(H, handler_name)(req))
     return resp, json.loads(resp.body)
 
 
-# ── Store round-trip ────────────────────────────────────────────────────
-
-
 def test_a_highlight_round_trips(store):
     item = _item(store)
-    row = store.add_annotation(item, "worth marking", occurrence=0, note="why it matters")
+    row = store.add_annotation(
+        item, "worth marking", occurrence=0, note="why it matters"
+    )
 
     assert row is not None and row["id"]
     listed = store.list_annotations(item)
@@ -86,7 +85,9 @@ def test_a_highlight_survives_a_fresh_store_handle(db_path):
 
     reopened = KnowledgeStore(db_path)
 
-    assert [a["quote"] for a in reopened.list_annotations(item)] == ["persisted passage"]
+    assert [a["quote"] for a in reopened.list_annotations(item)] == [
+        "persisted passage"
+    ]
 
 
 def test_the_note_is_optional(store):
@@ -111,7 +112,11 @@ def test_highlights_list_in_reading_order(store):
     store.add_annotation(item, "second")
     store.add_annotation(item, "third")
 
-    assert [a["quote"] for a in store.list_annotations(item)] == ["first", "second", "third"]
+    assert [a["quote"] for a in store.list_annotations(item)] == [
+        "first",
+        "second",
+        "third",
+    ]
 
 
 def test_only_this_items_highlights_come_back(store):
@@ -129,9 +134,6 @@ def test_deleting_a_highlight(store):
     assert store.delete_annotation(row["id"]) is True
     assert store.list_annotations(item) == []
     assert store.delete_annotation(row["id"]) is False
-
-
-# ── Guard rails ─────────────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize("quote", ["", "   ", "\n"])
@@ -154,9 +156,6 @@ def test_a_negative_occurrence_is_refused(store):
 
 def test_highlighting_an_unknown_item_returns_none(store):
     assert store.add_annotation("ghost", "passage") is None
-
-
-# ── What must not be lost ───────────────────────────────────────────────
 
 
 def test_highlighting_does_not_touch_updated_at(store):
@@ -190,11 +189,11 @@ def test_deleting_the_item_takes_its_highlights(store):
     store.delete_item(item)
 
     assert (
-        store.db.execute("SELECT 1 FROM annotations WHERE id = ?", (row["id"],)).fetchone() is None
+        store.db.execute(
+            "SELECT 1 FROM annotations WHERE id = ?", (row["id"],)
+        ).fetchone()
+        is None
     )
-
-
-# ── HTTP surface ────────────────────────────────────────────────────────
 
 
 def test_post_then_get_over_the_endpoints(store):
@@ -296,7 +295,7 @@ def test_delete_endpoint_removes_then_404s(store):
 
 def test_the_annotation_routes_are_registered():
     """A handler nobody routed to is unreachable — assert the wiring, not just the function."""
-    from gideon.dashboard.handlers import knowledge as H
+    from gideon.interfaces.dashboard.handlers import knowledge as H
 
     app = web.Application()
     app["state"] = SimpleNamespace(knowledge_store=None)
@@ -304,7 +303,8 @@ def test_the_annotation_routes_are_registered():
     H.setup_knowledge_routes(app)
 
     registered = {
-        (r.method, str(getattr(r.resource, "canonical", ""))) for r in app.router.routes()
+        (r.method, str(getattr(r.resource, "canonical", "")))
+        for r in app.router.routes()
     }
     assert ("GET", "/api/knowledge/items/{id}/annotations") in registered
     assert ("POST", "/api/knowledge/items/{id}/annotations") in registered

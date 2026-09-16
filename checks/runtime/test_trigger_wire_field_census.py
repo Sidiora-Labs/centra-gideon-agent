@@ -38,16 +38,24 @@ from pathlib import Path
 
 import pytest
 
-_REPO_ROOT = Path(__file__).resolve().parents[1]
-_HANDLERS = _REPO_ROOT / "src" / "gideon" / "dashboard" / "handlers" / "triggers.py"
-_SCHEDULE_FORM = _REPO_ROOT / "web" / "src" / "pages" / "schedule" / "ScheduleForm.tsx"
-_CREATE_PAGE = _REPO_ROOT / "web" / "src" / "pages" / "triggers" / "TriggerCreatePage.tsx"
-_API = _REPO_ROOT / "web" / "src" / "lib" / "api.ts"
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_HANDLERS = (
+    _REPO_ROOT
+    / "runtime"
+    / "gideon"
+    / "interfaces"
+    / "dashboard"
+    / "handlers"
+    / "triggers.py"
+)
+_SCHEDULE_FORM = (
+    _REPO_ROOT / "apps/console" / "src" / "pages" / "schedule" / "ScheduleForm.tsx"
+)
+_CREATE_PAGE = (
+    _REPO_ROOT / "apps/console" / "src" / "pages" / "triggers" / "TriggerCreatePage.tsx"
+)
+_API = _REPO_ROOT / "apps/console" / "src" / "lib" / "api.ts"
 
-#: Wire fields the handlers deliberately do NOT read, each with the reason it is allowed to be
-#: unread. A field belongs here only when leaving it unread is a decision someone made on purpose —
-#: never because a test went red. Rows are the exception surface; keep it short and keep the
-#: reasons true.
 _DELIBERATELY_UNREAD: dict[str, str] = {
     "at": (
         "One-shot scheduling is a declared-future axis: `scheduleMeta.ts` flags the `at` kind "
@@ -58,9 +66,6 @@ _DELIBERATELY_UNREAD: dict[str, str] = {
     ),
 }
 
-#: Floors. Each is the size of the set as measured when this test was written, minus a little slack
-#: for churn. They exist because every number below is produced by a regex over source text, and a
-#: regex that silently stops matching turns this whole file into a test that asserts nothing.
 _MIN_SENT = 8
 _MIN_READ_CREATE = 8
 _MIN_READ_UPDATE = 8
@@ -105,8 +110,12 @@ def _assigned_keys(region: str) -> set[str]:
 
 def _sent_fields() -> set[str]:
     """Every key either frontend payload builder can put on a schedule create/update body."""
-    edit = _region(_SCHEDULE_FORM, "export function draftToPayload(", "\n  return body\n}")
-    create = _region(_CREATE_PAGE, "if (kind === 'schedule') {", "await api.createSchedule(body)")
+    edit = _region(
+        _SCHEDULE_FORM, "export function draftToPayload(", "\n  return body\n}"
+    )
+    create = _region(
+        _CREATE_PAGE, "if (kind === 'schedule') {", "await api.createSchedule(body)"
+    )
     sent: set[str] = set()
     for region in (edit, create):
         literal = _region_literal(region)
@@ -118,7 +127,9 @@ def _region_literal(region: str) -> str:
     """The `const body… = { … }` literal inside a payload-builder region."""
     i = region.find("= {")
     if i < 0:
-        pytest.fail("payload builder has no `= {` body literal; the census cannot read its keys")
+        pytest.fail(
+            "payload builder has no `= {` body literal; the census cannot read its keys"
+        )
     depth = 0
     for k in range(i + 2, len(region)):
         if region[k] == "{":
@@ -139,7 +150,9 @@ def _action_config_fields() -> set[str]:
     region = _region(_API, "function _scheduleBodyToWire(", "\n}")
     m = re.search(r"const\s*\{([^}]*)\}\s*=\s*body", region)
     if m is None:
-        pytest.fail("`_scheduleBodyToWire` no longer destructures `body`; re-point this extractor")
+        pytest.fail(
+            "`_scheduleBodyToWire` no longer destructures `body`; re-point this extractor"
+        )
     names = {n.strip() for n in m.group(1).split(",") if n.strip() and "..." not in n}
     return names - {"action"}
 
@@ -167,22 +180,27 @@ def _wire_fields() -> set[str]:
 
 def test_the_census_can_still_see_both_sides() -> None:
     """The vacuity floor. Every assertion below is a set difference, and a regex that stopped
-    matching produces an empty set, which differs from nothing. Measure the sets first."""
+    matching produces an empty set, which differs from nothing. Measure the sets first.
+    """
     sent, action_cfg = _sent_fields(), _action_config_fields()
-    create, update = _handler_reads("_create_schedule"), _handler_reads("_update_schedule")
-    assert len(sent) >= _MIN_SENT, f"only {len(sent)} sent fields parsed: {sorted(sent)}"
+    create, update = _handler_reads("_create_schedule"), _handler_reads(
+        "_update_schedule"
+    )
+    assert (
+        len(sent) >= _MIN_SENT
+    ), f"only {len(sent)} sent fields parsed: {sorted(sent)}"
     assert len(action_cfg) >= _MIN_ACTION_CONFIG, f"action config: {sorted(action_cfg)}"
     assert len(create) >= _MIN_READ_CREATE, f"_create_schedule reads {sorted(create)}"
     assert len(update) >= _MIN_READ_UPDATE, f"_update_schedule reads {sorted(update)}"
-    # The two known-good anchors of the whole seam: if `name` and `action` are not in both sides,
-    # the extraction is wrong, not the code.
     assert {"name", "action"} <= _wire_fields()
 
 
 @pytest.mark.parametrize("func", ["_create_schedule", "_update_schedule"])
 def test_every_field_the_form_sends_is_read_or_declared_unread(func: str) -> None:
     read = _handler_reads(func)
-    unread = sorted(f for f in _wire_fields() if f not in read and f not in _DELIBERATELY_UNREAD)
+    unread = sorted(
+        f for f in _wire_fields() if f not in read and f not in _DELIBERATELY_UNREAD
+    )
     assert not unread, (
         f"{func} never reads {unread}, but the schedule form sends them. The request will "
         f"succeed and the setting will be silently discarded — issues 268/272/587 were each "
@@ -227,7 +245,9 @@ def test_action_config_keys_never_ride_a_body_that_carries_its_own_action() -> N
     also carry loose action-config keys. There is exactly one right place for them — inside the
     `config` the Action block already edits.
     """
-    create = _region(_CREATE_PAGE, "if (kind === 'schedule') {", "await api.createSchedule(body)")
+    create = _region(
+        _CREATE_PAGE, "if (kind === 'schedule') {", "await api.createSchedule(body)"
+    )
     assert "body.action" in create, (
         "the create page no longer sets `body.action`, so this test is no longer checking the "
         "branch that drops fields — re-point it at whatever builds the create payload now"
@@ -245,10 +265,15 @@ def test_draft_payload_keeps_action_config_behind_its_mode_guard() -> None:
     """The same rule for the edit path. `draftToPayload`'s unconditional literal goes out in EVERY
     mode, and only the invoke-agent branch of `_scheduleBodyToWire` has anywhere to put an
     action-config key — so a key in the base literal is silently dropped for every other mode. That
-    is how `approval_mode` came to be sent on a `notify` trigger's rename and quietly vanish."""
-    edit = _region(_SCHEDULE_FORM, "export function draftToPayload(", "\n  return body\n}")
+    is how `approval_mode` came to be sent on a `notify` trigger's rename and quietly vanish.
+    """
+    edit = _region(
+        _SCHEDULE_FORM, "export function draftToPayload(", "\n  return body\n}"
+    )
     base = _object_literal_keys(_region_literal(edit))
-    assert len(base) >= 5, f"base literal parsed as {sorted(base)}; the extractor is broken"
+    assert (
+        len(base) >= 5
+    ), f"base literal parsed as {sorted(base)}; the extractor is broken"
     leaked = sorted(_action_config_fields() & base)
     assert not leaked, (
         f"`draftToPayload` puts {leaked} in its UNCONDITIONAL literal. Those are action-config "
@@ -260,7 +285,9 @@ def test_draft_payload_keeps_action_config_behind_its_mode_guard() -> None:
 def test_deliberately_unread_rows_are_still_unread() -> None:
     """A stale exception is worse than none: it reads as a documented gap that has actually been
     closed, and it hides the next real one."""
-    read_by_either = _handler_reads("_create_schedule") | _handler_reads("_update_schedule")
+    read_by_either = _handler_reads("_create_schedule") | _handler_reads(
+        "_update_schedule"
+    )
     sent = _wire_fields()
     for field, reason in _DELIBERATELY_UNREAD.items():
         assert reason.strip(), f"{field} needs a real reason, not a placeholder"
@@ -271,7 +298,8 @@ def test_deliberately_unread_rows_are_still_unread() -> None:
     fully_landed = [
         f
         for f in _DELIBERATELY_UNREAD
-        if f in _handler_reads("_create_schedule") and f in _handler_reads("_update_schedule")
+        if f in _handler_reads("_create_schedule")
+        and f in _handler_reads("_update_schedule")
     ]
     assert not fully_landed, (
         f"{fully_landed} are read by BOTH handlers now, so the exception is stale — delete the "

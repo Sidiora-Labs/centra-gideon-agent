@@ -12,25 +12,20 @@ import json
 
 import pytest
 
-from gideon.memory import MemoryStore
-from gideon.memory_record import MemoryKind, MemoryRecord, MemoryScope
-from gideon.memory_service import MemoryService
-from gideon.memory_vault import (
-    MemoryVault,
-    _yaml_scalar,
-    render_record,
-    slug,
-)
-from gideon.vector_memory import VectorMemoryStore
+from gideon.cognition.memory import MemoryJournal
+from gideon.cognition.memory_record import MemoryKind, MemoryRecord, MemoryScope
+from gideon.cognition.memory_service import MemoryService
+from gideon.cognition.memory_vault import MemoryVault, _yaml_scalar, render_record, slug
+from gideon.cognition.vector_memory import SemanticArchive
 
 
 @pytest.fixture
 def service(tmp_path):
     ws = tmp_path / "ws"
     ws.mkdir()
-    store = MemoryStore(workspace=ws)
+    store = MemoryJournal(workspace=ws)
     store.init()
-    vs = VectorMemoryStore(db_path=tmp_path / "mem.db", embedding_dim=3)
+    vs = SemanticArchive(db_path=tmp_path / "mem.db", embedding_dim=3)
     vs.init()
     vs.embed_fn = lambda t: [1.0, 0.0, 0.0]
     store.vector_store = vs
@@ -42,16 +37,11 @@ def vault(service, tmp_path):
     return MemoryVault(service, tmp_path / "vault")
 
 
-# ── frontmatter is fence-proof (untrusted memory text) ───────────────────────
-
-
 def test_yaml_scalar_escapes_fence_breakers():
-    # A value that tries to break the fence / forge keys is JSON-escaped inline.
     evil = "line1\n---\nkind: injected\nmalice: true"
     out = _yaml_scalar(evil)
-    assert "\n" not in out  # single-line — cannot introduce new YAML keys
+    assert "\n" not in out
     assert out.startswith('"') and out.endswith('"')
-    # And it round-trips as the original string via JSON.
     assert json.loads(out) == evil
 
 
@@ -65,11 +55,8 @@ def test_slug_is_stable_and_safe():
     assert slug("pref.editor") == "pref.editor"
     a = slug("weird/id:with spaces")
     b = slug("weird/id:with spaces")
-    assert a == b  # deterministic
+    assert a == b
     assert "/" not in a and ":" not in a and " " not in a
-
-
-# ── rendering derives links from real fields ─────────────────────────────────
 
 
 def test_render_episodic_links_session_and_tags():
@@ -84,7 +71,6 @@ def test_render_episodic_links_session_and_tags():
     assert note.relpath == "episodic/ep1.md"
     assert "[[session-sess-42]]" in note.content
     assert "[[tag-deploy]]" in note.content and "[[tag-infra]]" in note.content
-    # links set carries the wikilink targets for graph wiring
     assert {"session-sess-42", "tag-deploy", "tag-infra"} <= note.links
 
 
@@ -112,20 +98,15 @@ def test_render_frontmatter_has_axes():
     assert "confidence: 0.9" in note.content
 
 
-# ── sync is idempotent + incremental + prunes ────────────────────────────────
-
-
 def test_sync_writes_then_noop(vault, service):
     service.set_semantic("pref.editor", "vim", 0.9, "user_explicit")
     service.write_episodic("shipped v2", conversation_id="s1", tags=["ship"])
     first = vault.sync()
     assert first["records"] >= 2
-    assert first["written"] >= 3  # 2 records + index + tag hub
-    # A second sync with no changes writes nothing.
+    assert first["written"] >= 3
     second = vault.sync()
     assert second["written"] == 0
     assert second["pruned"] == 0
-    # Files actually exist on disk.
     assert (vault.path / "facts" / "pref.editor.md").is_file()
     assert (vault.path / "MEMORY.md").is_file()
     assert (vault.path / "tags" / f"{slug('tag-ship')}.md").is_file()
@@ -135,7 +116,6 @@ def test_sync_prunes_deleted_record(vault, service):
     service.set_semantic("pref.tmp", "gone-soon", 0.9, "user_explicit")
     vault.sync()
     assert (vault.path / "facts" / "pref.tmp.md").is_file()
-    # Delete the record; the next sync prunes its file.
     service.delete_semantic("pref.tmp", source="user_explicit")
     summary = vault.sync()
     assert summary["pruned"] >= 1
@@ -146,7 +126,6 @@ def test_full_rebuild_reproduces_bytes(vault, service, tmp_path):
     service.set_semantic("pref.editor", "vim", 0.9, "user_explicit")
     vault.sync()
     original = (vault.path / "facts" / "pref.editor.md").read_text(encoding="utf-8")
-    # Blow away the manifest → full rebuild → identical content (pure projection).
     (vault.path / ".vault-manifest.json").unlink()
     vault.sync()
     rebuilt = (vault.path / "facts" / "pref.editor.md").read_text(encoding="utf-8")
@@ -154,10 +133,8 @@ def test_full_rebuild_reproduces_bytes(vault, service, tmp_path):
 
 
 def test_disabled_config_yields_no_vault(monkeypatch, service):
-    from gideon import memory_vault
+    from gideon.cognition import memory_vault
 
-    # vault_dir_from_config returns None when disabled → mirror is a no-op.
     monkeypatch.setattr(memory_vault, "vault_dir_from_config", lambda: None)
     assert memory_vault.vault_for(service) is None
-    # And the guarded post-consolidation entry never raises.
     memory_vault.mirror_after_consolidation(service)

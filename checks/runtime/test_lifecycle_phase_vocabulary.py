@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.loop import store
-from gideon.loop.loop import (
+from gideon.automation.loop import store
+from gideon.automation.loop.loop import (
     ACTIVE_STATUSES,
     ATTENTION_STATUSES,
     ENDED_STATUSES,
@@ -28,7 +28,7 @@ from gideon.loop.loop import (
     Loop,
     LoopStatus,
 )
-from gideon.workflows.models import (
+from gideon.automation.workflows.models import (
     ENDED_RUN_STATUSES,
     RESUMABLE_ENDED_RUN_STATUSES,
     RUN_PHASES,
@@ -40,7 +40,7 @@ from gideon.workflows.models import (
 
 @pytest.fixture(autouse=True)
 def _tmp_config(monkeypatch, tmp_path):
-    monkeypatch.setattr("gideon.loop.files.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.automation.loop.files.config_dir", lambda: tmp_path)
     return tmp_path
 
 
@@ -55,9 +55,6 @@ def _loop(**over) -> Loop:
     )
     base.update(over)
     return store.create(Loop(**base))
-
-
-# ── the vocabulary is exhaustive over both nouns ──────────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -76,7 +73,9 @@ def test_every_status_member_has_exactly_one_phase(enum_cls, phase_map, label):
     phantom = set(phase_map) - set(enum_cls)
     assert not phantom, f"phase rows for non-members of {label}: {phantom}"
     for status, phase in phase_map.items():
-        assert isinstance(phase, LifecyclePhase), f"{label}.{status.name} phase is not a phase"
+        assert isinstance(
+            phase, LifecyclePhase
+        ), f"{label}.{status.name} phase is not a phase"
 
 
 def test_both_nouns_use_the_same_phase_vocabulary():
@@ -88,9 +87,6 @@ def test_both_nouns_use_the_same_phase_vocabulary():
         "declared LifecyclePhase members no noun classifies into: "
         f"{sorted(p.value for p in set(LifecyclePhase) - used)}"
     )
-
-
-# ── terminality is derived, not declared ─────────────────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -146,11 +142,10 @@ def test_attention_is_derived_and_sits_inside_active():
     ), "ATTENTION_STATUSES is no longer derived from the phase map"
     assert ATTENTION_STATUSES, "vacuity floor: no attention statuses at all"
     assert ATTENTION_STATUSES <= ACTIVE_STATUSES
-    assert not (ATTENTION_STATUSES & ENDED_STATUSES), "an ended loop cannot be awaiting the user"
+    assert not (
+        ATTENTION_STATUSES & ENDED_STATUSES
+    ), "an ended loop cannot be awaiting the user"
     assert not (ATTENTION_STATUSES & PRELAUNCH_STATUSES)
-
-
-# ── the FAILED asymmetry, stated as one paired fact ──────────────────────────
 
 
 def test_failed_is_ended_for_both_nouns_but_terminal_for_only_the_run():
@@ -163,7 +158,9 @@ def test_failed_is_ended_for_both_nouns_but_terminal_for_only_the_run():
     """
     assert LoopStatus.FAILED in ENDED_STATUSES
     assert RunStatus.FAILED in ENDED_RUN_STATUSES
-    assert LoopStatus.FAILED not in TERMINAL_STATUSES, "a failed loop must stay resumable"
+    assert (
+        LoopStatus.FAILED not in TERMINAL_STATUSES
+    ), "a failed loop must stay resumable"
     assert RunStatus.FAILED in TERMINAL_RUN_STATUSES, "a failed run must stay terminal"
     assert RESUMABLE_ENDED_STATUSES == frozenset({LoopStatus.FAILED}), (
         "the loop's resumable-ended set is the one place `failed` diverges from the run's; "
@@ -177,9 +174,6 @@ def test_failed_is_not_counted_as_an_active_loop():
     comment on a hand-written literal. It is resumable but has no armed worker."""
     assert LoopStatus.FAILED not in ACTIVE_STATUSES
     assert ACTIVE_STATUSES, "vacuity floor: no active statuses at all"
-
-
-# ── the behaviour the derivation is supposed to preserve ─────────────────────
 
 
 def test_a_failed_loop_can_still_resume():

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 
-from gideon.routing import stats
+from gideon.engine.routing import stats
 
 
 def _row(**kw):
@@ -40,25 +40,25 @@ class TestFoldMath:
         stats.fold_record(s, _row(passed=False, latency_ms=4000.0), now="t")
         row = s["use_cases"]["reasoning"]["summarize"]["ollama-models:qwen3:8b"]
         assert row["n"] == 2
-        # EMA(alpha=0.2): 0.8*1.0 + 0.2*0.0 = 0.8 ; 0.8*2000 + 0.2*4000 = 2400
         assert row["success_rate"] == 0.8 and row["avg_ms"] == 2400.0
 
     def test_score_collapses_onto_success_without_feedback(self):
         s = {"use_cases": {}}
         stats.fold_record(s, _row(passed=True), now="t")
         row = s["use_cases"]["reasoning"]["summarize"]["ollama-models:qwen3:8b"]
-        # feedback_n=0 → score == success_rate (not 0.6*success), so an unrated ref isn't docked.
         assert row["feedback_n"] == 0 and row["score"] == row["success_rate"] == 1.0
 
     def test_ref_uses_active_models_spelling_with_colon_model(self):
         s = {"use_cases": {}}
-        stats.fold_record(s, _row(provider="ollama-models", model="gpt-oss:20b"), now="t")
+        stats.fold_record(
+            s, _row(provider="ollama-models", model="gpt-oss:20b"), now="t"
+        )
         assert "ollama-models:gpt-oss:20b" in s["use_cases"]["reasoning"]["summarize"]
 
     def test_unclassified_rows_are_skipped(self):
         s = {"use_cases": {}}
-        stats.fold_record(s, _row(query_class=""), now="t")  # no class → can't attribute
-        stats.fold_record(s, _row(use_case=""), now="t")  # no use_case
+        stats.fold_record(s, _row(query_class=""), now="t")
+        stats.fold_record(s, _row(use_case=""), now="t")
         assert s["use_cases"] == {}
 
 
@@ -70,7 +70,9 @@ class TestPersistence:
     def test_record_routing_stats_round_trips(self, tmp_path):
         stats.record_routing_stats(_row(), home=tmp_path, now="t")
         s = stats.load_stats(tmp_path)
-        assert s["use_cases"]["reasoning"]["summarize"]["ollama-models:qwen3:8b"]["n"] == 1
+        assert (
+            s["use_cases"]["reasoning"]["summarize"]["ollama-models:qwen3:8b"]["n"] == 1
+        )
 
     def test_corrupt_file_degrades_to_empty(self, tmp_path):
         (tmp_path / "routing_stats.json").write_text("{not json", encoding="utf-8")
@@ -92,13 +94,17 @@ class TestRebuild:
                 "latency_ms": 100.0,
                 "dollars_est": 0.001,
             },
-            {"garbage": True},  # tolerated
+            {"garbage": True},
         ]
-        audit.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+        audit.write_text(
+            "\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8"
+        )
         folded = stats.rebuild(tmp_path, audit_path=audit)
-        assert folded == 3  # the 3 classifiable rows; garbage skipped
+        assert folded == 3
         s = stats.load_stats(tmp_path)
-        assert s["use_cases"]["reasoning"]["summarize"]["ollama-models:qwen3:8b"]["n"] == 2
+        assert (
+            s["use_cases"]["reasoning"]["summarize"]["ollama-models:qwen3:8b"]["n"] == 2
+        )
         assert "short_chat" in s["use_cases"]["chat"]
 
     def test_rebuild_missing_jsonl_writes_empty(self, tmp_path):
@@ -110,10 +116,10 @@ class TestLiveHookThroughGuard:
     """The audit path folds the same attempt into routing_stats.json (MRT-1c wiring)."""
 
     def test_a_guarded_call_folds_into_stats(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
-        from gideon.guardrails.model_call import ModelCallGuard
-        from gideon.llm.base import EVENT_COMPLETE
-        from tests.test_guardrails_model_call import FakeProvider
+        monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
+        from checks.runtime.test_guardrails_model_call import FakeProvider
+        from gideon.integrations.llm.base import EVENT_COMPLETE
+        from gideon.security.guardrails.model_call import ModelCallGuard
 
         guard = ModelCallGuard(
             FakeProvider(text="ok"),
@@ -124,7 +130,7 @@ class TestLiveHookThroughGuard:
 
         async def _drive():
             await guard.start()
-            agen = guard.stream("summarize this, tl;dr")  # classifies as "summarize"
+            agen = guard.stream("summarize this, tl;dr")
             async for ev in agen:
                 if ev.kind == EVENT_COMPLETE:
                     break

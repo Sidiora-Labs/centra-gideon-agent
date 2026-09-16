@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.browse.sentinels import (
+from gideon.integrations.browse.sentinels import (
     ClickAction,
     DoneAction,
     GoBackAction,
@@ -34,7 +34,6 @@ def test_type_ref_value_parses():
 
 
 def test_type_value_may_contain_parens():
-    # The LAST ')' closes the group, so a value with inner parens survives.
     a = parse_sentinel("TYPE deadbeef(foo (bar) baz)")
     assert a == TypeAction(ref="deadbeef", value="foo (bar) baz")
 
@@ -57,7 +56,9 @@ def test_navigate_scroll_wait_notes():
     assert parse_sentinel("SCROLL down") == ScrollAction(direction="down")
     assert parse_sentinel("SCROLL up") == ScrollAction(direction="up")
     assert parse_sentinel("WAIT 3") == WaitAction(seconds=3)
-    assert parse_sentinel("NOTES the price is $40") == NotesAction(text="the price is $40")
+    assert parse_sentinel("NOTES the price is $40") == NotesAction(
+        text="the price is $40"
+    )
 
 
 def test_wait_clamped_to_band():
@@ -75,11 +76,10 @@ def test_unknown_and_blank_lines_ignored():
     assert parse_sentinel("   ") is None
     assert parse_sentinel("just some prose the model wrote") is None
     assert parse_sentinel("CLICKX abc") is None
-    assert parse_sentinel("CLICK") is None  # missing ref
+    assert parse_sentinel("CLICK") is None
 
 
 def test_click_rejects_non_ref_token():
-    # A ref is hex; a positional integer or a word is not a ref and must not parse as CLICK.
     assert parse_sentinel("CLICK 7") is None
     assert parse_sentinel("CLICK the-button") is None
 

@@ -1,7 +1,7 @@
 """Shrink-only ratchet for the committed inert-surface inventory (PLATFORM-HARDENING-FLOORS SH3.2).
 
-``inert-surface-baseline.json`` is a GENERATED census (by
-``scripts/generate_inert_surface_baseline.py``) of *declared-but-inert surfaces* across
+``checks/catalogs/inert-surfaces.json`` is a GENERATED census (by
+``tooling/scripts/generate_inert_surface_baseline.py``) of *declared-but-inert surfaces* across
 five seam kinds — config keys, enum members, trigger kinds, ``_EDITABLE_CONFIG`` entries,
 and SDK exports — each being a place where something is declared and nothing on the other
 side of the seam consumes or produces it. That defect passes ordinary tests because they
@@ -22,7 +22,7 @@ asserts every per-file inert counter **may only shrink** versus the committed ba
 
 ⚠️  FORBIDDEN-TO-RAISE RULE (the ``done_when`` doc line — do not weaken it): when this test
     reds because a counter ROSE, the fix is to ADD THE MISSING WRITER OR READER for the new
-    surface — NEVER to regenerate ``inert-surface-baseline.json`` to bless the higher
+    surface — NEVER to regenerate ``checks/catalogs/inert-surfaces.json`` to bless the higher
     number. Raising a committed count to make CI green re-hides exactly the defect this
     census exists to surface.
 
@@ -30,13 +30,13 @@ asserts every per-file inert counter **may only shrink** versus the committed ba
     Regenerate the committed baseline ONLY when a counter LEGITIMATELY SHRANK (a real
     cleanup landed that wired the missing writer/reader), and do it in that SAME commit::
 
-        python scripts/generate_inert_surface_baseline.py
+        python tooling/scripts/generate_inert_surface_baseline.py
 
     Each such cleanup commit should be able to point at the writer/reader it added.
 
     ONE further case, added 2026-08-19: a counter may also rise because the CENSUS started
     seeing a population it was previously blind to — not because anything became inert.
-    `sdk/channel.py` was the only `sdk/` module with no `__all__`, and the ``sdk_export``
+    `packages/python-client/channel.py` was the only `packages/python-client/` module with no `__all__`, and the ``sdk_export``
     detector keys on `__all__`, so its 104 published re-exports were invisible to this
     ratchet for the whole life of the facade (it counted 0). Declaring the surface moved it
     to 104 without changing one line of what the module publishes.
@@ -59,7 +59,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.generate_inert_surface_baseline import (
+from tooling.scripts.generate_inert_surface_baseline import (
     _attribute_names_in_src,
     _enum_members,
     _inert_enum_members,
@@ -69,21 +69,21 @@ from scripts.generate_inert_surface_baseline import (
     baseline_path,
     build_baseline,
     build_inventory,
+    decode_catalog,
+    encode_catalog,
     regressions,
 )
 
-# The forbidden-to-raise sentence, asserted present in both the generator and this test so
-# the ``done_when`` "forbidden-to-raise doc line is present" cannot silently be dropped.
 _FORBIDDEN_TO_RAISE = "add the missing writer or reader"
 
 
 def _committed_inventory() -> dict:
     path = baseline_path()
     assert path.is_file(), (
-        "inert-surface-baseline.json is missing — generate it with "
-        "`python scripts/generate_inert_surface_baseline.py`"
+        "checks/catalogs/inert-surfaces.json is missing — generate it with "
+        "`python tooling/scripts/generate_inert_surface_baseline.py`"
     )
-    return json.loads(path.read_text(encoding="utf-8"))
+    return decode_catalog(json.loads(path.read_text(encoding="utf-8")))
 
 
 def test_no_per_file_counter_rose_vs_committed_baseline():
@@ -101,7 +101,7 @@ def test_no_per_file_counter_rose_vs_committed_baseline():
         "inert-surface count ROSE for one or more files — a new declared-but-inert "
         "surface was introduced:\n  "
         + "\n  ".join(rose)
-        + "\n\nFORBIDDEN: do NOT regenerate inert-surface-baseline.json to bless the higher "
+        + "\n\nFORBIDDEN: do NOT regenerate checks/catalogs/inert-surfaces.json to bless the higher "
         "number. Add the missing writer or reader for the surface named above (that is the "
         "whole point of this ratchet). Regenerate the baseline ONLY when a count "
         "legitimately shrank, in that same commit."
@@ -122,13 +122,14 @@ def test_committed_baseline_is_not_stale_on_the_shrink_side():
         f"{rel}: committed {committed['per_file'][rel]['inert']} > current "
         f"{current['per_file'].get(rel, {}).get('inert', 0)}"
         for rel in committed["per_file"]
-        if committed["per_file"][rel]["inert"] > current["per_file"].get(rel, {}).get("inert", 0)
+        if committed["per_file"][rel]["inert"]
+        > current["per_file"].get(rel, {}).get("inert", 0)
     )
     assert not stale_high, (
         "the committed baseline is stale-HIGH — a cleanup shrank the inert population but "
-        "inert-surface-baseline.json was not regenerated:\n  "
+        "checks/catalogs/inert-surfaces.json was not regenerated:\n  "
         + "\n  ".join(stale_high)
-        + "\n\nRun `python scripts/generate_inert_surface_baseline.py` in the cleanup commit."
+        + "\n\nRun `python tooling/scripts/generate_inert_surface_baseline.py` in the cleanup commit."
     )
 
 
@@ -140,9 +141,9 @@ def test_committed_baseline_byte_matches_a_fresh_render():
     fresh = build_baseline()
     committed = baseline_path().read_text(encoding="utf-8")
     assert committed == fresh, (
-        "inert-surface-baseline.json does not match a fresh render. If a cleanup "
+        "checks/catalogs/inert-surfaces.json does not match a fresh render. If a cleanup "
         "legitimately shrank a counter, regenerate it with "
-        "`python scripts/generate_inert_surface_baseline.py` in the same commit. If a "
+        "`python tooling/scripts/generate_inert_surface_baseline.py` in the same commit. If a "
         "counter ROSE, do NOT regenerate — add the missing writer or reader instead."
     )
 
@@ -174,7 +175,7 @@ def test_baseline_is_well_shaped_and_sorted():
     """The committed inventory has the declared shape and every list is sorted."""
     inv = _committed_inventory()
     assert set(inv) == {"generated_from", "per_file", "totals"}, inv.keys()
-    assert inv["generated_from"] == "scripts/generate_inert_surface_baseline.py"
+    assert inv["generated_from"] == "tooling/scripts/generate_inert_surface_baseline.py"
     total = 0
     for rel, bucket in inv["per_file"].items():
         assert set(bucket) == {"inert", "surfaces"}, bucket
@@ -206,7 +207,7 @@ def test_baseline_ships_at_a_nonzero_measured_population():
     down)."""
     inv = _committed_inventory()
     assert inv["totals"]["inert"] > 0, (
-        "inert-surface-baseline.json reports zero inert surfaces — ship at the MEASURED "
+        "checks/catalogs/inert-surfaces.json reports zero inert surfaces — ship at the MEASURED "
         "population, not zero (a never-run gate given teeth at zero is an outage)."
     )
 
@@ -236,13 +237,14 @@ def test_a_new_inert_surface_reds_the_ratchet():
 
 def test_a_new_file_with_inert_surfaces_reds_the_ratchet():
     """A file absent from the baseline that acquires an inert surface counts as a rise from
-    an implicit zero — covering the "brand new file introduces an inert surface" case."""
+    an implicit zero — covering the "brand new file introduces an inert surface" case.
+    """
     committed = _committed_inventory()
     synthetic = {
         rel: {"inert": bucket["inert"], "surfaces": list(bucket["surfaces"])}
         for rel, bucket in committed["per_file"].items()
     }
-    synthetic["src/gideon/brand_new_module.py"] = {
+    synthetic["runtime/gideon/brand_new_module.py"] = {
         "inert": 1,
         "surfaces": ["sdk_export:NeverImported"],
     }
@@ -266,16 +268,6 @@ def test_a_cleanup_that_shrinks_a_counter_does_not_red_the_ratchet():
     assert regressions(per_file, shrunk) == []
 
 
-# ── enum census: whole-enum iteration clears a class (PHF-12) ────────────────
-#
-# The census once reported an enum member inert whenever its NAME was never accessed as an
-# attribute, which called every iteration-only enum dead: `workflows/publish.py:136`
-# validates author-supplied lineage edges against `{e.value for e in Lineage}`, so
-# `Lineage.INFORMED_BY` and `Lineage.RELATED` are reachable and were reported anyway. These
-# tests pin both directions of the corrected rule against a FIXTURE tree — never by adding
-# dead code to `src/` — plus a vacuity guard that the real census still finds a population.
-
-
 def _fixture_tree(tmp_path: Path, modules: dict[str, str]) -> list[Path]:
     """Write ``{filename: source}`` into ``tmp_path`` and return the sorted file list."""
     for name, source in modules.items():
@@ -286,7 +278,10 @@ def _fixture_tree(tmp_path: Path, modules: dict[str, str]) -> list[Path]:
 def _inert_in(tmp_path: Path, modules: dict[str, str]) -> set[str]:
     """``{"Class.MEMBER"}`` the enum detector reports for a fixture tree."""
     files = _fixture_tree(tmp_path, modules)
-    return {surface for _, surface in _inert_enum_members(files, _attribute_names_in_src(files))}
+    return {
+        surface
+        for _, surface in _inert_enum_members(files, _attribute_names_in_src(files))
+    }
 
 
 def test_an_enum_consumed_only_by_iteration_is_not_flagged(tmp_path):
@@ -328,7 +323,9 @@ def test_an_enum_consumed_only_by_iteration_is_not_flagged(tmp_path):
                 """,
         },
     )
-    assert inert == set(), f"iteration-only enums were flagged (false red): {sorted(inert)}"
+    assert (
+        inert == set()
+    ), f"iteration-only enums were flagged (false red): {sorted(inert)}"
 
 
 def test_an_enum_consumed_nowhere_is_still_flagged(tmp_path):
@@ -404,7 +401,10 @@ def test_the_lineage_false_red_is_gone_and_its_iteration_site_is_seen():
     publish = next(f for f in files if f.as_posix().endswith("workflows/publish.py"))
     assert (publish.resolve(), "Lineage") in iterated
 
-    inert = {surface for _, surface in _inert_enum_members(files, _attribute_names_in_src(files))}
+    inert = {
+        surface
+        for _, surface in _inert_enum_members(files, _attribute_names_in_src(files))
+    }
     assert not [s for s in inert if s.startswith("Lineage.")], sorted(inert)
 
 
@@ -433,22 +433,18 @@ def test_the_enum_census_still_finds_a_nontrivial_population():
     """
     files = _src_py_files()
     classes = {
-        cls for f in files if (tree := _parse(f)) is not None for cls, _ in _enum_members(tree)
+        cls
+        for f in files
+        if (tree := _parse(f)) is not None
+        for cls, _ in _enum_members(tree)
     }
-    assert len(classes) > 50, f"only {len(classes)} enum classes seen — the walk is broken"
+    assert (
+        len(classes) > 50
+    ), f"only {len(classes)} enum classes seen — the walk is broken"
     assert build_inventory()["totals"]["by_kind"]["enum"] >= 5, (
         "the enum census reports (almost) nothing — whole-class clearing has over-reached; "
         "shrink the detected shapes rather than trusting a suspiciously clean census"
     )
-
-
-# ── PHF-13: the value-lookup ruling (NOT a widening — a pinned decision) ─────────────────
-#
-# ``PHF-13`` audited every ``E(value)`` site behind the surviving enum surfaces and ruled
-# AGAINST teaching the detector that shape: five of the six sites either never execute in
-# production or read only values this codebase itself wrote, so a syntactic rule would FALSE-
-# CLEAR them. A false clear passes the shrink-only ratchet silently (the count goes DOWN), so
-# the ruling needs its own rail. These two tests are it.
 
 
 def test_value_lookup_alone_does_not_clear_a_member(tmp_path):
@@ -526,7 +522,9 @@ def test_the_audited_value_lookup_call_sites_are_wired_and_the_members_re_verdic
 
     baseline = _committed_inventory()
     flagged = {
-        surface for entry in baseline["per_file"].values() for surface in entry.get("surfaces", [])
+        surface
+        for entry in baseline["per_file"].values()
+        for surface in entry.get("surfaces", [])
     }
     for cleared in ("enum:Verdict.REPLAN", "enum:Actor.WORKER"):
         assert cleared not in flagged, (
@@ -542,10 +540,12 @@ def test_the_audited_value_lookup_call_sites_are_wired_and_the_members_re_verdic
 def test_the_value_lookup_ruling_is_recorded_in_the_generator():
     """The verdicts are the deliverable, so they must live where the next reader lands: in the
     detector that produces the flags, not only in a plan log."""
-    from scripts import generate_inert_surface_baseline as gen
+    from tooling.scripts import generate_inert_surface_baseline as gen
 
     doc = (gen._inert_enum_members.__doc__ or "").lower()
-    assert "deliberately not taught" in doc, "the PHF-13 ruling is missing from the detector"
+    assert (
+        "deliberately not taught" in doc
+    ), "the PHF-13 ruling is missing from the detector"
     for marker in ("externally reachable", "internal only", "dead call site"):
         assert marker in doc, f"the per-site verdict vocabulary lost {marker!r}"
     assert "construction is the known remaining false-red shape" not in doc, (
@@ -557,7 +557,20 @@ def test_the_value_lookup_ruling_is_recorded_in_the_generator():
 def test_forbidden_to_raise_doc_line_is_present():
     """done_when: "the forbidden-to-raise doc line is present" — in BOTH the generator and
     this test, so neither can drop it unnoticed."""
-    from scripts import generate_inert_surface_baseline as gen
+    from tooling.scripts import generate_inert_surface_baseline as gen
 
     assert _FORBIDDEN_TO_RAISE in (gen.__doc__ or "").lower()
     assert _FORBIDDEN_TO_RAISE in (__doc__ or "").lower()
+
+
+def test_catalog_format_round_trips_without_changing_records():
+    document = json.loads(baseline_path().read_text(encoding="utf-8"))
+    assert encode_catalog(decode_catalog(document)) == document
+
+
+@pytest.mark.parametrize("field,value", [("version", 2), ("kind", "unrecognized")])
+def test_catalog_reader_rejects_unknown_formats(field, value):
+    document = json.loads(baseline_path().read_text(encoding="utf-8"))
+    document[field] = value
+    with pytest.raises(ValueError, match="unsupported Gideon"):
+        decode_catalog(document)

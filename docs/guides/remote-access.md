@@ -272,7 +272,7 @@ re-subscribe each device afterwards.
 The iOS/Android store app cannot hold a web-push subscription — Apple and Google only
 deliver to it through their own push services, and only whoever holds the app's signing
 credentials can send there. Relay users route the same ids-only ping through a
-**stateless, open-source relay** ([`gideon-push-relay`](https://github.com/keyurgolani/gideon-push-relay))
+**stateless, open-source relay** ([`gideon-push-relay`](https://github.com/sidiora-labs/gideon-push-relay))
 that forwards it to APNs/FCM. Deploy it yourself with your own credentials, or use the
 hosted convenience instance — the relay stores nothing, retries nothing, and refuses any
 body that is not exactly the two ids, so it is a dumb pipe by construction, not a cloud

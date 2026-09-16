@@ -6,9 +6,9 @@ import asyncio
 
 import pytest
 
-from gideon.browse import plans as bp
-from gideon.browse.plan_runner import make_content_tick_runner
-from gideon.guardrails.autonomy import RUNG_ONE_TAP
+from gideon.integrations.browse import plans as bp
+from gideon.integrations.browse.plan_runner import make_content_tick_runner
+from gideon.security.guardrails.autonomy import RUNG_ONE_TAP
 
 _MISSING = object()
 
@@ -22,7 +22,10 @@ def plan_home(tmp_path, monkeypatch):
 
 def _watch(**over) -> bp.BrowsePlan:
     base = dict(
-        id="w1", goal="watch the changelog", kind=bp.KIND_WATCH_PAGE, start_url="https://x/c"
+        id="w1",
+        goal="watch the changelog",
+        kind=bp.KIND_WATCH_PAGE,
+        start_url="https://x/c",
     )
     base.update(over)
     return bp.BrowsePlan(**base)
@@ -30,7 +33,11 @@ def _watch(**over) -> bp.BrowsePlan:
 
 def _walk(**over) -> bp.BrowsePlan:
     base = dict(
-        id="f1", goal="file the form", kind=bp.KIND_WALK_FLOW, start_url="https://x/f", submits=True
+        id="f1",
+        goal="file the form",
+        kind=bp.KIND_WALK_FLOW,
+        start_url="https://x/f",
+        submits=True,
     )
     base.update(over)
     return bp.BrowsePlan(**base)
@@ -100,7 +107,7 @@ def test_watch_page_renders_and_extracts():
     out = asyncio.run(_runner(opener)(_watch()))
     assert out.ok is True and out.verified is True
     assert "Real article body" in out.content
-    assert out.html == "<article>Real article body here.</article>"  # raw markup carried too
+    assert out.html == "<article>Real article body here.</article>"
     assert out.final_url == "https://x/final"
     assert opener.session.started and opener.session.navigated == ["https://x/c"]
     assert opener.closed == 1 and opener.opened_with == ["ws://gw/1"]
@@ -121,26 +128,29 @@ def test_empty_cdp_url_fails_soft_without_opening():
 
 
 def test_open_fault_is_soft_and_leaks_nothing():
-    opener = _Opener(FakeSession(), FakePage("x"), open_exc=RuntimeError("browser down"))
+    opener = _Opener(
+        FakeSession(), FakePage("x"), open_exc=RuntimeError("browser down")
+    )
     out = asyncio.run(_runner(opener)(_watch()))
     assert out.ok is False and "failed" in out.note and "browser down" in out.note
-    assert opener.closed == 0  # never opened → nothing to close
+    assert opener.closed == 0
 
 
 def test_drive_fault_still_closes_the_session():
     opener = _Opener(FakeSession(nav_exc=RuntimeError("nav boom")), FakePage("x"))
     out = asyncio.run(_runner(opener)(_watch()))
     assert out.ok is False and "nav boom" in out.note
-    assert opener.closed == 1  # finally ran despite the fault
+    assert opener.closed == 1
 
 
 def test_empty_render_does_not_confirm():
-    # A JS shell that renders no extractable text → ok=False so the content cursor never advances.
-    opener = _Opener(FakeSession(), FakePage("<div id='root'></div>", url="https://x/c"))
+    opener = _Opener(
+        FakeSession(), FakePage("<div id='root'></div>", url="https://x/c")
+    )
     out = asyncio.run(_runner(opener)(_watch()))
     assert out.ok is False and out.verified is False
     assert "no extractable text" in out.note
-    assert "root" in out.html  # raw markup still carried for a caller's own DOM detectors
+    assert "root" in out.html
     assert opener.closed == 1
 
 
@@ -174,12 +184,18 @@ def test_custom_extract_is_used():
 
 
 def test_composes_with_execute_tick_idempotently(plan_home):
-    # Prove the production runner feeds plans.execute_tick's idempotent cursor: the same page is
-    # a change on the first tick and unchanged on the second.
     bp.save_plan(_watch())
-    runner = _runner(_Opener(FakeSession(), FakePage("<article>changelog v2 shipped</article>")))
-    first = asyncio.run(bp.execute_tick(bp.load_plan("w1"), run=runner, granted_rung=RUNG_ONE_TAP))
+    runner = _runner(
+        _Opener(FakeSession(), FakePage("<article>changelog v2 shipped</article>"))
+    )
+    first = asyncio.run(
+        bp.execute_tick(bp.load_plan("w1"), run=runner, granted_rung=RUNG_ONE_TAP)
+    )
     assert first.changed is True
-    assert "changelog v2 shipped" in first.html  # rendered markup flows up through execute_tick
-    second = asyncio.run(bp.execute_tick(bp.load_plan("w1"), run=runner, granted_rung=RUNG_ONE_TAP))
+    assert (
+        "changelog v2 shipped" in first.html
+    )  # rendered markup flows up through execute_tick
+    second = asyncio.run(
+        bp.execute_tick(bp.load_plan("w1"), run=runner, granted_rung=RUNG_ONE_TAP)
+    )
     assert second.changed is False

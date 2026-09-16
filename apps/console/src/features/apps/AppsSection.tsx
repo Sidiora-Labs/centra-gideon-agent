@@ -1,0 +1,1451 @@
+import { useMemo, useRef, useState } from 'react'
+import { fvs } from '../../shared/theme/fontWeight'
+import { accentChip } from '../../shared/theme/accent'
+import { motion } from 'framer-motion'
+import {
+  Blocks, Plus, Download, Power, Trash2, Settings2, FolderOpen,
+  ShieldAlert, ShieldCheck, Server, LayoutGrid, RefreshCw, Plug, ChevronDown,
+  MoreVertical, Database, Sparkles, Archive, HardDrive, MapPin, AlertTriangle,
+} from 'lucide-react'
+import { launchChat } from '../../app/shell/appSdk'
+import { ContextMenu, type ContextMenuItem } from '../../shared/ui/motion'
+import { spring, expr } from '../../shared/theme/motion'
+import { Popover, MenuRow } from '../../shared/ui/Popover'
+import { TopBar } from '../../shared/ui/TopBar'
+import { WorkbenchLayout } from '../../shared/ui/WorkbenchLayout'
+import { Button } from '../../shared/ui/Button'
+import { TextLink } from '../../shared/ui/TextLink'
+import { HeaderActions, HeaderControl } from '../../shared/ui/HeaderActions'
+import { ListControls } from '../../shared/ui/ListControls'
+import { FilterMenu, type FilterSectionDef, type FilterOption } from '../../shared/ui/FilterMenu'
+import { Modal } from '../../shared/ui/Modal'
+import { SidePanel } from '../../shared/ui/SidePanel'
+import { EmptyState, ListSkeleton, LoadError } from '../../shared/ui/ListScaffold'
+import { RowHitTarget } from '../../shared/ui/RowHitTarget'
+import { TextInput, FieldError } from '../../shared/ui/forms'
+import { SquareIconButton } from '../../shared/ui/SquareIconButton'
+import { Segmented } from '../../shared/ui/Segmented'
+import { useQueryParam, type RouteProps } from '../../app/shell/useQueryState'
+import { useIsMobile } from '../../app/shell/useIsMobile'
+import { useQuery, invalidateKeys, writeQuery } from '../../shared/data/data'
+import {
+  api, type AppSummary, type AppDepClassification, type AppCatalogEntry, type AppCatalog,
+} from '../../shared/data/api'
+import {
+  useGuardedInstall, guardedFromApp, isBlockingResult, terminalRefusalReason,
+  type GuardedResult, type GuardedInstall,
+} from '../../shared/data/useGuardedInstall'
+import { catalogApps } from '../../shared/data/appCatalog'
+import { provenance } from '../../shared/data/provenance'
+import { AppIcon } from './appIcon'
+import { QualityBadges } from './qualityBadges'
+import { StoreSideRail, type RailOption } from './StoreSideRail'
+import { artGradient } from './appArt'
+import { AppConfigFields, useAppConfig } from './appConfigForm'
+import { isInNav, setInNav } from './navApps'
+import { PageTitle } from '../../shared/ui/PageTitle'
+import { ScanReport, ConsentModal, PermissionList, CronConsentList } from './installConsent'
+import { BUSY_REASON } from '../../shared/ui/unavailable'
+
+interface PendingInstall {
+  source: string
+  label: string
+  entry?: AppCatalogEntry
+}
+
+export interface StoreItem extends AppCatalogEntry {
+  installed: boolean
+  enabled: boolean
+  hasUI: boolean
+  native?: boolean
+  hasConfig?: boolean
+  origin?: string
+  updateAvailable?: boolean
+  latestVersion?: string
+}
+
+function installedToStoreItem(a: AppSummary): StoreItem {
+  return {
+    name: a.name, displayName: a.displayName, description: a.description, version: a.version,
+    icon: a.icon, heroUrl: a.heroUrl, author: '', source: a.source ?? '', sourceKind: 'bundled',
+    isProvider: a.isProvider, providerType: a.providerType, tags: a.tags ?? [],
+    installed: true, enabled: a.enabled, hasUI: a.hasUI,
+    native: !!a.native, hasConfig: a.hasConfig, origin: a.origin,
+    updateAvailable: !!a.updateAvailable, latestVersion: a.latestVersion,
+    quality: a.quality,
+  }
+}
+
+const GIT_URL_RE = /^(https?:\/\/|git@|git:\/\/|ssh:\/\/)/
+
+export function localSourceLabel(path: string): string {
+  const trimmed = path.replace(/[/\\]+$/, '')
+  const base = trimmed.split(/[/\\]/).pop() ?? ''
+  return base || path
+}
+
+export function sourceGroup(it: StoreItem, localSources: string[]): { key: string; label: string } {
+  const src = (it.source || '').trim()
+  const isBuiltin = it.native || it.origin === 'builtin' || it.origin === 'registry'
+    || (it.sourceKind === 'bundled' && !it.installed)
+  if (isBuiltin || !src || src === 'builtin' || src.startsWith('registry:')) {
+    return { key: 'builtin', label: 'Built-in' }
+  }
+  if (GIT_URL_RE.test(src) || src.endsWith('.git')) {
+    const base = src.replace(/#.*$/, '')
+    return { key: `git:${base}`, label: base }
+  }
+  if (it.origin === 'external') return { key: 'git:external', label: 'Installed from git' }
+  const root = localSources.find((s) => src === s || src.startsWith(s.replace(/\/$/, '') + '/'))
+  const key = root ?? (src.replace(/\/[^/]+\/?$/, '') || src)
+  return { key: `local:${key}`, label: localSourceLabel(key) }
+}
+
+function groupBySource(items: StoreItem[], localSources: string[] = []): { key: string; label: string; items: StoreItem[] }[] {
+  const groups = new Map<string, { key: string; label: string; items: StoreItem[] }>()
+  for (const it of items) {
+    const g = sourceGroup(it, localSources)
+    let bucket = groups.get(g.key)
+    if (!bucket) { bucket = { key: g.key, label: g.label, items: [] }; groups.set(g.key, bucket) }
+    bucket.items.push(it)
+  }
+  return [...groups.values()].sort((a, b) =>
+    a.key === 'builtin' ? -1 : b.key === 'builtin' ? 1 : a.label.localeCompare(b.label))
+}
+
+function SourceDivider({ label, count }: { label: string; count: number }) {
+  return (
+    <div className="mb-2 flex items-center gap-2">
+      <span className="text-on-surface-low text-[0.75rem] uppercase tracking-wide">{label}</span>
+      <span className="text-on-surface-low text-[0.75rem] tabular-nums">{count}</span>
+      <span className="ml-1 h-px flex-1 bg-outline-variant/30" />
+    </div>
+  )
+}
+
+type AppActionKind = 'open' | 'toggle' | 'configure' | 'update' | 'uninstall' | 'force-uninstall'
+type DispatchAppAction = (app: { name: string; enabled: boolean; hasUI: boolean }, action: AppActionKind) => void
+
+function useAppActions(nav: (p: string) => void, reload: () => void) {
+  const [busyName, setBusyName] = useState<string | null>(null)
+  const [configFor, setConfigFor] = useState<string | null>(null)
+  const [updateFor, setUpdateFor] = useState<string | null>(null)
+  const [uninstallFor, setUninstallFor] = useState<string | null>(null)
+  const [removeFor, setRemoveFor] = useState<string | null>(null)
+
+  const dispatch: DispatchAppAction = (app, action) => {
+    switch (action) {
+      case 'open': nav(`app/${encodeURIComponent(app.name)}`); return
+      case 'configure': setConfigFor(app.name); return
+      case 'update': setUpdateFor(app.name); return
+      case 'uninstall': setRemoveFor(app.name); return
+      case 'force-uninstall': setUninstallFor(app.name); return
+      case 'toggle': {
+        setBusyName(app.name)
+        const p = app.enabled ? api.disableApp(app.name) : api.enableApp(app.name)
+        p.then(() => reload()).finally(() => setBusyName(null))
+        return
+      }
+    }
+  }
+
+  const modals = (
+    <>
+      {updateFor && <UpdateModal name={updateFor} onClose={() => setUpdateFor(null)}
+        onUpdated={() => { setUpdateFor(null); reload() }} />}
+      {configFor && <ConfigModal name={configFor} onClose={() => setConfigFor(null)} />}
+      {removeFor && <RemoveAppModal name={removeFor} onClose={() => setRemoveFor(null)}
+        onDone={() => { setRemoveFor(null); reload() }} />}
+      {uninstallFor && <UninstallModal name={uninstallFor} onClose={() => setUninstallFor(null)}
+        onDone={() => { setUninstallFor(null); reload() }} />}
+    </>
+  )
+  return { dispatch, busyName, modals }
+}
+
+function AppActionMenu({ item, onAction }: { item: StoreItem; onAction: DispatchAppAction }) {
+  const app = { name: item.name, enabled: item.enabled, hasUI: item.hasUI }
+  return (
+    <Popover align="right" placement="bottom" width={200}
+      portal
+      trigger={(open, toggle) => (
+        <button type="button" aria-label={`Actions for ${item.displayName}`} title="Actions"
+          aria-expanded={open} onClick={(e) => { e.stopPropagation(); toggle() }}
+          className={`grid size-8 shrink-0 place-items-center rounded-pill transition-colors ${open ? 'bg-surface-high text-on-surface' : 'text-on-surface-low hover:bg-surface-high hover:text-on-surface'}`}>
+          <MoreVertical size={16} />
+        </button>
+      )}>
+      {(close) => (
+        <div className="flex flex-col gap-0.5" onClick={(e) => e.stopPropagation()}>
+          {item.hasUI && item.enabled && (
+            <MenuRow icon={<LayoutGrid size={15} />} label="Open page" onClick={() => { onAction(app, 'open'); close() }} />
+          )}
+          {item.native ? (
+            <>
+              {item.hasConfig
+                ? <MenuRow icon={<Settings2 size={15} />} label="Configure" onClick={() => { onAction(app, 'configure'); close() }} />
+                : <div className="px-m py-2 text-on-surface-low text-[0.75rem]">Always on — manage its tools from the Tools page.</div>}
+              <MenuRow icon={<RefreshCw size={15} />} label="Update…" onClick={() => { onAction(app, 'update'); close() }} />
+              <div className="px-m py-1.5 text-on-surface-low text-[0.75rem]">Native app — always on, can't be deactivated.</div>
+            </>
+          ) : (
+            <>
+              {item.enabled && <MenuRow icon={<Settings2 size={15} />} label="Configure" onClick={() => { onAction(app, 'configure'); close() }} />}
+              <MenuRow icon={<RefreshCw size={15} />} label="Update…" onClick={() => { onAction(app, 'update'); close() }} />
+              <MenuRow icon={<Power size={15} />} label={item.enabled ? 'Deactivate' : 'Activate'} onClick={() => { onAction(app, 'toggle'); close() }} />
+              <div className="my-1 border-t border-outline-variant/30" />
+              {
+}
+              <MenuRow icon={<Archive size={15} />} label="Uninstall…" onClick={() => { onAction(app, 'uninstall'); close() }} />
+              <div className="[&_button]:text-danger">
+                <MenuRow icon={<Trash2 size={15} />} label="Force uninstall…" onClick={() => { onAction(app, 'force-uninstall'); close() }} />
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </Popover>
+  )
+}
+
+
+type LibSortKey = 'name' | 'updated' | 'installed' | 'status' | 'type'
+const LIB_SORTS: { key: LibSortKey; label: string }[] = [
+  { key: 'name', label: 'Name (A–Z)' },
+  { key: 'updated', label: 'Recently updated' },
+  { key: 'installed', label: 'Recently installed' },
+  { key: 'status', label: 'Enabled first' },
+  { key: 'type', label: 'Type' },
+]
+const LIB_STATUS = [
+  { key: 'all', label: 'All' },
+  { key: 'enabled', label: 'Enabled' },
+  { key: 'disabled', label: 'Disabled' },
+]
+const LIB_TYPES = [
+  { key: 'all', label: 'All' },
+  { key: 'standard', label: 'Standard apps' },
+  { key: 'provider', label: 'Provider apps' },
+]
+const LIB_CAPS = [
+  { key: 'all', label: 'Any capability' },
+  { key: 'ui', label: 'Has a UI page' },
+  { key: 'backend', label: 'Runs a backend' },
+  { key: 'config', label: 'Configurable' },
+]
+type StoreSortKey = 'name' | 'author' | 'type'
+const STORE_SORTS: { key: StoreSortKey; label: string }[] = [
+  { key: 'name', label: 'Name (A–Z)' },
+  { key: 'author', label: 'Author' },
+  { key: 'type', label: 'Type' },
+]
+const STORE_TYPES = [
+  { key: 'all', label: 'All' },
+  { key: 'standard', label: 'Standard apps' },
+  { key: 'provider', label: 'Provider apps' },
+]
+
+function libKind(a: AppSummary): 'provider' | 'standard' {
+  if (a.isProvider) return 'provider'
+  return 'standard'
+}
+const KIND_ORDER: Record<string, number> = { standard: 0, provider: 1 }
+
+function timeDesc(a: string | undefined, b: string | undefined): number {
+  const av = a || '', bv = b || ''
+  if (av === bv) return 0
+  return bv.localeCompare(av)
+}
+
+function entityOptions(types: string[]): FilterOption[] {
+  const counts = new Map<string, number>()
+  for (const t of types) if (t) counts.set(t, (counts.get(t) ?? 0) + 1)
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([type, count]) => ({ key: type, label: PROVIDER_ENTITY_LABEL[type] ?? type, count, icon: Plug }))
+}
+
+function tagOptions(tagLists: string[][], cap = 16): FilterOption[] {
+  const counts = new Map<string, number>()
+  for (const tags of tagLists) for (const t of tags) if (t) counts.set(t, (counts.get(t) ?? 0) + 1)
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, cap)
+    .map(([tag, count]) => ({ key: tag, label: tag, count }))
+}
+
+const TAG_WORD_CASING: Record<string, string> = {
+  llm: 'LLM', acp: 'ACP', tts: 'TTS', stt: 'STT', onnx: 'ONNX',
+  cli: 'CLI', macos: 'macOS',
+  mcp: 'MCP', a2a: 'A2A', api: 'API', ui: 'UI', sdk: 'SDK', http: 'HTTP',
+  url: 'URL', json: 'JSON', ocr: 'OCR', ios: 'iOS', s3: 'S3',
+}
+
+export function categoryLabel(tag: string): string {
+  return tag.replace(/[-_]+/g, ' ').trim().split(' ')
+    .map((w, i) => TAG_WORD_CASING[w.toLowerCase()]
+      ?? (i === 0 ? w.charAt(0).toUpperCase() + w.slice(1) : w))
+    .join(' ')
+}
+
+function matchesText(haystack: string, q: string): boolean {
+  return !q || haystack.toLowerCase().includes(q)
+}
+
+export function AppsSection({ query, setQuery, navigate }: Pick<RouteProps, 'query' | 'setQuery' | 'navigate'>) {
+  const q = query
+  const sq = setQuery
+  const nav = navigate
+  const { data: apps, error: appsErr, refresh } = useQuery<AppSummary[]>(
+    'apps', () => api.apps(), { persist: true },
+  )
+  const { data: catalog, error: catalogErr, refresh: refreshCatalog } = useQuery(
+    'app-catalog', () => api.appCatalog(), { persist: true },
+  )
+  const [search, setSearch] = useQueryParam(q, sq, 'q', '', { replace: true })
+  const [openName, setOpenName] = useQueryParam(q, sq, 'open', '')
+  const [view, setView] = useQueryParam(q, sq, 'view', 'library', { replace: true })
+  const [installing, setInstalling] = useState(false)
+  const [sourcesOpen, setSourcesOpen] = useState(false)
+
+  const [libSort, setLibSort] = useQueryParam(q, sq, 'sort', 'name', { replace: true })
+  const [libStatus, setLibStatus] = useQueryParam(q, sq, 'status', 'all', { replace: true })
+  const [libType, setLibType] = useQueryParam(q, sq, 'type', 'all', { replace: true })
+  const [libCap, setLibCap] = useQueryParam(q, sq, 'cap', 'all', { replace: true })
+  const [libEntity, setLibEntity] = useQueryParam(q, sq, 'entity', 'all', { replace: true })
+  const [storeSort, setStoreSort] = useQueryParam(q, sq, 'ssort', 'name', { replace: true })
+  const [storeType, setStoreType] = useQueryParam(q, sq, 'stype', 'all', { replace: true })
+  const [storeEntity, setStoreEntity] = useQueryParam(q, sq, 'sentity', 'all', { replace: true })
+  const [storeTag, setStoreTag] = useQueryParam(q, sq, 'stag', 'all', { replace: true })
+  const [storeSrc, setStoreSrc] = useQueryParam(q, sq, 'ssrc', 'all', { replace: true })
+  const isMobile = useIsMobile()
+
+  const reload = () => { invalidateKeys('apps'); invalidateKeys('app-catalog'); refresh(); refreshCatalog() }
+  const reloadCatalog = () => { invalidateKeys('app-catalog'); refreshCatalog() }
+  const isStore = view === 'store'
+  const isNative = view === 'native'
+
+  const n = search.trim().toLowerCase()
+  const libResult = useMemo(() => {
+    if (!apps) return null
+    let out = apps.filter((a) => (isNative ? !!a.native : !a.native))
+    out = out.filter((a) =>
+      matchesText(`${a.displayName} ${a.name} ${a.description} ${(a.tags ?? []).join(' ')}`, n))
+    if (libStatus !== 'all') out = out.filter((a) => (libStatus === 'enabled') === a.enabled)
+    if (libType !== 'all') out = out.filter((a) => libKind(a) === libType)
+    if (libCap !== 'all') out = out.filter((a) =>
+      libCap === 'ui' ? a.hasUI : libCap === 'backend' ? a.hasBackend : a.hasConfig)
+    if (libEntity !== 'all') out = out.filter((a) => a.isProvider && a.providerType === libEntity)
+    const byName = (a: AppSummary, b: AppSummary) => a.displayName.localeCompare(b.displayName)
+    out = [...out].sort((a, b) => {
+      switch (libSort as LibSortKey) {
+        case 'updated': return timeDesc(a.updatedAt, b.updatedAt) || byName(a, b)
+        case 'installed': return timeDesc(a.installedAt, b.installedAt) || byName(a, b)
+        case 'status': return Number(b.enabled) - Number(a.enabled) || byName(a, b)
+        case 'type': return KIND_ORDER[libKind(a)] - KIND_ORDER[libKind(b)] || byName(a, b)
+        default: return byName(a, b)
+      }
+    })
+    return out
+  }, [apps, n, isNative, libStatus, libType, libCap, libEntity, libSort])
+
+  const storeUniverse = useMemo<StoreItem[]>(() => {
+    const installedNames = new Set((apps ?? []).map((a) => a.name))
+    const byName = new Map<string, StoreItem>()
+    for (const e of catalogApps(catalog)) {
+      if (installedNames.has(e.name) || byName.has(e.name)) continue
+      byName.set(e.name, { ...e, installed: false, enabled: false, hasUI: false, native: false })
+    }
+    return [...byName.values()]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apps, catalog])
+  const storeResult = useMemo(() => {
+    let out = storeUniverse.filter((e) =>
+      matchesText(`${e.displayName} ${e.name} ${e.description} ${e.author} ${(e.tags ?? []).join(' ')}`, n))
+    if (storeType !== 'all') out = out.filter((e) => (storeType === 'provider') === e.isProvider)
+    if (storeEntity !== 'all') out = out.filter((e) => e.isProvider && e.providerType === storeEntity)
+    if (storeTag !== 'all') out = out.filter((e) => (e.tags ?? []).includes(storeTag))
+    if (storeSrc !== 'all') out = out.filter((e) => sourceGroup(e, catalog?.localSources ?? []).key === storeSrc)
+    const byName = (a: StoreItem, b: StoreItem) => a.displayName.localeCompare(b.displayName)
+    out = [...out].sort((a, b) => {
+      switch (storeSort as StoreSortKey) {
+        case 'author': return (a.author || '').localeCompare(b.author || '') || byName(a, b)
+        case 'type': return Number(b.isProvider) - Number(a.isProvider) || byName(a, b)
+        default: return byName(a, b)
+      }
+    })
+    return out
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storeUniverse, n, storeType, storeEntity, storeTag, storeSrc, storeSort, catalog?.localSources])
+
+  const open = apps?.find((a) => a.name === openName) ?? null
+  const openStore = open ? null : (storeUniverse.find((e) => e.name === openName) ?? null)
+
+  const appActions = useAppActions(nav, reload)
+
+  const cnt = <T,>(xs: T[], p: (x: T) => boolean) => xs.filter(p).length
+  const libSections: FilterSectionDef[] = useMemo(() => {
+    const all = apps ?? []
+    const provTypes = all.filter((a) => a.isProvider).map((a) => a.providerType)
+    const s: FilterSectionDef[] = [
+      { title: 'Sort by', value: libSort, defaultKey: 'name', onChange: setLibSort,
+        options: LIB_SORTS.map((o) => ({ key: o.key, label: o.label })) },
+      { title: 'Status', value: libStatus, defaultKey: 'all', onChange: setLibStatus,
+        options: LIB_STATUS.map((o) => ({ ...o, count: o.key === 'all' ? undefined : cnt(all, (a) => (o.key === 'enabled') === a.enabled) })) },
+      { title: 'Type', value: libType, defaultKey: 'all', onChange: setLibType,
+        options: LIB_TYPES.map((o) => ({ ...o, count: o.key === 'all' ? undefined : cnt(all, (a) => libKind(a) === o.key) })) },
+      { title: 'Capability', value: libCap, defaultKey: 'all', onChange: setLibCap,
+        options: LIB_CAPS.map((o) => ({ ...o, count: o.key === 'all' ? undefined : cnt(all, (a) => o.key === 'ui' ? a.hasUI : o.key === 'backend' ? a.hasBackend : a.hasConfig) })) },
+    ]
+    const entities = entityOptions(provTypes)
+    if (entities.length) s.push({ title: 'Provider entity', value: libEntity, defaultKey: 'all', onChange: setLibEntity,
+      options: [{ key: 'all', label: 'Any entity' }, ...entities] })
+    return s
+  }, [apps, libSort, libStatus, libType, libCap, libEntity])
+
+  const storeCategories: RailOption[] = useMemo(
+    () => tagOptions(storeUniverse.map((e) => e.tags ?? []))
+      .map((o) => ({ key: o.key, label: categoryLabel(o.label), count: o.count ?? 0 })),
+    [storeUniverse])
+  const storeSources: RailOption[] = useMemo(
+    () => groupBySource(storeUniverse, catalog?.localSources ?? [])
+      .map((g) => ({ key: g.key, label: g.label, count: g.items.length })),
+    [storeUniverse, catalog?.localSources])
+
+  const storeSections: FilterSectionDef[] = useMemo(() => {
+    const s: FilterSectionDef[] = [
+      { title: 'Sort by', value: storeSort, defaultKey: 'name', onChange: setStoreSort,
+        options: STORE_SORTS.map((o) => ({ key: o.key, label: o.label })) },
+      { title: 'Type', value: storeType, defaultKey: 'all', onChange: setStoreType,
+        options: STORE_TYPES.map((o) => ({ ...o, count: o.key === 'all' ? undefined : cnt(storeUniverse, (e) => (o.key === 'provider') === e.isProvider) })) },
+    ]
+    const entities = entityOptions(storeUniverse.filter((e) => e.isProvider).map((e) => e.providerType))
+    if (entities.length) s.push({ title: 'Provider entity', value: storeEntity, defaultKey: 'all', onChange: setStoreEntity,
+      options: [{ key: 'all', label: 'Any entity' }, ...entities] })
+    if (isMobile && storeCategories.length) {
+      s.push({ title: 'Categories', value: storeTag, defaultKey: 'all', onChange: setStoreTag,
+        options: [{ key: 'all', label: 'All apps' }, ...storeCategories] })
+    }
+    if (isMobile && storeSources.length) {
+      s.push({ title: 'Sources', value: storeSrc, defaultKey: 'all', onChange: setStoreSrc,
+        options: [{ key: 'all', label: 'All sources' }, ...storeSources] })
+    }
+    return s
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storeUniverse, storeSort, storeType, storeEntity, storeTag, storeSrc, isMobile, storeCategories, storeSources])
+
+  const libNarrowed = !!n || libStatus !== 'all' || libType !== 'all' || libCap !== 'all' || libEntity !== 'all'
+  const storeNarrowed = !!n || storeType !== 'all' || storeEntity !== 'all' || storeTag !== 'all' || storeSrc !== 'all'
+
+  const showLibControls = !isStore && (apps === undefined || apps.length > 0)
+  const showStoreControls = isStore && (catalog === undefined || storeUniverse.length > 0)
+
+  return (
+    <>
+      <WorkbenchLayout
+        topBar={<TopBar
+          keepCornerPadding
+          left={
+            <div className="flex items-center gap-3 min-w-0">
+              <PageTitle>Apps</PageTitle>
+              {
+}
+              <Segmented ariaLabel="Native, Library, or Store" collapse="menu" value={view} onChange={setView}
+                options={[{ key: 'native', label: 'Native' }, { key: 'library', label: 'Library' }, { key: 'store', label: 'Store' }]} />
+            </div>
+          }
+          right={<HeaderActions>
+            {isStore && <HeaderControl icon={Database} label="Manage Sources" priority="default" onClick={() => setSourcesOpen(true)} />}
+            <HeaderControl icon={Plus} label="Install from URL" variant="primary" priority="primary" onClick={() => setInstalling(true)} />
+          </HeaderActions>}
+        />}
+        controls={showLibControls ? (
+          <ListControls search={{ value: search, onChange: setSearch, placeholder: 'Search installed apps', label: 'Search apps' }}
+            results={{ count: (libResult ?? []).length, noun: 'apps', active: apps !== undefined && libNarrowed }}>
+            <FilterMenu sections={libSections} label="Filter & sort" />
+          </ListControls>
+        ) : showStoreControls ? (
+          <ListControls search={{ value: search, onChange: setSearch, placeholder: 'Search the Store', label: 'Search Store' }}
+            results={{ count: storeResult.length, noun: 'apps', active: catalog !== undefined && storeNarrowed }}>
+            <FilterMenu sections={storeSections} label="Filter & sort" />
+          </ListControls>
+        ) : undefined}
+        panel={(open || openStore) ? (
+          <SidePanel key={(open ?? openStore)!.name} fillHeight storeKey="app-panel-w"
+            title={(open ?? openStore)!.displayName} icon={<AppIcon name={(open ?? openStore)!.icon} size={18} />}
+            onClose={() => setOpenName('')}>
+            {open ? (
+              <AppDetailPanel app={open} onClose={() => setOpenName('')} onChanged={reload}
+                onOpen={() => nav(`app/${encodeURIComponent(open.name)}`)} />
+            ) : (
+              <StoreDetailPanel item={openStore!} onInstalled={() => { setOpenName(''); reload() }} />
+            )}
+          </SidePanel>
+        ) : sourcesOpen && (
+          <SidePanel key="sources" fillHeight storeKey="app-sources-panel-w"
+            title="Manage Sources" icon={<Database size={18} />}
+            onClose={() => setSourcesOpen(false)}>
+            <SourcesPanel catalog={catalog} reloadCatalog={reloadCatalog} onInstalled={reload} />
+          </SidePanel>
+        )}
+      >
+        <div className="mx-auto px-l py-l" style={{ maxWidth: 'var(--content-width)' }}>
+          {isStore ? (
+            <div className="flex items-start gap-l">
+              {!isMobile && (
+                <StoreSideRail
+                  categories={storeCategories} category={storeTag} onCategory={setStoreTag}
+                  categoryTotal={storeUniverse.length}
+                  sources={storeSources} source={storeSrc} onSource={setStoreSrc}
+                  sourceTotal={storeUniverse.length}
+                  onAddSource={() => setSourcesOpen(true)} />
+              )}
+              <div className="min-w-0 flex-1">
+                <StoreView catalog={catalog} catalogError={catalogErr} result={storeResult} totalKnown={storeUniverse.length}
+                  installedCount={(apps ?? []).filter((a) => !a.native).length}
+                  onInstalled={reload} reloadCatalog={reloadCatalog} onClearFilters={clearStoreFilters(setSearch, setStoreType, setStoreEntity, setStoreTag, setStoreSrc)}
+                  filtersActive={storeNarrowed}
+                  onOpen={(name) => setOpenName(name)} onAction={appActions.dispatch}
+                  onOpenSources={() => setSourcesOpen(true)} />
+              </div>
+            </div>
+          ) : apps === undefined && appsErr ? (
+            <LoadError what="apps" error={appsErr} onRetry={reload} />
+          ) : apps === undefined ? <ListSkeleton rows={4} what="apps" />
+            : libResult && libResult.length === 0 ? (
+              !libNarrowed ? (
+                isNative ? (
+                  <EmptyState icon={Blocks} title="No native apps"
+                    hint="Native tools ship with Gideon and are always on." />
+                ) : (
+                  <EmptyState icon={Blocks} title="No apps installed"
+                    hint="Browse the Store to add apps, or install one from a local path or git URL."
+                    action={{ label: 'Browse Store', onClick: () => setView('store'), icon: Blocks }} />
+                )
+              ) : (
+                <EmptyState icon={Blocks} title="No matching apps"
+                  hint={`No ${isNative ? 'native' : 'installed'} app matches the current search and filters.`}
+                  action={{ label: 'Clear filters', onClick: () => { setSearch(''); setLibStatus('all'); setLibType('all'); setLibCap('all'); setLibEntity('all') }, icon: RefreshCw }} />
+              )
+            ) : (
+              <>
+                <ResultCount n={libResult?.length ?? 0} total={(apps ?? []).filter((a) => (isNative ? !!a.native : !a.native)).length} noun="app" />
+                {
+}
+                <div className="flex flex-col gap-xl">
+                  {groupBySource((libResult ?? []).map(installedToStoreItem), catalog?.localSources ?? []).map((g) => (
+                    <div key={g.key}>
+                      <SourceDivider label={g.label} count={g.items.length} />
+                      <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
+                        {g.items.map((it, i) => (
+                          <AppCard key={it.name} item={it} index={i} busy={false}
+                            onInstall={() => {}} onOpen={() => setOpenName(it.name)} onAction={appActions.dispatch} />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+        </div>
+      </WorkbenchLayout>
+      {appActions.modals}
+
+      {installing && <InstallModal onClose={() => setInstalling(false)} onInstalled={() => { setInstalling(false); reload() }} />}
+    </>
+  )
+}
+
+function clearStoreFilters(
+  setSearch: (v: string) => void, setType: (v: string) => void,
+  setEntity: (v: string) => void, setTag: (v: string) => void,
+  setSrc: (v: string) => void,
+): () => void {
+  return () => { setSearch(''); setType('all'); setEntity('all'); setTag('all'); setSrc('all') }
+}
+
+function ResultCount({ n, total, noun }: { n: number; total: number; noun: string }) {
+  if (n === total) return null
+  return (
+    <div data-type="label-s" className="mb-2 px-1 text-on-surface-low">
+      Showing {n} of {total} {noun}{total === 1 ? '' : 's'}
+    </div>
+  )
+}
+
+export function StoreView({ catalog, catalogError, result, totalKnown, installedCount, onInstalled, reloadCatalog, onClearFilters, filtersActive, onOpen, onAction, onOpenSources }: {
+  catalog: AppCatalog | null | undefined
+  catalogError?: unknown
+  result: StoreItem[]
+  totalKnown: number
+  installedCount: number
+  onInstalled: () => void
+  reloadCatalog: () => void
+  onClearFilters: () => void
+  filtersActive: boolean
+  onOpen: (name: string) => void
+  onAction: DispatchAppAction
+  onOpenSources: () => void
+}) {
+  const [busy, setBusy] = useState<string | null>(null)
+  const [pending, setPending] = useState<PendingInstall | null>(null)
+  const guarded = useGuardedInstall((confirm) =>
+    api.installApp(pendingRef.current?.source ?? '', confirm).then(guardedFromApp))
+  const pendingRef = useRef<PendingInstall | null>(null)
+
+  async function installFrom(source: string, label: string, entry?: AppCatalogEntry) {
+    setBusy(label); guarded.reset()
+    pendingRef.current = { source, label, entry }
+    const r = await guarded.install()
+    setBusy(null)
+    if (r?.ok) { onInstalled(); reloadCatalog(); return }
+    if (isBlockingResult(r)) setPending({ source, label, entry })
+  }
+
+  async function confirmPending() {
+    const r = await guarded.confirmInstall()
+    if (r?.ok) { setPending(null); onInstalled(); reloadCatalog() }
+  }
+
+  if (catalog === undefined && catalogError) {
+    return <LoadError what="Store catalog" error={catalogError} onRetry={reloadCatalog} />
+  }
+  if (catalog === undefined) return <ListSkeleton rows={3} what="Store catalog" />
+
+  return (
+    <div className="flex flex-col gap-2xl">
+      <GuardedFailure guarded={guarded} />
+      {pending && guarded.blocked && (
+        <ConsentModal
+          label={pending.label}
+          result={guarded.blocked}
+          busy={guarded.busy}
+          permissions={pending.entry?.permissions}
+          crons={pending.entry?.crons}
+          onConfirm={confirmPending}
+          onClose={() => { setPending(null); guarded.reset() }}
+        />
+      )}
+
+      {totalKnown === 0 ? (
+        <div className="rounded-lg bg-surface-container px-l py-l text-on-surface-low text-[0.8125rem]">
+          {installedCount > 0
+            ? <>All available apps are installed — find them in the <strong className="text-on-surface">Library</strong> tab. <TextLink onClick={onOpenSources}>Manage Sources</TextLink> to discover more.</>
+            : <>No apps found. <TextLink onClick={onOpenSources}>Manage Sources</TextLink> to add a git or local source and discover apps.</>}
+        </div>
+      ) : result.length === 0 ? (
+        <EmptyState icon={Blocks} title="No matching apps"
+          hint="No app matches the current search and filters."
+          action={filtersActive ? { label: 'Clear filters', onClick: onClearFilters, icon: RefreshCw } : undefined} />
+      ) : (
+        <div className="flex flex-col gap-xl">
+          {
+}
+          {groupBySource(result, catalog?.localSources ?? []).map((g) => (
+            <div key={g.key}>
+              <SourceDivider label={g.label} count={g.items.length} />
+              <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
+                {g.items.map((e, i) => (
+                  <AppCard key={e.name} item={e} index={i} busy={busy === e.name}
+                    onInstall={() => installFrom(e.pointer || e.source, e.name, e)}
+                    onOpen={() => onOpen(e.name)} onAction={onAction} />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+export function SourcesPanel({ catalog, reloadCatalog, onInstalled }: {
+  catalog: AppCatalog | null | undefined
+  reloadCatalog: () => void
+  onInstalled: () => void
+}) {
+  const [busy, setBusy] = useState<string | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  const [newSource, setNewSource] = useState('')
+  const [newLocal, setNewLocal] = useState('')
+  const [pending, setPending] = useState<PendingInstall | null>(null)
+  const guarded = useGuardedInstall((confirm) =>
+    api.installApp(pendingRef.current?.source ?? '', confirm).then(guardedFromApp))
+  const pendingRef = useRef<PendingInstall | null>(null)
+
+  function entryForSource(source: string): AppCatalogEntry | undefined {
+    return catalogApps(catalog).find((e) => e.source === source || (e.pointer && e.pointer === source))
+  }
+
+  async function installFrom(source: string, label: string) {
+    setBusy(label); setErr(null); guarded.reset()
+    const entry = entryForSource(source)
+    pendingRef.current = { source, label, entry }
+    const r = await guarded.install()
+    setBusy(null)
+    if (r?.ok) { onInstalled(); reloadCatalog(); return }
+    if (isBlockingResult(r)) setPending({ source, label, entry })
+  }
+
+  async function confirmPending() {
+    const r = await guarded.confirmInstall()
+    if (r?.ok) { setPending(null); onInstalled(); reloadCatalog() }
+  }
+
+  function paintSources(patch: { gitSources?: string[]; localSources?: string[] }) {
+    if (!catalog) return
+    writeQuery('app-catalog', { ...catalog, ...patch }, true)
+  }
+
+  async function addSource() {
+    const u = newSource.trim()
+    if (!u) return
+    setBusy('add-source'); setErr(null)
+    try {
+      const r = await api.addAppSource(u)
+      setNewSource(''); reloadCatalog(); paintSources({ gitSources: r.sources })
+    }
+    catch (e) { setErr(String((e as Error).message || e)) }
+    finally { setBusy(null) }
+  }
+
+  async function addLocalSource() {
+    const p = newLocal.trim()
+    if (!p) return
+    setBusy('add-local'); setErr(null)
+    try {
+      const r = await api.addLocalAppSource(p)
+      setNewLocal(''); reloadCatalog(); paintSources({ localSources: r.sources })
+    }
+    catch (e) { setErr(String((e as Error).message || e)) }
+    finally { setBusy(null) }
+  }
+
+  const sources = catalog?.gitSources ?? []
+  const localSources = catalog?.localSources ?? []
+  const firstPartySources = new Set(catalog?.firstPartySources ?? [])
+  const defaultSources = new Set(catalog?.defaultGitSources ?? [])
+  const builtinSources = new Set(catalog?.builtinGitSources ?? [])
+  const networkSources = catalog?.networkSources ?? []
+
+  return (
+    <div className="flex flex-col gap-xl">
+      {err && <FieldError>{err}</FieldError>}
+      <GuardedFailure guarded={guarded} />
+      {pending && guarded.blocked && (
+        <ConsentModal
+          label={pending.label}
+          result={guarded.blocked}
+          busy={guarded.busy}
+          permissions={pending.entry?.permissions}
+          crons={pending.entry?.crons}
+          onConfirm={confirmPending}
+          onClose={() => { setPending(null); guarded.reset() }}
+        />
+      )}
+
+      <section>
+        <div className="mb-2 text-on-surface-low text-[0.75rem] uppercase tracking-wide">Git sources</div>
+        <div className="mb-2 flex items-center gap-2">
+          <TextInput value={newSource} onChange={setNewSource} name="app-git-source"
+            placeholder="https://github.com/owner/app.git" />
+          <Button variant="secondary" size="sm" loading={busy === 'add-source'} disabled={busy === 'add-source' || !newSource.trim()} onClick={addSource}
+            disabledReason={!newSource.trim() ? 'Enter a source URL first' : undefined}>
+            <Plus size={15} /> Add
+          </Button>
+        </div>
+        {sources.length === 0 ? (
+          <div className="text-on-surface-low text-[0.8125rem]">No git sources configured. Add a git URL to discover apps from it.</div>
+        ) : (
+          <div className="flex flex-col gap-1">
+            {sources.map((url) => {
+              const isDefault = defaultSources.has(url)
+              const isBuiltin = builtinSources.has(url)
+              return (
+              <div key={url} className="flex items-center gap-3 rounded-lg bg-surface-container px-l py-m">
+                <Download size={15} className="shrink-0 text-on-surface-low" />
+                <span className="min-w-0 flex-1 truncate text-on-surface text-[0.8125rem]">{url}</span>
+                {isDefault && (
+                  <span className="shrink-0 rounded-pill bg-surface-highest px-2 py-0.5 text-on-surface-low text-[0.75rem]">Default</span>
+                )}
+                <Button variant="ghost" size="sm" loading={busy === url} onClick={() => installFrom(url, url)}><Download size={14} /> Install
+                </Button>
+                {!isBuiltin && (
+                  <SquareIconButton icon={Trash2} tone="danger" label="Remove source" className="shrink-0"
+                    onClick={async () => { await api.removeAppSource(url); reloadCatalog() }} />
+                )}
+              </div>
+            )})}
+          </div>
+        )}
+        {
+}
+        {networkSources.length > 0 && (
+          <p data-testid="store-egress-disclosure" data-type="caption" className="mt-2 text-on-surface-low">
+            Reading these listings contacts {networkSources.join(', ')}. Only listings are
+            fetched — nothing is installed or run without your consent.
+            {builtinSources.size > 0 && ' A source that ships with Gideon has no remove button; turn it off in Settings → Apps.'}
+          </p>
+        )}
+        <p className="mt-2 text-on-surface-low text-[0.75rem]">
+          Installing fetches the app behind the security scanner — a dangerous verdict is always refused.
+        </p>
+      </section>
+
+      <section>
+        <div className="mb-2 text-on-surface-low text-[0.75rem] uppercase tracking-wide">Local sources</div>
+        <div className="mb-2 flex items-center gap-2">
+          <TextInput value={newLocal} onChange={setNewLocal} name="app-local-source"
+            placeholder="/path/to/apps  (a directory of app subdirs)" />
+          <Button variant="secondary" size="sm" loading={busy === 'add-local'} disabled={busy === 'add-local' || !newLocal.trim()} onClick={addLocalSource}
+            disabledReason={!newLocal.trim() ? 'Enter a folder path first' : undefined}>
+            <Plus size={15} /> Add
+          </Button>
+        </div>
+        {localSources.length === 0 ? (
+          <div className="text-on-surface-low text-[0.8125rem]">No local sources. Add a directory of app bundles (dev loop, or a checked-out apps/ tree).</div>
+        ) : (
+          <div className="flex flex-col gap-1">
+            {localSources.map((path) => {
+              const isFirstParty = firstPartySources.has(path)
+              return (
+              <div key={path} className="flex items-center gap-3 rounded-lg bg-surface-container px-l py-m">
+                <FolderOpen size={15} className="shrink-0 text-on-surface-low" />
+                <span className="min-w-0 flex-1 truncate font-mono text-on-surface text-[0.75rem]">{path}</span>
+                {isFirstParty ? (
+                  <span className="shrink-0 rounded-pill bg-surface-highest px-2 py-0.5 text-on-surface-low text-[0.75rem]">First-party</span>
+                ) : (
+                  <SquareIconButton icon={Trash2} tone="danger" label="Remove local source" className="shrink-0"
+                    onClick={async () => { await api.removeLocalAppSource(path); reloadCatalog() }} />
+                )}
+              </div>
+            )})}
+          </div>
+        )}
+      </section>
+    </div>
+  )
+}
+
+function AppCard({ item, index, busy, onInstall, onOpen, onAction }: {
+  item: StoreItem; index: number; busy: boolean; onInstall: () => void; onOpen: () => void; onAction: DispatchAppAction
+}) {
+  const providerLabel = item.isProvider
+    ? `${PROVIDER_ENTITY_LABEL[item.providerType] ?? item.providerType} provider` : ''
+  const app = { name: item.name, enabled: item.enabled, hasUI: item.hasUI }
+  const menuItems: ContextMenuItem[] = item.installed
+    ? [
+        { icon: <Blocks size={15} />, label: 'Details', onSelect: onOpen },
+        ...(item.hasUI && item.enabled ? [{ icon: <LayoutGrid size={15} />, label: 'Open page', onSelect: () => onAction(app, 'open') }] : []),
+        ...((item.enabled && (!item.native || item.hasConfig)) ? [{ icon: <Settings2 size={15} />, label: 'Configure', onSelect: () => onAction(app, 'configure') }] : []),
+        { icon: <RefreshCw size={15} />, label: 'Update…', onSelect: () => onAction(app, 'update') },
+        ...(item.native ? [] : [
+          { icon: <Power size={15} />, label: item.enabled ? 'Deactivate' : 'Activate', onSelect: () => onAction(app, 'toggle') },
+          { icon: <Archive size={15} />, label: 'Uninstall…', onSelect: () => onAction(app, 'uninstall') },
+          { icon: <Trash2 size={15} />, label: 'Force uninstall…', onSelect: () => onAction(app, 'force-uninstall'), danger: true },
+        ]),
+      ]
+    : [
+      { icon: <Blocks size={15} />, label: 'Details', onSelect: onOpen },
+      { icon: <Download size={15} />, label: 'Install', onSelect: onInstall, disabled: busy },
+    ]
+  const hero = item.heroUrl
+  const stop = (e: React.MouseEvent) => e.stopPropagation()
+
+  const iconTile = (
+    <div className="grid size-12 shrink-0 place-items-center rounded-lg bg-surface-high text-on-surface-low ring-2 ring-surface-container">
+      <AppIcon name={item.icon} size={24} />
+    </div>
+  )
+
+  const origin = item.installed ? null : provenance({ sourceKind: item.sourceKind })
+
+  return (
+    <ContextMenu items={menuItems}>
+    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ ...spring.spatialDefault, delay: Math.min(index * 0.03, 0.3) }}
+      whileHover={{ y: -expr(4, 0.3), boxShadow: 'var(--shadow-lift)' }}
+      tabIndex={-1}
+      onClick={onOpen}
+      className="group relative flex min-h-[11rem] cursor-pointer flex-col overflow-hidden rounded-xl border border-outline-variant/40 bg-surface-container has-[>button:focus-visible]:ring-2 has-[>button:focus-visible]:ring-inset has-[>button:focus-visible]:ring-primary"
+      style={{ borderRadius: 'var(--radius-lg)' }}>
+      { }
+      <RowHitTarget label={`${item.displayName} — details`} />
+
+      {
+}
+      <div className="relative h-28 w-full shrink-0 overflow-hidden bg-surface-high"
+        data-art={hero ? 'hero' : 'generated'}
+        style={hero ? undefined : { background: artGradient(item.name) }}>
+        {hero && (
+          <img src={hero} alt="" loading="lazy"
+            className="size-full object-cover transition-transform duration-300 group-hover:scale-[1.03]" />
+        )}
+        <div className="absolute inset-0 bg-gradient-to-t from-surface-container/50 to-transparent" />
+      </div>
+
+      <div className="flex flex-1 flex-col gap-2.5 p-4 pt-0">
+        { }
+        <div className="-mt-6 flex items-start gap-3">
+          {iconTile}
+          <div className="min-w-0 flex-1 pt-6">
+            <div className="flex items-center gap-1.5">
+              <span data-type="body-l" className="truncate text-on-surface transition-colors group-hover:text-primary" style={fvs(550)}>{item.displayName}</span>
+              {item.version && <span data-type="label-s" className="shrink-0 text-on-surface-low">v{item.version}</span>}
+              {item.installed && item.updateAvailable && (
+                <span data-type="label-s" title={item.latestVersion ? `Update to v${item.latestVersion} available` : 'Update available'}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-pill px-1.5 py-0.5"
+                  style={accentChip}>
+                  <RefreshCw size={11} /> Update
+                </span>
+              )}
+            </div>
+            {
+}
+            <div className="mt-0.5 flex flex-wrap items-center gap-1">
+              {providerLabel && (
+                <span className="inline-flex items-center gap-1 rounded-pill px-1.5 py-0.5" data-type="label-s"
+                  style={accentChip}>
+                  <Plug size={11} />{providerLabel}
+                </span>
+              )}
+              {origin && (
+                <span data-testid="store-card-origin" title={origin.title}
+                  className="inline-flex items-center gap-1 rounded-pill bg-surface-high px-1.5 py-0.5 text-on-surface-var"
+                  data-type="label-s">
+                  <MapPin size={11} />{origin.label}
+                </span>
+              )}
+            </div>
+          </div>
+          { }
+          {item.installed && <span onClick={stop}><AppActionMenu item={item} onAction={onAction} /></span>}
+        </div>
+
+        { }
+        <p className="line-clamp-2 flex-1 text-on-surface-low" data-type="body-s">
+          {item.description || item.name}{item.author ? ` · by ${item.author}` : ''}
+        </p>
+
+        {
+}
+        <QualityBadges quality={item.quality} />
+
+        { }
+        <div className="flex items-center gap-2">
+          <div className="flex min-w-0 flex-1 flex-wrap gap-1">
+            {(item.tags ?? []).slice(0, 3).map((t) => (
+              <span key={t} className="inline-flex h-6 items-center rounded-pill bg-surface-high px-2 text-on-surface-var text-[0.75rem]">{t}</span>
+            ))}
+          </div>
+          {item.installed ? (
+            item.hasUI && item.enabled ? (
+              <span onClick={stop}><Button variant="secondary" size="sm" onClick={() => onAction(app, 'open')}><LayoutGrid size={14} /> Open</Button></span>
+            ) : item.enabled ? (
+              <span className="inline-flex items-center gap-1 text-ok" data-type="label-s"><ShieldCheck size={13} /> Installed</span>
+            ) : (
+              <span onClick={stop}><Button variant="primary" size="sm" onClick={() => onAction(app, 'toggle')}><Power size={14} /> Activate</Button></span>
+            )
+          ) : (
+            <span onClick={stop}><Button variant="secondary" size="sm" loading={busy} onClick={onInstall}><Download size={14} /> Install
+            </Button></span>
+          )}
+        </div>
+      </div>
+    </motion.div>
+    </ContextMenu>
+  )
+}
+
+const PROVIDER_ENTITY_LABEL: Record<string, string> = {
+  model: 'Model', agent: 'Agent', search: 'Search', channel: 'Channel',
+  inbox: 'Inbox', notification: 'Notification', tool: 'Tool', task: 'Task',
+  action: 'Action', skills: 'Skills', knowledge: 'Knowledge', memory: 'Memory',
+  prompt: 'Prompt', workflow: 'Workflow',
+  trigger_source: 'Trigger source', duty_gate: 'Duty gate', sync: 'Sync', sandbox: 'Sandbox',
+  trigger: 'Trigger',
+}
+
+
+function InstallModal({ onClose, onInstalled }: { onClose: () => void; onInstalled: () => void }) {
+  const [source, setSource] = useState('')
+  const guarded = useGuardedInstall((confirm) =>
+    api.installApp(source.trim(), confirm).then(guardedFromApp))
+
+  async function doInstall(confirm: boolean) {
+    if (!source.trim()) return
+    const r = confirm ? await guarded.confirmInstall() : await guarded.install()
+    if (r?.ok) onInstalled()
+  }
+
+  const refusal = terminalRefusalReason(guarded.blocked)
+  const needsConsent = guarded.blocked?.needsConsent
+
+  return (
+    <Modal title="Install app" icon={<Download size={18} />} onClose={onClose}>
+      <div className="flex flex-col gap-m p-l" style={{ minWidth: 420 }}>
+        <label data-type="body-s" className="text-on-surface-low">Source — local path or git URL</label>
+        <TextInput value={source} onChange={(v) => { setSource(v); guarded.reset() }} autoFocus name="app-install-source"
+          placeholder="/path/to/app  or  https://github.com/owner/app.git" />
+
+        {guarded.blocked?.scan && <ScanReport scan={guarded.blocked.scan} />}
+        <GuardedFailure guarded={guarded} />
+
+        <div className="flex justify-end gap-2 pt-s">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          {needsConsent ? (
+            <Button variant="primary" loading={guarded.busy} onClick={() => doInstall(true)}><ShieldAlert size={16} /> Install anyway
+            </Button>
+          ) : (
+            <Button variant="primary" loading={guarded.busy} disabled={guarded.busy || !!refusal || !source.trim()} onClick={() => doInstall(false)}
+              disabledReason={refusal || (!source.trim() ? 'Enter a source first' : undefined)}><Download size={16} /> Install
+            </Button>
+          )}
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+function UpdateModal({ name, onClose, onUpdated }: { name: string; onClose: () => void; onUpdated: () => void }) {
+  const [source, setSource] = useState('')
+  const guarded = useGuardedInstall((confirm) =>
+    api.updateApp(name, source.trim(), confirm).then(guardedFromApp))
+
+  async function doUpdate(confirm: boolean) {
+    if (!source.trim()) return
+    const r = confirm ? await guarded.confirmInstall() : await guarded.install()
+    if (r?.ok) onUpdated()
+  }
+
+  const refusal = terminalRefusalReason(guarded.blocked)
+  const needsConsent = guarded.blocked?.needsConsent
+
+  return (
+    <Modal title={`Update ${name}`} icon={<RefreshCw size={18} />} onClose={onClose}>
+      <div className="flex flex-col gap-m p-l" style={{ minWidth: 420 }}>
+        <label data-type="body-s" className="text-on-surface-low">New source — local path or git URL (data is preserved)</label>
+        <TextInput value={source} onChange={(v) => { setSource(v); guarded.reset() }} autoFocus name="app-install-source"
+          placeholder="/path/to/app  or  https://github.com/owner/app.git" />
+        {guarded.blocked?.scan && <ScanReport scan={guarded.blocked.scan} />}
+        <GuardedFailure guarded={guarded} />
+        <div className="flex justify-end gap-2 pt-s">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          {needsConsent ? (
+            <Button variant="primary" loading={guarded.busy} onClick={() => doUpdate(true)}><ShieldAlert size={16} /> Update anyway
+            </Button>
+          ) : (
+            <Button variant="primary" loading={guarded.busy} disabled={guarded.busy || !!refusal || !source.trim()} onClick={() => doUpdate(false)}
+              disabledReason={refusal || (!source.trim() ? 'Enter a source first' : undefined)}><RefreshCw size={16} /> Update
+            </Button>
+          )}
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+
+
+export function FixWithAiButton({ fixPrompt }: { fixPrompt: string | null }) {
+  if (!fixPrompt) return null
+  return (
+    <Button variant="secondary" size="sm" onClick={() => launchChat({ prompt: fixPrompt })}>
+      <Sparkles size={15} /> Fix with AI
+    </Button>
+  )
+}
+
+function GuardedFailure({ guarded }: { guarded: Pick<GuardedInstall, 'error' | 'fixPrompt'> }) {
+  if (!guarded.error) return null
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <FieldError>{guarded.error}</FieldError>
+      <FixWithAiButton fixPrompt={guarded.fixPrompt} />
+    </div>
+  )
+}
+
+
+function AppDetailPanel({ app, onClose, onChanged, onOpen }: { app: AppSummary; onClose: () => void; onChanged: () => void; onOpen: () => void }) {
+  const [busy, setBusy] = useState(false)
+  const [confirmUninstall, setConfirmUninstall] = useState(false)
+  const [confirmRemove, setConfirmRemove] = useState(false)
+  const [configOpen, setConfigOpen] = useState(false)
+  const [updateOpen, setUpdateOpen] = useState(false)
+  const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [inNav, setInNavState] = useState(() => isInNav(app.name))
+
+  async function toggle() {
+    setBusy(true)
+    try { app.enabled ? await api.disableApp(app.name) : await api.enableApp(app.name); onChanged() }
+    finally { setBusy(false) }
+  }
+
+  const toggleNav = () => { const next = !inNav; setInNav(app.name, next); setInNavState(next) }
+
+  const installedOrigin = provenance({ sourceKind: app.sourceKind })
+
+  return (
+    <>
+      <div className="flex flex-col gap-l p-l">
+        <div>
+          <div data-type="body-s" className="text-on-surface-low">{app.description || app.name}</div>
+          {
+}
+          <div data-type="label-s" className="mt-1 text-on-surface-low">
+            v{app.version}{installedOrigin ? ` · ${installedOrigin.label}` : ''}
+          </div>
+          {
+}
+          <div className="mt-2"><QualityBadges quality={app.quality} /></div>
+        </div>
+
+        {app.updateAvailable && (
+          <div className="flex items-center justify-between gap-3 rounded-md border border-primary/40 bg-surface-high p-m"
+            style={{ background: 'color-mix(in srgb, var(--color-primary) 8%, var(--color-surface-high))' }}>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 text-primary" data-type="body-s"><RefreshCw size={14} /> Update available</div>
+              <div className="mt-0.5 text-on-surface-low" data-type="label-s">
+                {app.latestVersion ? `Version ${app.latestVersion} is available (you have ${app.version}).` : 'A newer version is available.'}
+              </div>
+            </div>
+            <Button variant="primary" size="sm" className="shrink-0" onClick={() => setUpdateOpen(true)}><RefreshCw size={15} /> Update</Button>
+          </div>
+        )}
+
+        <PermissionList perms={app.permissions} />
+
+        {app.hasBackend && (
+          <div className="rounded-md border border-outline-variant bg-surface-high p-m" data-type="body-s">
+            <div className="flex items-center gap-2 text-on-surface"><Server size={14} /> Backend</div>
+            <div className="mt-1 text-on-surface-low">
+              {app.backendRunning ? `running on port ${app.backendPort}` : 'not running'}
+            </div>
+          </div>
+        )}
+
+        {app.hasUI && app.enabled && (
+          <label className="flex items-center justify-between gap-3 rounded-md border border-outline-variant bg-surface-high p-m">
+            <span className="min-w-0">
+              <span className="flex items-center gap-2 text-on-surface" data-type="body-s"><LayoutGrid size={14} /> Show in navigation</span>
+              <span className="mt-0.5 block text-on-surface-low" data-type="label-s">Pin this app's page to the Apps section of the nav rail.</span>
+            </span>
+            <button type="button" role="switch" aria-checked={inNav} aria-label="Show in navigation" onClick={toggleNav}
+              className={`h-6 w-11 shrink-0 rounded-pill transition-colors ${inNav ? 'bg-primary' : 'bg-surface-highest'}`}>
+              <span className={`block size-5 rounded-full bg-white transition-transform ${inNav ? 'translate-x-5' : 'translate-x-0.5'}`} />
+            </button>
+          </label>
+        )}
+
+        {
+}
+        {app.native ? (
+          <>
+            <div className="rounded-md border border-outline-variant bg-surface-high p-m" data-type="body-s">
+              <div className="flex items-center gap-2 text-on-surface"><Power size={14} /> Native app — always on</div>
+              <div className="mt-1 text-on-surface-low" data-type="label-s">
+                {app.hasConfig
+                  ? "Ships with Gideon as part of the baseline; it can't be deactivated or disabled. You can change its settings below."
+                  : "Ships with Gideon as part of the baseline; it can't be deactivated or disabled. Manage its individual tools from the Tools page."}
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {app.hasUI && app.enabled && (
+                <Button variant="primary" size="sm" onClick={onOpen}><LayoutGrid size={15} /> Open</Button>
+              )}
+              {app.hasConfig && <Button variant="ghost" size="sm" onClick={() => setConfigOpen(true)}><Settings2 size={15} /> Configure</Button>}
+              <Button variant="ghost" size="sm" onClick={() => setUpdateOpen(true)}><RefreshCw size={15} /> Update</Button>
+            </div>
+          </>
+        ) : (<>
+          {
+}
+          <div className="flex flex-wrap gap-2">
+            {app.hasUI && app.enabled && (
+              <Button variant="primary" size="sm" onClick={onOpen}><LayoutGrid size={15} /> Open</Button>
+            )}
+            <Button variant={app.enabled ? 'secondary' : 'primary'} size="sm" disabled={busy} disabledReason={BUSY_REASON} onClick={toggle}>
+              <Power size={15} /> {app.enabled ? 'Deactivate' : 'Activate'}
+            </Button>
+            {app.enabled && <Button variant="ghost" size="sm" onClick={() => setConfigOpen(true)}><Settings2 size={15} /> Configure</Button>}
+            <Button variant="ghost" size="sm" onClick={() => setUpdateOpen(true)}><RefreshCw size={15} /> Update</Button>
+            {
+}
+            <Button variant="ghost" size="sm" onClick={() => setConfirmRemove(true)}><Archive size={15} /> Uninstall</Button>
+          </div>
+
+          {
+}
+          <div className="border-t border-outline-variant/40 pt-3">
+            <button type="button" onClick={() => setAdvancedOpen((o) => !o)} aria-expanded={advancedOpen}
+              className="flex items-center gap-1.5 text-on-surface-low text-[0.8125rem] transition-colors hover:text-on-surface">
+              <ChevronDown size={14} className="transition-transform" style={{ transform: advancedOpen ? 'rotate(180deg)' : 'none' }} /> Advanced
+            </button>
+            {advancedOpen && (
+              <div className="mt-2 rounded-md border border-outline-variant bg-surface-high p-m">
+                <div data-type="body-s" className="text-on-surface">Force uninstall</div>
+                <div data-type="label-s" className="mt-0.5 text-on-surface-low">
+                  Remove this app's files <span className="text-on-surface">and everything it stored for you</span> — notes, history,
+                  logs. Deactivate keeps the files; Uninstall removes them and keeps your data. This can't be undone.
+                </div>
+                <Button variant="danger" size="sm" className="mt-2" onClick={() => setConfirmUninstall(true)}>
+                  <Trash2 size={15} /> Force uninstall
+                </Button>
+              </div>
+            )}
+          </div>
+        </>)}
+      </div>
+
+      {updateOpen && <UpdateModal name={app.name} onClose={() => setUpdateOpen(false)}
+        onUpdated={() => { setUpdateOpen(false); onChanged() }} />}
+      {configOpen && <ConfigModal name={app.name} onClose={() => setConfigOpen(false)} />}
+      {confirmRemove && <RemoveAppModal name={app.name}
+        onClose={() => setConfirmRemove(false)}
+        onDone={() => { setConfirmRemove(false); onClose(); onChanged() }} />}
+      {confirmUninstall && <UninstallModal name={app.name}
+        onClose={() => setConfirmUninstall(false)}
+        onDone={() => { setConfirmUninstall(false); onClose(); onChanged() }} />}
+    </>
+  )
+}
+
+function StoreDetailPanel({ item, onInstalled }: { item: StoreItem; onInstalled: () => void }) {
+  const providerLabel = item.isProvider
+    ? `${PROVIDER_ENTITY_LABEL[item.providerType] ?? item.providerType} provider` : ''
+  const [consent, setConsent] = useState<GuardedResult | null>(null)
+  const guarded = useGuardedInstall((confirm) => api.installApp(item.pointer || item.source, confirm).then(guardedFromApp))
+
+  async function install(confirm: boolean) {
+    const r = confirm ? await guarded.confirmInstall() : await guarded.install()
+    if (r?.ok) { onInstalled(); return }
+    if (isBlockingResult(r)) setConsent(r)
+  }
+
+  return (
+    <div className="flex flex-col gap-l p-l">
+      {
+}
+      <div className="relative -mx-l -mt-l h-36 shrink-0 overflow-hidden bg-surface-high"
+        data-art={item.heroUrl ? 'hero' : 'generated'}
+        style={item.heroUrl ? undefined : { background: artGradient(item.name) }}>
+        {item.heroUrl && <img src={item.heroUrl} alt="" className="size-full object-cover" />}
+        <div className="absolute inset-0 bg-gradient-to-t from-surface/60 to-transparent" />
+      </div>
+      <div>
+        <div data-type="body-s" className="text-on-surface-low">{item.description || item.name}</div>
+        <div data-type="label-s" className="mt-1 text-on-surface-low">
+          v{item.version || '—'}{item.author ? ` · by ${item.author}` : ''}
+        </div>
+        {providerLabel && (
+          <span className="mt-2 inline-flex items-center gap-1 rounded-pill px-1.5 py-0.5" data-type="label-s"
+            style={accentChip}>
+            <Plug size={11} />{providerLabel}
+          </span>
+        )}
+      </div>
+
+      {
+}
+      <QualityBadges quality={item.quality} />
+
+      {(item.tags ?? []).length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {(item.tags ?? []).map((t) => (
+            <span key={t} className="inline-flex h-6 items-center rounded-pill bg-surface-high px-2 text-on-surface-var text-[0.75rem]">{t}</span>
+          ))}
+        </div>
+      )}
+
+      {
+}
+      {item.permissions && Object.keys(item.permissions).length > 0 && (
+        <PermissionList perms={item.permissions} />
+      )}
+      {(item.crons ?? []).length > 0 && <CronConsentList crons={item.crons!} />}
+
+      <div className="rounded-md border border-outline-variant bg-surface-high p-m" data-type="body-s">
+        <div className="flex items-center gap-2 text-on-surface"><Download size={14} /> Not installed</div>
+        <div className="mt-1 text-on-surface-low" data-type="label-s">
+          Installing fetches this app behind the security scanner — a dangerous verdict is always refused.
+        </div>
+      </div>
+
+      <GuardedFailure guarded={guarded} />
+      <div>
+        <Button variant="primary" size="sm" loading={guarded.busy} onClick={() => install(false)}><Download size={15} /> Install
+        </Button>
+      </div>
+
+      {consent && guarded.blocked && (
+        <ConsentModal label={item.displayName} result={guarded.blocked} busy={guarded.busy}
+          permissions={item.permissions} crons={item.crons}
+          onConfirm={async () => { const r = await guarded.confirmInstall(); if (r?.ok) { setConsent(null); onInstalled() } }}
+          onClose={() => { setConsent(null); guarded.reset() }} />
+      )}
+    </div>
+  )
+}
+
+
+
+
+
+function ConfigModal({ name, onClose }: { name: string; onClose: () => void }) {
+  const cfg = useAppConfig(name)
+
+  return (
+    <Modal title={`Configure ${name}`} icon={<Settings2 size={18} />} onClose={onClose}>
+      <div className="flex flex-col gap-m p-l" style={{ minWidth: 440 }}>
+        {cfg.error ? (
+          <LoadError what="app configuration" error={cfg.error} onRetry={cfg.reload} />
+        ) : cfg.loading ? <div data-type="body-s" className="text-on-surface-low">Loading…</div>
+          : !cfg.hasSchema ? (
+            <div data-type="body-s" className="text-on-surface-low">This app declares no configurable options.</div>
+          ) : (
+            <AppConfigFields appName={name} props={cfg.props} cur={cfg.cur} set={cfg.set} secretSet={cfg.secretSet} required={cfg.required} />
+          )}
+        {
+}
+        {cfg.err && <FieldError>{cfg.err}</FieldError>}
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          {
+}
+          <Button variant="primary" disabled={cfg.busy || cfg.loading || !!cfg.error || cfg.missing.length > 0}
+            disabledReason={cfg.error ? 'The configuration failed to load'
+              : cfg.loading ? 'Still loading the configuration'
+              : cfg.missing.length > 0 ? `Fill in ${cfg.missingLabels.join(', ')}` : undefined}
+            onClick={() => cfg.save(onClose)}>Save</Button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+function KeptDepsList({ kept }: { kept: AppDepClassification[] }) {
+  if (kept.length === 0) return null
+  return (
+    <ul className="flex flex-col gap-1">
+      {kept.map((d) => (
+        <li key={d.key} data-type="body-s" className="text-on-surface-low">
+          • Keeping {d.kind} <span className="text-on-surface">{d.id}</span> ({d.disposition})
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function RemoveAppModal({ name, onClose, onDone }: { name: string; onClose: () => void; onDone: () => void }) {
+  const { data } = useQuery(`app-uninstall:${name}`, () => api.appUninstallPreview(name), { persist: false })
+  const [busy, setBusy] = useState(false)
+  const kept = (data?.dependencies ?? []).filter((d) => d.disposition !== 'removable')
+  const facts = data?.data
+  const unconsumed = facts?.unconsumed ?? []
+  const blocked = unconsumed.length > 0
+
+  async function remove() {
+    setBusy(true)
+    try { await api.removeApp(name); onDone() }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <Modal title={`Uninstall ${name}?`} icon={<Archive size={18} />} onClose={onClose}>
+      <div className="flex flex-col gap-m p-l" style={{ minWidth: 400 }}>
+        <div data-type="body-s" className="text-on-surface-low">
+          This removes the app's files and providers from disk. To just turn it off and leave the
+          files in place, use <span className="text-on-surface">Deactivate</span> instead.
+        </div>
+        {blocked && (
+          <div role="alert" className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning/5 p-m">
+            <AlertTriangle size={15} className="mt-0.5 shrink-0 text-warning" />
+            <div data-type="body-s" className="min-w-0 text-on-surface-low">
+              <span className="font-medium">An earlier copy of this app's data is still here.</span>{' '}
+              Uninstalling would have to overwrite or delete it, so it is refused until you decide
+              what to keep. Move {unconsumed.length === 1 ? 'it' : 'them'} somewhere else (or delete
+              {unconsumed.length === 1 ? ' it' : ' them'}, if you already have what you need), then
+              try again. <span className="text-on-surface">Force uninstall</span> deletes
+              {unconsumed.length === 1 ? ' it' : ' them'} deliberately.
+              {unconsumed.map((p) => (
+                <div key={p} data-type="label-s" className="mt-1 break-all opacity-80">{p}</div>
+              ))}
+            </div>
+          </div>
+        )}
+        {
+}
+        <div className="flex items-start gap-2 rounded-md border border-outline-variant bg-surface-high p-m">
+          <HardDrive size={15} className="mt-0.5 shrink-0 text-on-surface-low" />
+          <div data-type="body-s" className="min-w-0 text-on-surface-low">
+            {facts === undefined
+              ? 'Checking what this app has stored…'
+              : !facts.present
+                ? <>This app keeps no data of its own, so there is nothing to preserve.</>
+                : facts.entries === 0
+                  ? <>This app has a data folder and it is currently <span className="text-on-surface">empty</span>. It is kept anyway, so reinstalling picks up where you left off.</>
+                  : <><span className="text-on-surface">Your data is kept</span> — {facts.entries} {facts.entries === 1 ? 'item' : 'items'} in this app's data folder. Reinstall it and your data comes back.</>}
+            {facts?.present && facts.path && (
+              <div data-type="label-s" className="mt-1 break-all text-on-surface-low/80">Kept at {facts.path}</div>
+            )}
+          </div>
+        </div>
+        <KeptDepsList kept={kept} />
+        <div className="flex justify-end gap-2">
+          {
+}
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          {
+}
+          <Button
+            variant="primary"
+            loading={busy}
+            disabled={blocked}
+            disabledReason={blocked ? 'An earlier copy of this app’s data is still on disk — resolve it first' : undefined}
+            onClick={remove}
+          >
+            <Archive size={16} /> Uninstall
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+function UninstallModal({ name, onClose, onDone }: { name: string; onClose: () => void; onDone: () => void }) {
+  const { data } = useQuery(`app-uninstall:${name}`, () => api.appUninstallPreview(name), { persist: false })
+  const [busy, setBusy] = useState(false)
+  const deps: AppDepClassification[] = data?.dependencies ?? []
+  const kept = deps.filter((d) => d.disposition !== 'removable')
+  const facts = data?.data
+
+  async function forceUninstall() {
+    setBusy(true)
+    try { await api.uninstallApp(name, true); onDone() }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <Modal title={`Force uninstall ${name}?`} icon={<Trash2 size={18} />} onClose={onClose}>
+      <div className="flex flex-col gap-m p-l" style={{ minWidth: 400 }}>
+        {
+}
+        <div data-type="body-s" className="text-on-surface-low">
+          This permanently removes the app's files and providers from disk
+          {facts?.present && facts.entries > 0
+            ? <>, <span className="text-danger">including the {facts.entries} {facts.entries === 1 ? 'item' : 'items'} it stored for you</span></>
+            : <> and anything it stored for you</>}
+          {' '}— it cannot be undone. To keep your data, use <span className="text-on-surface">Uninstall</span>;
+          to just turn the app off and leave everything on disk, use <span className="text-on-surface">Deactivate</span>.
+          {kept.length > 0 && ' Shared dependencies still used by other apps will be kept.'}
+        </div>
+        <KeptDepsList kept={kept} />
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="danger" loading={busy} onClick={forceUninstall}><Trash2 size={16} /> Force uninstall
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  )
+}

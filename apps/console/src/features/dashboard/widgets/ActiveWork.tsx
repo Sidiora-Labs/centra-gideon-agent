@@ -1,0 +1,126 @@
+import { useState } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
+import { Send, MessageCircleQuestion, Coffee } from 'lucide-react'
+import { api, type Loop } from '../../../shared/data/api'
+import { useDashboardLive } from '../DashboardLive'
+import { loopStatusLabel, loopStatusColor, effectiveLoopStatus, ACTIVE_LOOP_STATUSES } from '../../../shared/data/loopStatus'
+import { SlotEmptyState, RowAction, StatusDot } from './kit'
+import { ListSkeleton } from '../../../shared/ui/ListScaffold'
+import { ProgressRing } from '../../../shared/ui/ProgressRing'
+import { spring } from '../../../shared/theme/motion'
+import type { RouteProps } from '../../../app/shell/useQueryState'
+
+function pendingText(l: Loop): string | null {
+  const q = l.pending_question
+  if (!q) return null
+  return typeof q === 'string' ? q : q.question
+}
+
+export function ActiveWork({ navigate }: RouteProps) {
+  const { loops, read } = useDashboardLive()
+  const active = loops
+    .filter((l) => ACTIVE_LOOP_STATUSES.has(l.status))
+    .sort((a, b) => (b.started_at ?? b.created_at) - (a.started_at ?? a.created_at))
+
+  if (active.length === 0) {
+    if (!read.loops) return <ListSkeleton rows={2} what="active work" />
+    return <SlotEmptyState icon={Coffee}>No active work. Loops you launch appear here as they run.</SlotEmptyState>
+  }
+
+  return (
+    <div className="flex flex-col gap-s pt-xs">
+      <AnimatePresence initial={false}>
+        {active.map((l) => <ActiveRow key={l.id} loop={l} navigate={navigate} />)}
+      </AnimatePresence>
+    </div>
+  )
+}
+
+function ActiveRow({ loop, navigate }: { loop: Loop; navigate: RouteProps['navigate'] }) {
+  const loopLabel = loop.name || loop.task?.slice(0, 60) || 'Loop'
+  const dispStatus = effectiveLoopStatus(loop.status, loop.error_message)
+  const statusColor = loopStatusColor(dispStatus)
+  const question = pendingText(loop)
+  const [answering, setAnswering] = useState(false)
+  const [text, setText] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const pct = loop.max_cycles > 0 ? Math.min(1, loop.total_cycles / loop.max_cycles) : null
+  const cycleText = loop.max_cycles > 0
+    ? `cycle ${loop.total_cycles}/${loop.max_cycles}`
+    : `cycle ${loop.total_cycles} · ongoing`
+
+  const send = async () => {
+    const t = text.trim()
+    if (!t) return
+    setBusy(true)
+    try { await api.uLoopNudge(loop.id, t); setText(''); setAnswering(false) }
+    catch {   }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <motion.div
+      layout
+      transition={spring.spatialDefault}
+      className="rounded-lg bg-surface-low p-m"
+    >
+      <div className="flex items-center gap-s">
+        <button type="button" onClick={() => navigate(`loops/${loop.id}`)} className="flex min-w-0 flex-1 items-center gap-s text-left">
+          {pct != null
+            ? <ProgressRing pct={pct} tone={statusColor} label={`Cycle progress for ${loop.name || loop.task || 'this loop'}`} />
+            : <StatusDot color={statusColor} pulse={loop.status === 'running'} />}
+          <div className="min-w-0">
+            <p data-type="title-m" className="truncate text-on-surface">{loopLabel}</p>
+            <p data-type="body-m" className="truncate text-on-surface-low">
+              <span style={{ color: statusColor }}>{loopStatusLabel(dispStatus)}</span> · {cycleText}
+            </p>
+          </div>
+        </button>
+        {loop.status === 'needs_input' && !answering && (
+          <RowAction tone="primary" onClick={() => setAnswering(true)} title="Answer the loop's question"
+            ariaLabel={`Answer: ${loopLabel}`}><MessageCircleQuestion size={14} /> Answer</RowAction>
+        )}
+        {loop.status !== 'needs_input' && !answering && (
+          <RowAction tone="default" onClick={() => setAnswering(true)} title="Nudge this loop"
+            ariaLabel={`Nudge: ${loopLabel}`}><Send size={14} /> Nudge</RowAction>
+        )}
+      </div>
+
+      {question && !answering && (
+        <p data-type="body-m" className="mt-s rounded-md bg-surface px-m py-s text-on-surface-var">
+          <MessageCircleQuestion size={13} className="mr-xs inline text-info" />{question}
+        </p>
+      )}
+
+      <AnimatePresence>
+        {answering && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={spring.spatialFast}
+            className="mt-s overflow-hidden"
+          >
+            {question && <p data-type="body-m" className="mb-xs text-on-surface-var">{question}</p>}
+            <div className="flex items-end gap-s">
+              <textarea
+                autoFocus
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send(); if (e.key === 'Escape') { setAnswering(false); setText('') } }}
+                placeholder={loop.status === 'needs_input' ? 'Answer…' : 'Nudge the loop…'}
+                aria-label={loop.status === 'needs_input' ? 'Answer the loop' : 'Nudge the loop'}
+                rows={2}
+                className="min-h-0 flex-1 resize-none rounded-md bg-surface px-m py-s text-on-surface outline-none placeholder:text-on-surface-low focus:ring-2 focus:ring-inset focus:ring-primary"
+                data-type="body-m"
+              />
+              <RowAction tone="primary" onClick={send} title="Send (⌘↵)">{busy ? '…' : <><Send size={14} /> Send</>}</RowAction>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  )
+}
+

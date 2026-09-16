@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.embedding_providers import registry as reg
+from gideon.integrations.embedding_providers import registry as reg
 
 
 @pytest.mark.parametrize(
@@ -23,7 +23,9 @@ def test_native_names_take_the_in_process_path(provider_name, monkeypatch):
     """For any native spelling, get_active_embed_fn uses the native provider and
     NEVER falls through to the LLM registry (which would raise for a non-model
     provider name)."""
-    monkeypatch.setattr(reg, "_active_embedding_spec", lambda: (provider_name, "all-MiniLM-L6-v2"))
+    monkeypatch.setattr(
+        reg, "_active_embedding_spec", lambda: (provider_name, "all-MiniLM-L6-v2")
+    )
 
     called = {"llm": False}
 
@@ -33,7 +35,6 @@ def test_native_names_take_the_in_process_path(provider_name, monkeypatch):
 
     monkeypatch.setattr(reg, "_llm_embed_fn", _boom)
 
-    # Stub the native provider so we don't need the model downloaded.
     class _FakeNative:
         def get_embed_fn(self, model_id):
             return lambda text: [0.0, 0.1, 0.2]
@@ -51,10 +52,12 @@ def test_hyphen_name_resolves_dimension(monkeypatch):
     """The dimension lookup accepts the hyphenated native name and reads the
     registered native provider's catalog (the sentence-transformers app)."""
     monkeypatch.setattr(
-        reg, "_active_embedding_spec", lambda: ("sentence-transformers", "all-MiniLM-L6-v2")
+        reg,
+        "_active_embedding_spec",
+        lambda: ("sentence-transformers", "all-MiniLM-L6-v2"),
     )
 
-    from gideon.embedding_providers.base import EmbeddingModel
+    from gideon.integrations.embedding_providers.base import EmbeddingModel
 
     class _FakeNative:
         async def list_models(self):
@@ -71,9 +74,11 @@ def test_knowledge_embedder_uses_the_unified_path(monkeypatch):
     embeds via the resolved fn. Regression this replaces: the knowledge embedder used
     to hardcode native+ollama only, silently yielding None for a bound openai/etc.
     model (knowledge semantic search disabled)."""
-    from gideon.knowledge import embedder as emb_mod
+    from gideon.cognition.knowledge import embedder as emb_mod
 
-    monkeypatch.setattr(reg, "get_active_embed_fn", lambda: (lambda text: [0.1, 0.2, 0.3]))
+    monkeypatch.setattr(
+        reg, "get_active_embed_fn", lambda: (lambda text: [0.1, 0.2, 0.3])
+    )
     monkeypatch.setattr(reg, "get_active_embedding_dim", lambda: 3)
 
     emb = emb_mod.create_embedder_from_config({})
@@ -85,7 +90,7 @@ def test_knowledge_embedder_uses_the_unified_path(monkeypatch):
 
 def test_knowledge_embedder_none_when_nothing_bound(monkeypatch):
     """No embedding model bound → no embedder (knowledge embedding gracefully off)."""
-    from gideon.knowledge import embedder as emb_mod
+    from gideon.cognition.knowledge import embedder as emb_mod
 
     monkeypatch.setattr(reg, "get_active_embed_fn", lambda: None)
     assert emb_mod.create_embedder_from_config({}) is None
@@ -111,15 +116,17 @@ async def test_embed_many_fn_works_from_inside_a_running_event_loop(monkeypatch)
 
         name = "fake-direct"
 
-        async def embed_batch(self, texts: list[str], model: str = "") -> list[list[float]]:
+        async def embed_batch(
+            self, texts: list[str], model: str = ""
+        ) -> list[list[float]]:
             return [[float(len(t))] for t in texts]
 
-    monkeypatch.setattr(reg, "_active_embedding_spec", lambda: ("fake-direct", "fake-model"))
+    monkeypatch.setattr(
+        reg, "_active_embedding_spec", lambda: ("fake-direct", "fake-model")
+    )
     monkeypatch.setattr(reg, "_ensure_scanned", lambda: None)
     monkeypatch.setattr(reg, "_providers", {"fake-direct": _FakeDirectProvider()})
 
     fn = reg.get_active_embed_many_fn()
     assert fn is not None
-    # Called directly (not awaited) — `fn` is a plain sync callable, exactly how the
-    # gateway's async ingest/chunk-backfill path calls it. Before the fix this raised.
     assert fn(["a", "bb", "ccc"]) == [[1.0], [2.0], [3.0]]

@@ -3,7 +3,7 @@
 
 Why this exists as its own module rather than inline in ``conftest.py``: the
 detector has to be **drivable against a fake root** so the rail can be proven
-non-vacuous (``tests/test_real_home_guard.py`` points it at a throwaway tree and
+non-vacuous (``checks/runtime/test_real_home_guard.py`` points it at a throwaway tree and
 asserts it fires). A detector that can only ever be exercised by the thing it is
 guarding is indistinguishable from one that never fires.
 
@@ -52,16 +52,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-#: The developer's REAL home, resolved once at import time — i.e. before any test
-#: has had a chance to patch ``Path.home`` or ``$HOME``. Everything else in the
-#: suite is expected to stay out of it.
 REAL_HOME = Path.home() / ".gideon"
 
-#: Paths (relative to the root) that are permitted to change during a run.
-#: MUST stay empty unless a residue is named here individually, with the reason,
-#: and recorded in the owning plan's execution log. A blanket allowance — a
-#: prefix, a glob, "whatever leaks today" — is not a rail; it is a baseline that
-#: silently ratifies the next leak. Populated set members are compared exactly.
 ALLOWED_RESIDUE: frozenset[str] = frozenset()
 
 
@@ -141,10 +133,6 @@ def scan_changes(root: Path, since_ns: int) -> list[HomeChange]:
                 elif st.st_mtime_ns > since_ns:
                     kind = "modified"
                 else:
-                    # ctime moved but mtime did not: a metadata-preserving write
-                    # (``copy2``/``copystat``/``utime``) or a metadata-only touch.
-                    # Named distinctly because the fix differs — you are looking for
-                    # a copy, not for a writer.
                     kind = "metadata-preserving-write"
             changes.append(HomeChange(path=rel, kind=kind, size=st.st_size))
     changes.sort(key=lambda c: c.path)
@@ -166,7 +154,7 @@ def format_report(root: Path, changes: list[HomeChange], *, limit: int = 40) -> 
         "",
         "The test suite must never touch the developer's real gateway home. Every",
         "subsystem resolves its home through a seam a test can point at tmp_path;",
-        "fix the leak at that seam (see tests/conftest.py::_isolate_real_home_writers)",
+        "fix the leak at that seam (see checks/runtime/conftest.py::_isolate_real_home_writers)",
         "rather than adding the path below to ALLOWED_RESIDUE.",
         "",
         "If you have a gateway running against the real home, that is the other cause —",

@@ -9,19 +9,10 @@ const {
   normalizeRoute,
   MAX_TITLE,
   MAX_BODY,
-} = require("../nativeNotifications");
-const { IPC_CHANNELS } = require("../capabilities");
+} = require("../src/native/notifications");
+const { IPC_CHANNELS } = require("../src/native/capabilities");
 
-// ── The `native` target's shell half (DC-5) ──────────────────────────────
-//
-// Every leg here is SIMULATED: an Electron main-process `new Notification()` cannot be
-// asserted from a test runner, so `Notification` is injected as a recording double. What
-// that buys is the one thing a mapping-table assertion cannot — that `show()` actually
-// constructs a notification and calls `.show()` on it, and that the tap wires focus +
-// route. What it does NOT prove is that macOS renders a banner; that needs a launched
-// shell on a real Mac (DC-3's V3 walk-through, still open).
 
-/** A recording stand-in for Electron's Notification. */
 function fakeNotification({ supported = true, throwOn = null } = {}) {
   const raised = [];
   class N {
@@ -69,8 +60,6 @@ function make(opts = {}) {
 
 describe("makeNativeNotifications", () => {
   it("raises nothing on construction", () => {
-    // A module that notified at boot would fire on every app launch, which is the one
-    // thing a notification actuator must never do.
     const { Notification } = make();
     assert.deepStrictEqual(Notification.raised, []);
   });
@@ -94,8 +83,6 @@ describe("makeNativeNotifications", () => {
   });
 
   it("still focuses when the note named no surface", () => {
-    // Raising the app is the half a user expects from any tap; a routeless note is not a
-    // reason to swallow the gesture.
     const { native, Notification, focused, sent } = make();
     native.show({ title: "Backup finished", body: "", route: "" });
     Notification.raised[0].tap();
@@ -159,8 +146,6 @@ describe("normalizeRoute", () => {
   });
 
   it("rejects rather than repairs anything that is not a route id", () => {
-    // Rejecting is the point: a half-cleaned route deep-links somewhere the user did not
-    // mean, and "" is a fine answer (the tap then just focuses the window).
     for (const bad of [
       "https://evil.example/x",
       "javascript:alert(1)",
@@ -198,13 +183,10 @@ describe("registerNativeNotificationIpc", () => {
 });
 
 describe("main.js wiring", () => {
-  const main = fs.readFileSync(path.join(__dirname, "..", "main.js"), "utf8");
+  const main = fs.readFileSync(path.join(__dirname, "..", "src/application/desktop-application.js"), "utf8");
 
   it("registers the notify handler in the main process", () => {
-    // 🪤 The whole DC-5 audit finding was a target nothing dispatched to. A module that
-    // exists but is never registered would reproduce it one layer down: the preload would
-    // invoke a channel with no handler, and every native note would reject silently.
-    assert.match(main, /registerNativeNotificationIpc\(ipcMain, nativeNotifications, IPC_CHANNELS\)/);
+    assert.match(main, /registerNativeNotificationIpc\(ipcMain, this\.notifications, IPC_CHANNELS\)/);
     assert.match(main, /makeNativeNotifications\(\{/);
   });
 
@@ -214,15 +196,14 @@ describe("main.js wiring", () => {
 });
 
 describe("preload notifications surface", () => {
-  const src = fs.readFileSync(path.join(__dirname, "..", "preload.js"), "utf8");
+  const src = fs.readFileSync(path.join(__dirname, "..", "src/bridge/dashboard-preload.js"), "utf8");
 
   it("exposes show() and on() and no token accessor", () => {
     assert.match(src, /notifications:\s*\{/);
     assert.match(src, /ipcRenderer\.invoke\(IPC_CHANNELS\.notify/);
-    assert.match(src, /ipcRenderer\.on\(IPC_CHANNELS\.notificationActivate/);
-    // 🪤 Comment-stripped before scanning. The preload's own header says "Nothing here
-    // exposes the gateway `shell_token`" — a raw text scan reads that PROSE as a hit and
-    // fails a file that is in fact clean. Scanners read comments; this one must not.
+    assert.match(src, /subscribe\(IPC_CHANNELS\.notificationActivate/);
+    assert.match(src, /ipcRenderer\.on\(channel, listener\)/);
+    assert.match(src, /ipcRenderer\.removeListener\(channel, listener\)/);
     const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
     assert.ok(code.includes("notifications:"), "the scan must still see the code");
     assert.ok(!/token/i.test(code), "the bridge must not reach the token");

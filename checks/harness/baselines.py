@@ -21,24 +21,16 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from harness.replay import Metrics, metrics_for_scenario
+from checks.harness.replay import Metrics, metrics_for_scenario
 
-# ClawX-proven hard defaults. A baseline entry may override any of these (with a rationale).
 DEFAULT_HARD = {
     "duplicate_event_rate_max": 0.005,
     "order_violation_count_max": 0,
     "reconnect_loss_count_max": 0,
     "event_fanout_ratio_max": 1.2,
 }
-LATENCY_DRIFT_TOLERANCE = 0.15  # p95 may grow at most +15% over the baseline
+LATENCY_DRIFT_TOLERANCE = 0.15
 
-#: Scenarios that MUST be present on disk — dropping one from the tree is itself a failure,
-#: not merely "one fewer scenario". These are the §2.3 required set members whose absence is
-#: how a gate silently rots: the WF2 journal-format gate lives entirely in the two workflow
-#: scenarios, so if either recording vanished the journal would be ungated with nothing to
-#: say so (SV-5, Success Criterion #4). ``required_scenarios`` already treats every recording
-#: on disk as present-and-required; this NAMED set adds the "and these two must EXIST" half,
-#: which a disk scan alone cannot express (an absent dir scans as absent, not as failing).
 REQUIRED_SCENARIOS = frozenset(
     {
         "workflow-journal-projection",
@@ -128,7 +120,6 @@ def check_metrics(m: Metrics, baseline: Baseline) -> list[str]:
             f"event_fanout_ratio {m.event_fanout_ratio:.2f} > {hard['event_fanout_ratio_max']}"
         )
 
-    # Latency drift vs the recorded baseline p95 (per stream).
     base_p95 = baseline.metrics.get("latency_p95", {})
     for stream, p95 in m.latency_p95.items():
         recorded = base_p95.get(stream)
@@ -140,17 +131,12 @@ def check_metrics(m: Metrics, baseline: Baseline) -> list[str]:
                 f"{int(LATENCY_DRIFT_TOLERANCE * 100)}%"
             )
 
-    # Event-fold law (WF2-R11, the SV-5 gate). A baseline that pins a ``fold`` terminal state
-    # is asserting the exact state the journal→SSE projection reconstructs. An EXACT compare,
-    # not a threshold: the fold law is a byte-equal invariant, so any drift — a renamed event
-    # kind, a dropped guard, a changed terminal state — must fail, which is precisely what
-    # gates the journal format before a Slice 3+ consumer relies on it. A baseline that pins a
-    # fold but the recording no longer produces one is also a failure (the projection events
-    # vanished from the trace).
     base_fold = baseline.metrics.get("fold")
     if base_fold is not None:
         if m.fold is None:
-            failures.append("fold invariant missing: scenario recorded no workflow projection")
+            failures.append(
+                "fold invariant missing: scenario recorded no workflow projection"
+            )
         elif m.fold != base_fold:
             failures.append(
                 "event-fold law broke: folded terminal state diverged from baseline "
@@ -182,19 +168,15 @@ def check_baselines(td: Path | None = None) -> list[GateResult]:
     present = set(required_scenarios(d))
     results: list[GateResult] = []
 
-    # A NAMED required scenario absent from disk fails the run outright (SV-5, SC#4). This is
-    # distinct from the per-baseline "recording missing" check below: that fires only when a
-    # baseline ENTRY exists, so deleting both the recording AND its baseline would otherwise
-    # be a silent scenario drop — the exact rot the required set exists to prevent. Skipped
-    # when a baseline entry still exists (the per-baseline loop reports that case), so a
-    # scenario is never failed twice for the same absence.
     for scen in sorted(REQUIRED_SCENARIOS):
         if scen not in present and scen not in baselines:
             results.append(
                 GateResult(
                     scenario=scen,
                     ok=False,
-                    failures=["required scenario recording missing from harness/traces/"],
+                    failures=[
+                        "required scenario recording missing from checks/harness/traces/"
+                    ],
                 )
             )
 
@@ -202,7 +184,9 @@ def check_baselines(td: Path | None = None) -> list[GateResult]:
         if scen not in present:
             results.append(
                 GateResult(
-                    scenario=scen, ok=False, failures=["required scenario recording missing"]
+                    scenario=scen,
+                    ok=False,
+                    failures=["required scenario recording missing"],
                 )
             )
             continue
@@ -211,7 +195,9 @@ def check_baselines(td: Path | None = None) -> list[GateResult]:
                 GateResult(
                     scenario=scen,
                     ok=False,
-                    failures=["threshold loosened beyond default without a rationale line"],
+                    failures=[
+                        "threshold loosened beyond default without a rationale line"
+                    ],
                 )
             )
             continue
@@ -219,12 +205,13 @@ def check_baselines(td: Path | None = None) -> list[GateResult]:
         failures = check_metrics(m, baseline)
         results.append(GateResult(scenario=scen, ok=not failures, failures=failures))
 
-    # A recorded scenario with no baseline entry is also a failure (add its baseline).
     for scen in present:
         if scen not in baselines:
             results.append(
                 GateResult(
-                    scenario=scen, ok=False, failures=["recorded scenario has no baseline entry"]
+                    scenario=scen,
+                    ok=False,
+                    failures=["recorded scenario has no baseline entry"],
                 )
             )
     return results

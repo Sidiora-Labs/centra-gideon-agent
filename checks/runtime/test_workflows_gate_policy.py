@@ -20,19 +20,19 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.tool_providers.base import RiskLevel
-from gideon.workflows import gate_policy as GP
-from gideon.workflows import human_input as HI
-from gideon.workflows import journal as J
-from gideon.workflows import store
-from gideon.workflows.controller import EngineServices, RunController
-from gideon.workflows.models import (
+from gideon.automation.workflows import gate_policy as GP
+from gideon.automation.workflows import human_input as HI
+from gideon.automation.workflows import journal as J
+from gideon.automation.workflows import store
+from gideon.automation.workflows.controller import EngineServices, RunController
+from gideon.automation.workflows.models import (
     InstanceState,
     OriginKind,
     RunOrigin,
     RunStatus,
     WorkflowRun,
 )
+from gideon.integrations.tool_providers.base import RiskLevel
 
 pytestmark = pytest.mark.anyio
 
@@ -46,11 +46,8 @@ def anyio_backend() -> str:
 def _isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
     return home
-
-
-# ── risk classification ──────────────────────────────────────────────────────
 
 
 class TestGateRisk:
@@ -62,7 +59,9 @@ class TestGateRisk:
             ("destructive", RiskLevel.DESTRUCTIVE),
         ],
     )
-    def test_a_declared_risk_is_honoured(self, declared: str, expected: RiskLevel) -> None:
+    def test_a_declared_risk_is_honoured(
+        self, declared: str, expected: RiskLevel
+    ) -> None:
         assert GP.gate_risk({"risk": declared}) == expected
 
     def test_an_undeclared_gate_defaults_to_destructive(self) -> None:
@@ -77,12 +76,15 @@ class TestGateRisk:
 
 class TestUnattendedDetection:
     @pytest.mark.parametrize(
-        "kind", [OriginKind.SCHEDULE, OriginKind.EVENT, OriginKind.HOOK, OriginKind.IDLE]
+        "kind",
+        [OriginKind.SCHEDULE, OriginKind.EVENT, OriginKind.HOOK, OriginKind.IDLE],
     )
     def test_trigger_origins_are_unattended(self, kind: OriginKind) -> None:
         assert GP.is_unattended(kind)
 
-    @pytest.mark.parametrize("kind", [OriginKind.CHAT, OriginKind.MANUAL, OriginKind.API])
+    @pytest.mark.parametrize(
+        "kind", [OriginKind.CHAT, OriginKind.MANUAL, OriginKind.API]
+    )
     def test_requested_origins_are_attended(self, kind: OriginKind) -> None:
         """A requester exists who can answer, even in background mode."""
         assert not GP.is_unattended(kind)
@@ -102,7 +104,9 @@ class TestDecide:
 
     def test_an_unattended_run_still_asks_for_a_destructive_gate(self) -> None:
         """An unreviewed destructive action is worse than a stalled run."""
-        verdict = GP.decide({"risk": "destructive"}, "g", origin_kind=OriginKind.SCHEDULE)
+        verdict = GP.decide(
+            {"risk": "destructive"}, "g", origin_kind=OriginKind.SCHEDULE
+        )
         assert verdict.asks_human and not verdict.approved
 
     def test_an_attended_run_always_asks(self) -> None:
@@ -119,8 +123,13 @@ class TestDecide:
 
     def test_the_verdict_carries_its_reasoning(self) -> None:
         """The reason is rendered to a user, so it has to say WHY, not just what."""
-        verdict = GP.decide({"risk": "destructive"}, "g", origin_kind=OriginKind.SCHEDULE)
-        assert "destructive" in verdict.reason and verdict.to_dict()["risk"] == "destructive"
+        verdict = GP.decide(
+            {"risk": "destructive"}, "g", origin_kind=OriginKind.SCHEDULE
+        )
+        assert (
+            "destructive" in verdict.reason
+            and verdict.to_dict()["risk"] == "destructive"
+        )
 
 
 class TestAllowMemory:
@@ -143,9 +152,6 @@ class TestAllowMemory:
         assert len(memory) == 0
 
 
-# ── remote-channel gates ─────────────────────────────────────────────────────
-
-
 class TestOwnerBinding:
     def _run(self, session_key: str = "owner-1") -> WorkflowRun:
         return WorkflowRun(
@@ -160,12 +166,16 @@ class TestOwnerBinding:
         assert ok
 
     def test_the_owner_may_answer_remotely(self) -> None:
-        ok, _why = GP.may_answer(self._run("owner-1"), responder="owner-1", channel="slack")
+        ok, _why = GP.may_answer(
+            self._run("owner-1"), responder="owner-1", channel="slack"
+        )
         assert ok
 
     def test_a_non_owner_is_refused(self) -> None:
         """Without this, a shared channel is a privilege-escalation path."""
-        ok, why = GP.may_answer(self._run("owner-1"), responder="someone-else", channel="slack")
+        ok, why = GP.may_answer(
+            self._run("owner-1"), responder="someone-else", channel="slack"
+        )
         assert not ok and "requester" in why
 
     def test_an_ownerless_run_refuses_remote_approval(self) -> None:
@@ -178,9 +188,6 @@ class TestOwnerBinding:
         was reading a channel."""
         verdict = GP.remote_timeout_decision({"risk": "destructive"})
         assert verdict.decision == GP.Decision.AUTO_DENIED and not verdict.approved
-
-
-# ── event gates ──────────────────────────────────────────────────────────────
 
 
 class TestEventHold:
@@ -208,7 +215,9 @@ class TestEventHold:
     def test_the_hold_limit_is_configurable(self) -> None:
         state = GP.HoldState()
         GP.evaluate_event_gate({"hold_limit": 1}, state, prerequisite_met=False)
-        second = GP.evaluate_event_gate({"hold_limit": 1}, state, prerequisite_met=False)
+        second = GP.evaluate_event_gate(
+            {"hold_limit": 1}, state, prerequisite_met=False
+        )
         assert second.give_up
 
     def test_invalid_input_fails_rather_than_holding(self) -> None:
@@ -218,10 +227,7 @@ class TestEventHold:
             {}, GP.HoldState(), prerequisite_met=False, input_valid=False
         )
         assert verdict.give_up and not verdict.hold
-        assert not verdict.preserve_event  # the event WAS delivered; it was just bad
-
-
-# ── action-node clarification ────────────────────────────────────────────────
+        assert not verdict.preserve_event
 
 
 class TestClarificationExtraction:
@@ -231,7 +237,13 @@ class TestClarificationExtraction:
 
     def test_a_structured_clarification_is_preserved(self) -> None:
         ask = GP.clarification_from_output(
-            {"needs_input": {"kind": "choice", "prompt": "env?", "choices": ["dev", "prod"]}}
+            {
+                "needs_input": {
+                    "kind": "choice",
+                    "prompt": "env?",
+                    "choices": ["dev", "prod"],
+                }
+            }
         )
         assert ask["kind"] == "choice" and ask["choices"] == ["dev", "prod"]
 
@@ -242,9 +254,6 @@ class TestClarificationExtraction:
         assert GP.clarification_from_output({"count": 3}) is None
         assert GP.clarification_from_output("plain text") is None
         assert GP.clarification_from_output(None) is None
-
-
-# ── controller integration ───────────────────────────────────────────────────
 
 
 def _gate_spec(gate_config: dict) -> dict:
@@ -284,7 +293,9 @@ async def _run_with(gate_config: dict, *, origin: OriginKind, mode: str = "backg
 class TestControllerAutoApprove:
     async def test_a_scheduled_run_sails_through_a_safe_gate(self) -> None:
         """This is what makes an unattended run actually unattended."""
-        c, status = await _run_with({"risk": "safe", "timeout_secs": 0}, origin=OriginKind.SCHEDULE)
+        c, status = await _run_with(
+            {"risk": "safe", "timeout_secs": 0}, origin=OriginKind.SCHEDULE
+        )
         assert status == RunStatus.COMPLETE
         assert c.instances["root.children[0]"].state == InstanceState.DONE
         resolved = [e for e in J.ledger(c.run.id) if e.get("kind") == J.GATE_RESOLVED]
@@ -305,7 +316,9 @@ class TestControllerAutoApprove:
         assert status == RunStatus.NEEDS_INPUT
 
     async def test_a_chat_run_stops_even_at_a_safe_gate(self) -> None:
-        c, status = await _run_with({"risk": "safe", "timeout_secs": 0}, origin=OriginKind.CHAT)
+        c, status = await _run_with(
+            {"risk": "safe", "timeout_secs": 0}, origin=OriginKind.CHAT
+        )
         assert status == RunStatus.NEEDS_INPUT
 
 
@@ -316,12 +329,13 @@ class TestControllerRemoteAnswers:
         result = c.resume(token, True, responder="owner-1", channel="slack")
         assert result["ok"] and result["approved"]
 
-    async def test_a_non_owner_channel_reply_is_refused_without_touching_the_token(self) -> None:
+    async def test_a_non_owner_channel_reply_is_refused_without_touching_the_token(
+        self,
+    ) -> None:
         c, _status = await _run_with({"timeout_secs": 0}, origin=OriginKind.CHAT)
         token = HI.list_continuations(c.run.id)[0].token
         refused = c.resume(token, True, responder="intruder", channel="slack")
         assert not refused["ok"] and refused["code"] == "WF_RESUME_NOT_OWNER"
-        # The token survives, so the real owner can still answer.
         assert c.resume(token, True, responder="owner-1", channel="slack")["ok"]
 
     async def test_a_local_answer_needs_no_responder(self) -> None:
@@ -371,12 +385,16 @@ class TestControllerClarification:
             "root": {
                 "kind": "sequence",
                 "id": "s",
-                "children": [{"kind": "action", "id": "a", "config": {"provider": "p"}}],
+                "children": [
+                    {"kind": "action", "id": "a", "config": {"provider": "p"}}
+                ],
             },
         }
         run = store.create(WorkflowRun(id="", workflow_name="clar"))
         store.write_spec(run.id, spec)
-        c = RunController(run, spec, services=EngineServices(get_provider=lambda n: P()))
+        c = RunController(
+            run, spec, services=EngineServices(get_provider=lambda n: P())
+        )
         status = await c.run_to_completion(timeout=20)
         assert status == RunStatus.NEEDS_INPUT
         assert c.instances["root.children[0]"].state == InstanceState.WAITING
@@ -401,10 +419,14 @@ class TestControllerClarification:
             "root": {
                 "kind": "sequence",
                 "id": "s",
-                "children": [{"kind": "action", "id": "a", "config": {"provider": "p"}}],
+                "children": [
+                    {"kind": "action", "id": "a", "config": {"provider": "p"}}
+                ],
             },
         }
         run = store.create(WorkflowRun(id="", workflow_name="ok"))
         store.write_spec(run.id, spec)
-        c = RunController(run, spec, services=EngineServices(get_provider=lambda n: P()))
+        c = RunController(
+            run, spec, services=EngineServices(get_provider=lambda n: P())
+        )
         assert await c.run_to_completion(timeout=20) == RunStatus.COMPLETE

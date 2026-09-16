@@ -8,7 +8,7 @@ What these tests are for, in order of what would actually break silently:
    and the ``VERIFIER_ABSENT`` mapping is asserted at the ``matrix.aggregate`` CALL SITE —
    a mean of ``None`` rather than ``0.0`` is the property, not the enum value.
 2. **Every declared arm must RUN.** Each mask is driven against the REAL retriever classes
-   (``type(...) is HybridRetriever`` / ``is VectorMemoryStore``), and the arms are asserted
+   (``type(...) is HybridRetriever`` / ``is SemanticArchive``), and the arms are asserted
    to return DIFFERENT id sets — a mask that parses but gates nothing makes every arm's
    delta zero, so it would read as "no arm contributes".
 3. **Every guard is shown failing.** The control mask, the read-only rail, the empty
@@ -27,15 +27,13 @@ from pathlib import Path
 
 import pytest
 
-from gideon.evals import retrieval_bench as rb
-from gideon.evals import store as evals_store
-from gideon.evals.matrix import VERIFIER_ABSENT, MatrixSpec, aggregate
-from gideon.knowledge import retrieval as knowledge_retrieval
-from gideon.knowledge.store import KnowledgeStore, knowledge_db_path
-from gideon.memory_graph import MemoryGraph
-from gideon.vector_memory import VectorMemoryStore
-
-# ── fixtures: the real stores, seeded so no single arm can answer everything ───
+from gideon.assurance.evals import retrieval_bench as rb
+from gideon.assurance.evals import store as evals_store
+from gideon.assurance.evals.matrix import VERIFIER_ABSENT, MatrixSpec, aggregate
+from gideon.cognition.knowledge import retrieval as knowledge_retrieval
+from gideon.cognition.knowledge.store import KnowledgeStore, knowledge_db_path
+from gideon.cognition.memory_graph import MemoryGraph
+from gideon.cognition.vector_memory import SemanticArchive
 
 _ITEMS = {
     "RRF fusion notes": "Reciprocal rank fusion blends the keyword and vector lists.",
@@ -54,9 +52,6 @@ def knowledge_store() -> KnowledgeStore:
         title: store.create_typed_item(item_type="note", title=title, content=body)
         for title, body in _ITEMS.items()
     }
-    # An entity whose mentions are the ONLY way the graph arm can reach these two — the
-    # query text shares no words with either title, so a graph hit cannot be a keyword hit
-    # in disguise.
     entity = store.add_entity("Orion", "concept")
     store.add_mention(ids["Terraform state recovery"], entity)
     store.add_mention(ids["Nginx TLS ciphers"], entity)
@@ -76,9 +71,9 @@ _RECORDS = {
 
 
 @pytest.fixture()
-def memory_store() -> VectorMemoryStore:
-    """A REAL VectorMemoryStore at the redirected home, with graph links + volunteers."""
-    store = VectorMemoryStore()
+def memory_store() -> SemanticArchive:
+    """A REAL SemanticArchive at the redirected home, with graph links + volunteers."""
+    store = SemanticArchive()
     store.init()
     for key, value in _RECORDS.items():
         store.set_semantic(key, value, 0.9, "test")
@@ -104,7 +99,6 @@ def memory_store() -> VectorMemoryStore:
             to_entity=entity,
             source="test",
         )
-    # One volunteered ref that is NEVER used, so the mining filter has a negative to drop.
     unused = graph.upsert_entity("ripgrep", "tool")
     graph.log_volunteer(
         entity_id=unused,
@@ -115,13 +109,8 @@ def memory_store() -> VectorMemoryStore:
         record_ref="user.tool.ripgrep",
         recall_at_volunteer=0,
     )
-    # The "used" signal: recall_count RISES after the volunteer, for Orion's refs only.
     store.record_recall(["project.orion.deploy_window", "project.orion.oncall"])
     store.db.commit()
-    # `set_semantic`'s write-time linker already resolved `alias_index`, caching an EMPTY
-    # matcher before these entities existed. Without this the graph arm silently matches
-    # nothing — the documented contract on `invalidate_alias_index`, and what
-    # `memory_service` does after every entity write.
     store.invalidate_alias_index()
     try:
         yield store
@@ -137,12 +126,9 @@ def bound_models():
     ``_prune_removed_providers`` without a configured provider, which is what lets a test
     exercise the pin without standing up a model backend.
     """
-    from gideon.providers.use_cases import save_active_models
+    from gideon.extensions.providers.use_cases import save_active_models
 
     save_active_models({"chat": ["test-chat"], "embedding": ["test-embed"]})
-
-
-# ── 0. home isolation is asserted, not assumed ───────────────────────────────
 
 
 def test_stores_resolve_under_a_tmp_home():
@@ -155,10 +141,7 @@ def test_stores_resolve_under_a_tmp_home():
     real_home = Path.home() / ".gideon"
     for path in (knowledge_db_path(), rb.memory_db_path()):
         assert real_home not in Path(path).parents, path
-        assert "pclaw-home" in str(path) or "tmp" in str(path).lower(), path
-
-
-# ── 1. the metric contract: three distinct absences ──────────────────────────
+        assert "gideon-home" in str(path) or "tmp" in str(path).lower(), path
 
 
 def test_precision_over_no_candidates_is_undefined_not_a_score():
@@ -205,7 +188,9 @@ def test_score_query_reasons_separate_no_candidates_from_no_relevant():
 def test_a_mask_that_retrieved_nothing_reports_none_not_zero_in_the_table():
     """The vacuity assertion on the REPORT, not just on the metric function."""
     scores = [
-        rb.score_query(rb.QrelsQuery(query=f"q{i}", relevant_ids=("a",)), [], mask="none", k=5)
+        rb.score_query(
+            rb.QrelsQuery(query=f"q{i}", relevant_ids=("a",)), [], mask="none", k=5
+        )
         for i in range(3)
     ]
     row = rb.build_table(scores, k=5)[0]
@@ -219,8 +204,12 @@ def test_a_mask_that_retrieved_nothing_reports_none_not_zero_in_the_table():
 def test_undefined_recall_is_counted_apart_from_no_candidates():
     """Both absences appear in the row, in different columns."""
     scores = [
-        rb.score_query(rb.QrelsQuery(query="a", relevant_ids=("x",)), [], mask="keyword", k=5),
-        rb.score_query(rb.QrelsQuery(query="b", relevant_ids=()), ["x"], mask="keyword", k=5),
+        rb.score_query(
+            rb.QrelsQuery(query="a", relevant_ids=("x",)), [], mask="keyword", k=5
+        ),
+        rb.score_query(
+            rb.QrelsQuery(query="b", relevant_ids=()), ["x"], mask="keyword", k=5
+        ),
     ]
     row = rb.build_table(scores, k=5)[0]
     assert row.no_candidate_queries == 1
@@ -233,9 +222,11 @@ def test_no_candidate_cells_cannot_be_averaged_in_as_zero():
     The property is the mean, not the enum: a `VERIFIER_ABSENT` label that still carried a
     0.0 score would average in and report the retriever as scoring zero.
     """
-    from gideon.evals.matrix import CellResult
+    from gideon.assurance.evals.matrix import CellResult
 
-    score = rb.score_query(rb.QrelsQuery(query="q", relevant_ids=("a",)), [], mask="none", k=5)
+    score = rb.score_query(
+        rb.QrelsQuery(query="q", relevant_ids=("a",)), [], mask="none", k=5
+    )
     outcome, cell_score = rb._cell_outcome(score)
     assert outcome == VERIFIER_ABSENT and cell_score is None
     agg = aggregate([CellResult(coords={}, outcome=outcome, score=cell_score)])
@@ -244,14 +235,13 @@ def test_no_candidate_cells_cannot_be_averaged_in_as_zero():
     assert agg["scored_count"] == 0
 
 
-# ── 2. one arm vocabulary, and mask spelling ─────────────────────────────────
-
-
 def test_one_arm_vocabulary_across_both_stores():
     """Two spellings would make "the graph arm's contribution" mean two things."""
-    import gideon.vector_memory as vector_memory
+    import gideon.cognition.vector_memory as vector_memory
 
-    assert rb.ARMS == tuple(knowledge_retrieval.ARMS) == tuple(vector_memory.RECALL_ARMS)
+    assert (
+        rb.ARMS == tuple(knowledge_retrieval.ARMS) == tuple(vector_memory.RECALL_ARMS)
+    )
 
 
 def test_mask_name_is_canonical_regardless_of_input_order():
@@ -271,22 +261,21 @@ def test_ablation_masks_carry_a_control_a_full_and_every_leave_one_out():
         assert rb.mask_name((arm,)) in names
 
 
-# ── 3. each arm RUNS — driven against the real retriever classes ─────────────
-
-
 def test_knowledge_arm_mask_gates_the_real_hybrid_retriever(knowledge_store):
     """Each knowledge arm runs and returns a DIFFERENT set; the empty mask returns none."""
     retriever = knowledge_retrieval.HybridRetriever(knowledge_store)
     assert type(retriever) is knowledge_retrieval.HybridRetriever
 
-    keyword_only = {h["id"] for h in retriever.search("vacuum runbook", limit=5, arms=("keyword",))}
+    keyword_only = {
+        h["id"] for h in retriever.search("vacuum runbook", limit=5, arms=("keyword",))
+    }
     graph_only = {h["id"] for h in retriever.search("Orion", limit=5, arms=("graph",))}
     assert keyword_only, "the keyword arm did not run"
     assert graph_only, "the graph arm did not run"
-    assert keyword_only != graph_only, "both arms returned the same set — is the mask applied?"
+    assert (
+        keyword_only != graph_only
+    ), "both arms returned the same set — is the mask applied?"
 
-    # The control: all arms off retrieves nothing. This is the vacuity floor under every
-    # per-arm delta the harness reports.
     assert retriever.search("Orion", limit=5, arms=()) == []
 
 
@@ -304,7 +293,9 @@ def test_a_masked_knowledge_arm_never_issues_its_query(knowledge_store, monkeypa
     calls: list[str] = []
     real_graph = retriever._graph_search
     monkeypatch.setattr(
-        retriever, "_graph_search", lambda *a, **k: (calls.append("graph"), real_graph(*a, **k))[1]
+        retriever,
+        "_graph_search",
+        lambda *a, **k: (calls.append("graph"), real_graph(*a, **k))[1],
     )
     retriever.search("Orion", limit=5, arms=("keyword",))
     assert calls == [], "the graph arm ran under a keyword-only mask"
@@ -314,13 +305,17 @@ def test_a_masked_knowledge_arm_never_issues_its_query(knowledge_store, monkeypa
 
 def test_memory_arm_mask_gates_the_real_rank_semantic(memory_store):
     """Each memory arm runs; the empty mask returns none."""
-    assert type(memory_store) is VectorMemoryStore
+    assert type(memory_store) is SemanticArchive
 
     keyword_only = {
         r["key"]
-        for r in memory_store.rank_semantic("hydration starter", limit=5, arms=("keyword",))
+        for r in memory_store.rank_semantic(
+            "hydration starter", limit=5, arms=("keyword",)
+        )
     }
-    graph_only = {r["key"] for r in memory_store.rank_semantic("Orion", limit=5, arms=("graph",))}
+    graph_only = {
+        r["key"] for r in memory_store.rank_semantic("Orion", limit=5, arms=("graph",))
+    }
     assert keyword_only, "the memory keyword arm did not run"
     assert graph_only, "the memory graph arm did not run"
     assert keyword_only != graph_only
@@ -330,14 +325,18 @@ def test_memory_arm_mask_gates_the_real_rank_semantic(memory_store):
 
 def test_a_masked_memory_graph_arm_never_traverses(memory_store, monkeypatch):
     calls: list[str] = []
-    monkeypatch.setattr(memory_store, "_graph_boosts", lambda text: (calls.append(text), {})[1])
+    monkeypatch.setattr(
+        memory_store, "_graph_boosts", lambda text: (calls.append(text), {})[1]
+    )
     memory_store.rank_semantic("Orion", limit=5, arms=("keyword",))
     assert calls == []
     memory_store.rank_semantic("Orion", limit=5, arms=("keyword", "graph"))
     assert calls == ["Orion"]
 
 
-def test_get_semantic_context_still_renders_through_rank_semantic(memory_store, monkeypatch):
+def test_get_semantic_context_still_renders_through_rank_semantic(
+    memory_store, monkeypatch
+):
     """The extraction's call site: the formatter must go THROUGH the ranking function."""
     seen: list[str] = []
     real = memory_store.rank_semantic
@@ -351,9 +350,6 @@ def test_get_semantic_context_still_renders_through_rank_semantic(memory_store, 
     assert "pref.baking.hydration" in block
 
 
-# ── 4. qrels mining, asserted in BOTH directions ─────────────────────────────
-
-
 def test_volunteer_qrels_keeps_used_and_drops_unused(memory_store):
     graph = memory_store.graph
     assert type(graph) is MemoryGraph
@@ -363,7 +359,9 @@ def test_volunteer_qrels_keeps_used_and_drops_unused(memory_store):
         "project.orion.deploy_window",
         "project.orion.oncall",
     ]
-    assert "ripgrep" not in qrels, "a volunteered-but-never-used record was mined as a positive"
+    assert (
+        "ripgrep" not in qrels
+    ), "a volunteered-but-never-used record was mined as a positive"
 
 
 def test_volunteer_qrels_shares_the_used_predicate_with_the_health_panel(memory_store):
@@ -374,9 +372,11 @@ def test_volunteer_qrels_shares_the_used_predicate_with_the_health_panel(memory_
 
 
 def test_mine_knowledge_qrels_keeps_named_intents_and_drops_unnamed(knowledge_store):
-    item_id = next(iter(rb.mine_knowledge_qrels.__doc__ or ""), None)  # placeholder, replaced below
+    item_id = next(iter(rb.mine_knowledge_qrels.__doc__ or ""), None)
     del item_id
-    rows = knowledge_store.db.execute("SELECT id, title FROM items ORDER BY title").fetchall()
+    rows = knowledge_store.db.execute(
+        "SELECT id, title FROM items ORDER BY title"
+    ).fetchall()
     keep_id = rows[0]["id"]
     drop_id = rows[1]["id"]
     knowledge_store.record_intent_outcome(
@@ -390,10 +390,9 @@ def test_mine_knowledge_qrels_keeps_named_intents_and_drops_unnamed(knowledge_st
     assert "a real standing question" in queries
     assert queries["a real standing question"].relevant_ids == (keep_id,)
     assert queries["a real standing question"].source == rb.SOURCE_MINED_INTENT
-    assert all(q.query.strip() for q in mined), "a blank-named intent was mined as a query"
-
-
-# ── §5.2 source (a): LEARN-R4's surfacing_events ──────────────────────────────
+    assert all(
+        q.query.strip() for q in mined
+    ), "a blank-named intent was mined as a query"
 
 
 def _record_surfacing(*events) -> None:
@@ -404,8 +403,8 @@ def _record_surfacing(*events) -> None:
     ``~/.gideon/learning.db``, and a redirect nobody checks is one that silently stops
     working.
     """
-    from gideon.config.loader import config_dir
-    from gideon.learning.surfacing_events import SurfacingEventStore
+    from gideon.cognition.learning.surfacing_events import SurfacingEventStore
+    from gideon.core.config.loader import config_dir
 
     store_ = SurfacingEventStore()
     try:
@@ -419,16 +418,24 @@ def _record_surfacing(*events) -> None:
 
 
 def _event(**kwargs):
-    from gideon.learning.surfacing_events import SurfacingEvent
+    from gideon.cognition.learning.surfacing_events import SurfacingEvent
 
     return SurfacingEvent(**kwargs)
 
 
 def test_mine_knowledge_qrels_reads_surfacing_events_as_source_a(knowledge_store):
     """A used candidate whose entity IS an item in the corpus is a source-(a) positive."""
-    item_id = knowledge_store.db.execute("SELECT id FROM items ORDER BY title").fetchone()["id"]
+    item_id = knowledge_store.db.execute(
+        "SELECT id FROM items ORDER BY title"
+    ).fetchone()["id"]
     _record_surfacing(
-        _event(kind="knowledge", entity=item_id, arm="keyword", used=True, query="how do I fuse?")
+        _event(
+            kind="knowledge",
+            entity=item_id,
+            arm="keyword",
+            used=True,
+            query="how do I fuse?",
+        )
     )
 
     mined = {q.query: q for q in rb.mine_knowledge_qrels(knowledge_store)}
@@ -442,15 +449,21 @@ def test_a_surfaced_but_unused_candidate_is_never_a_positive(knowledge_store):
     that LOST would make the denominator the numerator and label every arm perfect."""
     rows = knowledge_store.db.execute("SELECT id FROM items ORDER BY title").fetchall()
     _record_surfacing(
-        _event(kind="knowledge", entity=rows[0]["id"], arm="keyword", used=True, query="q"),
-        _event(kind="knowledge", entity=rows[1]["id"], arm="vector", used=False, query="q"),
+        _event(
+            kind="knowledge", entity=rows[0]["id"], arm="keyword", used=True, query="q"
+        ),
+        _event(
+            kind="knowledge", entity=rows[1]["id"], arm="vector", used=False, query="q"
+        ),
     )
 
     mined = {q.query: q for q in rb.mine_surfacing_qrels(knowledge_store)}
     assert mined["q"].relevant_ids == (rows[0]["id"],)
 
 
-def test_an_entity_the_store_does_not_contain_is_dropped_not_kept_as_a_miss(knowledge_store):
+def test_an_entity_the_store_does_not_contain_is_dropped_not_kept_as_a_miss(
+    knowledge_store,
+):
     """The rail that keeps a foreign arm's label out of this store's ground truth.
 
     ``surfacing_events`` is ONE log shared by every surfacing arm, and its ``entity`` is
@@ -458,15 +471,31 @@ def test_an_entity_the_store_does_not_contain_is_dropped_not_kept_as_a_miss(know
     ``P@k`` to ``0.0`` for every arm and every mask — the good ones included — and publish
     "retrieval is broken" as a finding about the retriever rather than about the label.
     """
-    item_id = knowledge_store.db.execute("SELECT id FROM items ORDER BY title").fetchone()["id"]
+    item_id = knowledge_store.db.execute(
+        "SELECT id FROM items ORDER BY title"
+    ).fetchone()["id"]
     _record_surfacing(
-        _event(kind="knowledge", entity=item_id, arm="keyword", used=True, query="shared query"),
-        _event(kind="lesson", entity="lesson:not-an-item", arm="lessons", used=True, query="q2"),
+        _event(
+            kind="knowledge",
+            entity=item_id,
+            arm="keyword",
+            used=True,
+            query="shared query",
+        ),
+        _event(
+            kind="lesson",
+            entity="lesson:not-an-item",
+            arm="lessons",
+            used=True,
+            query="q2",
+        ),
     )
 
     mined = {q.query: q for q in rb.mine_surfacing_qrels(knowledge_store)}
     assert mined["shared query"].relevant_ids == (item_id,)
-    assert "q2" not in mined, "a label naming an id this store cannot contain was mined anyway"
+    assert (
+        "q2" not in mined
+    ), "a label naming an id this store cannot contain was mined anyway"
     assert all(
         "lesson:not-an-item" not in q.relevant_ids for q in mined.values()
     ), "an unreachable positive would score every arm at P@k 0.0"
@@ -481,7 +510,13 @@ def test_the_only_live_writer_contributes_no_knowledge_labels(knowledge_store):
     arm that ranks knowledge ITEMS is instrumented. When one is, this test flips and says so.
     """
     _record_surfacing(
-        _event(kind="skill", entity="pdf-processing", arm="skill_surfaced", used=True, query="q"),
+        _event(
+            kind="skill",
+            entity="pdf-processing",
+            arm="skill_surfaced",
+            used=True,
+            query="q",
+        ),
         _event(kind="skill", entity="brazil", arm="skill_forced", used=True, query="q"),
     )
 
@@ -492,22 +527,36 @@ def test_the_two_mined_sources_union_and_source_a_wins_a_shared_query(knowledge_
     """Both sources are live and separately labelled; neither is a fallback for the other."""
     rows = knowledge_store.db.execute("SELECT id FROM items ORDER BY title").fetchall()
     surfaced_id, intent_id = rows[0]["id"], rows[1]["id"]
-    knowledge_store.record_intent_outcome("i-a", intent_name="shared", item_id=intent_id)
-    knowledge_store.record_intent_outcome("i-b", intent_name="intent only", item_id=intent_id)
+    knowledge_store.record_intent_outcome(
+        "i-a", intent_name="shared", item_id=intent_id
+    )
+    knowledge_store.record_intent_outcome(
+        "i-b", intent_name="intent only", item_id=intent_id
+    )
     knowledge_store.db.commit()
     _record_surfacing(
-        _event(kind="knowledge", entity=surfaced_id, arm="keyword", used=True, query="shared")
+        _event(
+            kind="knowledge",
+            entity=surfaced_id,
+            arm="keyword",
+            used=True,
+            query="shared",
+        )
     )
 
     mined = {q.query: q for q in rb.mine_knowledge_qrels(knowledge_store)}
     assert mined["shared"].source == rb.SOURCE_MINED_SURFACING
     assert mined["shared"].relevant_ids == (surfaced_id,), "the two id sets were merged"
     assert mined["intent only"].source == rb.SOURCE_MINED_INTENT
-    bench = rb.RetrievalBenchmark(name="n", store=rb.STORE_KNOWLEDGE, queries=tuple(mined.values()))
+    bench = rb.RetrievalBenchmark(
+        name="n", store=rb.STORE_KNOWLEDGE, queries=tuple(mined.values())
+    )
     assert bench.sources() == {rb.SOURCE_MINED_INTENT: 1, rb.SOURCE_MINED_SURFACING: 1}
 
 
-def test_an_empty_benchmark_refuses_rather_than_scoring_nothing(knowledge_store, bound_models):
+def test_an_empty_benchmark_refuses_rather_than_scoring_nothing(
+    knowledge_store, bound_models
+):
     """A store with no labels has no P@k. Returning a zero here would file "retrieval is
     broken" as a finding about the retriever."""
     with pytest.raises(rb.EmptyBenchmarkError):
@@ -519,11 +568,10 @@ def test_an_empty_benchmark_refuses_rather_than_scoring_nothing(knowledge_store,
         )
 
 
-# ── 5. the control mask is the harness's own falsifier ───────────────────────
-
-
 def _seeded_benchmark(knowledge_store) -> rb.RetrievalBenchmark:
-    rows = knowledge_store.db.execute("SELECT id, title FROM items ORDER BY title").fetchall()
+    rows = knowledge_store.db.execute(
+        "SELECT id, title FROM items ORDER BY title"
+    ).fetchall()
     by_title = {r["title"]: r["id"] for r in rows}
     return rb.RetrievalBenchmark(
         name="retrieval-knowledge",
@@ -547,7 +595,9 @@ def _seeded_benchmark(knowledge_store) -> rb.RetrievalBenchmark:
     )
 
 
-def test_a_mask_that_gates_nothing_refuses_to_publish(knowledge_store, bound_models, monkeypatch):
+def test_a_mask_that_gates_nothing_refuses_to_publish(
+    knowledge_store, bound_models, monkeypatch
+):
     """The falsification the harness performs on ITSELF.
 
     A retriever that ignores the mask makes every arm score identically, so the report
@@ -559,7 +609,9 @@ def test_a_mask_that_gates_nothing_refuses_to_publish(knowledge_store, bound_mod
     def _ignores_the_mask(query: str, k: int, arms):
         return [h["id"] for h in retriever.search(query, limit=k)]
 
-    monkeypatch.setattr(rb, "retriever_for", lambda store_kind, handle: _ignores_the_mask)
+    monkeypatch.setattr(
+        rb, "retriever_for", lambda store_kind, handle: _ignores_the_mask
+    )
     with pytest.raises(rb.MaskNotAppliedError):
         rb.run_retrieval_bench(
             rb.STORE_KNOWLEDGE,
@@ -574,9 +626,6 @@ def test_a_run_with_no_control_cell_is_unfalsifiable_and_refuses():
         rb._assert_mask_applied(
             [rb.score_query(rb.QrelsQuery(query="q"), ["a"], mask="keyword", k=5)]
         )
-
-
-# ── 6. the read-only rail, shown holding AND failing ─────────────────────────
 
 
 def test_store_unchanged_passes_when_nothing_writes(tmp_path):
@@ -616,7 +665,9 @@ def test_the_sibling_of_a_live_store_is_the_other_live_store():
     siblings = rb.sibling_store_paths(rb.knowledge_db_path(create=False))
     assert [p.name for p in siblings] == ["memory.db"]
     assert rb.knowledge_db_path(create=False).resolve() not in siblings
-    assert [p.name for p in rb.sibling_store_paths(rb.memory_db_path())] == ["knowledge.db"]
+    assert [p.name for p in rb.sibling_store_paths(rb.memory_db_path())] == [
+        "knowledge.db"
+    ]
 
 
 def test_a_store_outside_the_home_gets_no_sibling_guard(tmp_path):
@@ -627,7 +678,8 @@ def test_a_store_outside_the_home_gets_no_sibling_guard(tmp_path):
 
 def test_asking_where_the_knowledge_store_would_live_creates_nothing():
     """A read-only rail that mkdirs is not read-only — so the rail's path lookup passes
-    `create=False`. Both directions: the default DOES create, which is why it is unsafe here."""
+    `create=False`. Both directions: the default DOES create, which is why it is unsafe here.
+    """
     quiet = rb.knowledge_db_path(create=False)
     assert not quiet.parent.exists(), "create=False created the store directory"
     assert rb.knowledge_db_path().parent.exists(), "create=True stopped creating it"
@@ -677,9 +729,6 @@ def test_a_knowledge_run_refuses_a_write_to_the_memory_store(
     assert "memory.db" in str(excinfo.value)
 
 
-# ── 7. per-arm contribution + the dark-ship verdict ──────────────────────────
-
-
 def test_arm_verdict_reads_its_floor_from_the_module_constant():
     at_floor = rb.MIN_ARM_CONTRIBUTION
     below = rb.MIN_ARM_CONTRIBUTION / 2
@@ -703,7 +752,6 @@ def test_an_arm_with_no_executor_is_unmeasured_not_worthless():
     verdict, reasons = rb.arm_verdict(0.0, 100, has_executor=False)
     assert verdict == rb.ARM_UNMEASURED
     assert "no executor" in reasons[0]
-    # ...and a POSITIVE delta over a dead arm is still unmeasured, not an enable.
     assert rb.arm_verdict(0.9, 100, has_executor=False)[0] == rb.ARM_UNMEASURED
 
 
@@ -735,7 +783,9 @@ def test_a_dead_arm_is_marked_unmeasured_through_contributions():
         rb.ArmMaskRow(rb.mask_name(rb.ARMS), 5, 0.80, 0.70, 10, 10, 0, 0),
         rb.ArmMaskRow(rb.mask_name(("keyword", "graph")), 5, 0.50, 0.40, 10, 10, 0, 0),
     ]
-    vector = next(c for c in rb.contributions(rows, {"vector": False}) if c.arm == "vector")
+    vector = next(
+        c for c in rb.contributions(rows, {"vector": False}) if c.arm == "vector"
+    )
     assert vector.verdict == rb.ARM_UNMEASURED
     assert "no executor" in vector.reasons[0]
 
@@ -749,9 +799,6 @@ def test_arm_executors_reports_the_vector_arm_dead_without_an_embedder(memory_st
     assert rb.arm_executors(rb.STORE_MEMORY, memory_store)[rb.ARM_VECTOR] is True
 
 
-# ── 8. corpus versioning by reference ────────────────────────────────────────
-
-
 def test_corpus_snapshot_ref_moves_when_the_corpus_grows(knowledge_store):
     before = rb.corpus_snapshot_ref(rb.STORE_KNOWLEDGE, knowledge_store)
     assert before.startswith(f"{rb.STORE_KNOWLEDGE}:{len(_ITEMS)}:")
@@ -759,29 +806,34 @@ def test_corpus_snapshot_ref_moves_when_the_corpus_grows(knowledge_store):
     knowledge_store.db.commit()
     after = rb.corpus_snapshot_ref(rb.STORE_KNOWLEDGE, knowledge_store)
     assert after != before
-    bench = rb.RetrievalBenchmark(name="b", store=rb.STORE_KNOWLEDGE, corpus_snapshot_ref=before)
+    bench = rb.RetrievalBenchmark(
+        name="b", store=rb.STORE_KNOWLEDGE, corpus_snapshot_ref=before
+    )
     assert rb.corpus_drifted(bench, after) is True
     assert rb.corpus_drifted(bench, before) is False
 
 
 def test_an_unknown_corpus_ref_is_not_reported_as_drift():
-    bench = rb.RetrievalBenchmark(name="b", store=rb.STORE_KNOWLEDGE, corpus_snapshot_ref="")
+    bench = rb.RetrievalBenchmark(
+        name="b", store=rb.STORE_KNOWLEDGE, corpus_snapshot_ref=""
+    )
     assert rb.corpus_drifted(bench, "knowledge:1:abc") is False
 
 
 def test_the_subject_hash_ignores_the_corpus_ref_and_the_timestamp():
     """Re-mining the same labels must NOT look like a new benchmark to `pin_diff`."""
     queries = (rb.QrelsQuery(query="q", relevant_ids=("a",)),)
-    a = rb.RetrievalBenchmark("n", rb.STORE_MEMORY, queries, "memory:1:aaa", "2026-01-01")
-    b = rb.RetrievalBenchmark("n", rb.STORE_MEMORY, queries, "memory:9:zzz", "2026-06-06")
+    a = rb.RetrievalBenchmark(
+        "n", rb.STORE_MEMORY, queries, "memory:1:aaa", "2026-01-01"
+    )
+    b = rb.RetrievalBenchmark(
+        "n", rb.STORE_MEMORY, queries, "memory:9:zzz", "2026-06-06"
+    )
     assert a.sha256 == b.sha256
     changed = rb.RetrievalBenchmark(
         "n", rb.STORE_MEMORY, (rb.QrelsQuery(query="q", relevant_ids=("b",)),)
     )
     assert changed.sha256 != a.sha256
-
-
-# ── 9. the hand-label card ───────────────────────────────────────────────────
 
 
 def test_an_empty_hand_label_is_a_real_judgement_not_a_missing_one(knowledge_store):
@@ -793,7 +845,11 @@ def test_an_empty_hand_label_is_a_real_judgement_not_a_missing_one(knowledge_sto
     bench = rb.RetrievalBenchmark(
         name="b",
         store=rb.STORE_KNOWLEDGE,
-        queries=(rb.QrelsQuery(query="q", relevant_ids=("mined",), source=rb.SOURCE_MINED_INTENT),),
+        queries=(
+            rb.QrelsQuery(
+                query="q", relevant_ids=("mined",), source=rb.SOURCE_MINED_INTENT
+            ),
+        ),
     )
     updated = rb.apply_hand_labels(bench, {"q": []})
     assert updated.queries[0].relevant_ids == ()
@@ -808,7 +864,9 @@ def test_build_benchmark_prefers_a_hand_label_over_a_remined_one(knowledge_store
         rb.RetrievalBenchmark(
             name="retrieval-knowledge",
             store=rb.STORE_KNOWLEDGE,
-            queries=(rb.QrelsQuery(query="q", relevant_ids=(), source=rb.SOURCE_HAND_LABEL),),
+            queries=(
+                rb.QrelsQuery(query="q", relevant_ids=(), source=rb.SOURCE_HAND_LABEL),
+            ),
         )
     )
     rebuilt = rb.build_benchmark(rb.STORE_KNOWLEDGE, knowledge_store)
@@ -829,7 +887,11 @@ def test_the_qrels_census_counts_every_source_including_unlabelled():
             rb.QrelsQuery(query="d"),
         ),
     )
-    assert bench.sources() == {"": 1, rb.SOURCE_HAND_LABEL: 1, rb.SOURCE_MINED_INTENT: 2}
+    assert bench.sources() == {
+        "": 1,
+        rb.SOURCE_HAND_LABEL: 1,
+        rb.SOURCE_MINED_INTENT: 2,
+    }
     assert sum(bench.sources().values()) == len(bench.queries)
 
 
@@ -842,18 +904,19 @@ def test_the_card_offers_the_weakest_labelled_queries_first(knowledge_store):
         name="b",
         store=rb.STORE_KNOWLEDGE,
         queries=(
-            rb.QrelsQuery(query="rich", relevant_ids=("a", "b"), source=rb.SOURCE_MINED_INTENT),
+            rb.QrelsQuery(
+                query="rich", relevant_ids=("a", "b"), source=rb.SOURCE_MINED_INTENT
+            ),
             rb.QrelsQuery(query="thin", relevant_ids=(), source=rb.SOURCE_MINED_INTENT),
-            rb.QrelsQuery(query="done", relevant_ids=("c",), source=rb.SOURCE_HAND_LABEL),
+            rb.QrelsQuery(
+                query="done", relevant_ids=("c",), source=rb.SOURCE_HAND_LABEL
+            ),
         ),
     )
     card = rb.hand_label_card(bench, lambda q, k, arms: ["cand"], limit=2)
     assert [entry["query"] for entry in card["queries"]] == ["thin", "rich"]
     assert card["candidates_per_query"] == rb.HAND_LABEL_CANDIDATES
     assert all(entry["candidates"] == ["cand"] for entry in card["queries"])
-
-
-# ── 10. the whole run: artifacts, ledger, scorer:qrels ───────────────────────
 
 
 def test_a_run_lands_in_matrices_via_scorer_qrels(knowledge_store, bound_models):
@@ -865,7 +928,9 @@ def test_a_run_lands_in_matrices_via_scorer_qrels(knowledge_store, bound_models)
     )
     assert type(result.spec) is MatrixSpec
     assert result.spec.scorer == rb.SCORER_QRELS == "qrels"
-    assert result.spec.axes[rb.ARM_AXIS] == [rb.mask_name(m) for m in rb.ablation_masks()]
+    assert result.spec.axes[rb.ARM_AXIS] == [
+        rb.mask_name(m) for m in rb.ablation_masks()
+    ]
 
     run_dir = evals_store.matrix_dir(result.bench_id)
     for name in (
@@ -884,7 +949,6 @@ def test_a_run_lands_in_matrices_via_scorer_qrels(knowledge_store, bound_models)
     table = json.loads((run_dir / "table.json").read_text(encoding="utf-8"))
     assert table["store"] == rb.STORE_KNOWLEDGE
     assert table["floors"]["min_arm_contribution"] == rb.MIN_ARM_CONTRIBUTION
-    # The ground truth's provenance travels with the numbers, not only inside benchmark.json.
     assert table["qrels_sources"] == {rb.SOURCE_MINED_INTENT: table["queries"]}
     assert table["queries"] > 0
     control = next(r for r in table["rows"] if r["mask"] == rb.MASK_NONE)
@@ -907,7 +971,9 @@ def test_a_run_appends_one_pinned_ledger_row(knowledge_store, bound_models):
     assert row["scenario_sha256"] == _seeded_benchmark(knowledge_store).sha256
 
 
-def test_a_run_measures_every_arm_and_the_masks_do_not_all_agree(knowledge_store, bound_models):
+def test_a_run_measures_every_arm_and_the_masks_do_not_all_agree(
+    knowledge_store, bound_models
+):
     """The end-to-end version of "each arm RUNS".
 
     Asserted on the RETRIEVED SETS rather than on the aggregate P@k: two arms can coincide
@@ -922,8 +988,12 @@ def test_a_run_measures_every_arm_and_the_masks_do_not_all_agree(knowledge_store
         benchmark=_seeded_benchmark(knowledge_store),
     )
     by_mask = {row.mask: row for row in result.table}
-    for arm in rb.ARMS[:2]:  # keyword + graph; the vector arm has no embedder under test
-        assert by_mask[rb.mask_name((arm,))].scored_queries >= 1, f"{arm} scored nothing"
+    for arm in rb.ARMS[
+        :2
+    ]:  # keyword + graph; the vector arm has no embedder under test
+        assert (
+            by_mask[rb.mask_name((arm,))].scored_queries >= 1
+        ), f"{arm} scored nothing"
     assert by_mask[rb.MASK_NONE].p_at_k is None
 
     retrieved_per_mask = {}
@@ -966,10 +1036,9 @@ def test_each_store_has_its_own_benchmark_file():
         rb.benchmark_path("both")
 
 
-# ── 11. the shared matrices/ sink: two writers, one table.json ────────────────
-
-
-def test_a_retrieval_run_is_not_claimed_by_the_judge_bench(knowledge_store, bound_models):
+def test_a_retrieval_run_is_not_claimed_by_the_judge_bench(
+    knowledge_store, bound_models
+):
     """🔴 The collision this atom actually caused, measured in a browser first.
 
     ES-4's `list_bench_runs` claimed every `matrices/<id>/` dir that had a `table.json` —
@@ -978,7 +1047,7 @@ def test_a_retrieval_run_is_not_claimed_by_the_judge_bench(knowledge_store, boun
     bench, and `JudgeBenchPanel` read `row.wall_secs` off a P@k row and took the whole
     Learning page down with `Cannot read properties of undefined`.
     """
-    from gideon.evals import judge_bench as jb
+    from gideon.assurance.evals import judge_bench as jb
 
     result = rb.run_retrieval_bench(
         rb.STORE_KNOWLEDGE,
@@ -991,7 +1060,9 @@ def test_a_retrieval_run_is_not_claimed_by_the_judge_bench(knowledge_store, boun
     assert jb.latest_bench_view() is None, "the judge panel would render retrieval rows"
 
 
-def test_the_two_consumers_own_their_runs_by_the_artifacts_stamp(knowledge_store, bound_models):
+def test_the_two_consumers_own_their_runs_by_the_artifacts_stamp(
+    knowledge_store, bound_models
+):
     """The vacuity floor under the test above: with a REAL judge run present, the judge
     consumer finds its own and still refuses the retrieval one — and symmetrically.
 
@@ -999,7 +1070,7 @@ def test_the_two_consumers_own_their_runs_by_the_artifacts_stamp(knowledge_store
     its own ``bench_id`` (the judge bench's own suite does), so a prefix rule would strand
     every run whose id someone chose — a second bug of the same shape as the one being fixed.
     """
-    from gideon.evals import judge_bench as jb
+    from gideon.assurance.evals import judge_bench as jb
 
     retrieval = rb.run_retrieval_bench(
         rb.STORE_KNOWLEDGE,
@@ -1007,7 +1078,6 @@ def test_the_two_consumers_own_their_runs_by_the_artifacts_stamp(knowledge_store
         db_path=knowledge_store.db_path,
         benchmark=_seeded_benchmark(knowledge_store),
     )
-    # A caller-chosen id with NO judge prefix, to prove the id is not what identifies it.
     judge_id = "bench-custom-id"
     evals_store.matrix_dir(judge_id).joinpath("table.json").write_text(
         json.dumps({"kind": jb.TABLE_KIND, "columns": [], "rows": [], "floors": {}}),
@@ -1016,7 +1086,6 @@ def test_the_two_consumers_own_their_runs_by_the_artifacts_stamp(knowledge_store
     runs = jb.list_bench_runs()
     assert judge_id in runs, "the judge consumer stopped finding its OWN run"
     assert retrieval.bench_id not in runs
-    # ...and symmetrically: the retrieval consumer must not claim the judge run.
     assert rb.latest_bench_id(rb.STORE_KNOWLEDGE) == retrieval.bench_id
     assert rb.latest_bench_id() == retrieval.bench_id
 
@@ -1024,7 +1093,7 @@ def test_the_two_consumers_own_their_runs_by_the_artifacts_stamp(knowledge_store
 def test_an_unstamped_table_is_claimed_by_neither_consumer(knowledge_store):
     """A table.json with no `kind` belongs to nobody. Silently adopting it is exactly how the
     judge bench came to serve a retrieval run."""
-    from gideon.evals import judge_bench as jb
+    from gideon.assurance.evals import judge_bench as jb
 
     orphan = "matrix-with-no-owner"
     evals_store.matrix_dir(orphan).joinpath("table.json").write_text(
@@ -1034,7 +1103,9 @@ def test_an_unstamped_table_is_claimed_by_neither_consumer(knowledge_store):
     assert rb.latest_bench_id() != orphan
 
 
-def test_the_retrieval_latest_is_scoped_to_the_store_asked_for(knowledge_store, bound_models):
+def test_the_retrieval_latest_is_scoped_to_the_store_asked_for(
+    knowledge_store, bound_models
+):
     """A knowledge run must never be served as the memory store's report — §5.1 again."""
     retrieval = rb.run_retrieval_bench(
         rb.STORE_KNOWLEDGE,

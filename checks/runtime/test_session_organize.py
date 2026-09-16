@@ -22,13 +22,15 @@ from __future__ import annotations
 
 import pytest
 
-from gideon import session_organize as so
+from gideon.engine import session_organize as so
 
 
 class FakeSession:
     """The subset of `_ChatSession` the heuristics read (state.py:232-234, 200)."""
 
-    def __init__(self, key="s1", title="", workspace_dir="", channel="", memory_mode="persistent"):
+    def __init__(
+        self, key="s1", title="", workspace_dir="", channel="", memory_mode="persistent"
+    ):
         self.key = key
         self.title = title
         self.workspace_dir = workspace_dir
@@ -58,8 +60,10 @@ class FakeState:
 def home(tmp_path, monkeypatch):
     """Isolate the inbox store and the entity_settings decline store."""
     (tmp_path / "entity_settings").mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr("gideon.inbox.config_dir", lambda: tmp_path)
-    monkeypatch.setattr("gideon.providers.entity_routes.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.integrations.inbox.config_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "gideon.extensions.providers.entity_routes.config_dir", lambda: tmp_path
+    )
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     return tmp_path
 
@@ -70,9 +74,6 @@ TAGS = [
     {"id": "t-slack", "name": "slack"},
     {"id": "t-done", "name": "done", "status": True},
 ]
-
-
-# ── "Untagged" ──────────────────────────────────────────────────────────────────
 
 
 def test_unorganized_means_neither_folder_nor_tag():
@@ -92,11 +93,10 @@ def test_restricted_sessions_are_never_candidates():
         assert not so.is_unorganized(FakeSession(title="secret", memory_mode=mode))
 
 
-# ── Deterministic signals ───────────────────────────────────────────────────────
-
-
 def test_title_keyword_matches_existing_vocabulary():
-    p = so.deterministic_proposal(FakeSession(title="Research on FTS5 indexes"), FOLDERS, TAGS)
+    p = so.deterministic_proposal(
+        FakeSession(title="Research on FTS5 indexes"), FOLDERS, TAGS
+    )
     assert p is not None and p.source == "title"
     assert p.folder_id == "f-res"
 
@@ -116,7 +116,9 @@ def test_title_matches_whole_words_not_substrings():
 
 
 def test_workspace_dir_basename_matches_a_folder():
-    s = FakeSession(title="unrelated words entirely", workspace_dir="/Users/x/code/Infra")
+    s = FakeSession(
+        title="unrelated words entirely", workspace_dir="/Users/x/code/Infra"
+    )
     p = so.deterministic_proposal(s, FOLDERS, TAGS)
     assert p is not None and p.source == "workspace" and p.folder_id == "f-inf"
 
@@ -148,9 +150,6 @@ def test_title_wins_over_workspace():
     assert p.source == "title" and p.folder_id == "f-res"
 
 
-# ── Deterministic-vs-LLM boundary ───────────────────────────────────────────────
-
-
 def test_no_vocabulary_is_not_ambiguous():
     """Nothing to sort into ⇒ nothing to propose ⇒ no roundtrip."""
     assert not so.is_ambiguous(FakeSession(title="a real topic here"), [], [])
@@ -165,7 +164,9 @@ def test_a_deterministic_match_is_not_ambiguous():
 
 
 def test_vocabulary_plus_unmatched_title_is_ambiguous():
-    assert so.is_ambiguous(FakeSession(title="quarterly planning cadence"), FOLDERS, TAGS)
+    assert so.is_ambiguous(
+        FakeSession(title="quarterly planning cadence"), FOLDERS, TAGS
+    )
 
 
 @pytest.mark.asyncio
@@ -177,11 +178,15 @@ async def test_deterministic_path_never_calls_the_model(home, monkeypatch):
         calls.append(prompt)
         return "NONE"
 
-    monkeypatch.setattr("gideon.dashboard.chat_title._stream_background_prompt", spy)
+    monkeypatch.setattr(
+        "gideon.interfaces.dashboard.chat_title._stream_background_prompt", spy
+    )
     state = FakeState(FOLDERS, TAGS)
     p = await so.propose_for_session(state, FakeSession(title="Research plan"))
     assert p is not None and p.source == "title"
-    assert calls == [], "a title that matched the vocabulary still paid for a model call"
+    assert (
+        calls == []
+    ), "a title that matched the vocabulary still paid for a model call"
 
 
 @pytest.mark.asyncio
@@ -190,9 +195,13 @@ async def test_ambiguous_path_consults_the_model(home, monkeypatch):
         assert "Available folders: Research, Infra" in prompt
         return "FOLDER: Research  TAGS: bug"
 
-    monkeypatch.setattr("gideon.dashboard.chat_title._stream_background_prompt", fake)
+    monkeypatch.setattr(
+        "gideon.interfaces.dashboard.chat_title._stream_background_prompt", fake
+    )
     state = FakeState(FOLDERS, TAGS)
-    p = await so.propose_for_session(state, FakeSession(title="quarterly planning cadence"))
+    p = await so.propose_for_session(
+        state, FakeSession(title="quarterly planning cadence")
+    )
     assert p is not None and p.source == "llm"
     assert p.folder_id == "f-res" and p.tag_names == ["bug"]
 
@@ -204,7 +213,9 @@ async def test_allow_llm_false_stays_deterministic(home, monkeypatch):
     async def boom(state, prompt):
         raise AssertionError("model called with allow_llm=False")
 
-    monkeypatch.setattr("gideon.dashboard.chat_title._stream_background_prompt", boom)
+    monkeypatch.setattr(
+        "gideon.interfaces.dashboard.chat_title._stream_background_prompt", boom
+    )
     state = FakeState(FOLDERS, TAGS)
     s = FakeSession(title="quarterly planning cadence")
     assert await so.propose_for_session(state, s, allow_llm=False) is None
@@ -213,7 +224,9 @@ async def test_allow_llm_false_stays_deterministic(home, monkeypatch):
 def test_llm_reply_cannot_invent_a_folder():
     """A hallucinated category must not reach a proposal — accepting one would create it."""
     s = FakeSession(title="x")
-    assert so.parse_llm_reply("FOLDER: Marketing  TAGS: growth", s, FOLDERS, TAGS) is None
+    assert (
+        so.parse_llm_reply("FOLDER: Marketing  TAGS: growth", s, FOLDERS, TAGS) is None
+    )
 
 
 def test_llm_reply_none_is_no_proposal():
@@ -232,9 +245,6 @@ def test_llm_reply_is_capped_at_max_tags():
         "FOLDER: -  TAGS: bug, alpha, beta", FakeSession(title="x"), FOLDERS, tags
     )
     assert len(p.tag_names) == so.MAX_TAGS
-
-
-# ── NEVER auto-applies ──────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -288,9 +298,6 @@ def test_no_module_function_but_apply_writes_folder_or_tags():
     assert not offenders, f"a second writer for session folder/tags: {offenders}"
 
 
-# ── Dedup / no-nag ──────────────────────────────────────────────────────────────
-
-
 def test_dedup_key_includes_the_proposed_value():
     """Keying on the session alone would suppress every LATER proposal too, including a
     better one produced once the topic became clear."""
@@ -317,7 +324,7 @@ def test_the_row_NAMES_the_chat_it_is_asking_about(home):
     the conversation was an opaque key. Driven through the real builder and the real emit, and
     asserted on the persisted row, because `body` is what the inbox list renders.
     """
-    from gideon.inbox import InboxStore
+    from gideon.integrations.inbox import InboxStore
 
     session = FakeSession(key="s-3bd6196a", title="Research on FTS5 indexes")
     proposal = so.deterministic_proposal(session, FOLDERS, TAGS)
@@ -332,9 +339,7 @@ def test_the_row_NAMES_the_chat_it_is_asking_about(home):
 
     assert "Research on FTS5 indexes" in body, f"the row must name the chat: {body!r}"
     assert "s-3bd6196a" not in body, f"the key is not a name a user can use: {body!r}"
-    # The reason it cites is now visible in the same sentence.
     assert "the title matches" in body, body
-    # And the machine half is untouched: accept/decline resolve the chat from refs.
     assert rows[0].refs["session"] == "s-3bd6196a"
 
 
@@ -345,10 +350,17 @@ def test_EVERY_signal_carries_the_title_not_just_the_one_that_matches_on_it(home
     cases = [
         (FakeSession(key="s-a", title="Research on FTS5 indexes"), "title"),
         (
-            FakeSession(key="s-b", title="zzz nothing matches", workspace_dir="/Users/x/Research"),
+            FakeSession(
+                key="s-b",
+                title="zzz nothing matches",
+                workspace_dir="/Users/x/Research",
+            ),
             "workspace",
         ),
-        (FakeSession(key="s-c", title="qqq nothing matches", channel="slack"), "channel"),
+        (
+            FakeSession(key="s-c", title="qqq nothing matches", channel="slack"),
+            "channel",
+        ),
     ]
     seen = set()
     for session, expected_source in cases:
@@ -363,7 +375,7 @@ def test_EVERY_signal_carries_the_title_not_just_the_one_that_matches_on_it(home
 def test_an_UNTITLED_chat_falls_back_to_the_key_rather_than_naming_nothing(home):
     """The one case where the key is the only handle there is. A blank subject would be worse
     than an opaque one — the row would ask about a chat it did not identify at all."""
-    from gideon.inbox import InboxStore
+    from gideon.integrations.inbox import InboxStore
 
     proposal = so.OrganizeProposal(
         session_key="s-untitled", folder_id="f-res", folder_name="Research"
@@ -382,13 +394,18 @@ def test_the_subject_is_never_EMPTY_and_the_two_handles_are_distinguishable(home
     """The vacuity floor. If a title could equal its key, or the subject could render blank,
     every assertion above would pass while proving nothing."""
     titled = so.OrganizeProposal(
-        session_key="s-1", session_title="A real chat title", folder_name="Research", folder_id="f"
+        session_key="s-1",
+        session_title="A real chat title",
+        folder_name="Research",
+        folder_id="f",
     )
-    untitled = so.OrganizeProposal(session_key="s-1", folder_name="Research", folder_id="f")
+    untitled = so.OrganizeProposal(
+        session_key="s-1", folder_name="Research", folder_id="f"
+    )
     assert titled.session_title and titled.session_title != titled.session_key
     for p in (titled, untitled):
         so.surface_proposal(None, p)
-    from gideon.inbox import InboxStore
+    from gideon.integrations.inbox import InboxStore
 
     store = InboxStore()
     store.load()
@@ -399,7 +416,7 @@ def test_the_subject_is_never_EMPTY_and_the_two_handles_are_distinguishable(home
 
 def test_surfacing_twice_raises_one_inbox_row(home):
     """The inbox dedup tier: an open row is returned untouched, not stacked."""
-    from gideon.inbox import InboxStore, ItemKind
+    from gideon.integrations.inbox import InboxStore, ItemKind
 
     p = so.OrganizeProposal(session_key="s1", folder_id="f-res", folder_name="Research")
     first = so.surface_proposal(None, p)
@@ -441,20 +458,17 @@ def test_decline_store_fails_open(home, monkeypatch):
     assert not so.is_declined(so.OrganizeProposal(session_key="s1", folder_id="f-res"))
 
 
-# ── Accept applies ──────────────────────────────────────────────────────────────
-
-
 def test_accept_applies_folder_and_tags(home, monkeypatch):
     """The one mutating path. Tags resolve through the SHARED tag helper, so a tag created
     by accepting is indistinguishable from a hand-made one."""
     saves = []
     monkeypatch.setattr(
-        "gideon.dashboard.chat_persistence.save_session_to_history",
+        "gideon.interfaces.dashboard.chat_persistence.save_session_to_history",
         lambda state, session, force=False: saves.append(session.key),
     )
     state = FakeState(FOLDERS, list(TAGS))
     monkeypatch.setattr(
-        "gideon.dashboard.chat_tags.find_tag_by_name",
+        "gideon.interfaces.dashboard.chat_tags.find_tag_by_name",
         lambda st, name: next((t for t in st._tags if t["name"] == name), None),
     )
     s = FakeSession(title="Research on indexes")
@@ -465,14 +479,16 @@ def test_accept_applies_folder_and_tags(home, monkeypatch):
     assert s.folder_id == "f-res" and s.tags == ["t-bug"]
     assert applied == {"folder_id": "f-res", "tags": ["t-bug"]}
     assert saves == [s.key], "the applied change must be persisted, not just in memory"
-    assert state.pushes == 1, "the sessions list must be told, or the UI shows stale state"
+    assert (
+        state.pushes == 1
+    ), "the sessions list must be told, or the UI shows stale state"
 
 
 def test_accept_validates_the_folder_against_live_state(home, monkeypatch):
     """Same validation `chat_folders.api_chat_session_folder` does — an echoed proposal is
     not trust. A deleted folder id must not be written."""
     monkeypatch.setattr(
-        "gideon.dashboard.chat_persistence.save_session_to_history",
+        "gideon.interfaces.dashboard.chat_persistence.save_session_to_history",
         lambda state, session, force=False: None,
     )
     state = FakeState(FOLDERS, list(TAGS))
@@ -485,7 +501,7 @@ def test_accept_validates_the_folder_against_live_state(home, monkeypatch):
 
 def test_accept_resolves_the_inbox_row(home):
     """Otherwise the row keeps claiming attention for a decision already made."""
-    from gideon.inbox import InboxStore, ItemStatus
+    from gideon.integrations.inbox import InboxStore, ItemStatus
 
     p = so.OrganizeProposal(session_key="s1", folder_id="f-res", folder_name="Research")
     so.surface_proposal(None, p)

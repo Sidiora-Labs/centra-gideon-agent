@@ -23,13 +23,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from gideon.dashboard.chat_runner import run_chat
-from gideon.dashboard.state import DashboardState, _ChatSession
-from gideon.history import ConversationLog
-from gideon.providers.provider_bridge import ProviderResolutionError
+from gideon.cognition.history import ConversationLog
+from gideon.extensions.providers.provider_bridge import ProviderResolutionError
+from gideon.interfaces.dashboard.chat_runner import run_chat
+from gideon.interfaces.dashboard.state import ConsoleState, _ChatSession
 
 
-def _make_state(tmp_path) -> DashboardState:
+def _make_state(tmp_path) -> ConsoleState:
     """A state whose runtime build fails exactly as it does with no provider bound."""
     sessions = MagicMock(count=0)
     sessions.get_pid = MagicMock(return_value=None)
@@ -40,7 +40,7 @@ def _make_state(tmp_path) -> DashboardState:
             "WHY: no provider is bound\nFIX: add a model provider in Settings"
         )
     )
-    state = DashboardState(
+    state = ConsoleState(
         sessions=sessions,
         start_time=0.0,
         conversation_log=ConversationLog(base_dir=tmp_path),
@@ -56,19 +56,19 @@ def _make_state(tmp_path) -> DashboardState:
 async def test_no_provider_turn_runs_cleanup_without_unbound_error(tmp_path):
     state = _make_state(tmp_path)
     session = _ChatSession("chat-1-test")
-    # Skip the auto-title background model call — it is orthogonal to the counter crash.
     session._titled = True
 
     with (
-        patch("gideon.dashboard.chat_runner.maybe_offer_check_work") as offer,
-        patch("gideon.dashboard.chat_runner._maybe_followups", new=AsyncMock()),
-        patch("gideon.dashboard.chat_plan.maybe_submit_plan_draft"),
+        patch(
+            "gideon.interfaces.dashboard.chat_runner.maybe_offer_check_work"
+        ) as offer,
+        patch(
+            "gideon.interfaces.dashboard.chat_runner._maybe_followups", new=AsyncMock()
+        ),
+        patch("gideon.interfaces.dashboard.chat_plan.maybe_submit_plan_draft"),
     ):
-        # Before the fix this raised UnboundLocalError('_turn_tool_call_count') out of
-        # the finally block; the primary assertion is simply that it RETURNS.
         await run_chat(state, session, "hi")
 
-    # The user still saw the streamed provider error.
     assert any(m.get("role") == "error" for m in session.messages)
     assert session._last_turn_errored is True
     state.sessions.record_failure.assert_awaited_once()

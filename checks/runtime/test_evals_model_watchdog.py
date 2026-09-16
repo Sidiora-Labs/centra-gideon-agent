@@ -23,9 +23,9 @@ from datetime import datetime, timezone
 
 import pytest
 
-from gideon.evals import model_watchdog as watchdog
-from gideon.evals import store
-from gideon.evals.pinning import RunPin
+from gideon.assurance.evals import model_watchdog as watchdog
+from gideon.assurance.evals import store
+from gideon.assurance.evals.pinning import RunPin
 
 NOW = datetime(2026, 8, 17, 12, 0, tzinfo=timezone.utc)
 
@@ -35,30 +35,28 @@ def watch_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(home))
-    # `load_active_models` PRUNES refs whose provider is not configured, so a fingerprint
-    # test without these providers would read {} and pass vacuously.
     (home / "config.json").write_text(
-        json.dumps({"providers": [{"name": n} for n in ("A", "B", "C", "Anthropic")]}) + "\n",
+        json.dumps({"providers": [{"name": n} for n in ("A", "B", "C", "Anthropic")]})
+        + "\n",
         encoding="utf-8",
     )
     return home
 
 
 def _bind(home, mapping: dict[str, list[str]]) -> None:
-    (home / "active_models.json").write_text(json.dumps(mapping, indent=2) + "\n", encoding="utf-8")
+    (home / "active_models.json").write_text(
+        json.dumps(mapping, indent=2) + "\n", encoding="utf-8"
+    )
 
 
 class _Notifier:
-    """A DashboardState.notify-shaped callable that counts its calls."""
+    """A ConsoleState.notify-shaped callable that counts its calls."""
 
     def __init__(self) -> None:
         self.calls: list[tuple] = []
 
     def __call__(self, kind, title, body, **kwargs):
         self.calls.append((kind, title, body))
-
-
-# ── the watched vocabulary (a plan/code drift, made visible) ──────────────────
 
 
 def test_the_watchdog_only_watches_bindings_that_can_exist():
@@ -68,7 +66,7 @@ def test_the_watchdog_only_watches_bindings_that_can_exist():
     ``factory("eval_judge")``, not a member of ``providers.use_cases.VALID_USE_CASES`` — so a
     watchdog "watching" it would be a control that reports no change forever.
     """
-    from gideon.providers.use_cases import VALID_USE_CASES
+    from gideon.extensions.providers.use_cases import VALID_USE_CASES
 
     assert "eval_judge" in watchdog.PLAN_WATCHED_USE_CASES
     assert "eval_judge" not in VALID_USE_CASES
@@ -76,15 +74,16 @@ def test_the_watchdog_only_watches_bindings_that_can_exist():
     assert all(uc in VALID_USE_CASES for uc in watchdog.WATCHED_USE_CASES)
 
 
-# ── the fingerprint ───────────────────────────────────────────────────────────
-
-
 def test_the_fingerprint_matches_the_ledgers_own_model_fp_column(watch_home):
-    _bind(watch_home, {"chat": ["Anthropic:claude-a"], "reasoning": ["Anthropic:claude-b"]})
+    _bind(
+        watch_home,
+        {"chat": ["Anthropic:claude-a"], "reasoning": ["Anthropic:claude-b"]},
+    )
     fingerprint, digest = watchdog.fingerprint_now()
-    assert fingerprint == {"chat": "Anthropic:claude-a", "reasoning": "Anthropic:claude-b"}
-    # Computed through the pin, NOT by hashing the file here: a second digest of the same
-    # facts would compare unequal to every results.tsv row it exists to match.
+    assert fingerprint == {
+        "chat": "Anthropic:claude-a",
+        "reasoning": "Anthropic:claude-b",
+    }
     expected = RunPin(
         scenario_id="s", scenario_sha256="h", model_fingerprint=fingerprint
     ).model_fp()
@@ -100,11 +99,7 @@ def test_changed_bindings_reports_gains_losses_and_moves(watch_home):
         ("background", "A:3", ""),
         ("reasoning", "A:2", "A:9"),
     ]
-    # An unwatched use case moving is not a rebind for this purpose.
     assert watchdog.changed_bindings({"stt": "A:1"}, {"stt": "A:2"}) == []
-
-
-# ── the first observation is a baseline, not an upgrade ───────────────────────
 
 
 def test_the_first_observation_records_a_baseline_without_notifying(watch_home):
@@ -112,18 +107,17 @@ def test_the_first_observation_records_a_baseline_without_notifying(watch_home):
     notifier = _Notifier()
     result = watchdog.check(now=NOW, notifier=notifier)
     assert result.changed is False and result.reason == "baseline_recorded"
-    assert notifier.calls == [], "a fresh install must not be greeted with a rebind digest"
+    assert (
+        notifier.calls == []
+    ), "a fresh install must not be greeted with a rebind digest"
     assert watchdog.load_state()["model_fp"] == result.model_fp
     assert watchdog.load_queue() == []
-
-
-# ── exactly ONE digest ────────────────────────────────────────────────────────
 
 
 def test_a_rebind_of_three_bindings_emits_exactly_one_digest(watch_home):
     _bind(watch_home, {"chat": ["A:1"], "reasoning": ["A:2"], "background": ["A:3"]})
     notifier = _Notifier()
-    watchdog.check(now=NOW, notifier=notifier)  # baseline
+    watchdog.check(now=NOW, notifier=notifier)
     assert notifier.calls == []
 
     _bind(watch_home, {"chat": ["B:1"], "reasoning": ["B:2"], "background": ["B:3"]})
@@ -132,12 +126,10 @@ def test_a_rebind_of_three_bindings_emits_exactly_one_digest(watch_home):
     assert result.changed is True
     assert len(result.changes) == 3, "three bindings moved"
     assert len(result.queued) >= 1, "and at least one re-benchmark was queued"
-    # THE CLAUSE: one event, one notification. Never N.
     assert len(notifier.calls) == 1
     assert result.notifications == 1
     kind, title, body = notifier.calls[0]
     assert kind == watchdog.NOTIFY_KIND
-    # Everything the user learns is in that ONE body, so all three moves must be in it.
     for use_case in ("chat", "reasoning", "background"):
         assert use_case in body
     assert "re-benchmark" in title
@@ -147,7 +139,7 @@ def test_a_tick_with_no_change_notifies_nothing(watch_home):
     """THE VACUITY FLOOR for "exactly one": a rail that always fires once is not a rail."""
     _bind(watch_home, {"chat": ["A:1"]})
     notifier = _Notifier()
-    watchdog.check(now=NOW, notifier=notifier)  # baseline
+    watchdog.check(now=NOW, notifier=notifier)
     result = watchdog.check(now=NOW, notifier=notifier)
     assert result.changed is False and result.reason == "no_change"
     assert notifier.calls == []
@@ -162,18 +154,21 @@ def test_a_rebind_is_reported_once_not_on_every_later_tick(watch_home):
     watchdog.check(now=NOW, notifier=notifier)
     watchdog.check(now=NOW, notifier=notifier)
     watchdog.check(now=NOW, notifier=notifier)
-    assert len(notifier.calls) == 1, "the state must absorb the rebind, not re-announce it"
+    assert (
+        len(notifier.calls) == 1
+    ), "the state must absorb the rebind, not re-announce it"
 
 
 def test_a_rewrite_that_changed_no_head_model_is_not_a_rebind(watch_home):
     _bind(watch_home, {"chat": ["A:1", "A:fallback"]})
     notifier = _Notifier()
     watchdog.check(now=NOW, notifier=notifier)
-    # Only the FALLBACK moved; the resolved head is unchanged, so no evidence expired.
     _bind(watch_home, {"chat": ["A:1", "A:other-fallback"]})
     result = watchdog.check(now=NOW, notifier=notifier)
     assert result.changed is False
-    assert result.reason == "file_touched_no_rebind", "the mtime moved but the fingerprint did not"
+    assert (
+        result.reason == "file_touched_no_rebind"
+    ), "the mtime moved but the fingerprint did not"
     assert notifier.calls == []
 
 
@@ -196,15 +191,19 @@ def test_a_raising_notifier_does_not_lose_the_queue(watch_home):
 
     result = watchdog.check(now=NOW, notifier=_broken)
     assert result.changed is True and result.notifications == 0
-    assert watchdog.load_queue(), "the queue is the durable half; the digest is best-effort"
+    assert (
+        watchdog.load_queue()
+    ), "the queue is the durable half; the digest is best-effort"
 
 
 # ── the small-budget queue ────────────────────────────────────────────────────
 
 
-def test_queued_rebenchmarks_are_small_budget_and_capped_independently(watch_home, monkeypatch):
-    from gideon.workflows import store as wf_store
-    from gideon.workflows.models import WorkflowRun
+def test_queued_rebenchmarks_are_small_budget_and_capped_independently(
+    watch_home, monkeypatch
+):
+    from gideon.automation.workflows import store as wf_store
+    from gideon.automation.workflows.models import WorkflowRun
 
     for index in range(3):
         wf_store.create(WorkflowRun(id=f"r{index}", workflow_name="triage"))
@@ -220,8 +219,6 @@ def test_queued_rebenchmarks_are_small_budget_and_capped_independently(watch_hom
     assert [e["subject"] for e in result.queued[1:]] == ["triage", "digest"]
     for entry in result.queued:
         assert entry["trials"] == watchdog.SMALL_BUDGET_TRIALS == 1
-        # NOT evals.default_budget_usd: that default may be 0 (uncapped), and automatic work
-        # must be bounded even when the user's own runs are not.
         assert entry["budget_usd"] == watchdog.SMALL_BUDGET_USD > 0.0
         assert entry["model_fp"] == result.model_fp
         assert entry["status"] == "queued"
@@ -235,9 +232,6 @@ def test_the_queue_appends_rather_than_replacing(watch_home):
     _bind(watch_home, {"chat": ["C:1"]})
     second = watchdog.check(now=NOW, notifier=None)
     assert len(watchdog.load_queue()) == len(first.queued) + len(second.queued)
-
-
-# ── per-fingerprint baselines ─────────────────────────────────────────────────
 
 
 def test_baselines_are_grouped_by_fingerprint(watch_home):
@@ -255,9 +249,15 @@ def test_baselines_are_grouped_by_fingerprint(watch_home):
         prompt_pack_sha256="p",
         config_snapshot_ref="c",
     )
-    store.append_result({"study_id": "m1", "kind": "matrix", "score_new": 0.8, "ts": "t1"}, pin=old)
-    store.append_result({"study_id": "m2", "kind": "matrix", "score_new": 0.6, "ts": "t2"}, pin=old)
-    store.append_result({"study_id": "m3", "kind": "matrix", "score_new": 0.9, "ts": "t3"}, pin=new)
+    store.append_result(
+        {"study_id": "m1", "kind": "matrix", "score_new": 0.8, "ts": "t1"}, pin=old
+    )
+    store.append_result(
+        {"study_id": "m2", "kind": "matrix", "score_new": 0.6, "ts": "t2"}, pin=old
+    )
+    store.append_result(
+        {"study_id": "m3", "kind": "matrix", "score_new": 0.9, "ts": "t3"}, pin=new
+    )
 
     baselines = watchdog.baselines_by_fingerprint()
     assert set(baselines) == {old.model_fp(), new.model_fp()}
@@ -276,10 +276,10 @@ def test_an_unscored_baseline_is_none_not_zero(watch_home):
         config_snapshot_ref="c",
     )
     store.append_result(
-        {"study_id": "m1", "kind": "matrix", "verdict": "verifier_absent", "ts": "t1"}, pin=pin
+        {"study_id": "m1", "kind": "matrix", "verdict": "verifier_absent", "ts": "t1"},
+        pin=pin,
     )
     bucket = watchdog.baselines_by_fingerprint()[pin.model_fp()]["triage"]
-    # The §1.2 rule applied to the ledger read: an absent measurement is never a zero.
     assert bucket["mean"] is None and bucket["n"] == 1
 
 
@@ -294,8 +294,12 @@ def test_the_digest_reports_the_previous_fingerprints_baseline_count(watch_home)
         prompt_pack_sha256="p",
         config_snapshot_ref="c",
     )
-    assert pin.model_fp() == before_fp, "the pin and the watchdog must agree on the digest"
-    store.append_result({"study_id": "m1", "kind": "matrix", "score_new": 0.8, "ts": "t"}, pin=pin)
+    assert (
+        pin.model_fp() == before_fp
+    ), "the pin and the watchdog must agree on the digest"
+    store.append_result(
+        {"study_id": "m1", "kind": "matrix", "score_new": 0.8, "ts": "t"}, pin=pin
+    )
 
     _bind(watch_home, {"chat": ["B:1"]})
     notifier = _Notifier()
@@ -304,21 +308,20 @@ def test_the_digest_reports_the_previous_fingerprints_baseline_count(watch_home)
     assert "1 scenario baseline(s)" in notifier.calls[0][2]
 
 
-# ── §4.4 mechanical revocation (ES-15): a rebind voids standing grants ─────────
-
-
 def test_a_rebind_revokes_standing_autonomy_grants(watch_home, monkeypatch):
     """The evidence behind every grant was measured under the OLD bindings, so the
     rebind branch calls the shared revoker — with the fingerprint as the evidence id,
     so the notice names exactly which model change voided the trust."""
     calls: list[dict] = []
     monkeypatch.setattr(
-        "gideon.guardrails.ladder.revoke_granted_scopes",
+        "gideon.security.guardrails.ladder.revoke_granted_scopes",
         lambda **kw: calls.append(kw) or [],
     )
     _bind(watch_home, {"chat": ["A:1"]})
-    watchdog.check(now=NOW, notifier=None)  # baseline — must NOT revoke
-    assert calls == [], "a fresh install's first observation is a baseline, not a rebind"
+    watchdog.check(now=NOW, notifier=None)
+    assert (
+        calls == []
+    ), "a fresh install's first observation is a baseline, not a rebind"
 
     _bind(watch_home, {"chat": ["B:1"]})
     result = watchdog.check(now=NOW, notifier=None)
@@ -328,16 +331,17 @@ def test_a_rebind_revokes_standing_autonomy_grants(watch_home, monkeypatch):
     assert calls[0]["evidence_id"] == f"model_fp:{result.model_fp}"
     assert "chat" in calls[0]["cause"], "the cause names the binding that moved"
 
-    # And a quiet tick revokes nothing.
     watchdog.check(now=NOW, notifier=None)
     assert len(calls) == 1
 
 
-def test_a_revocation_failure_does_not_lose_the_queue_or_digest(watch_home, monkeypatch):
+def test_a_revocation_failure_does_not_lose_the_queue_or_digest(
+    watch_home, monkeypatch
+):
     def boom(**kw):
         raise RuntimeError("rung store unwritable")
 
-    monkeypatch.setattr("gideon.guardrails.ladder.revoke_granted_scopes", boom)
+    monkeypatch.setattr("gideon.security.guardrails.ladder.revoke_granted_scopes", boom)
     _bind(watch_home, {"chat": ["A:1"]})
     watchdog.check(now=NOW, notifier=None)
     _bind(watch_home, {"chat": ["B:1"]})

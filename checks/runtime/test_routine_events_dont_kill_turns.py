@@ -19,14 +19,11 @@ def _isolate_home(tmp_path, monkeypatch):
     monkeypatch.delenv("GIDEON_HOME", raising=False)
 
 
-# ── #369: episodic LIKE fallback survives pathological user text ─────────────
-
-
 @pytest.fixture()
 def store(tmp_path):
-    from gideon.vector_memory import VectorMemoryStore
+    from gideon.cognition.vector_memory import SemanticArchive
 
-    s = VectorMemoryStore(db_path=tmp_path / "mem.db")
+    s = SemanticArchive(db_path=tmp_path / "mem.db")
     s.init()
     return s
 
@@ -38,15 +35,11 @@ class TestEpisodicKeywordFallbackRobustness:
         )
 
     def test_giant_token_does_not_raise(self, store):
-        # A single token past SQLite's 50k LIKE-pattern cap used to raise
-        # "LIKE or GLOB pattern too complex" out of the recall path and kill
-        # the chat turn that triggered context assembly.
         self._seed(store)
         giant = "A" * 60_000
         assert store._fts5_episodic_search(giant, limit=5) == []
 
     def test_giant_token_amid_normal_words_still_matches(self, store):
-        # The oversized token is dropped; the human words still recall.
         self._seed(store)
         giant = "B" * 60_000
         rows = store._fts5_episodic_search(f"{giant} deploy pipeline", limit=5)
@@ -58,9 +51,7 @@ class TestEpisodicKeywordFallbackRobustness:
         assert len(rows) == 1
 
     def test_operational_error_degrades_to_empty(self, store, monkeypatch):
-        # The invariant, independent of the word cap: recall degrades to
-        # no-matches on ANY SQLite operational refusal, never propagates.
-        from gideon.sqlite_compat import sqlite3
+        from gideon.core.sqlite_compat import sqlite3
 
         class _BoomDB:
             def execute(self, *_a, **_k):
@@ -68,9 +59,6 @@ class TestEpisodicKeywordFallbackRobustness:
 
         monkeypatch.setattr(store, "_db", _BoomDB())
         assert store._fts5_episodic_search("anything at all", limit=5) == []
-
-
-# ── #312: a WS client disconnecting mid-broadcast is DEBUG + reap, not ERROR ─
 
 
 class _ExplodingWS:
@@ -84,9 +72,9 @@ class _ExplodingWS:
 
 class TestWsSendGuarded:
     def _state(self):
-        from gideon.dashboard.state import DashboardState
+        from gideon.interfaces.dashboard.state import ConsoleState
 
-        state = DashboardState.__new__(DashboardState)
+        state = ConsoleState.__new__(ConsoleState)
         state._ws_clients = []
         state._ws_app = {}
         state._ws_log_subscribers = set()
@@ -102,14 +90,13 @@ class TestWsSendGuarded:
 
         with caplog.at_level(logging.DEBUG):
             ok = state._schedule_ws_send(ws.send_str("{}"), ws)
-            # Let the guarded task run to completion.
             await asyncio.sleep(0)
             await asyncio.sleep(0)
 
-        assert ok is True  # scheduling succeeded; the FAILURE is absorbed
-        assert ws not in state._ws_clients  # reaped immediately, not next broadcast
+        assert ok is True
+        assert ws not in state._ws_clients
         errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
-        assert errors == []  # nothing above DEBUG for a routine disconnect
+        assert errors == []
 
     @pytest.mark.asyncio
     async def test_successful_send_keeps_client(self):
@@ -128,8 +115,6 @@ class TestWsSendGuarded:
         assert ws in state._ws_clients
 
     def test_no_loop_closes_coro_without_warning(self, recwarn):
-        # Sync startup/tests: no running loop, no captured loop — the coroutine
-        # must be closed cleanly (no "never awaited" RuntimeWarning).
         state = self._state()
         ws = _ExplodingWS()
         assert state._schedule_ws_send(ws.send_str("{}"), ws) is True

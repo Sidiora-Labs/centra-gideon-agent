@@ -4,7 +4,7 @@ Two of ``BROWSE-AUTOMATION`` `BA-2`'s ``done_when`` clauses cannot be reached by
 about source text: *"the injected safety script makes a test page's ``fetch()`` /
 ``media.play()`` / ``navigator.bluetooth`` throw or return blocked"* and *"client-side redirects
 are re-evaluated per ``Page.frameNavigated``"*. Both are proven only by
-``tests/test_browse_safety_script.py`` (layer 2) and ``tests/test_browse_cdp_live.py``, which
+``checks/runtime/test_browse_safety_script.py`` (layer 2) and ``checks/runtime/test_browse_cdp_live.py``, which
 launch a real browser over raw CDP. When no browser is found those files ``pytest.skip`` — and a
 skip is counted as a pass, not as a gap. **So the reach of this module is the reach of BA-2's
 behavioural proof**, and anything it fails to find is a clause that quietly stopped being tested.
@@ -27,7 +27,7 @@ The fix is to search by *shape*: the per-OS Playwright roots, a glob over ``chro
 revision>``, and a glob for the executable's own name inside it (rather than an enumeration of
 per-arch directory names, which is the same brittleness one level down).
 
-``tests/test_browse_behavioural_proof_is_reachable.py`` is the rail over this module. Its
+``checks/runtime/test_browse_behavioural_proof_is_reachable.py`` is the rail over this module. Its
 load-bearing case asks the question the literals answered wrongly — *"a Chromium is installed
 here; can we see it?"* — using Playwright's own ``INSTALLATION_COMPLETE`` marker as the evidence
 that one exists, so the floor is not computed from the value it is meant to pin.
@@ -40,7 +40,7 @@ is how a gate demands the proof actually ran.
 ``ci.yml``'s ``browse-live`` job is that gate: it installs a Chromium and sets
 :data:`REQUIRE_ENV`, so on the merge gate a missing/renamed/unlaunchable browser is a RED rather
 than a green full of skips. The strictness lives there and nowhere else — a contributor with no
-browser still gets a skip. ``tests/test_browse_live_legs_run_in_ci.py`` is the rail over that
+browser still gets a skip. ``checks/runtime/test_browse_live_legs_run_in_ci.py`` is the rail over that
 wiring, because :data:`REQUIRE_ENV` protects nothing if the workflow stops setting it.
 """
 
@@ -52,27 +52,12 @@ import sys
 
 import pytest
 
-#: Point this at a browser binary to use it verbatim. The escape hatch for a Chrome that came
-#: from somewhere other than Playwright (a distro package, a Nix store path, a CI cache).
 CHROME_ENV = "GIDEON_TEST_CHROME"
 
-#: Set this (to anything but ``0``/``false``/``no``/empty) and a missing browser or missing
-#: ``websockets`` FAILS instead of skipping. Nothing in the repo sets it by default: a developer
-#: without a browser should still be able to run the suite. It exists so that a gate which
-#: *intends* to prove the behavioural clauses cannot pass by skipping them.
 REQUIRE_ENV = "GIDEON_REQUIRE_BROWSE_PROOF"
 
-#: Directory-name prefixes Playwright uses for a Chromium install, best first. The headless
-#: shell is preferred because it is what these proofs want: smaller, no window server needed.
-#: The trailing ``-`` is deliberate — it is followed by the revision, which is what we refuse
-#: to hard-code. ``chromium_headless_shell-`` is listed first AND matched first per root.
 _REVISION_DIR_PREFIXES = ("chromium_headless_shell-", "chromium-")
 
-#: Executable names/paths to look for *inside* a revision directory, relative to it. One glob
-#: segment stands in for the per-arch folder (``chrome-headless-shell-mac-arm64``,
-#: ``chrome-linux``, ``chrome-win64``, …) precisely so a new arch name needs no edit here.
-#: NOT gated on ``sys.platform``: the rail tests synthesise foreign layouts to prove the reach,
-#: and a cross-compiled or copied browser tree is not worth refusing.
 _BINARY_GLOBS = (
     "*/chrome-headless-shell",
     "*/chrome-headless-shell.exe",
@@ -83,9 +68,6 @@ _BINARY_GLOBS = (
     "*/*.app/Contents/MacOS/Google Chrome for Testing",
 )
 
-#: Playwright writes this marker file into a revision directory once the download unpacked
-#: cleanly. The rail uses it as INDEPENDENT evidence that a browser is installed — independent
-#: because Playwright writes it and :func:`find_chrome` never reads it.
 INSTALL_MARKER = "INSTALLATION_COMPLETE"
 
 
@@ -180,7 +162,9 @@ def missing(proof: str, detail: str) -> None:
     """
     if _falsey(os.environ.get(REQUIRE_ENV)):
         pytest.skip(f"{proof} NOT RUN: {detail}")
-    pytest.fail(f"{REQUIRE_ENV} is set, so {proof} not running is a FAILURE, not a skip: {detail}")
+    pytest.fail(
+        f"{REQUIRE_ENV} is set, so {proof} not running is a FAILURE, not a skip: {detail}"
+    )
 
 
 def chrome_or_skip(proof: str, roots: tuple[pathlib.Path, ...] | None = None) -> str:
@@ -193,7 +177,9 @@ def chrome_or_skip(proof: str, roots: tuple[pathlib.Path, ...] | None = None) ->
     chrome = find_chrome(roots)
     if chrome is not None:
         return chrome
-    searched = ", ".join(str(root) for root in (roots or browsers_roots())) or "(no root)"
+    searched = (
+        ", ".join(str(root) for root in (roots or browsers_roots())) or "(no root)"
+    )
     missing(
         proof,
         f"no Chromium found under {searched}. Install it with `npx playwright install chromium`, "

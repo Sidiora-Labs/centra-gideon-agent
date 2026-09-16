@@ -31,10 +31,10 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.knowledge import report_schedules as rs
-from gideon.knowledge import research_reports as rr
-from gideon.schedule import ScheduleDefinition
-from gideon.triggers.store import TriggerStore
+from gideon.automation.schedule import ScheduleDefinition
+from gideon.automation.triggers.store import TriggerStore
+from gideon.cognition.knowledge import report_schedules as rs
+from gideon.cognition.knowledge import research_reports as rr
 
 CRON = "0 9 * * 1"
 
@@ -65,9 +65,6 @@ def _rows() -> list:
     return TriggerStore().list_triggers()
 
 
-# ── The schedule is attached ───────────────────────────────────────────────
-
-
 def test_saving_a_report_creates_its_clock_trigger(home):
     """The atom's whole remainder: a saved report is now attached to the clock."""
     defn = rr.save_report(_defn())
@@ -90,7 +87,9 @@ def test_the_row_is_ARMED_at_creation_not_only_at_boot(home):
     """
     rr.save_report(_defn())
     row = _rows()[0]
-    assert row.next_fire_at, "the row was persisted unarmed — it will not fire until a restart"
+    assert (
+        row.next_fire_at
+    ), "the row was persisted unarmed — it will not fire until a restart"
 
 
 def test_the_capability_fence_ADMITS_the_row(home):
@@ -100,11 +99,13 @@ def test_the_capability_fence_ADMITS_the_row(home):
     block is refused at fire time — a schedule that exists, arms, fires, and is then turned
     away.
     """
-    from gideon.triggers import screen
+    from gideon.automation.triggers import screen
 
     rr.save_report(_defn())
     row = _rows()[0]
-    decision = screen.capability_allows(row.capabilities, key="providers", value="knowledge-report")
+    decision = screen.capability_allows(
+        row.capabilities, key="providers", value="knowledge-report"
+    )
     assert getattr(
         decision, "allowed", False
     ), f"the fence refuses this row's own action: {row.capabilities} -> {decision}"
@@ -116,7 +117,7 @@ def test_an_empty_capability_block_would_be_refused(home):
     Without this, `capability_allows` could return allowed for anything and the assertion
     above would prove nothing about the block being frozen.
     """
-    from gideon.triggers import screen
+    from gideon.automation.triggers import screen
 
     decision = screen.capability_allows({}, key="providers", value="knowledge-report")
     assert not getattr(decision, "allowed", True), "the fence permits an empty block"
@@ -164,9 +165,6 @@ def test_clearing_the_cadence_removes_the_row(home):
     assert _rows() == [], "a report with no cadence kept a live trigger"
 
 
-# ── The cadence mapping ───────────────────────────────────────────────────
-
-
 @pytest.mark.parametrize(
     "sched,expected",
     [
@@ -174,13 +172,10 @@ def test_clearing_the_cadence_removes_the_row(home):
             ScheduleDefinition(kind="cron", cron_expr=CRON),
             {"kind": "cron", "expr": CRON, "timezone": "UTC"},
         ),
-        # `interval`, not `every`: `CLOCK_KINDS` has no `every`, so a row spelling it that way
-        # is an ERROR from `validate_spec` and would persist broken.
         (
             ScheduleDefinition(kind="every", every_secs=3600),
             {"kind": "interval", "interval_secs": 3600, "timezone": "UTC"},
         ),
-        # An epoch float, because `arm.next_fire` reads `spec["at"]` through `_positive()`.
         (
             ScheduleDefinition(kind="at", at_ts=2_000_000_000.0),
             {"kind": "at", "at": 2_000_000_000.0, "timezone": "UTC"},
@@ -251,9 +246,6 @@ def test_the_timezone_travels_with_the_spec(home):
     assert rs.clock_spec(defn)["timezone"] == "America/New_York"
 
 
-# ── The pre-flight: `is_due` gets its caller ──────────────────────────────
-
-
 class _Ctx:
     event = "clock.fire"
     context = ""
@@ -261,7 +253,7 @@ class _Ctx:
 
 
 async def _run(config: dict):
-    from gideon.action_providers.knowledge_report_provider import (
+    from gideon.integrations.action_providers.knowledge_report_provider import (
         KnowledgeReportActionProvider,
     )
 
@@ -271,13 +263,16 @@ async def _run(config: dict):
 @pytest.mark.asyncio
 async def test_a_scheduled_fire_that_is_not_due_is_a_named_skip(home, monkeypatch):
     """The pre-flight. The trigger may be more eager than the report; `is_due` is the
-    authority for the window, and it owns the four hardening rules a cron cannot express."""
+    authority for the window, and it owns the four hardening rules a cron cannot express.
+    """
     import json
 
     defn = rr.save_report(_defn())
     calls: list = []
     monkeypatch.setattr(rr, "record_run", lambda *a, **k: calls.append((a, k)))
-    monkeypatch.setattr(rr, "is_due", lambda d, *, now: (False, "waiting for the window"))
+    monkeypatch.setattr(
+        rr, "is_due", lambda d, *, now: (False, "waiting for the window")
+    )
 
     result = await _run({"report_id": defn.id})
 
@@ -303,7 +298,6 @@ async def test_a_MANUAL_run_skips_the_dueness_check(home, monkeypatch):
         return (False, "not due")
 
     monkeypatch.setattr(rr, "is_due", _is_due)
-    # The scope resolution is not under test; a store failure is a clean recorded failure.
     monkeypatch.setattr(rr, "record_run", lambda *a, **k: None)
 
     await _run({"report_id": defn.id, "manual": True})
@@ -344,13 +338,15 @@ def test_is_due_now_has_a_production_caller(home):
     import re
     from pathlib import Path
 
-    root = Path(__file__).resolve().parent.parent / "src" / "gideon"
+    root = Path(__file__).resolve().parent.parent.parent / "runtime" / "gideon"
     callers = []
     for path in root.rglob("*.py"):
         if path.name == "research_reports.py":
-            continue  # the definition itself
+            continue
         text = path.read_text(encoding="utf-8")
-        code = "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("#"))
+        code = "\n".join(
+            ln for ln in text.splitlines() if not ln.lstrip().startswith("#")
+        )
         if re.search(r"\brr\.is_due\(|research_reports\.is_due\(", code):
             callers.append(str(path.relative_to(root)))
     assert callers, (

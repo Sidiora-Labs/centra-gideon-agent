@@ -19,23 +19,19 @@ import time
 
 import pytest
 
-from gideon.workflows import human_input as HI
-from gideon.workflows import introspection as intro
-from gideon.workflows import journal as J
+from gideon.automation.workflows import human_input as HI
+from gideon.automation.workflows import introspection as intro
+from gideon.automation.workflows import journal as J
 
 pytestmark = pytest.mark.asyncio
 
 
-# ── 1. the dwell stamp rides the real resolution path ────────────────────────
-
-
 async def test_a_human_answer_journals_its_dwell(tmp_path, monkeypatch):
-    from tests.test_workflows_human_input import _blocked
+    from checks.runtime.test_workflows_human_input import _blocked
 
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     c, _status = await _blocked({"timeout_secs": 0})
     cont = HI.list_continuations(c.run.id)[0]
-    # Backdate the ask so the dwell is unambiguously positive.
     cont.created_at = time.time() - 30.0
     HI.save_continuation(cont)
     c.resume(cont.token, True)
@@ -43,9 +39,6 @@ async def test_a_human_answer_journals_its_dwell(tmp_path, monkeypatch):
     assert len(resolved) == 1
     dwell = resolved[0].get("resolved_after_secs")
     assert isinstance(dwell, float) and dwell >= 29.0
-
-
-# ── 2. the metric is a pure query ─────────────────────────────────────────────
 
 
 def test_auto_approved_gates_cost_no_attention():
@@ -67,12 +60,11 @@ def test_debt_decays_on_the_half_life():
     assert intro.attention_debt([now], now=now) == 1.0
     assert intro.attention_debt([now - week], now=now) == 0.5
     assert intro.attention_debt([now - 2 * week], now=now) == 0.25
-    # A future or missing timestamp is skipped, never guessed.
     assert intro.attention_debt([now + 60, 0.0], now=now) == 0.0
 
 
 def test_trend_needs_a_sample_and_reads_direction():
-    assert intro.attention_trend([3, 0]) == ""  # below the minimum sample
+    assert intro.attention_trend([3, 0]) == ""
     assert intro.attention_trend([3, 3, 3, 0, 0, 0]) == "falling"
     assert intro.attention_trend([0, 0, 0, 2, 2, 3]) == "rising"
     assert intro.attention_trend([1, 1, 1, 1, 1, 1]) == "flat"
@@ -85,7 +77,11 @@ def test_attention_stats_summarizes_dwell_and_series():
             200.0,
             [
                 {"kind": "user_edited_mid_flight", "ts": 200.0},
-                {"kind": "gate_resolved", "answer": {"ok": 1}, "resolved_after_secs": 12.5},
+                {
+                    "kind": "gate_resolved",
+                    "answer": {"ok": 1},
+                    "resolved_after_secs": 12.5,
+                },
             ],
         ),
     ]
@@ -98,23 +94,17 @@ def test_attention_stats_summarizes_dwell_and_series():
     assert intro.attention_stats("empty", [], now=1.0).note() == ""
 
 
-# ── 3. the mechanical demotion signal ────────────────────────────────────────
-
-
 def test_post_grant_rise_requires_samples_on_both_sides():
     series = [(1.0, 0), (2.0, 0), (3.0, 0), (4.0, 2), (5.0, 2), (6.0, 3)]
     assert intro.post_grant_rise(series, granted_at=3.5) is True
-    assert intro.post_grant_rise(series, granted_at=0.0) is False  # no grant, no signal
-    assert intro.post_grant_rise(series[:4], granted_at=3.5) is False  # thin post-grant side
+    assert intro.post_grant_rise(series, granted_at=0.0) is False
+    assert intro.post_grant_rise(series[:4], granted_at=3.5) is False
     falling = [(1.0, 3), (2.0, 3), (3.0, 2), (4.0, 0), (5.0, 0), (6.0, 0)]
     assert intro.post_grant_rise(falling, granted_at=3.5) is False
 
 
-# ── 4. proposals cite the trend through the injected callback ────────────────
-
-
 def test_promotion_proposal_carries_the_attention_note(monkeypatch):
-    from gideon.guardrails import ladder
+    from gideon.security.guardrails import ladder
 
     class _El:
         eligible = True
@@ -132,9 +122,13 @@ def test_promotion_proposal_carries_the_attention_note(monkeypatch):
         "_file_proposal",
         lambda key, rung, record: filed.append((key, rung, record)) or True,
     )
-    monkeypatch.setattr("gideon.guardrails.rungs.ensure_core_action_types", lambda: None)
+    monkeypatch.setattr(
+        "gideon.security.guardrails.rungs.ensure_core_action_types", lambda: None
+    )
 
-    ladder.propose_promotions(note_for=lambda key: "workflow attention: 0.4/run over 12 runs")
+    ladder.propose_promotions(
+        note_for=lambda key: "workflow attention: 0.4/run over 12 runs"
+    )
     assert filed and "workflow attention: 0.4/run over 12 runs" in filed[0][2]
 
     filed.clear()
@@ -143,4 +137,6 @@ def test_promotion_proposal_carries_the_attention_note(monkeypatch):
         raise RuntimeError("citation source down")
 
     ladder.propose_promotions(note_for=_boom)
-    assert filed and filed[0][2] == _El.reason  # the proposal survives a citation failure
+    assert (
+        filed and filed[0][2] == _El.reason
+    )  # the proposal survives a citation failure

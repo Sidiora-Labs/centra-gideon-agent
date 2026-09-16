@@ -3,11 +3,11 @@
 Every inbox source that shipped before this was **synthesized**: a notification rule fired, a
 run needed input, a poll found a message, an app contributed a proposal. There was no way for
 a person to put something in their own inbox — which is why the desktop tray's "Quick Capture
-Note…" row (DC-4) deep-linked ``#/inbox?capture=1`` and wrote nothing. `web/src` had zero
+Note…" row (DC-4) deep-linked ``#/inbox?capture=1`` and wrote nothing. `apps/console/src` had zero
 readers for that flag; the router parsed it and dropped it.
 
 So these tests refuse to stop at the dataclass. Each one drives the REAL path — ``POST
-/api/inbox/notes`` → :func:`gideon.inbox.emit_attention_item` → the persisted row
+/api/inbox/notes`` → :func:`gideon.integrations.inbox.emit_attention_item` → the persisted row
 re-read **off disk** → ``GET /api/inbox`` — because the two failure modes worth catching are
 both invisible to a unit test on the model:
 
@@ -28,13 +28,17 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from gideon import notification_kinds as nk
-from gideon.dashboard import handlers_inbox as h
 from gideon.http_errors import HTTP_ERROR_CODES
-from gideon.inbox import NON_CHANNEL_KINDS, InboxState, InboxStore, ItemKind, ItemStatus
+from gideon.integrations.inbox import (
+    NON_CHANNEL_KINDS,
+    InboxState,
+    InboxStore,
+    ItemKind,
+    ItemStatus,
+)
+from gideon.interfaces.dashboard import handlers_inbox as h
+from gideon.workspace import notification_kinds as nk
 
-#: Every wire code `api_inbox_note_create` can answer with. Written out rather than scraped so
-#: a new refusal path has to be listed here deliberately (and then owes its registry row).
 NOTE_CODES = (
     "invalid_json",
     "invalid_body",
@@ -42,9 +46,6 @@ NOTE_CODES = (
     "note_too_long",
     "note_not_saved",
 )
-
-
-# ── harness ──
 
 
 def _svc(tmp_path):
@@ -94,9 +95,6 @@ async def _payload(resp):
     return json.loads(resp.body.decode())
 
 
-# ── the capability: a person writes an inbox item ──
-
-
 @pytest.mark.asyncio
 async def test_a_note_becomes_an_inbox_item_through_a_real_endpoint(tmp_path):
     svc = _svc(tmp_path)
@@ -108,7 +106,6 @@ async def test_a_note_becomes_an_inbox_item_through_a_real_endpoint(tmp_path):
     assert item["message"] == "Chase the invoice discrepancy"
     assert item["item_kind"] == ItemKind.USER_NOTE.value
     assert item["status"] == ItemStatus.PENDING.value
-    # No channel behind it, so no reply machinery — the UI keys its Send gate off this.
     assert item["can_reply"] is False
     assert ItemKind.USER_NOTE.value in NON_CHANNEL_KINDS
 
@@ -122,12 +119,11 @@ async def test_the_typed_kind_says_user_authored_without_a_second_lookup(tmp_pat
     to join two fields to answer "did a person write this?" would get it wrong the first time
     a synthesized emitter reused the source string.
     """
-    from gideon.inbox import emit_attention_item
+    from gideon.integrations.inbox import emit_attention_item
 
     svc = _svc(tmp_path)
     state = _state(svc)
     await _post(state, {"text": "Ask about the renewal"})
-    # A synthesized sibling raised through the same seam, so the two are genuinely comparable.
     emit_attention_item(
         state,
         source="system",
@@ -143,8 +139,6 @@ async def test_the_typed_kind_says_user_authored_without_a_second_lookup(tmp_pat
     synthesized = [r for r in rows if r["item_kind"] != ItemKind.USER_NOTE.value]
     assert [r["message"] for r in authored] == ["Ask about the renewal"]
     assert len(synthesized) == 1
-    # And the value spells the provenance out, so the test above is not tautological on a
-    # kind name that merely happens to be unique.
     assert ItemKind.USER_NOTE.value == "user_note"
 
 
@@ -160,7 +154,10 @@ async def test_the_first_line_is_the_subject_and_no_typed_line_is_lost(tmp_path)
     note = "Groceries for the week\n- oat milk\n- the good bread"
     _, body = await _post(_state(svc), {"text": note})
 
-    assert body["item"]["message"] == "Groceries for the week\n\n- oat milk\n- the good bread"
+    assert (
+        body["item"]["message"]
+        == "Groceries for the week\n\n- oat milk\n- the good bread"
+    )
     for line in ("Groceries for the week", "- oat milk", "- the good bread"):
         assert line in body["item"]["message"]
 
@@ -176,10 +173,9 @@ async def test_the_chip_row_and_the_kind_filter_both_reach_a_note(tmp_path):
     assert await _payload(await h.api_inbox_list(_list(svc, {"kind": "message"}))) == []
 
     chips = (await _payload(await h.api_inbox_kinds(_list(svc))))["kinds"]
-    assert [(c["kind"], c["open"], c["channel"]) for c in chips] == [("user_note", 1, False)]
-
-
-# ── persistence: the note must survive the gateway that wrote it ──
+    assert [(c["kind"], c["open"], c["channel"]) for c in chips] == [
+        ("user_note", 1, False)
+    ]
 
 
 @pytest.mark.asyncio
@@ -196,21 +192,23 @@ async def test_the_note_survives_a_restart_read_back_off_disk(tmp_path):
     _, body = await _post(_state(svc), {"text": "Renew the domain before the 3rd"})
     note_id = body["id"]
 
-    # The file exists and is the durable copy — not the writer's memory.
     assert path.is_file()
     on_disk = json.loads(path.read_text())
     assert [i["item_kind"] for i in on_disk["items"]] == [ItemKind.USER_NOTE.value]
 
-    # ── restart ──
     del svc
     reloaded = InboxStore(path)
     reloaded.load()
     assert note_id in reloaded.items
     assert reloaded.items[note_id].message == "Renew the domain before the 3rd"
 
-    restarted = SimpleNamespace(state=InboxState(tmp_path / "inbox_state.json"), inbox=reloaded)
+    restarted = SimpleNamespace(
+        state=InboxState(tmp_path / "inbox_state.json"), inbox=reloaded
+    )
     rows = await _payload(await h.api_inbox_list(_list(restarted)))
-    assert [(r["id"], r["message"]) for r in rows] == [(note_id, "Renew the domain before the 3rd")]
+    assert [(r["id"], r["message"]) for r in rows] == [
+        (note_id, "Renew the domain before the 3rd")
+    ]
 
 
 @pytest.mark.asyncio
@@ -241,15 +239,14 @@ async def test_the_endpoint_has_no_write_path_of_its_own(tmp_path, monkeypatch):
     and the store's dedup/id-shape/flush guarantees apply to one writer and not the other.
     """
     svc = _svc(tmp_path)
-    monkeypatch.setattr("gideon.inbox.emit_attention_item", lambda *a, **k: "")
+    monkeypatch.setattr(
+        "gideon.integrations.inbox.emit_attention_item", lambda *a, **k: ""
+    )
 
     resp, body = await _post(_state(svc), {"text": "Would a second path catch this?"})
     assert resp.status == 500 and body["error"]["code"] == "note_not_saved"
     assert svc.inbox.items == {}
     assert not (tmp_path / "inbox.json").exists()
-
-
-# ── refusals, each with a user-actionable wire code ──
 
 
 @pytest.mark.asyncio
@@ -306,10 +303,9 @@ def test_every_wire_code_this_endpoint_emits_is_registered():
     assert not missing, f"codes emitted with no user-actionable meaning: {missing}"
     for code in NOTE_CODES:
         meaning = HTTP_ERROR_CODES[code]
-        assert meaning.strip().endswith("."), f"{code}: the meaning is copy, so it is a sentence"
-
-
-# ── the notification target: registered, and NOT a phantom ──
+        assert meaning.strip().endswith(
+            "."
+        ), f"{code}: the meaning is copy, so it is a sentence"
 
 
 def test_the_note_kind_is_registered_rather_than_falling_open_to_generic():
@@ -320,7 +316,6 @@ def test_the_note_kind_is_registered_rather_than_falling_open_to_generic():
     kind = nk.resolve_kind("user", "note")
     assert kind.key == "user/note"
     assert kind.attention is True
-    # Round-trips, or the rule a user configures against it would silently do nothing.
     assert nk.kind_for_legacy_pair("user", "note") == "user_note"
     assert nk.kind_for_legacy("user_note").key == "user/note"
 
@@ -334,14 +329,14 @@ def test_the_note_kind_is_a_deliverable_target_not_a_phantom_source(tmp_path):
     keystrokes), and `state.notify` is OBSERVED receiving its wire string on a real capture —
     which is the half that distinguishes "advertised and deliverable" from "advertised".
     """
-    from gideon.notification_rules import rules_document
+    from gideon.workspace.notification_rules import rules_document
 
     row = next((r for r in rules_document()["rules"] if r["key"] == "user/note"), None)
-    assert row is not None, "the kind must be configurable, or the user cannot change it"
+    assert (
+        row is not None
+    ), "the kind must be configurable, or the user cannot change it"
     assert row["mode"] == "badge" and row["default_mode"] == "badge"
     assert row["label"] == "Note you captured"
-    # `badge` persists and counts without a toast, so nothing is DECLINED — every other mode,
-    # including `immediate`, is one click away in this same row.
     assert "immediate" in nk.MODES and "badge" in nk.MODES
 
 
@@ -357,7 +352,9 @@ async def test_capturing_a_note_actually_delivers_through_notify(tmp_path):
     assert title == "Reply to the landlord"
     assert note_body == "about the boiler"
     assert state.notify.call_args.kwargs["meta"]["inbox_item"] == body["id"]
-    assert state.notify.call_args.kwargs["meta"]["item_kind"] == ItemKind.USER_NOTE.value
+    assert (
+        state.notify.call_args.kwargs["meta"]["item_kind"] == ItemKind.USER_NOTE.value
+    )
 
 
 def test_a_note_is_not_verifiable_so_the_skeptic_cannot_hide_it():

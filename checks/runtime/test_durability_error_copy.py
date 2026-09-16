@@ -27,7 +27,7 @@ SECRET = "secret-internal-path-0451"
 
 
 def _durability_app() -> web.Application:
-    from gideon.dashboard.handlers import durability as mod
+    from gideon.interfaces.dashboard.handlers import durability as mod
 
     @web.middleware
     async def identity(request, handler):
@@ -37,7 +37,9 @@ def _durability_app() -> web.Application:
 
     app = web.Application(middlewares=[identity])
     app.router.add_post("/api/durability/import", mod.api_durability_import)
-    app.router.add_post("/api/durability/archive/{id}/restore", mod.api_durability_archive_restore)
+    app.router.add_post(
+        "/api/durability/archive/{id}/restore", mod.api_durability_archive_restore
+    )
     return app
 
 
@@ -45,10 +47,12 @@ def _durability_app() -> web.Application:
 async def test_import_crash_answers_guidance_not_the_exception(monkeypatch, tmp_path):
     """A crash inside the apply leg answers the registered 500 whose message carries
     the way forward — the raising exception's text must not appear anywhere in it."""
-    import gideon.portability as portability
+    import gideon.workspace.portability as portability
 
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    monkeypatch.setattr(portability, "validate_import_zip", lambda p: (True, "", {"version": 3}))
+    monkeypatch.setattr(
+        portability, "validate_import_zip", lambda p: (True, "", {"version": 3})
+    )
 
     def _boom(*a, **k):
         raise RuntimeError(SECRET)
@@ -77,7 +81,7 @@ async def test_restore_crash_is_a_500_failure_not_a_refused_400(monkeypatch, tmp
     """restore_apply reports designed refusals as ok:false VALUES; a raise is a crash.
     The route must answer restore_failed 500 with guidance — not the old
     restore_refused 400 carrying the exception's own words."""
-    import gideon.snapshot as snap_mod
+    import gideon.workspace.snapshot as snap_mod
 
     archives = tmp_path / "snaps"
     archives.mkdir()
@@ -111,7 +115,7 @@ def test_merge_tags_validates_into_before_the_store():
     the store's authored refusal texts — and TypeError can no longer surface."""
     import inspect
 
-    from gideon.dashboard.handlers import knowledge as mod
+    from gideon.interfaces.dashboard.handlers import knowledge as mod
 
     src = inspect.getsource(mod.merge_tag)
     assert (

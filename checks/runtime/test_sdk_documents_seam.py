@@ -17,9 +17,7 @@ front depends on:
 
 from __future__ import annotations
 
-import gideon.documents as core_documents
-from gideon.documents.from_markup import deck_from_markdown as core_deck_from_markdown
-from gideon.documents.pptx_parser import parse_pptx
+import gideon.workspace.documents as core_documents
 from gideon.sdk.documents import (
     Block,
     Bullet,
@@ -46,6 +44,10 @@ from gideon.sdk.documents import (
     sheet_from_dict,
     sheet_to_dict,
 )
+from gideon.workspace.documents.from_markup import (
+    deck_from_markdown as core_deck_from_markdown,
+)
+from gideon.workspace.documents.pptx_parser import parse_pptx
 
 BRIEF = """# Launch review
 
@@ -100,7 +102,6 @@ def test_register_writer_is_not_on_the_app_boundary() -> None:
 
     assert "register_writer" not in sdk_documents.__all__
     assert not hasattr(sdk_documents, "register_writer")
-    # It is still core's own seam — this is a boundary decision, not a removal.
     assert hasattr(core_documents, "register_writer")
 
 
@@ -121,7 +122,9 @@ def test_an_unavailable_format_gets_no_writer_rather_than_raising() -> None:
 
 def test_a_markdown_brief_renders_a_deck_that_reads_back() -> None:
     """The whole path an app walks: markdown → DeckModel → pptx bytes → core's parser."""
-    if "pptx" not in available_formats():  # pragma: no cover — build without python-pptx
+    if (
+        "pptx" not in available_formats()
+    ):  # pragma: no cover — build without python-pptx
         return
     model = deck_from_markdown(BRIEF, title="Launch review")
     assert isinstance(model, DeckModel)

@@ -3,8 +3,8 @@
 import os
 from unittest.mock import patch
 
-from gideon import mcp_core
-from gideon.mcp_core import _get_ppid, _resolve_session_key
+from gideon.integrations import mcp_core
+from gideon.integrations.mcp_core import _get_ppid, _resolve_session_key
 
 
 class TestResolveSessionKey:
@@ -23,7 +23,7 @@ class TestResolveSessionKey:
         try:
             with (
                 patch.dict("os.environ", env, clear=True),
-                patch("gideon.mcp_core.config_dir", return_value=tmp_path),
+                patch("gideon.integrations.mcp_core.config_dir", return_value=tmp_path),
             ):
                 assert _resolve_session_key() == "dashboard:loop-abc123"
         finally:
@@ -45,7 +45,7 @@ class TestResolveSessionKey:
         mcp_core.reset_current_session_key(token)
         with (
             patch.dict("os.environ", env, clear=True),
-            patch("gideon.mcp_core.config_dir", return_value=tmp_path),
+            patch("gideon.integrations.mcp_core.config_dir", return_value=tmp_path),
             patch("os.getppid", return_value=1),
         ):
             assert _resolve_session_key() == ""
@@ -58,7 +58,7 @@ class TestResolveSessionKey:
         env = {k: v for k, v in os.environ.items() if k != "GIDEON_SESSION_KEY"}
         with (
             patch.dict("os.environ", env, clear=True),
-            patch("gideon.mcp_core.config_dir", return_value=tmp_path),
+            patch("gideon.integrations.mcp_core.config_dir", return_value=tmp_path),
         ):
             assert _resolve_session_key() == "dashboard:chat-2-456"
 
@@ -66,16 +66,15 @@ class TestResolveSessionKey:
         """Walks up ancestors when immediate parent has no PID file."""
         (tmp_path / "session_pid_25.txt").write_text("dashboard:chat-3-789")
 
-        # Mock: PID 100 -> parent 50 -> parent 25 (has file)
         def fake_get_ppid(pid):
             return {100: 50, 50: 25}.get(pid, 0)
 
         env = {k: v for k, v in os.environ.items() if k != "GIDEON_SESSION_KEY"}
         with (
             patch.dict("os.environ", env, clear=True),
-            patch("gideon.mcp_core.config_dir", return_value=tmp_path),
+            patch("gideon.integrations.mcp_core.config_dir", return_value=tmp_path),
             patch("os.getppid", return_value=100),
-            patch("gideon.mcp_core._get_ppid", side_effect=fake_get_ppid),
+            patch("gideon.integrations.mcp_core._get_ppid", side_effect=fake_get_ppid),
         ):
             assert _resolve_session_key() == "dashboard:chat-3-789"
 
@@ -88,9 +87,9 @@ class TestResolveSessionKey:
         env = {k: v for k, v in os.environ.items() if k != "GIDEON_SESSION_KEY"}
         with (
             patch.dict("os.environ", env, clear=True),
-            patch("gideon.mcp_core.config_dir", return_value=tmp_path),
+            patch("gideon.integrations.mcp_core.config_dir", return_value=tmp_path),
             patch("os.getppid", return_value=100),
-            patch("gideon.mcp_core._get_ppid", side_effect=fake_get_ppid),
+            patch("gideon.integrations.mcp_core._get_ppid", side_effect=fake_get_ppid),
         ):
             assert _resolve_session_key() == ""
 
@@ -99,9 +98,9 @@ class TestResolveSessionKey:
         env = {k: v for k, v in os.environ.items() if k != "GIDEON_SESSION_KEY"}
         with (
             patch.dict("os.environ", env, clear=True),
-            patch("gideon.mcp_core.config_dir", return_value=tmp_path),
+            patch("gideon.integrations.mcp_core.config_dir", return_value=tmp_path),
             patch("os.getppid", return_value=99999),
-            patch("gideon.mcp_core._get_ppid", return_value=0),
+            patch("gideon.integrations.mcp_core._get_ppid", return_value=0),
         ):
             assert _resolve_session_key() == ""
 
@@ -114,9 +113,9 @@ class TestResolveSessionKey:
         env = {k: v for k, v in os.environ.items() if k != "GIDEON_SESSION_KEY"}
         with (
             patch.dict("os.environ", env, clear=True),
-            patch("gideon.mcp_core.config_dir", return_value=tmp_path),
+            patch("gideon.integrations.mcp_core.config_dir", return_value=tmp_path),
             patch("os.getppid", return_value=100),
-            patch("gideon.mcp_core._get_ppid", side_effect=fake_get_ppid),
+            patch("gideon.integrations.mcp_core._get_ppid", side_effect=fake_get_ppid),
         ):
             assert _resolve_session_key() == ""
 

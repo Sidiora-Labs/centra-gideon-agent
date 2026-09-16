@@ -1,7 +1,7 @@
 """The working directory an ACP CLI is spawned with on the CONCURRENT (shared-connection)
 path.
 
-``SessionManager._open_acp_concurrent`` resolved its fallback cwd as
+``ConversationDirectory._open_acp_concurrent`` resolved its fallback cwd as
 ``default_workspace_dir()`` and passed the result on unchanged. That helper returns ``""``
 when it finds no safe root; ``AcpProcess`` does ``Path(work_dir)``; and ``Path("")`` is
 ``Path(".")``. So a session opened with no explicit cwd on a machine with no resolvable
@@ -30,7 +30,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from gideon.acp.errors import AcpWorkspaceUnresolved
+from gideon.integrations.acp.errors import AcpWorkspaceUnresolved
 
 _RUNTIME = "acp:test-cli"
 _KIND = {"provider_kind": _RUNTIME}
@@ -60,7 +60,7 @@ def _isolate(monkeypatch, tmp_path) -> Path:
 
 
 def _make_sm():
-    from gideon.session import SessionManager
+    from gideon.engine.session import ConversationDirectory
 
     cfg = MagicMock()
     cfg.default_agent = ""
@@ -68,7 +68,7 @@ def _make_sm():
     cfg.session.pool_size = 0
     cfg.session.pool_agent = ""
     cfg.session.pool_ttl_secs = 0
-    return SessionManager(cfg)
+    return ConversationDirectory(cfg)
 
 
 def _no_workspace(monkeypatch) -> None:
@@ -77,7 +77,7 @@ def _no_workspace(monkeypatch) -> None:
     Patched at ``session``'s module binding (it imports the name, not the module), which is
     the binding the code under test reads.
     """
-    import gideon.session as session_mod
+    import gideon.engine.session as session_mod
 
     monkeypatch.setattr(session_mod, "default_workspace_dir", lambda: "")
 
@@ -85,8 +85,8 @@ def _no_workspace(monkeypatch) -> None:
 @pytest.fixture
 def wire(monkeypatch):
     """Open the double gate onto a spy pool for runtime ``acp:test-cli``."""
-    from gideon.acp import connection_pool as cp
-    from gideon.llm import acp_session_provider, registry
+    from gideon.integrations.acp import connection_pool as cp
+    from gideon.integrations.llm import acp_session_provider, registry
 
     def _wire(pool):
         entry = MagicMock()
@@ -94,7 +94,9 @@ def wire(monkeypatch):
         reg = MagicMock()
         reg.get_entry.return_value = entry
         monkeypatch.setattr(registry, "get_default_registry", lambda: reg)
-        monkeypatch.setattr(acp_session_provider, "concurrent_sessions_enabled", lambda d: True)
+        monkeypatch.setattr(
+            acp_session_provider, "concurrent_sessions_enabled", lambda d: True
+        )
         cp.set_acp_pool(pool)
         return pool
 
@@ -103,7 +105,9 @@ def wire(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_resolvable_workspace_reaches_open_session_as_a_path(monkeypatch, tmp_path, wire):
+async def test_resolvable_workspace_reaches_open_session_as_a_path(
+    monkeypatch, tmp_path, wire
+):
     """VACUITY FLOOR for every assertion below: a resolvable workspace DOES arrive.
 
     Also pins the shape: the fallback branch used to hand ``open_session`` a bare ``str``
@@ -115,10 +119,14 @@ async def test_resolvable_workspace_reaches_open_session_as_a_path(monkeypatch, 
     prov = MagicMock()
     pool = wire(_SpyPool(prov))
 
-    got = await sm._open_acp_concurrent("dashboard:s1", None, "gpu-dev", None, None, dict(_KIND))
+    got = await sm._open_acp_concurrent(
+        "dashboard:s1", None, "gpu-dev", None, None, dict(_KIND)
+    )
 
     assert got is prov
-    assert len(pool.opened) == 1, "gate never opened — the containment rails would be vacuous"
+    assert (
+        len(pool.opened) == 1
+    ), "gate never opened — the containment rails would be vacuous"
     cwd = pool.opened[0]["cwd"]
     assert isinstance(cwd, Path), f"open_session got {type(cwd).__name__}, not Path"
     assert cwd == Path(os.path.realpath(ws))
@@ -136,16 +144,14 @@ async def test_unresolvable_workspace_refuses_instead_of_spawning_anywhere(
 
     raised: BaseException | None = None
     try:
-        await sm._open_acp_concurrent("dashboard:s1", None, "gpu-dev", None, None, dict(_KIND))
+        await sm._open_acp_concurrent(
+            "dashboard:s1", None, "gpu-dev", None, None, dict(_KIND)
+        )
     except AcpWorkspaceUnresolved as exc:
         raised = exc
 
-    # Value first, so the red NAMES the directory that would have been used. Ordering the
-    # raise check first would hide it, and it also reds for a refactor that returns None
-    # (silently degrading to the one-session path) instead of raising.
     assert pool.opened == [], f"a CLI was opened in {pool.opened[0]['cwd']!r}"
     assert raised is not None, "an unresolvable workspace opened a session silently"
-    # The user has to be able to act on it: the message names the knob, not just the fault.
     assert "GIDEON_WORKSPACE" in str(raised)
 
 
@@ -161,7 +167,9 @@ async def test_explicit_session_cwd_still_wins_when_no_default_resolves(
     _no_workspace(monkeypatch)
     pool = wire(_SpyPool(MagicMock()))
 
-    await sm._open_acp_concurrent("dashboard:s1", None, None, None, str(proj), dict(_KIND))
+    await sm._open_acp_concurrent(
+        "dashboard:s1", None, None, None, str(proj), dict(_KIND)
+    )
 
     assert len(pool.opened) == 1
     assert pool.opened[0]["cwd"] == proj
@@ -182,14 +190,18 @@ async def test_a_genuine_pool_failure_still_degrades_to_the_one_session_path(
     sm = _make_sm()
     pool = wire(_SpyPool(boom=RuntimeError("agent refused the connection")))
 
-    got = await sm._open_acp_concurrent("dashboard:s1", None, "gpu-dev", None, None, dict(_KIND))
+    got = await sm._open_acp_concurrent(
+        "dashboard:s1", None, "gpu-dev", None, None, dict(_KIND)
+    )
 
     assert got is None
-    assert len(pool.opened) == 1  # it really did try
+    assert len(pool.opened) == 1
 
 
 @pytest.mark.asyncio
-async def test_an_empty_work_dir_would_spawn_in_the_gateways_own_cwd(monkeypatch, tmp_path):
+async def test_an_empty_work_dir_would_spawn_in_the_gateways_own_cwd(
+    monkeypatch, tmp_path
+):
     """WHY the refusal above must refuse — measured at the spawn kwargs, no real CLI.
 
     ``AcpProcess`` does ``Path(work_dir)``, so the ``""`` the old fallback produced and
@@ -198,14 +210,12 @@ async def test_an_empty_work_dir_would_spawn_in_the_gateways_own_cwd(monkeypatch
     directory, i.e. wherever the gateway happens to be running.
     """
     _isolate(monkeypatch, tmp_path)
-    import gideon.session as session_mod
-    from gideon.acp import transport as tr
-    from gideon.sandbox_providers import none as none_provider
+    import gideon.engine.session as session_mod
+    from gideon.integrations.acp import transport as tr
+    from gideon.integrations.sandbox_providers import none as none_provider
 
     assert Path("") == Path("."), "the equivalence this test rests on"
 
-    # PID-tracking files are irrelevant here and write under the config home; stub them out
-    # so this test cannot write anywhere at all.
     monkeypatch.setattr(session_mod, "_track_pid", lambda *a, **k: None)
     monkeypatch.setattr(session_mod, "_track_session_pid", lambda *a, **k: None)
     monkeypatch.setattr(session_mod, "_track_child_pids", lambda *a, **k: None)
@@ -213,7 +223,7 @@ async def test_an_empty_work_dir_would_spawn_in_the_gateways_own_cwd(monkeypatch
     seen: list[dict] = []
 
     class _StubProc:
-        pid = 999999  # no such process: no descendant scan, no real pid touched
+        pid = 999999
         stderr = None
         returncode = None
 
@@ -228,12 +238,12 @@ async def test_an_empty_work_dir_would_spawn_in_the_gateways_own_cwd(monkeypatch
     monkeypatch.chdir(ambient)
 
     await tr.AcpProcess(command=["true"], work_dir="").spawn()
-    assert len(seen) == 1, "capture seam never fired — the assertion below would be vacuous"
+    assert (
+        len(seen) == 1
+    ), "capture seam never fired — the assertion below would be vacuous"
     assert seen[0]["cwd"] == ".", f"expected the ambient marker, got {seen[0]['cwd']!r}"
     assert Path(seen[0]["cwd"]).resolve() == ambient.resolve()
 
-    # Contrast: a real work_dir arrives absolute. Same seam, so the assertion above is
-    # measuring the empty case and not a broken harness.
     bound = tmp_path / "bound"
     await tr.AcpProcess(command=["true"], work_dir=bound).spawn()
     assert len(seen) == 2

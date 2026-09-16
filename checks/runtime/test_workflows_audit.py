@@ -23,14 +23,14 @@ import time
 
 import pytest
 
-from gideon.workflows import store
-from gideon.workflows.audit import (
+from gideon.automation.workflows import store
+from gideon.automation.workflows.audit import (
     EXPIRED_WAIT_GRACE_SECS,
     STALE_RUNNING_SECS,
     Finding,
     audit,
 )
-from gideon.workflows.models import (
+from gideon.automation.workflows.models import (
     InstanceState,
     NodeInstance,
     RunStatus,
@@ -49,7 +49,7 @@ def anyio_backend() -> str:
 def _isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
     return home
 
 
@@ -67,7 +67,9 @@ def _stamp(offset_secs: float = 0.0) -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - offset_secs))
 
 
-def _run(status: RunStatus = RunStatus.RUNNING, spec: dict | None = None) -> WorkflowRun:
+def _run(
+    status: RunStatus = RunStatus.RUNNING, spec: dict | None = None
+) -> WorkflowRun:
     run = store.create(WorkflowRun(id="", workflow_name="aud", status=status))
     if spec is not None:
         store.write_spec(run.id, spec)
@@ -85,12 +87,14 @@ class _FakeSupervisor:
 class TestDiagnose:
     def test_a_healthy_store_reports_nothing(self) -> None:
         run = _run(spec=SPEC)
-        store.write_state(run.id, {"root.children[0]": NodeInstance(path="root.children[0]")})
+        store.write_state(
+            run.id, {"root.children[0]": NodeInstance(path="root.children[0]")}
+        )
         report = audit()
         assert report.healthy and report.runs_scanned == 1
 
     def test_a_missing_spec_is_found(self) -> None:
-        _run()  # no spec written
+        _run()
         report = audit()
         assert [f.kind for f in report.findings] == [Finding.MISSING_SPEC]
 
@@ -138,7 +142,9 @@ class TestDiagnose:
 
     def test_a_dead_gate_is_reported_when_the_run_is_not_surfaced(self) -> None:
         run = _run(spec=SPEC)
-        inst = NodeInstance(path="root.children[0]", state=InstanceState.WAITING, wake_at=0.0)
+        inst = NodeInstance(
+            path="root.children[0]", state=InstanceState.WAITING, wake_at=0.0
+        )
         store.write_state(run.id, {"root.children[0]": inst})
         report = audit()
         assert Finding.DEAD_GATE in [f.kind for f in report.findings]
@@ -146,7 +152,9 @@ class TestDiagnose:
     def test_a_gate_on_a_needs_input_run_is_legitimate(self) -> None:
         """Parked on a human with the run correctly surfaced is not a finding."""
         run = _run(status=RunStatus.NEEDS_INPUT, spec=SPEC)
-        inst = NodeInstance(path="root.children[0]", state=InstanceState.WAITING, wake_at=0.0)
+        inst = NodeInstance(
+            path="root.children[0]", state=InstanceState.WAITING, wake_at=0.0
+        )
         store.write_state(run.id, {"root.children[0]": inst})
         assert audit().healthy
 
@@ -154,7 +162,11 @@ class TestDiagnose:
         run = _run(spec=SPEC)
         store.write_state(
             run.id,
-            {"root.children[0]": NodeInstance(path="root.children[0]", state=InstanceState.DONE)},
+            {
+                "root.children[0]": NodeInstance(
+                    path="root.children[0]", state=InstanceState.DONE
+                )
+            },
         )
         report = audit()
         assert Finding.LOST_RUN in [f.kind for f in report.findings]
@@ -171,12 +183,16 @@ class TestDryRunSafety:
         run = _run(spec=SPEC)
         store.write_state(
             run.id,
-            {"root.children[0]": NodeInstance(path="root.children[0]", state=InstanceState.DONE)},
+            {
+                "root.children[0]": NodeInstance(
+                    path="root.children[0]", state=InstanceState.DONE
+                )
+            },
         )
         report = audit()
         assert report.dry_run is True
         assert not any(f.healed for f in report.findings)
-        assert store.get(run.id).status == RunStatus.RUNNING  # untouched
+        assert store.get(run.id).status == RunStatus.RUNNING
 
     def test_a_run_with_a_live_controller_is_never_healed(self) -> None:
         """The controller is that run's only legitimate writer (WF2-R10) — healing
@@ -190,8 +206,10 @@ class TestDryRunSafety:
         store.write_state(run.id, {"root.children[0]": inst})
         report = audit(dry_run=False, supervisor=_FakeSupervisor({run.id}))
         stale = [f for f in report.findings if f.kind == Finding.STALE_RUNNING]
-        assert stale and not stale[0].healed  # reported, left alone
-        assert store.read_state(run.id)["root.children[0]"].state == InstanceState.RUNNING
+        assert stale and not stale[0].healed
+        assert (
+            store.read_state(run.id)["root.children[0]"].state == InstanceState.RUNNING
+        )
 
 
 class TestHeal:
@@ -207,8 +225,6 @@ class TestHeal:
         healed = [f for f in report.findings if f.kind == Finding.STALE_RUNNING]
         assert healed and healed[0].healed
         after = store.read_state(run.id)["root.children[0]"]
-        # BLOCKED, not FAILED: "the worker vanished without reporting" is a different
-        # fact from "the work failed", and it routes to needs-input.
         assert after.state == InstanceState.BLOCKED
         assert after.failure.terminal_reason == "protocol_violation"
 
@@ -230,7 +246,11 @@ class TestHeal:
         run = _run(spec=SPEC)
         store.write_state(
             run.id,
-            {"root.children[0]": NodeInstance(path="root.children[0]", state=InstanceState.DONE)},
+            {
+                "root.children[0]": NodeInstance(
+                    path="root.children[0]", state=InstanceState.DONE
+                )
+            },
         )
         audit(dry_run=False)
         assert store.get(run.id).status == RunStatus.COMPLETE
@@ -245,7 +265,9 @@ class TestHeal:
                 "root.children[0]": NodeInstance(
                     path="root.children[0]", state=InstanceState.FAILED
                 ),
-                "root.children[1]": NodeInstance(path="root.children[1]", state=InstanceState.DONE),
+                "root.children[1]": NodeInstance(
+                    path="root.children[1]", state=InstanceState.DONE
+                ),
             },
         )
         audit(dry_run=False)
@@ -261,12 +283,16 @@ class TestHeal:
     def test_a_dead_gate_is_never_auto_resolved(self) -> None:
         """Nobody approved anything — auto-resolving a gate would fabricate consent."""
         run = _run(spec=SPEC)
-        inst = NodeInstance(path="root.children[0]", state=InstanceState.WAITING, wake_at=0.0)
+        inst = NodeInstance(
+            path="root.children[0]", state=InstanceState.WAITING, wake_at=0.0
+        )
         store.write_state(run.id, {"root.children[0]": inst})
         report = audit(dry_run=False)
         gate = [f for f in report.findings if f.kind == Finding.DEAD_GATE]
         assert gate and not gate[0].healed
-        assert store.read_state(run.id)["root.children[0]"].state == InstanceState.WAITING
+        assert (
+            store.read_state(run.id)["root.children[0]"].state == InstanceState.WAITING
+        )
 
 
 class TestUtcParsing:
@@ -275,21 +301,20 @@ class TestUtcParsing:
     cancelled the measured age, leaving the stale-running check permanently inert."""
 
     def test_a_utc_stamp_parses_to_its_real_epoch(self) -> None:
-        from gideon.workflows.audit import _epoch
+        from gideon.automation.workflows.audit import _epoch
 
-        # 2026-01-01T00:00:00Z is exactly 1767225600 in UTC, in every timezone.
         assert _epoch("2026-01-01T00:00:00Z") == 1767225600.0
 
     def test_a_known_age_measures_correctly(self) -> None:
-        from gideon.workflows.audit import _epoch
+        from gideon.automation.workflows.audit import _epoch
 
         age = time.time() - _epoch(_stamp(7200))
-        assert 7150 < age < 7250  # ~2h, not ~0 and not shifted by a tz offset
+        assert 7150 < age < 7250
 
     def test_the_controller_parses_utc_identically(self) -> None:
         """Both parsers must agree, or a run's elapsed time and its audit age disagree."""
-        from gideon.workflows.audit import _epoch as audit_epoch
-        from gideon.workflows.controller import _epoch as ctrl_epoch
+        from gideon.automation.workflows.audit import _epoch as audit_epoch
+        from gideon.automation.workflows.controller import _epoch as ctrl_epoch
 
         assert ctrl_epoch("2026-01-01T00:00:00Z") == audit_epoch("2026-01-01T00:00:00Z")
 
@@ -307,30 +332,27 @@ class TestReportShape:
         assert set(d) == {"healthy", "dry_run", "runs_scanned", "counts", "findings"}
 
 
-# ── the run-workflow action provider ─────────────────────────────────────────
-
-
 class TestRunWorkflowProvider:
     def _provider(self):
-        from gideon.action_providers.run_workflow_provider import (
+        from gideon.integrations.action_providers.run_workflow_provider import (
             RunWorkflowActionProvider,
         )
 
         return RunWorkflowActionProvider()
 
     def _ctx(self):
-        from gideon.action_providers.base import ActionContext
+        from gideon.integrations.action_providers.base import ActionContext
 
         return ActionContext(event="schedule", context="trigger-1")
 
     def test_it_is_registered_and_allowlisted_together(self) -> None:
         """A provider in one set but not the other is what makes a trigger save and then
         fail at fire time."""
-        from gideon.action_providers.registry import (
+        from gideon.assurance.validation import ALLOWED_HOOK_PROVIDERS
+        from gideon.integrations.action_providers.registry import (
             _ensure_default_providers_registered,
             get_action_provider,
         )
-        from gideon.validation import ALLOWED_HOOK_PROVIDERS
 
         _ensure_default_providers_registered()
         assert get_action_provider("run-workflow") is not None
@@ -347,7 +369,7 @@ class TestRunWorkflowProvider:
     async def test_a_dry_run_creates_nothing(self) -> None:
         import json
 
-        from gideon.workflows import defs as defs_mod
+        from gideon.automation.workflows import defs as defs_mod
 
         class P(defs_mod.WorkflowDefProvider):
             @property
@@ -369,7 +391,7 @@ class TestRunWorkflowProvider:
             after, _ = store.list_runs()
             assert result.success and result.outcome == "skip"
             assert json.loads(result.stdout)["dry_run"] is True
-            assert len(after) == len(before)  # nothing created
+            assert len(after) == len(before)
         finally:
             defs_mod.unregister_provider("test-pack")
 
@@ -377,9 +399,11 @@ class TestRunWorkflowProvider:
         """A per-minute trigger against a ten-minute workflow must not pile up runs."""
         import json
 
-        from gideon.workflows import defs as defs_mod
+        from gideon.automation.workflows import defs as defs_mod
 
-        existing = store.create(WorkflowRun(id="", workflow_name="aud", status=RunStatus.RUNNING))
+        existing = store.create(
+            WorkflowRun(id="", workflow_name="aud", status=RunStatus.RUNNING)
+        )
 
         class P(defs_mod.WorkflowDefProvider):
             @property
@@ -406,8 +430,8 @@ class TestRunWorkflowProvider:
         look verified."""
         import json
 
-        from gideon.action_providers import services as svc_mod
-        from gideon.workflows import defs as defs_mod
+        from gideon.automation.workflows import defs as defs_mod
+        from gideon.integrations.action_providers import services as svc_mod
 
         launched: list[str] = []
 
@@ -449,9 +473,9 @@ class TestRunWorkflowProvider:
     async def test_a_retried_caller_key_returns_the_same_run(self) -> None:
         import json
 
-        from gideon.action_providers import services as svc_mod
-        from gideon.workflows import defs as defs_mod
-        from gideon.workflows.effects import START_DEDUPE
+        from gideon.automation.workflows import defs as defs_mod
+        from gideon.automation.workflows.effects import START_DEDUPE
+        from gideon.integrations.action_providers import services as svc_mod
 
         class FakeSupervisor:
             async def launch(self, run, spec, *, depth=0):
@@ -490,8 +514,8 @@ class TestRunWorkflowProvider:
     async def test_no_supervisor_is_an_honest_failure(self) -> None:
         """The run row exists but nothing is driving it — saying "launched" would be a
         lie."""
-        from gideon.action_providers import services as svc_mod
-        from gideon.workflows import defs as defs_mod
+        from gideon.automation.workflows import defs as defs_mod
+        from gideon.integrations.action_providers import services as svc_mod
 
         class P(defs_mod.WorkflowDefProvider):
             @property

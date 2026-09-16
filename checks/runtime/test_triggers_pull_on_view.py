@@ -16,9 +16,9 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.triggers import pull_on_view as V
-from gideon.triggers.models import Trigger
-from gideon.triggers.store import TriggerStore
+from gideon.automation.triggers import pull_on_view as V
+from gideon.automation.triggers.models import Trigger
+from gideon.automation.triggers.store import TriggerStore
 
 NOW = 1_800_000_000.0
 
@@ -43,13 +43,12 @@ def _view(store, *, tid="view:tile", surface="dashboard.inbox", **spec):
     return store.get(tid).trigger
 
 
-# ── binding ──
-
-
 def test_a_view_trigger_is_FOUND_for_its_surface(store):
     """🔴 The defect at its root: `surface_binding` had no reader, so nothing could match."""
     _view(store)
-    assert [t.id for t in V.bound_triggers(store, surface="dashboard.inbox")] == ["view:tile"]
+    assert [t.id for t in V.bound_triggers(store, surface="dashboard.inbox")] == [
+        "view:tile"
+    ]
 
 
 def test_a_DIFFERENT_surface_does_not_match(store):
@@ -75,9 +74,6 @@ def test_a_DISABLED_binding_does_not_refresh(store):
     row.enabled = False
     store.upsert(row)
     assert V.bound_triggers(store, surface="dashboard.inbox") == []
-
-
-# ── the TTL, which is the whole control ──
 
 
 def test_the_FIRST_render_refreshes(store, tmp_path):
@@ -117,12 +113,10 @@ def test_the_cache_reason_reports_the_AGE(store, tmp_path):
     assert "10s old" in V.on_render(trigger, now=NOW + 10, base_dir=tmp_path).reason
 
 
-# ── the rate floor ──
-
-
 def test_the_TTL_is_FLOORED(store):
     """🔴 A dashboard re-renders on every websocket nudge, so a TTL of 1 would mean an LLM turn per
-    keystroke elsewhere in the UI. S109 recorded the R1 floor being declared but read by no code."""
+    keystroke elsewhere in the UI. S109 recorded the R1 floor being declared but read by no code.
+    """
     assert V.ttl_for(_view(store, ttl_secs=1)) == V.MIN_REFRESH_INTERVAL_SECS
 
 
@@ -138,9 +132,6 @@ def test_a_MALFORMED_ttl_falls_back_rather_than_crashing(store):
     assert V.ttl_for(_view(store, ttl_secs="soon")) == V.DEFAULT_TTL_SECS
 
 
-# ── persist=False: asking must not change the answer ──
-
-
 def test_a_DRY_read_does_not_consume_the_window(store, tmp_path):
     """🔴 Without this, a freshness column that merely REPORTED staleness would refresh the tile by
     asking — the observer changing what it observes."""
@@ -148,9 +139,6 @@ def test_a_DRY_read_does_not_consume_the_window(store, tmp_path):
     first = V.on_render(trigger, now=NOW, base_dir=tmp_path, persist=False)
     second = V.on_render(trigger, now=NOW, base_dir=tmp_path, persist=False)
     assert first.refresh is True and second.refresh is True
-
-
-# ── the payload + freshness bookkeeping ──
 
 
 def test_the_payload_names_the_SURFACE(store, tmp_path):
@@ -164,8 +152,13 @@ def test_the_refresh_COUNT_increments(store, tmp_path):
     """§3's freshness column: "refreshed 12 times" is what tells a user whether a binding earns its
     cost."""
     trigger = _view(store, ttl_secs=60)
-    assert V.on_render(trigger, now=NOW, base_dir=tmp_path).payload["refresh_number"] == 1
-    assert V.on_render(trigger, now=NOW + 100, base_dir=tmp_path).payload["refresh_number"] == 2
+    assert (
+        V.on_render(trigger, now=NOW, base_dir=tmp_path).payload["refresh_number"] == 1
+    )
+    assert (
+        V.on_render(trigger, now=NOW + 100, base_dir=tmp_path).payload["refresh_number"]
+        == 2
+    )
 
 
 def test_freshness_SURVIVES_a_restart(store, tmp_path):
@@ -183,15 +176,14 @@ def test_a_CORRUPT_sidecar_reads_as_never_refreshed(tmp_path):
     assert V.load_freshness("view:tile", base_dir=tmp_path).last_refresh_at == 0.0
 
 
-# ── the render fan-out ──
-
-
 def test_renders_returns_BOTH_refreshes_and_cache_hits(store, tmp_path):
     """§7 criterion 8's zero-silent-drops rule applies to a skipped refresh exactly as to a skipped
     fire, so the caller gets both lists."""
     _view(store, tid="view:a", ttl_secs=300)
     _view(store, tid="view:b", ttl_secs=300)
-    payloads, cached = V.renders(store, surface="dashboard.inbox", now=NOW, base_dir=tmp_path)
+    payloads, cached = V.renders(
+        store, surface="dashboard.inbox", now=NOW, base_dir=tmp_path
+    )
     assert len(payloads) == 2 and cached == []
 
     payloads2, cached2 = V.renders(
@@ -213,20 +205,22 @@ def test_ONE_bad_binding_does_not_break_the_RENDER(store, tmp_path, monkeypatch)
         return real(trigger, **kw)
 
     monkeypatch.setattr(V, "on_render", flaky)
-    payloads, cached = V.renders(store, surface="dashboard.inbox", now=NOW, base_dir=tmp_path)
+    payloads, cached = V.renders(
+        store, surface="dashboard.inbox", now=NOW, base_dir=tmp_path
+    )
     assert payloads == []
     assert cached and "raised" in cached[0]["reason"]
 
 
-# ── it is NOT a poll ──
-
-
 def test_NO_background_loop_polls_this_kind():
     """🔴 R10's whole point, asserted. A `view` trigger must cost nothing when nobody is looking; a
-    poll loop would reintroduce the 1440-run-dirs-a-day cost the kind exists to avoid."""
+    poll loop would reintroduce the 1440-run-dirs-a-day cost the kind exists to avoid.
+    """
     import inspect
 
-    from gideon import gateway
+    from gideon.engine import gateway
 
     src = inspect.getsource(gateway)
-    assert "pull_on_view" not in src, "the view kind must be render-driven, never polled"
+    assert (
+        "pull_on_view" not in src
+    ), "the view kind must be render-driven, never polled"

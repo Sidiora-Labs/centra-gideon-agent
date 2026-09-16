@@ -44,11 +44,7 @@ import time
 
 import pytest
 
-from gideon import security as S
-
-# ── the oracle: `redact_credentials` exactly as it stood before #2637 ──
-# Kept verbatim rather than described. A prose claim of equivalence is what let the cost sit here
-# unnoticed; an executable one cannot drift from the thing it certifies.
+from gideon.security import security as S
 
 _PRE_2637_URL_USERINFO_RE = re.compile(
     r"(?P<scheme>[A-Za-z][A-Za-z0-9+.\-]*://)(?P<userinfo>[^/?#\s@]+)@"
@@ -81,9 +77,6 @@ def _pre_2637_redact_credentials(text: str) -> tuple[str, list[str]]:
     return result, warnings
 
 
-# ── the corpus ──
-
-#: Real credential shapes. If the rewrite changed WHICH spans are masked, these fail first.
 CREDENTIALS = [
     "https://user:s3cr3t@github.com/acme/repo.git",
     "ssh://deploy:pa55@host:22/repo",
@@ -101,14 +94,13 @@ CREDENTIALS = [
     "client_secret: swordfish99",
 ]
 
-#: Near-misses. A rule that fired on these would make every log worse, so they pin the other edge.
 NEAR_MISSES = [
     "mail alice@example.com about it",
     "git@github.com:owner/repo.git",
     "https://api.example.com/x?to=a@b.com",
     "https://github.com/acme/repo.git",
     "see docs at https://example.com/a/b#frag",
-    "1://user@host",  # no letter starts the run, so no scheme, so no match
+    "1://user@host",
     "://user@host",
     "-://user@host",
     ".://user@host",
@@ -117,11 +109,12 @@ NEAR_MISSES = [
     "bearer x",
 ]
 
-#: Long innocuous runs — the shapes this defect actually fired on. Each is preserved VERBATIM
-#: today, which is exactly why a length cap was the wrong fix.
 LONG_INNOCUOUS = [
     "".join(random.Random(1).choice(string.hexdigits.lower()) for _ in range(4096)),
-    "".join(random.Random(2).choice(string.ascii_letters + string.digits) for _ in range(4096)),
+    "".join(
+        random.Random(2).choice(string.ascii_letters + string.digits)
+        for _ in range(4096)
+    ),
     "data:image/png;base64," + "iVBORw0KGgoAAAANSUhEUg" * 120,
     "a" * 2048 + "://" + "b" * 2048,
     "x" * 3000 + "://user@host",
@@ -129,7 +122,6 @@ LONG_INNOCUOUS = [
     "-" * 1000 + "." * 1000 + "+" * 1000,
 ]
 
-#: Structural adversaries: the boundaries the backward walk has to land on exactly.
 ADVERSARIAL = [
     "",
     " ",
@@ -141,10 +133,6 @@ ADVERSARIAL = [
     "a+b://u@h",
     "1abc://user@h",
     "x1://user@h",
-    # A `:` immediately before the scheme. These are the cases that tell whether the backward walk
-    # stops where the old character class stopped: `:` is not a scheme character, so the run is
-    # `y`, not `x:y`, and the warning names `y`. Added after a mutation that put `:` into
-    # `_SCHEME_CHARS` was caught only by the structural pin and not by this corpus.
     "x:y://u@h",
     "1:2://u@h",
     "http:://u@h",
@@ -157,7 +145,6 @@ ADVERSARIAL = [
     "s://" + "a" * 100 + "@h",
 ]
 
-#: Unicode, including the separators a naive character walk gets wrong.
 UNICODE = [
     "héllo://üser@host/ünicode",
     "日本語://ユーザ@host",
@@ -172,7 +159,16 @@ UNICODE = [
 def _mixed_document(n: int) -> str:
     """A realistic mixed document: prose, URLs, hashes, and real credentials interleaved."""
     rnd = random.Random(99)
-    words = ["deploy", "gateway", "returned", "409", "conflict", "session", "resume", "lock"]
+    words = [
+        "deploy",
+        "gateway",
+        "returned",
+        "409",
+        "conflict",
+        "session",
+        "resume",
+        "lock",
+    ]
     parts: list[str] = []
     size = 0
     i = 0
@@ -181,9 +177,13 @@ def _mixed_document(n: int) -> str:
         if i % 17 == 0:
             chunk = f"https://api.example.com/v1/runs/{i}?trace=abc"
         elif i % 23 == 0:
-            chunk = "sk-ant-api03-" + "".join(rnd.choice(string.ascii_letters) for _ in range(30))
+            chunk = "sk-ant-api03-" + "".join(
+                rnd.choice(string.ascii_letters) for _ in range(30)
+            )
         elif i % 13 == 0:
-            chunk = "sha256:" + "".join(rnd.choice("0123456789abcdef") for _ in range(64))
+            chunk = "sha256:" + "".join(
+                rnd.choice("0123456789abcdef") for _ in range(64)
+            )
         elif i % 29 == 0:
             chunk = "https://user:hunter2@git.example.com/acme/repo.git"
         else:
@@ -199,7 +199,9 @@ CORPUS = CREDENTIALS + NEAR_MISSES + LONG_INNOCUOUS + ADVERSARIAL + UNICODE
 class TestTheOutputIsByteIdentical:
     """Any input where the new implementation differs is a defect in the change, not a fix."""
 
-    @pytest.mark.parametrize("text", CORPUS, ids=lambda t: (t[:32] or "empty").replace("\n", "|"))
+    @pytest.mark.parametrize(
+        "text", CORPUS, ids=lambda t: (t[:32] or "empty").replace("\n", "|")
+    )
     def test_the_corpus_redacts_exactly_as_before(self, text):
         assert S.redact_credentials(text) == _pre_2637_redact_credentials(text)
 
@@ -210,9 +212,12 @@ class TestTheOutputIsByteIdentical:
 
     def test_the_url_pre_pass_alone_is_identical_too(self):
         """`redact_url_userinfo` is public — a caller that only handles URLs uses it directly, so
-        its own return value is part of the contract, not just its contribution downstream."""
+        its own return value is part of the contract, not just its contribution downstream.
+        """
         for text in CORPUS:
-            assert S.redact_url_userinfo(text) == _pre_2637_redact_url_userinfo(text), text[:60]
+            assert S.redact_url_userinfo(text) == _pre_2637_redact_url_userinfo(
+                text
+            ), text[:60]
 
     def test_exhaustive_over_the_characters_that_decide_a_match(self):
         """Every string up to length 5 over the alphabet the rule actually branches on.
@@ -225,7 +230,9 @@ class TestTheOutputIsByteIdentical:
         for n in range(6):
             for tup in itertools.product(alphabet, repeat=n):
                 text = "".join(tup)
-                assert S.redact_credentials(text) == _pre_2637_redact_credentials(text), text
+                assert S.redact_credentials(text) == _pre_2637_redact_credentials(
+                    text
+                ), text
                 checked += 1
         assert checked == sum(len(alphabet) ** n for n in range(6))
 
@@ -249,7 +256,9 @@ class TestTheOutputIsByteIdentical:
         rnd = random.Random(20260907)
         for _ in range(4000):
             text = "".join(rnd.choice(pieces) for _ in range(rnd.randint(0, 12)))
-            assert S.redact_credentials(text) == _pre_2637_redact_credentials(text), repr(text)
+            assert S.redact_credentials(text) == _pre_2637_redact_credentials(
+                text
+            ), repr(text)
 
 
 class TestTheEquivalenceRestsOnTwoFacts:
@@ -272,7 +281,8 @@ class TestTheEquivalenceRestsOnTwoFacts:
 
     def test_the_scheme_class_and_the_pattern_agree(self):
         """`_SCHEME_CHARS` is a `str` for `rstrip` and the old rule was a character class. A
-        divergence between them is the one way the backward walk can find the wrong run start."""
+        divergence between them is the one way the backward walk can find the wrong run start.
+        """
         old_class = re.compile(r"[A-Za-z0-9+.\-]")
         for ch in S._SCHEME_CHARS:
             assert old_class.fullmatch(ch), ch
@@ -282,7 +292,9 @@ class TestTheEquivalenceRestsOnTwoFacts:
 
     def test_the_tag_is_still_unmatchable_by_construction(self):
         assert " " in S._URL_USERINFO_TAG
-        assert not S._URL_USERINFO_CORE_RE.search(f"https://{S._URL_USERINFO_TAG}@host/x")
+        assert not S._URL_USERINFO_CORE_RE.search(
+            f"https://{S._URL_USERINFO_TAG}@host/x"
+        )
 
 
 class TestTheCostTracksNothingQuadratic:
@@ -296,7 +308,9 @@ class TestTheCostTracksNothingQuadratic:
     @staticmethod
     def _unbroken(n: int) -> str:
         rnd = random.Random(1234)
-        return "".join(rnd.choice(string.ascii_letters + string.digits) for _ in range(n))
+        return "".join(
+            rnd.choice(string.ascii_letters + string.digits) for _ in range(n)
+        )
 
     def test_the_fixture_really_is_one_unbroken_run(self):
         """Vacuity floor. A token containing `/` or `_` breaks into short scheme runs and costs
@@ -306,7 +320,9 @@ class TestTheCostTracksNothingQuadratic:
         """
         token = self._unbroken(8192)
         assert len(token) == 8192
-        assert not set(token) - set(S._SCHEME_CHARS), "the fixture is not one unbroken scheme run"
+        assert not set(token) - set(
+            S._SCHEME_CHARS
+        ), "the fixture is not one unbroken scheme run"
 
     def test_a_quarter_megabyte_single_token_is_bounded(self):
         """A coarse floor, not a benchmark. This shape cost 30.475s before; it now costs ~0.025s.
@@ -316,7 +332,9 @@ class TestTheCostTracksNothingQuadratic:
         started = time.perf_counter()
         out, warnings = S.redact_credentials(token)
         elapsed = time.perf_counter() - started
-        assert out == token and warnings == [], "an innocuous token must survive verbatim"
+        assert (
+            out == token and warnings == []
+        ), "an innocuous token must survive verbatim"
         assert elapsed < 3.0, f"256 KB of one unbroken token took {elapsed:.2f}s"
 
     def test_quadrupling_the_run_does_not_multiply_the_cost_by_sixteen(self):
@@ -336,34 +354,13 @@ class TestTheCostTracksNothingQuadratic:
         assert ratio < 8.0, f"cost grew ×{ratio:.1f} for ×4 input — that is not linear"
 
 
-# ── #2717: the per-match rebuild ────────────────────────────────────────────────────────────────
-#
-# Pass 1 used to be `finditer` with `result = result.replace(matched, tag, 1)` INSIDE the loop —
-# one fresh copy of the whole document per match, O(matches x length). On a 1 MB document holding
-# 23,831 credentials that loop was 1.318s of 1.367s total, and `acp/translate.py` calls this 5+
-# times per agent message, so a leaked env dump cost seconds on a live turn path.
-#
-# 🪤 It was NOT a drop-in, which is why #2716 left it alone. `str.replace(matched, tag, 1)`
-# rewrites the LEFTMOST occurrence of the matched TEXT, not the occurrence the scan found — so
-# replacing the loop with a span splice is a behaviour question before it is an optimisation, and
-# it needed its own equivalence argument rather than riding on #2716's.
-#
-# `_pre_2637_redact_credentials` above is the reference for BOTH fixes: it predates each, so every
-# byte-identity test in this file already covers this change. These add the shape those tests do
-# not reach — the same credential appearing more than once, which is exactly where leftmost and
-# found could diverge.
-
-#: Documents where a credential repeats. The reason the old loop was not provably correct.
 REPEATED = [
     "AKIAIOSFODNN7EXAMPLE AKIAIOSFODNN7EXAMPLE",
     "key=AKIAIOSFODNN7EXAMPLE and again key=AKIAIOSFODNN7EXAMPLE",
     "AKIAIOSFODNN7EXAMPLE ASIA1234567890123456 AKIAIOSFODNN7EXAMPLE",
     "first AKIAAAAAAAAAAAAAAAAA middle AKIAAAAAAAAAAAAAAAAA last AKIAAAAAAAAAAAAAAAAA",
-    # A repeat whose copies are separated by ANOTHER credential's tag-to-be.
     "sk-ant-api03-" + "z" * 30 + " AKIAZZZZZZZZZZZZZZZZ sk-ant-api03-" + "z" * 30,
-    # Adjacent, no separator at all.
     "AKIAQQQQQQQQQQQQQQQQAKIAQQQQQQQQQQQQQQQQ",
-    # The same credential inside a URL and again bare.
     "https://u:hunter2@h/x AKIAWWWWWWWWWWWWWWWW https://u:hunter2@h/x AKIAWWWWWWWWWWWWWWWW",
 ]
 
@@ -392,7 +389,9 @@ class TestRepeatedCredentialsRedactIdentically:
         testing nothing about the leftmost-vs-found question it exists for."""
         for text in REPEATED:
             spans = [m.group() for m in S._CREDENTIAL_PATTERNS.finditer(text)]
-            assert len(spans) > len(set(spans)), f"no credential repeats in {text[:48]!r}"
+            assert len(spans) > len(
+                set(spans)
+            ), f"no credential repeats in {text[:48]!r}"
 
 
 class TestTheSpliceIsEquivalentUnderFuzzing:
@@ -436,12 +435,13 @@ class TestTheSpliceIsEquivalentUnderFuzzing:
             parts: list[str] = []
             for _ in range(rnd.randint(1, 9)):
                 piece = rnd.choice(pool)
-                # Repeat something already present, often — that is the shape under test.
                 if parts and rnd.random() < 0.35:
                     piece = rnd.choice(parts)
                 parts.append(piece)
             text = "".join(parts)
-            assert S.redact_credentials(text) == _pre_2637_redact_credentials(text), repr(text)
+            assert S.redact_credentials(text) == _pre_2637_redact_credentials(
+                text
+            ), repr(text)
 
     def test_the_generator_really_produces_repeats_and_matches(self):
         """Vacuity floor on the fuzz: a generator emitting no credentials, or no repeats, would
@@ -462,7 +462,9 @@ class TestTheSpliceIsEquivalentUnderFuzzing:
                 with_match += 1
             if len(spans) > len(set(spans)):
                 repeats += 1
-        assert with_match > 200, f"only {with_match}/400 generated documents held a credential"
+        assert (
+            with_match > 200
+        ), f"only {with_match}/400 generated documents held a credential"
         assert repeats > 20, f"only {repeats}/400 held a REPEATED credential"
 
 
@@ -487,7 +489,9 @@ class TestManyMatchesIsNotQuadratic:
         started = time.perf_counter()
         out, warnings = S.redact_credentials(text)
         elapsed = time.perf_counter() - started
-        assert len(warnings) == 24_000, f"expected one warning per match, got {len(warnings)}"
+        assert (
+            len(warnings) == 24_000
+        ), f"expected one warning per match, got {len(warnings)}"
         assert "AKIA" not in out, "a credential survived"
         assert elapsed < 2.0, f"24k credentials took {elapsed:.2f}s"
 
@@ -503,4 +507,6 @@ class TestManyMatchesIsNotQuadratic:
             return best
 
         ratio = _cost(self._many(8000)) / max(_cost(self._many(2000)), 1e-6)
-        assert ratio < 8.0, f"cost grew x{ratio:.1f} for x4 matches — that is not linear"
+        assert (
+            ratio < 8.0
+        ), f"cost grew x{ratio:.1f} for x4 matches — that is not linear"

@@ -16,8 +16,8 @@ from unittest.mock import patch
 
 import pytest
 
-from gideon.config.loader import AppConfig
-from gideon.config.safety import SandboxConfig
+from gideon.core.config.loader import AppConfig
+from gideon.core.config.safety import SandboxConfig
 
 FIELD_NAME = "cgroup_scopes"
 
@@ -28,7 +28,7 @@ def cfg_file(tmp_path, monkeypatch):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path / "home"))
     p = tmp_path / "config.json"
     p.write_text("{}", encoding="utf-8")
-    with patch("gideon.config.loader.config_path", return_value=p):
+    with patch("gideon.core.config.loader.config_path", return_value=p):
         yield p
 
 
@@ -37,9 +37,6 @@ def _sandbox_field(name: str):
     matches = [f for f in fields(SandboxConfig) if f.name == name]
     assert matches, f"SandboxConfig declares no field named {name!r}"
     return matches[0]
-
-
-# --- the dataclass ---------------------------------------------------------------
 
 
 def test_the_cgroup_tier_defaults_off():
@@ -57,12 +54,8 @@ def test_the_field_carries_renderable_metadata():
     meta = _sandbox_field(FIELD_NAME).metadata
     assert meta.get("label", "").strip(), "cgroup_scopes has no _meta label"
     assert meta.get("help", "").strip(), "cgroup_scopes has no _meta help"
-    # The help must say the two things that decide whether to touch it at all.
     help_text = meta["help"].lower()
     assert "linux" in help_text, "the help must disclose that the tier is Linux-only"
-
-
-# --- load() ----------------------------------------------------------------------
 
 
 def test_load_reads_the_flag_from_config_json(cfg_file):
@@ -128,15 +121,21 @@ def test_garbage_does_not_crash_load_or_enable_the_tier(cfg_file, garbage):
     """
     import json
 
-    cfg_file.write_text(json.dumps({"sandbox": {"cgroup_scopes": garbage}}), encoding="utf-8")
+    cfg_file.write_text(
+        json.dumps({"sandbox": {"cgroup_scopes": garbage}}), encoding="utf-8"
+    )
 
-    loaded = AppConfig.load()  # must not raise
+    loaded = AppConfig.load()
 
-    assert loaded.sandbox.cgroup_scopes is False, f"{garbage!r} silently enabled the cgroup tier"
+    assert (
+        loaded.sandbox.cgroup_scopes is False
+    ), f"{garbage!r} silently enabled the cgroup tier"
 
 
 @pytest.mark.parametrize("truthy_string", ["true", "True", "yes", "on", "1"])
-def test_a_truthy_STRING_is_rejected_rather_than_honoured(cfg_file, caplog, truthy_string):
+def test_a_truthy_STRING_is_rejected_rather_than_honoured(
+    cfg_file, caplog, truthy_string
+):
     """Measured behaviour: only a real JSON boolean opts in — ``"true"`` does NOT.
 
     Not the obvious outcome, so it is pinned here. The schema layer is generated from
@@ -149,14 +148,17 @@ def test_a_truthy_STRING_is_rejected_rather_than_honoured(cfg_file, caplog, trut
     import json
     import logging
 
-    cfg_file.write_text(json.dumps({"sandbox": {"cgroup_scopes": truthy_string}}), encoding="utf-8")
+    cfg_file.write_text(
+        json.dumps({"sandbox": {"cgroup_scopes": truthy_string}}), encoding="utf-8"
+    )
 
-    with caplog.at_level(logging.WARNING, logger="gideon.config.loader"):
+    with caplog.at_level(logging.WARNING, logger="gideon.core.config.loader"):
         loaded = AppConfig.load()
 
     assert loaded.sandbox.cgroup_scopes is False
     assert any(
-        "sandbox.cgroup_scopes" in r.getMessage() and "expected boolean" in r.getMessage()
+        "sandbox.cgroup_scopes" in r.getMessage()
+        and "expected boolean" in r.getMessage()
         for r in caplog.records
     ), "a non-boolean was dropped with no warning — the user has no way to learn why"
 
@@ -168,14 +170,11 @@ def test_the_derived_schema_types_the_flag_as_a_boolean():
     would accept any junk silently, and the garbage sweep above would then be passing
     for the wrong reason (``_expose_flag`` alone) without anyone noticing.
     """
-    from gideon.config.schema import JSON_SCHEMA
+    from gideon.core.config.schema import JSON_SCHEMA
 
     sandbox_props = JSON_SCHEMA["properties"]["sandbox"]["properties"]
     assert FIELD_NAME in sandbox_props, "the schema walker never reached cgroup_scopes"
     assert sandbox_props[FIELD_NAME]["type"] == "boolean"
-
-
-# --- to_dict() -------------------------------------------------------------------
 
 
 def test_to_dict_carries_the_flag():
@@ -185,12 +184,9 @@ def test_to_dict_carries_the_flag():
     assert sandbox[FIELD_NAME] is False
 
 
-# --- the PATCH write path --------------------------------------------------------
-
-
 def test_the_flag_is_patch_editable():
     """Absent from ``_EDITABLE_CONFIG`` ⇒ unreachable from the API or any UI."""
-    from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+    from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
     assert _EDITABLE_CONFIG.get("sandbox.cgroup_scopes") == {"type": "bool"}
 
@@ -203,7 +199,7 @@ def test_no_sandbox_allowlist_key_is_dead():
     there looking wired. Derive the key from the field object instead of retyping it,
     and check the whole section so this guard cannot pass on an empty match set.
     """
-    from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+    from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
     declared = {f.name for f in fields(SandboxConfig)}
     keys = [k for k in _EDITABLE_CONFIG if k.startswith("sandbox.")]
@@ -212,6 +208,5 @@ def test_no_sandbox_allowlist_key_is_dead():
     dead = [k for k in keys if k.split(".", 1)[1] not in declared]
     assert not dead, f"_EDITABLE_CONFIG keys naming no SandboxConfig field: {dead}"
 
-    # ...and the key for THIS field is derived from the field name, not retyped.
     derived = f"sandbox.{_sandbox_field(FIELD_NAME).name}"
     assert derived in _EDITABLE_CONFIG, f"{derived} is not PATCH-editable"

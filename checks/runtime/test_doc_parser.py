@@ -7,12 +7,7 @@ import zipfile
 
 import pytest
 
-from gideon.doc_parser import (
-    extract_text,
-    is_parseable_document,
-)
-
-# ── Helpers ──
+from gideon.cognition.doc_parser import extract_text, is_parseable_document
 
 
 def _make_docx(paragraphs: list[str]) -> str:
@@ -50,9 +45,6 @@ def _make_pptx(slides: list[list[str]]) -> str:
     return path
 
 
-# ── is_parseable_document ──
-
-
 class TestIsParseableDocument:
     def test_docx_mimetype(self):
         mt = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -82,9 +74,6 @@ class TestIsParseableDocument:
 
     def test_empty_not_parseable(self):
         assert not is_parseable_document()
-
-
-# ── DOCX extraction ──
 
 
 class TestExtractDocx:
@@ -134,9 +123,6 @@ class TestExtractDocx:
             os.unlink(path)
 
 
-# ── PPTX extraction ──
-
-
 class TestExtractPptx:
     def test_single_slide(self):
         path = _make_pptx([["Title", "Body text"]])
@@ -171,9 +157,6 @@ class TestExtractPptx:
             os.unlink(path)
 
 
-# ── PDF extraction ──
-
-
 class TestExtractPdf:
     def test_simple_pdf_text(self):
         """A minimal PDF with uncompressed text."""
@@ -205,9 +188,6 @@ class TestExtractPdf:
             assert result == ""
         finally:
             os.unlink(path)
-
-
-# ── Error handling ──
 
 
 class TestErrorHandling:
@@ -244,19 +224,15 @@ class TestErrorHandling:
         assert "Refusing to read sensitive path" in caplog.text
 
 
-# ── Decompression bomb guards ──
-
-
 class TestDecompressionGuards:
     def test_oversized_zip_entry_skipped(self, caplog):
         """A ZIP entry whose actual decompressed content exceeds the limit is skipped."""
         from unittest.mock import patch
 
-        import gideon.doc_parser as dp
+        import gideon.cognition.doc_parser as dp
 
         path = _make_docx(["Normal text"])
         try:
-            # Temporarily lower the limit so the real entry exceeds it
             with patch.object(dp, "_MAX_ZIP_ENTRY", 5):
                 with caplog.at_level(logging.WARNING):
                     result = extract_text(path, filename="bomb.docx")
@@ -269,10 +245,8 @@ class TestDecompressionGuards:
         """_safe_decompress raises on output exceeding max_size."""
         import zlib as _zlib
 
-        from gideon.doc_parser import _safe_decompress
+        from gideon.cognition.doc_parser import _safe_decompress
 
-        # Compress 1 MB of zeros
         big = _zlib.compress(b"\x00" * (1024 * 1024))
-        # Allow only 100 bytes of output
         with pytest.raises(ValueError, match="exceeds size limit"):
             _safe_decompress(big, max_size=100)

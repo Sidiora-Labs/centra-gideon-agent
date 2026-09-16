@@ -24,20 +24,16 @@ import importlib
 
 import pytest
 
-import gideon.mcp_core as core
+import gideon.integrations.mcp_core as core
 
-# The category modules the aggregation root composes, and the providers they back.
 _CATEGORY_MODULES = [
-    "gideon.mcp_artifacts",
-    "gideon.mcp_prompts",
-    "gideon.mcp_memory",
-    "gideon.mcp_subagents",
-    "gideon.mcp_workflows",
-    "gideon.mcp_automation",
-    # Desktop computer use (`DCU-4`). Not named `mcp_computer_use` because the module is also
-    # `DCU-4`'s tool-surface DECLARATION, which `computer_use/service.py` reads — it lives
-    # inside the package whose chain it declares rather than beside the other adapters.
-    "gideon.computer_use.tools",
+    "gideon.integrations.mcp_artifacts",
+    "gideon.integrations.mcp_prompts",
+    "gideon.integrations.mcp_memory",
+    "gideon.integrations.mcp_subagents",
+    "gideon.integrations.mcp_workflows",
+    "gideon.integrations.mcp_automation",
+    "gideon.integrations.computer_use.tools",
 ]
 _CATEGORY_PROVIDERS = {
     "gideon-core",
@@ -49,18 +45,8 @@ _CATEGORY_PROVIDERS = {
     "gideon-automation",
     "gideon-computer-use",
 }
-# The cross-cutting tools that stay in residual core (not a single entity category).
-# skill_invoke + skill_search + skill_remember are the skill-library-spanning trio
-# (load one / find any / capture one) — all live in core since they span the whole
-# skill library rather than one entity category. get_context is the routed-context
-# provider (PLATFORM-LEGIBILITY §7): it assembles a whole-project manifest spanning
-# rules + memory + knowledge + skills, so it too belongs in core rather than any one
-# entity category.
 _RESIDUAL_CORE_TOOLS = {
     "skill_invoke",
-    # skill_resource (WF2LEA-10) is skill_invoke's deeper tier — it reads one file the
-    # skill declared beside its SKILL.md. Same library-spanning residence as the trio
-    # below: it owns no entity category, it loads part of a skill.
     "skill_resource",
     "skill_search",
     "skill_remember",
@@ -70,38 +56,11 @@ _RESIDUAL_CORE_TOOLS = {
     "notify_attachment",
     "loop_nudge_stop",
     "get_context",
-    # project_context_review (WF2LEA-12) spans a project's instructions + context files +
-    # skills — three entity categories, not one — so like get_context it stays in residual
-    # core rather than any single category module.
     "project_context_review",
-    # dashboard_tile_propose (AMBIENT-SURFACES §1.3) proposes a saved artifact onto the
-    # composable home. It spans the artifact store + the dashboard-views registry rather
-    # than owning either, so like get_context it is a cross-cutting core tool, not an
-    # artifacts-category tool.
     "dashboard_tile_propose",
-    # template_save_from_session (WF2LEA-7) reads the SESSION's just-carried-out steps,
-    # checks the WORKFLOW library for an already-surfaced definition, and files into the
-    # LEARNING proposal queue — three categories, owning none of them. Same reason
-    # get_context and project_context_review sit here: a tool that spans categories in
-    # a category module would make that module the owner of things it does not own.
     "template_save_from_session",
-    # suggest_template (UNIVERSAL-PLANNING UP-R9) offers to turn a recurring CONVERSATIONAL
-    # shape into a workflow template. It is a conversation-level affordance, not a workflow
-    # entity operation: it creates nothing, reads no run or def, and its state is the
-    # per-shape anti-nag record. Naming it `workflow_*` would put it in the workflows
-    # category alongside 19 tools that all act on a def or a run, and a model reaching for
-    # "how do I start a workflow" would find a nudge helper.
     "suggest_template",
-    # skill_promote (WF2LEA-11) is the retroactive half of skill_remember: it reads a completed
-    # WORKFLOW run, files into the LEARNING proposal queue, and installs (once accepted) into the
-    # SKILL library — the same three-category span that put template_save_from_session here.
     "skill_promote",
-    # The template refiner's tool pair (WF2LEA-6). refiner_evidence READS a workflow def's run
-    # ledger; propose_template_diff files into the LEARNING proposal queue against that def —
-    # spanning the WORKFLOW and LEARNING categories while owning neither, exactly like
-    # template_save_from_session. Naming either `workflow_*` would put it in the workflows
-    # category (a 19-tool count + prefix it does not fit) and make that module own a learning
-    # proposal path it does not own.
     "refiner_evidence",
     "propose_template_diff",
 }
@@ -111,9 +70,6 @@ def _names(list_tools_fn) -> list[str]:
     return [t["name"] for t in list_tools_fn()]
 
 
-# ── Residual core ───────────────────────────────────────────────────────────
-
-
 def test_residual_core_is_exactly_the_cross_cutting_tools():
     assert set(_names(core._list_tools)) == _RESIDUAL_CORE_TOOLS
 
@@ -121,10 +77,9 @@ def test_residual_core_is_exactly_the_cross_cutting_tools():
 def test_residual_core_owns_no_category_tools():
     core_names = set(_names(core._list_tools))
     for prefix in ("artifact_", "workflow_", "memory_", "subagent_"):
-        assert not any(n.startswith(prefix) for n in core_names), f"core still owns {prefix}*"
-
-
-# ── Category modules each expose a coherent surface ───────────────────────────
+        assert not any(
+            n.startswith(prefix) for n in core_names
+        ), f"core still owns {prefix}*"
 
 
 @pytest.mark.parametrize("mod_path", _CATEGORY_MODULES)
@@ -135,12 +90,7 @@ def test_category_module_has_list_and_call(mod_path):
 
 
 def test_aggregated_modules_registered_in_root():
-    # The aggregation root must reference exactly the category modules (so a new
-    # category can't be added without wiring it into the ACP surface).
     assert set(core._AGGREGATED_CATEGORY_MODULES) == set(_CATEGORY_MODULES)
-
-
-# ── ACP aggregate completeness + no collisions ────────────────────────────────
 
 
 def test_aggregate_equals_core_plus_all_categories():
@@ -158,20 +108,22 @@ def test_aggregate_has_no_duplicate_tool_names():
 
 def test_no_tool_name_collision_between_categories():
     seen: dict[str, str] = {}
-    sources = {"gideon.mcp_core": core._list_tools}
-    sources.update({m: importlib.import_module(m)._list_tools for m in _CATEGORY_MODULES})
+    sources = {"gideon.integrations.mcp_core": core._list_tools}
+    sources.update(
+        {m: importlib.import_module(m)._list_tools for m in _CATEGORY_MODULES}
+    )
     for src, fn in sources.items():
         for n in _names(fn):
             assert n not in seen, f"{n} defined in both {seen[n]} and {src}"
             seen[n] = src
 
 
-# ── In-process registry: every tool grouped under exactly one category provider ──
-
-
 def test_in_process_catalog_matches_aggregate_and_groups_by_provider():
-    from gideon.providers.loader import load_all_extensions
-    from gideon.tool_providers.registry import list_all_tools, list_providers
+    from gideon.extensions.providers.loader import load_all_extensions
+    from gideon.integrations.tool_providers.registry import (
+        list_all_tools,
+        list_providers,
+    )
 
     load_all_extensions()
     provs = {p.name for p in list_providers()}
@@ -180,11 +132,9 @@ def test_in_process_catalog_matches_aggregate_and_groups_by_provider():
     ), f"missing category providers: {_CATEGORY_PROVIDERS - provs}"
 
     tools = asyncio.run(list_all_tools())
-    # Every tool the ACP aggregate exposes is present in the in-process catalog too.
     inproc = {t.name for t in tools}
     assert set(_names(core._aggregated_list_tools)) <= inproc
 
-    # Each category's tools are owned in-process by its own provider (not core).
     owner = {t.name: t.provider for t in tools}
     expectations = {
         "artifact_save": "gideon-artifacts",
@@ -194,10 +144,9 @@ def test_in_process_catalog_matches_aggregate_and_groups_by_provider():
         "skill_invoke": "gideon-core",
     }
     for tool, prov in expectations.items():
-        assert owner.get(tool) == prov, f"{tool} owned by {owner.get(tool)!r}, want {prov!r}"
-
-
-# ── The native chat agent must reach EVERY category (the split regression) ─────
+        assert (
+            owner.get(tool) == prov
+        ), f"{tool} owned by {owner.get(tool)!r}, want {prov!r}"
 
 
 @pytest.mark.xfail(reason="pre-existing on main (v0.1.0 baseline) — #6", strict=False)
@@ -211,33 +160,32 @@ def test_native_runtime_tool_surface_includes_all_categories():
     """
     from pathlib import Path
 
-    from gideon.agents.native.builtin_tools import NativeBuiltinToolProvider
-    from gideon.providers.loader import load_all_extensions
-    from gideon.tool_providers.base import ToolProvider
-    from gideon.tool_providers.registry import list_providers
+    from gideon.engine.agents.native.builtin_tools import NativeBuiltinToolProvider
+    from gideon.extensions.providers.loader import load_all_extensions
+    from gideon.integrations.tool_providers.base import ToolProvider
+    from gideon.integrations.tool_providers.registry import list_providers
 
     load_all_extensions()
 
-    # web_search ships as the web-tools APP now (separated out of core), so it's only in
-    # the surface when installed. Load its provider from the app dir (as the loader would
-    # for an installed app) + add it, so this test verifies the full category surface
-    # with the app present — the web-tool wiring must still reach the runtime.
     def _load_web_tools_provider() -> ToolProvider | None:
         import importlib.util
         import sys
 
-        app = Path(__file__).resolve().parents[2] / "apps" / "web-tools" / "provider.py"
+        app = Path(__file__).resolve().parents[3] / "apps" / "web-tools" / "provider.py"
         if not app.is_file():
             return None
-        spec = importlib.util.spec_from_file_location("_pclaw_app_web_tools__provider", app)
+        spec = importlib.util.spec_from_file_location(
+            "_gideon_app_web_tools__provider", app
+        )
         mod = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = mod
         spec.loader.exec_module(mod)
         return mod.create_provider({})
 
-    # Mirror _build_native_runtime's tool_providers assembly: builtin + registry + the
-    # installed web-tools app.
-    provs = [NativeBuiltinToolProvider(cwd=None, agent="x", session_key=""), *list_providers()]
+    provs = [
+        NativeBuiltinToolProvider(cwd=None, agent="x", session_key=""),
+        *list_providers(),
+    ]
     web = _load_web_tools_provider()
     if web is not None:
         provs.append(web)
@@ -246,7 +194,7 @@ def test_native_runtime_tool_surface_includes_all_categories():
         try:
             names |= {t.name for t in asyncio.run(p.list_tools())}
         except Exception:
-            pass  # an unconfigured remote provider may list nothing — fine
+            pass
     for sample in (
         "web_search",
         "subagent_run",

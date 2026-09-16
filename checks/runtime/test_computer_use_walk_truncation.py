@@ -32,8 +32,8 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.computer_use import macos_ffi
-from gideon.computer_use.types import MAX_DEPTH, MAX_ELEMENTS
+from gideon.integrations.computer_use import macos_ffi
+from gideon.integrations.computer_use.types import MAX_DEPTH, MAX_ELEMENTS
 
 
 class _Node:
@@ -73,25 +73,34 @@ def walk(monkeypatch):
         monkeypatch.setattr(macos_ffi, "_load", lambda: object())
         monkeypatch.setattr(macos_ffi, "is_process_trusted", lambda: True)
         monkeypatch.setattr(macos_ffi, "resolve_app_pid", lambda app: 4242)
-        monkeypatch.setattr(macos_ffi, "_front_window", lambda frameworks, application: root)
-        # `_attribute(frameworks, handle, "AXChildren")` then `_array_items(...)` is how the walk
-        # descends; returning the node itself and unwrapping in `_array_items` keeps the two
-        # calls honest rather than collapsing them into one fake.
-        monkeypatch.setattr(macos_ffi, "_attribute", lambda frameworks, element, name: element)
         monkeypatch.setattr(
-            macos_ffi, "_array_items", lambda frameworks, ref: list(getattr(ref, "children", []))
+            macos_ffi, "_front_window", lambda frameworks, application: root
+        )
+        monkeypatch.setattr(
+            macos_ffi, "_attribute", lambda frameworks, element, name: element
+        )
+        monkeypatch.setattr(
+            macos_ffi,
+            "_array_items",
+            lambda frameworks, ref: list(getattr(ref, "children", [])),
         )
         monkeypatch.setattr(
             macos_ffi, "_text_attribute", lambda frameworks, element, name: element.name
         )
         monkeypatch.setattr(
-            macos_ffi, "_bool_attribute", lambda frameworks, element, name, default: default
+            macos_ffi,
+            "_bool_attribute",
+            lambda frameworks, element, name, default: default,
         )
-        monkeypatch.setattr(macos_ffi, "_frame", lambda frameworks, element: (0.0, 0.0, 1.0, 1.0))
+        monkeypatch.setattr(
+            macos_ffi, "_frame", lambda frameworks, element: (0.0, 0.0, 1.0, 1.0)
+        )
         monkeypatch.setattr(macos_ffi, "_action_names", lambda frameworks, element: ())
 
         class _App:
-            def AXUIElementCreateApplication(self, pid):  # noqa: N802 - mirrors the AX symbol
+            def AXUIElementCreateApplication(
+                self, pid
+            ):  # noqa: N802 - mirrors the AX symbol
                 return object()
 
         class _FW:

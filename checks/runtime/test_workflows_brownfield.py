@@ -9,7 +9,7 @@ as a parameter, never by sleeping.
 
 from pathlib import Path
 
-from gideon.workflows.brownfield import (
+from gideon.automation.workflows.brownfield import (
     DEFAULT_TTL_SECS,
     BrownfieldCache,
     build_codebase_context,
@@ -22,11 +22,15 @@ from gideon.workflows.brownfield import (
 def _project(root: Path) -> Path:
     (root / "src" / "pkg").mkdir(parents=True)
     (root / "src" / "pkg" / "core.py").write_text("x = 1\n", encoding="utf-8")
-    (root / "tests").mkdir()
-    (root / "tests" / "test_core.py").write_text("def test(): pass\n", encoding="utf-8")
+    (root / "checks/runtime").mkdir(parents=True)
+    (root / "checks/runtime" / "test_core.py").write_text(
+        "def test(): pass\n", encoding="utf-8"
+    )
     (root / "pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8")
     (root / "Makefile").write_text("build:\n\techo hi\n", encoding="utf-8")
-    (root / "README.md").write_text("# X\n\nA tool that does the thing.\n", encoding="utf-8")
+    (root / "README.md").write_text(
+        "# X\n\nA tool that does the thing.\n", encoding="utf-8"
+    )
     (root / "node_modules").mkdir()
     (root / "node_modules" / "junk.js").write_text("//\n", encoding="utf-8")
     return root
@@ -39,12 +43,14 @@ def test_the_synthesis_reflects_the_real_project(tmp_path):
     assert "Python (pyproject.toml)" in rendered
     assert "Makefile present" in rendered
     assert "A tool that does the thing." in rendered
-    assert "src/" in rendered and "tests/" in rendered
+    assert "src/" in rendered and "checks/runtime/" in rendered
 
 
 def test_common_ignores_are_dropped(tmp_path):
     entries, _ = depth_filtered_tree(_project(tmp_path))
-    assert not any("node_modules" in e for e in entries), "dependency trees must not be walked"
+    assert not any(
+        "node_modules" in e for e in entries
+    ), "dependency trees must not be walked"
 
 
 def test_the_tree_is_depth_limited(tmp_path):
@@ -54,7 +60,9 @@ def test_the_tree_is_depth_limited(tmp_path):
     entries, _ = depth_filtered_tree(root, max_depth=2)
     assert "a/" in entries
     assert "a/b/" in entries
-    assert not any("a/b/c" in e for e in entries), "depth 2 must not reach the third level"
+    assert not any(
+        "a/b/c" in e for e in entries
+    ), "depth 2 must not reach the third level"
 
 
 def test_a_non_directory_is_not_a_project(tmp_path):
@@ -63,17 +71,14 @@ def test_a_non_directory_is_not_a_project(tmp_path):
 
 
 def test_the_cache_hits_on_the_same_tree_hash(tmp_path):
-    # Cache lives OUTSIDE the scanned project, mirroring production (config_dir vs workspace) — a
-    # cache file written into the tree would itself change the tree-hash.
     project = _project(tmp_path / "proj")
     cache = BrownfieldCache(tmp_path / "cache.json")
     first = codebase_context("proj-1", project, cache=cache, now=1000.0)
     assert "A tool that does the thing." in first
 
-    # Rewriting the README CONTENT (same filename) leaves the tree listing unchanged, so the
-    # tree-hash is unchanged and the call returns the cached render — a re-read would pick up the
-    # new content, a hit keeps the old. That is exactly the README read the cache exists to skip.
-    (project / "README.md").write_text("# X\n\nCompletely different now.\n", encoding="utf-8")
+    (project / "README.md").write_text(
+        "# X\n\nCompletely different now.\n", encoding="utf-8"
+    )
     second = codebase_context("proj-1", project, cache=cache, now=1000.0)
     assert second == first
     assert "A tool that does the thing." in second
@@ -84,8 +89,6 @@ def test_the_cache_misses_when_the_tree_changes(tmp_path):
     cache = BrownfieldCache(tmp_path / "cache.json")
     codebase_context("proj-1", project, cache=cache, now=1000.0)
 
-    # Adding a file within the depth-limited listing changes the tree-hash → a re-synthesis, not the
-    # stale entry. `src/` is walked, so a file directly under it appears in the depth-2 tree.
     (project / "src" / "new_module.py").write_text("y = 2\n", encoding="utf-8")
     refreshed = codebase_context("proj-1", project, cache=cache, now=1000.0)
     assert "new_module.py" in refreshed
@@ -117,7 +120,6 @@ def test_the_tree_hash_changes_with_the_tree(tmp_path):
 def test_the_cache_survives_a_corrupt_file(tmp_path):
     cache = BrownfieldCache(tmp_path / "cache.json")
     (tmp_path / "cache.json").write_text("{not json", encoding="utf-8")
-    # A corrupt cache reads as empty (a miss), never raises.
     assert cache.get("proj-1", "h", now=1.0) is None
     cache.put("proj-1", "h", "RENDER", now=1.0)
     assert cache.get("proj-1", "h", now=2.0) == "RENDER"

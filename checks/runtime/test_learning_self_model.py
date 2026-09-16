@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.learning.self_model import (
+from gideon.cognition.learning.self_model import (
     CAPS,
     FACETS,
     KEY_PREFIX,
@@ -71,9 +71,6 @@ def _entries(count, *, facet="principle", confidence=0.8, seen=5):
     ]
 
 
-# ── the measured leak this session closed ──
-
-
 def test_the_selfmodel_prefix_is_excluded_from_fact_blocks():
     """THE regression.
 
@@ -81,14 +78,14 @@ def test_the_selfmodel_prefix_is_excluded_from_fact_blocks():
     clause, so a principle about the HARNESS's working patterns would render in the user-fact
     block. It is a statement about the system, not the user; only §2.6's snapshot may inject it.
     """
-    from gideon.vector_memory import _NON_FACT_KEY_CLAUSE
+    from gideon.cognition.vector_memory import _NON_FACT_KEY_CLAUSE
 
     assert "user.selfmodel.%" in _NON_FACT_KEY_CLAUSE
 
 
 def test_the_prefix_sits_under_an_already_allowlisted_root():
     """`user.*` was already in `_BUILTIN_PREFIXES`; measuring saved inventing an allowlist entry."""
-    from gideon.vector_memory import _BUILTIN_PREFIXES
+    from gideon.cognition.vector_memory import _BUILTIN_PREFIXES
 
     assert any(KEY_PREFIX.startswith(p.rstrip("*")) for p in _BUILTIN_PREFIXES)
 
@@ -96,7 +93,7 @@ def test_the_prefix_sits_under_an_already_allowlisted_root():
 def test_the_prefix_is_adjacent_to_the_existing_persona_seam():
     """§2.6 puts the self-model beside `user.persona.*`, which is the same KIND of thing:
     harness-internal, agent-facing, never a user fact."""
-    from gideon.vector_memory import _NON_FACT_KEY_CLAUSE
+    from gideon.cognition.vector_memory import _NON_FACT_KEY_CLAUSE
 
     assert "user.persona.%" in _NON_FACT_KEY_CLAUSE
     assert KEY_PREFIX == "user.selfmodel"
@@ -105,9 +102,6 @@ def test_the_prefix_is_adjacent_to_the_existing_persona_seam():
 def test_an_entry_renders_a_namespaced_memory_key():
     entry = Entry(facet="principle", key="edit-over-rewrite", body="x")
     assert entry.memory_key == "user.selfmodel.principle.edit-over-rewrite"
-
-
-# ── reinforcement: both thresholds, as a conjunction ──
 
 
 def test_the_thresholds_are_a_conjunction_not_an_either():
@@ -131,7 +125,10 @@ def test_a_correction_outweighs_an_acceptance():
 
     A symmetric scale would let a habit that fails a third of the time still promote.
     """
-    assert abs(REACTION_WEIGHT[Reaction.CORRECTED.value]) > REACTION_WEIGHT[Reaction.ACCEPTED.value]
+    assert (
+        abs(REACTION_WEIGHT[Reaction.CORRECTED.value])
+        > REACTION_WEIGHT[Reaction.ACCEPTED.value]
+    )
 
 
 def test_an_acceptance_after_a_FAILED_turn_is_not_reinforcement():
@@ -176,9 +173,6 @@ def test_the_documented_thresholds_match_the_plan():
     assert MIN_CONFIDENCE == pytest.approx(0.72)
 
 
-# ── bounded by construction ──
-
-
 def test_every_facet_has_a_cap():
     """Structurally-impossible bloat only holds if every tier is actually bounded."""
     for facet in FACETS:
@@ -221,7 +215,7 @@ def test_a_newcomer_must_BEAT_the_weakest_not_tie_it():
     principles forever."""
     plan = plan_promotion(
         facet="principle",
-        reinforcement=_reinforced(*[Reaction.ACCEPTED.value] * 4),  # confidence 1.0
+        reinforcement=_reinforced(*[Reaction.ACCEPTED.value] * 4),
         current=_entries(CAPS["principle"], confidence=1.0),
     )
     assert not plan.allowed
@@ -257,7 +251,9 @@ def test_the_weakest_entry_is_chosen_by_confidence_then_uses_then_age():
 
 def test_an_unpromotable_pattern_is_refused_with_its_numbers():
     plan = plan_promotion(
-        facet="principle", reinforcement=_reinforced(Reaction.ACCEPTED.value), current=[]
+        facet="principle",
+        reinforcement=_reinforced(Reaction.ACCEPTED.value),
+        current=[],
     )
     assert not plan.allowed
     assert "needs" in plan.reason and "2" in plan.reason
@@ -265,7 +261,9 @@ def test_an_unpromotable_pattern_is_refused_with_its_numbers():
 
 def test_an_unknown_facet_is_refused():
     plan = plan_promotion(
-        facet="vibes", reinforcement=_reinforced(*[Reaction.ACCEPTED.value] * 4), current=[]
+        facet="vibes",
+        reinforcement=_reinforced(*[Reaction.ACCEPTED.value] * 4),
+        current=[],
     )
     assert not plan.allowed
     assert "unknown facet" in plan.reason
@@ -275,14 +273,17 @@ def test_caps_are_per_facet_so_tiers_do_not_compete():
     """A full principle tier must not block a theory."""
     current = _entries(CAPS["principle"], facet="principle")
     plan = plan_promotion(
-        facet="theory", reinforcement=_reinforced(*[Reaction.ACCEPTED.value] * 3), current=current
+        facet="theory",
+        reinforcement=_reinforced(*[Reaction.ACCEPTED.value] * 3),
+        current=current,
     )
     assert plan.allowed and plan.displaces == ""
 
 
 def test_over_cap_catches_hand_edited_data():
     """The caps are structural for anything via `plan_promotion`, but a file on disk can say
-    anything — and a self-model holding twelve principles would blow the injection budget."""
+    anything — and a self-model holding twelve principles would blow the injection budget.
+    """
     assert over_cap(_entries(9)) == {"principle": 3}
     assert over_cap(_entries(CAPS["principle"])) == {}
     assert over_cap([]) == {}
@@ -291,7 +292,10 @@ def test_over_cap_catches_hand_edited_data():
 def test_the_retrospection_ring_trims_to_cap_keeping_the_newest():
     ring = [
         Entry(
-            facet="retrospection", key=f"r{i}", body=f"obs {i}", last_seen_at=f"2024-01-{i + 1:02d}"
+            facet="retrospection",
+            key=f"r{i}",
+            body=f"obs {i}",
+            last_seen_at=f"2024-01-{i + 1:02d}",
         )
         for i in range(12)
     ]
@@ -301,13 +305,12 @@ def test_the_retrospection_ring_trims_to_cap_keeping_the_newest():
 
 
 def test_trimming_the_ring_leaves_other_facets_alone():
-    mixed = _entries(3) + [Entry(facet="retrospection", key=f"r{i}", body="x") for i in range(20)]
+    mixed = _entries(3) + [
+        Entry(facet="retrospection", key=f"r{i}", body="x") for i in range(20)
+    ]
     kept = trim_ring(mixed)
     assert len([e for e in kept if e.facet == "principle"]) == 3
     assert len([e for e in kept if e.facet == "retrospection"]) == CAPS["retrospection"]
-
-
-# ── propose, never install ──
 
 
 def test_a_refused_plan_yields_no_proposal_at_all():
@@ -316,9 +319,14 @@ def test_a_refused_plan_yields_no_proposal_at_all():
     Returning an un-promotable proposal would let a caller file one by ignoring the plan.
     """
     refused = plan_promotion(
-        facet="principle", reinforcement=_reinforced(Reaction.ACCEPTED.value), current=[]
+        facet="principle",
+        reinforcement=_reinforced(Reaction.ACCEPTED.value),
+        current=[],
     )
-    assert build_proposal(facet="principle", reinforcement=_reinforced(), plan=refused) is None
+    assert (
+        build_proposal(facet="principle", reinforcement=_reinforced(), plan=refused)
+        is None
+    )
 
 
 def test_a_promoted_pattern_becomes_a_lesson_shaped_proposal():
@@ -328,7 +336,7 @@ def test_a_promoted_pattern_becomes_a_lesson_shaped_proposal():
     fingerprint dedup, and the decision store — a new kind would be a second review surface for
     one shape of thing.
     """
-    from gideon.learning.proposals import Kind
+    from gideon.cognition.learning.proposals import Kind
 
     record = _reinforced(*[Reaction.ACCEPTED.value] * 4)
     plan = plan_promotion(facet="principle", reinforcement=record, current=[])
@@ -350,11 +358,15 @@ def test_a_proposal_is_marked_as_observed_rather_than_corrected():
 
 def test_a_proposal_carries_its_reinforcement_evidence():
     """ "The system decided this about itself" is not an auditable explanation."""
-    record = _reinforced(Reaction.ACCEPTED.value, Reaction.ACCEPTED.value, Reaction.ACCEPTED.value)
+    record = _reinforced(
+        Reaction.ACCEPTED.value, Reaction.ACCEPTED.value, Reaction.ACCEPTED.value
+    )
     plan = plan_promotion(facet="principle", reinforcement=record, current=[])
     proposal = build_proposal(facet="principle", reinforcement=record, plan=plan)
     assert proposal is not None
-    assert proposal.evidence and all("after success" in line for line in proposal.evidence)
+    assert proposal.evidence and all(
+        "after success" in line for line in proposal.evidence
+    )
     assert proposal.seen_count == 3
 
 
@@ -371,7 +383,9 @@ def test_a_displacing_proposal_names_who_it_would_displace():
     happens."""
     record = _reinforced(*[Reaction.ACCEPTED.value] * 4)
     plan = plan_promotion(
-        facet="principle", reinforcement=record, current=_entries(CAPS["principle"], confidence=0.5)
+        facet="principle",
+        reinforcement=record,
+        current=_entries(CAPS["principle"], confidence=0.5),
     )
     proposal = build_proposal(facet="principle", reinforcement=record, plan=plan)
     assert proposal is not None and proposal.displaces == "p0"
@@ -380,7 +394,7 @@ def test_a_displacing_proposal_names_who_it_would_displace():
 def test_the_fingerprint_uses_the_shared_proposal_hash():
     """A second hashing scheme would make the self-model the one proposer that can re-file something
     the user already declined."""
-    from gideon.learning.proposals import content_fingerprint
+    from gideon.cognition.learning.proposals import content_fingerprint
 
     record = _reinforced(*[Reaction.ACCEPTED.value] * 3)
     plan = plan_promotion(facet="principle", reinforcement=record, current=[])
@@ -397,14 +411,17 @@ def test_nothing_in_this_module_writes_memory():
     """ "Never self-installed". Asserted against the SOURCE, because the property is an ABSENCE."""
     import inspect
 
-    from gideon.learning import self_model
+    from gideon.cognition.learning import self_model
 
     src = inspect.getsource(self_model)
-    for forbidden in ("MemoryService(", ".remember(", ".save(", "atomic_write", "sqlite3"):
+    for forbidden in (
+        "MemoryService(",
+        ".remember(",
+        ".save(",
+        "atomic_write",
+        "sqlite3",
+    ):
         assert forbidden not in src, f"self_model writes via {forbidden}"
-
-
-# ── only a compact snapshot injects ──
 
 
 def test_the_snapshot_is_bounded_and_drops_whole_entries():
@@ -428,7 +445,14 @@ def test_theories_render_as_explicitly_unproven():
     """A working theory that reads like a principle is worse than no theory: the model would treat a
     guess as a constraint."""
     out = snapshot(
-        [Entry(facet="theory", key="t", body="You prefer terse commits.", confidence=0.6)]
+        [
+            Entry(
+                facet="theory",
+                key="t",
+                body="You prefer terse commits.",
+                confidence=0.6,
+            )
+        ]
     )
     assert "Unproven" in out
 
@@ -436,7 +460,9 @@ def test_theories_render_as_explicitly_unproven():
 def test_retrospections_never_inject():
     """They are evidence for promotion, not guidance for a turn."""
     assert Facet.RETROSPECTION.value not in SNAPSHOT_FACETS
-    out = snapshot([Entry(facet="retrospection", key="r", body="SECRET-HISTORY", confidence=0.9)])
+    out = snapshot(
+        [Entry(facet="retrospection", key="r", body="SECRET-HISTORY", confidence=0.9)]
+    )
     assert out == ""
 
 
@@ -462,11 +488,8 @@ def test_a_heading_never_renders_without_entries_under_it():
     assert not out.endswith(":")
 
 
-# ── the config gate (four-point wiring) ──
-
-
 def test_the_gate_exists_and_defaults_on():
-    from gideon.config.learning import LearningConfig
+    from gideon.core.config.learning import LearningConfig
 
     assert "self_model_enabled" in LearningConfig.__dataclass_fields__
     assert LearningConfig().self_model_enabled is True
@@ -476,7 +499,7 @@ def test_the_gate_is_read_by_load():
     """Point (b): omission from the field-by-field mapping means the value is silently dropped."""
     import inspect
 
-    from gideon.config import loader
+    from gideon.core.config import loader
 
     assert "self_model_enabled=bool(learning_data.get(" in inspect.getsource(loader)
 
@@ -484,6 +507,6 @@ def test_the_gate_is_read_by_load():
 def test_the_gate_is_runtime_editable():
     """Point (d). Live-editable because it is the one path that acts on what WORKED — a user
     who finds that presumptuous should be able to stop it without a restart."""
-    from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+    from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
     assert _EDITABLE_CONFIG["learning.self_model_enabled"] == {"type": "bool"}

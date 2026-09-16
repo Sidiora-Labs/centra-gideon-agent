@@ -29,12 +29,12 @@ from datetime import datetime, timezone
 
 import pytest
 
-from gideon.triggers import arm as A
-from gideon.triggers import service as SVC
-from gideon.triggers.models import Trigger
-from gideon.triggers.store import TriggerStore
+from gideon.automation.triggers import arm as A
+from gideon.automation.triggers import service as SVC
+from gideon.automation.triggers.models import Trigger
+from gideon.automation.triggers.store import TriggerStore
 
-NOW = 1_800_000_000.0  # 2027-01-15T08:00:00Z
+NOW = 1_800_000_000.0
 
 
 @pytest.fixture(autouse=True)
@@ -69,9 +69,6 @@ def _iso(epoch: float) -> str:
     return datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat()
 
 
-# ── 🔴 the inert-migration blocker ──
-
-
 def test_a_migrated_cron_is_armed_by_boot(tmp_path):
     """🔴 THE blocker, reproduced end to end on a real migrated store. Before this, boot reported
     `rearmed: []` and the trigger's `next_fire_at` stayed empty — migrated, enabled, and unable to
@@ -94,13 +91,13 @@ def test_a_migrated_cron_is_armed_by_boot(tmp_path):
     )
     store = TriggerStore(base_dir=tmp_path)
     store.migrate_from_crons()
-    assert store.get("j-cron").trigger.next_fire_at == ""  # the inert state
+    assert store.get("j-cron").trigger.next_fire_at == ""
 
     report = SVC.boot(store, now=NOW)
     assert [r["id"] for r in report["rearmed"]] == ["j-cron"]
     assert report["rearmed"][0]["reason"] == "armed from spec"
     armed = store.get("j-cron").trigger.next_fire_at
-    assert armed == _iso(1_800_003_600.0)  # 09:00 UTC, the next slot
+    assert armed == _iso(1_800_003_600.0)
 
 
 def test_an_armed_migrated_cron_becomes_due(tmp_path):
@@ -110,8 +107,8 @@ def test_an_armed_migrated_cron_becomes_due(tmp_path):
     store.upsert(_clock({"kind": "cron", "expr": "0 9 * * *"}, tid="j"))
     SVC.boot(store, now=NOW)
     triggers = [r.trigger for r in store.load()]
-    assert SVC.due_ids(triggers, now=NOW) == []  # not yet
-    assert SVC.due_ids(triggers, now=1_800_003_601.0) == ["j"]  # after its slot
+    assert SVC.due_ids(triggers, now=NOW) == []
+    assert SVC.due_ids(triggers, now=1_800_003_601.0) == ["j"]
 
 
 def test_boot_leaves_an_already_armed_trigger_alone(tmp_path):
@@ -137,9 +134,6 @@ def test_an_unarmable_trigger_is_skipped_not_armed_to_now(tmp_path):
     assert store.get("bad").trigger.next_fire_at == ""
 
 
-# ── 🔴 the fire storm ──
-
-
 def test_a_fired_cron_rearms_to_its_next_slot(tmp_path):
     """🔴 THE second defect. A cron that fired kept its ELAPSED `next_fire_at`, so every later tick
     read it as still-due — a storm on one past slot."""
@@ -150,8 +144,6 @@ def test_a_fired_cron_rearms_to_its_next_slot(tmp_path):
     result = asyncio.run(SVC.tick(store, now=fired_at))
     assert [f.trigger.id for f in result.fires] == ["j"]
     assert result.rescheduled == ["j"]
-    # The next slot is TOMORROW's 09:00, computed from the expression — not from completion, which
-    # would drift a 9am job later every day.
     assert store.get("j").trigger.next_fire_at == _iso(1_800_090_000.0)
 
 
@@ -171,19 +163,23 @@ def test_a_one_shot_is_retired_after_firing(tmp_path):
     past slot forever. `delete_after_run` (declared in the spec, defaulting True for a migrated
     `at`, and consumed by NOTHING before this) decides how it retires."""
     store = TriggerStore(base_dir=tmp_path)
-    store.upsert(_clock({"kind": "at", "at": NOW + 3600, "delete_after_run": True}, tid="once"))
+    store.upsert(
+        _clock({"kind": "at", "at": NOW + 3600, "delete_after_run": True}, tid="once")
+    )
     SVC.boot(store, now=NOW)
     result = asyncio.run(SVC.tick(store, now=NOW + 3601))
     assert [f.trigger.id for f in result.fires] == ["once"]
     assert result.retired == ["once"]
-    assert store.get("once") is None  # deleted
+    assert store.get("once") is None
 
 
 def test_a_one_shot_that_keeps_its_row_is_disabled_not_left_armed(tmp_path):
     """`delete_after_run: False` keeps the row visible in the UI, but it must be DISABLED with no
     next fire — an enabled row holding a past timestamp is the storm."""
     store = TriggerStore(base_dir=tmp_path)
-    store.upsert(_clock({"kind": "at", "at": NOW + 3600, "delete_after_run": False}, tid="keep"))
+    store.upsert(
+        _clock({"kind": "at", "at": NOW + 3600, "delete_after_run": False}, tid="keep")
+    )
     SVC.boot(store, now=NOW)
     result = asyncio.run(SVC.tick(store, now=NOW + 3601))
     assert result.retired == ["keep"]
@@ -196,26 +192,28 @@ def test_a_one_shot_that_keeps_its_row_is_disabled_not_left_armed(tmp_path):
 def test_retirement_is_reported_not_silent(tmp_path):
     """ "It stopped existing" is the state change a user most needs explained."""
     store = TriggerStore(base_dir=tmp_path)
-    store.upsert(_clock({"kind": "at", "at": NOW + 60, "delete_after_run": True}, tid="once"))
+    store.upsert(
+        _clock({"kind": "at", "at": NOW + 60, "delete_after_run": True}, tid="once")
+    )
     SVC.boot(store, now=NOW)
     result = asyncio.run(SVC.tick(store, now=NOW + 61))
     assert "retired" in result.to_dict()
     assert result.to_dict()["retired"] == ["once"]
 
 
-# ── the primitive: every clock kind ──
-
-
 def test_cron_is_evaluated_in_the_triggers_own_timezone():
     """🔴 Inherited verbatim from `schedule.compute_next_run_ts`: croniter interprets the expression
     in the BASE's tz. Evaluating in UTC instead silently shifts every tz-bearing job by the offset —
     a moving target across a DST boundary."""
-    utc = A.next_fire(_clock({"kind": "cron", "expr": "0 9 * * *", "timezone": "UTC"}), now=NOW)
-    ny = A.next_fire(
-        _clock({"kind": "cron", "expr": "0 9 * * *", "timezone": "America/New_York"}), now=NOW
+    utc = A.next_fire(
+        _clock({"kind": "cron", "expr": "0 9 * * *", "timezone": "UTC"}), now=NOW
     )
-    assert utc == 1_800_003_600.0  # 09:00Z
-    assert ny == 1_800_021_600.0  # 14:00Z == 09:00 EST
+    ny = A.next_fire(
+        _clock({"kind": "cron", "expr": "0 9 * * *", "timezone": "America/New_York"}),
+        now=NOW,
+    )
+    assert utc == 1_800_003_600.0
+    assert ny == 1_800_021_600.0
     assert ny != utc
 
 
@@ -232,7 +230,8 @@ def test_an_unknown_timezone_refuses_to_arm_and_says_so(caplog):
     """
     with caplog.at_level("WARNING"):
         got = A.next_fire(
-            _clock({"kind": "cron", "expr": "0 9 * * *", "timezone": "Mars/Olympus"}), now=NOW
+            _clock({"kind": "cron", "expr": "0 9 * * *", "timezone": "Mars/Olympus"}),
+            now=NOW,
         )
     assert got == 0.0
     assert any("Mars/Olympus" in r.getMessage() for r in caplog.records), caplog.text
@@ -243,14 +242,18 @@ def test_an_interval_advances_on_its_own_grid():
     slots are skipped rather than fired as a backlog."""
     fresh = A.next_fire(_clock({"kind": "interval", "interval_secs": 300}), now=NOW)
     anchored = A.next_fire(
-        _clock({"kind": "interval", "interval_secs": 300, "created_at": NOW - 3600}), now=NOW
+        _clock({"kind": "interval", "interval_secs": 300, "created_at": NOW - 3600}),
+        now=NOW,
     )
     assert fresh == NOW + 300
-    assert anchored == NOW + 300  # next slot on the grid, not 12 backlogged fires
+    assert anchored == NOW + 300
 
 
 def test_a_sequence_arms_like_an_interval():
-    assert A.next_fire(_clock({"kind": "sequence", "interval_secs": 600}), now=NOW) == NOW + 600
+    assert (
+        A.next_fire(_clock({"kind": "sequence", "interval_secs": 600}), now=NOW)
+        == NOW + 600
+    )
 
 
 def test_a_future_one_shot_arms_to_its_timestamp():
@@ -266,8 +269,9 @@ def test_an_elapsed_one_shot_never_rearms():
 @pytest.mark.parametrize("kind", ["cron", "interval", "at", "sequence", "adaptive"])
 def test_every_declared_clock_kind_is_handled(kind):
     """🔴 A clock kind the primitive does not know returns 0.0 and is silently inert — exactly the
-    bug this module exists to fix. Derived from `CLOCK_KINDS` so a new kind fails here."""
-    from gideon.triggers.models import CLOCK_KINDS
+    bug this module exists to fix. Derived from `CLOCK_KINDS` so a new kind fails here.
+    """
+    from gideon.automation.triggers.models import CLOCK_KINDS
 
     assert kind in CLOCK_KINDS
     spec = {
@@ -275,8 +279,6 @@ def test_every_declared_clock_kind_is_handled(kind):
         "interval": {"kind": "interval", "interval_secs": 300},
         "at": {"kind": "at", "at": NOW + 60},
         "sequence": {"kind": "sequence", "interval_secs": 300},
-        # PR2-8. Both cadences are required, so a minimal armable spec carries both; which one is
-        # picked is `test_resilience_remediation_trigger.py`'s subject.
         "adaptive": {
             "kind": "adaptive",
             "interval_secs_healthy": 3600,
@@ -288,16 +290,18 @@ def test_every_declared_clock_kind_is_handled(kind):
 
 def test_the_parametrized_kinds_cover_the_whole_union():
     """The guard that keeps the test above honest as the union grows."""
-    from gideon.triggers.models import CLOCK_KINDS
+    from gideon.automation.triggers.models import CLOCK_KINDS
 
     assert set(CLOCK_KINDS) == {"cron", "interval", "at", "sequence", "adaptive"}
 
 
-# ── refusals ──
-
-
 def test_a_disabled_trigger_is_never_armed():
-    assert A.next_fire(_clock({"kind": "cron", "expr": "0 9 * * *"}, enabled=False), now=NOW) == 0.0
+    assert (
+        A.next_fire(
+            _clock({"kind": "cron", "expr": "0 9 * * *"}, enabled=False), now=NOW
+        )
+        == 0.0
+    )
 
 
 def test_a_non_clock_kind_is_never_armed():
@@ -320,7 +324,9 @@ def test_arm_returns_the_stores_own_empty_spelling():
     """One spelling for "no next fire" — the store already uses "", so a sentinel date here would
     create a second meaning for the same state."""
     assert A.arm(_clock({"kind": "at", "at": NOW - 1}), now=NOW) == ""
-    assert A.arm(_clock({"kind": "cron", "expr": "0 9 * * *"}), now=NOW).startswith("2027-")
+    assert A.arm(_clock({"kind": "cron", "expr": "0 9 * * *"}), now=NOW).startswith(
+        "2027-"
+    )
 
 
 def test_needs_arming_selects_exactly_the_inert_population():
@@ -328,11 +334,11 @@ def test_needs_arming_selects_exactly_the_inert_population():
     assert A.needs_arming(live) is True
     live.next_fire_at = SVC.to_iso(NOW + 60)
     assert A.needs_arming(live) is False
-    assert A.needs_arming(_clock({"kind": "cron", "expr": "0 9 * * *"}, enabled=False)) is False
+    assert (
+        A.needs_arming(_clock({"kind": "cron", "expr": "0 9 * * *"}, enabled=False))
+        is False
+    )
     assert A.needs_arming(Trigger(id="f", name="F", kind="file", enabled=True)) is False
-
-
-# ── skip dates (S112) ──
 
 
 def _iso_day(ts: float, tz_name: str = "UTC") -> str:
@@ -353,7 +359,8 @@ def test_a_skipped_date_is_advanced_past():
     skipped_day = _iso_day(plain)
 
     fire = A.next_fire(
-        _clock({"kind": "cron", "expr": "0 9 * * *", "skip_dates": [skipped_day]}), now=NOW
+        _clock({"kind": "cron", "expr": "0 9 * * *", "skip_dates": [skipped_day]}),
+        now=NOW,
     )
     assert fire > plain
     assert _iso_day(fire) != skipped_day
@@ -365,7 +372,8 @@ def test_consecutive_skipped_dates_are_all_advanced_past():
     day1, day2 = _iso_day(first), _iso_day(first + 86400)
 
     fire = A.next_fire(
-        _clock({"kind": "cron", "expr": "0 9 * * *", "skip_dates": [day1, day2]}), now=NOW
+        _clock({"kind": "cron", "expr": "0 9 * * *", "skip_dates": [day1, day2]}),
+        now=NOW,
     )
     assert _iso_day(fire) not in (day1, day2)
 
@@ -374,10 +382,15 @@ def test_an_interval_keeps_its_grid_across_a_skip():
     """Stepping past a skipped day must not re-phase the schedule to the skipped instant."""
     plain = A.next_fire(_clock({"kind": "interval", "interval_secs": 86400}), now=NOW)
     fire = A.next_fire(
-        _clock({"kind": "interval", "interval_secs": 86400, "skip_dates": [_iso_day(plain)]}),
+        _clock(
+            {
+                "kind": "interval",
+                "interval_secs": 86400,
+                "skip_dates": [_iso_day(plain)],
+            }
+        ),
         now=NOW,
     )
-    # Exactly one interval later, on the same grid — not "now + a day".
     assert fire == plain + 86400
 
 
@@ -386,7 +399,10 @@ def test_a_one_shot_on_a_skipped_day_never_fires():
     anyway would fire on the day the user struck out."""
     at = NOW + 86400
     assert (
-        A.next_fire(_clock({"kind": "at", "at": at, "skip_dates": [_iso_day(at)]}), now=NOW) == 0.0
+        A.next_fire(
+            _clock({"kind": "at", "at": at, "skip_dates": [_iso_day(at)]}), now=NOW
+        )
+        == 0.0
     )
 
 
@@ -394,14 +410,23 @@ def test_skip_dates_are_evaluated_in_the_triggers_own_timezone():
     """🔴 A date is a LOCAL-calendar question. On a UTC host the same instant is a different
     calendar date, so evaluating skips against server time would strike the wrong day — the same
     reasoning `calendar.py` records for the week grid."""
-    tz = "Pacific/Kiritimati"  # UTC+14: its local date runs ahead of UTC
+    tz = "Pacific/Kiritimati"
     trigger = _clock({"kind": "cron", "expr": "0 9 * * *", "timezone": tz})
     plain = A.next_fire(trigger, now=NOW)
     local_day = _iso_day(plain, tz)
-    assert local_day != _iso_day(plain), "the fixture needs a tz whose date differs from UTC"
+    assert local_day != _iso_day(
+        plain
+    ), "the fixture needs a tz whose date differs from UTC"
 
     fire = A.next_fire(
-        _clock({"kind": "cron", "expr": "0 9 * * *", "timezone": tz, "skip_dates": [local_day]}),
+        _clock(
+            {
+                "kind": "cron",
+                "expr": "0 9 * * *",
+                "timezone": tz,
+                "skip_dates": [local_day],
+            }
+        ),
         now=NOW,
     )
     assert _iso_day(fire, tz) != local_day
@@ -432,15 +457,16 @@ def test_an_all_skipped_cadence_reports_unarmable_rather_than_firing():
 
     base = datetime.fromtimestamp(NOW, tz=_tz.utc)
     every_day = [
-        (base + timedelta(days=n)).strftime("%Y-%m-%d") for n in range(A.MAX_SKIP_ADVANCE + 2)
+        (base + timedelta(days=n)).strftime("%Y-%m-%d")
+        for n in range(A.MAX_SKIP_ADVANCE + 2)
     ]
     assert (
-        A.next_fire(_clock({"kind": "cron", "expr": "0 9 * * *", "skip_dates": every_day}), now=NOW)
+        A.next_fire(
+            _clock({"kind": "cron", "expr": "0 9 * * *", "skip_dates": every_day}),
+            now=NOW,
+        )
         == 0.0
     )
-
-
-# ── jitter_secs / strict: declared in SPEC_KEYS, applied by nothing (S149) ──
 
 
 def test_jitter_secs_is_applied_and_deterministic_per_id():
@@ -452,7 +478,7 @@ def test_jitter_secs_is_applied_and_deterministic_per_id():
     Deterministic per id, not random: a random offset re-rolls every fire, so two triggers can still
     collide on any given fire and a restart reshuffles everything.
     """
-    from gideon.triggers.scheduling import jitter_offset
+    from gideon.automation.triggers.scheduling import jitter_offset
 
     spec = {"kind": "interval", "interval_secs": 3600, "created_at": NOW - 3600}
     offsets = {}
@@ -460,7 +486,9 @@ def test_jitter_secs_is_applied_and_deterministic_per_id():
         trigger = _clock({**spec, "jitter_secs": 300}, tid=tid)
         offset = A.next_fire(trigger, now=NOW) - (NOW + 3600.0)
         assert offset == pytest.approx(jitter_offset(tid, 300)), tid
-        assert A.next_fire(trigger, now=NOW) == A.next_fire(trigger, now=NOW), "must be stable"
+        assert A.next_fire(trigger, now=NOW) == A.next_fire(
+            trigger, now=NOW
+        ), "must be stable"
         offsets[tid] = offset
     assert len(set(offsets.values())) == 3, "different ids must land in different slots"
 
@@ -470,10 +498,15 @@ def test_the_offset_is_byte_compatible_with_the_boot_stagger():
     must land in the slot the job it came from occupied. So this reuses `scheduling.jitter_offset`,
     the same BLAKE2b-over-id algorithm the boot stagger and the legacy `ScheduleService` used. A
     fresh algorithm would re-phase every schedule on migration day."""
-    from gideon.triggers.scheduling import jitter_offset
+    from gideon.automation.triggers.scheduling import jitter_offset
 
     trigger = _clock(
-        {"kind": "interval", "interval_secs": 60, "created_at": NOW, "jitter_secs": 900},
+        {
+            "kind": "interval",
+            "interval_secs": 60,
+            "created_at": NOW,
+            "jitter_secs": 900,
+        },
         tid="migrated-job",
     )
     assert A.next_fire(trigger, now=NOW) - (NOW + 60.0) == pytest.approx(
@@ -486,7 +519,8 @@ def test_strict_opts_OUT_of_jitter():
     A user who needs an exact wall-clock fire must be able to have one."""
     spec = {"kind": "interval", "interval_secs": 3600, "created_at": NOW - 3600}
     assert (
-        A.next_fire(_clock({**spec, "jitter_secs": 300, "strict": True}), now=NOW) == NOW + 3600.0
+        A.next_fire(_clock({**spec, "jitter_secs": 300, "strict": True}), now=NOW)
+        == NOW + 3600.0
     )
 
 
@@ -512,7 +546,9 @@ def test_jitter_is_always_FORWARD():
             },
             tid=tid,
         )
-        assert A.next_fire(trigger, now=NOW) >= A.cadence_next_fire(trigger, now=NOW), tid
+        assert A.next_fire(trigger, now=NOW) >= A.cadence_next_fire(
+            trigger, now=NOW
+        ), tid
 
 
 def test_jitter_never_pushes_a_fire_onto_a_SKIPPED_day():
@@ -533,10 +569,11 @@ def test_jitter_never_pushes_a_fire_onto_a_SKIPPED_day():
         "skip_dates": ["2026-08-05"],
     }
     fire = A.next_fire(_clock(spec, tid="edge"), now=base)
-    assert datetime.fromtimestamp(fire, timezone.utc).strftime("%Y-%m-%d") == "2026-08-04"
+    assert (
+        datetime.fromtimestamp(fire, timezone.utc).strftime("%Y-%m-%d") == "2026-08-04"
+    )
     assert fire == A.cadence_next_fire(_clock(spec, tid="edge"), now=base)
 
-    # …and with no skip declared, the same trigger DOES take its jitter.
     open_spec = {k: v for k, v in spec.items() if k != "skip_dates"}
     assert A.next_fire(_clock(open_spec, tid="edge"), now=base) > A.cadence_next_fire(
         _clock(open_spec, tid="edge"), now=base
@@ -547,6 +584,7 @@ def test_the_week_grid_still_plots_UNJITTERED_slots():
     """`cadence_next_fire` is public so the grid can step the honest cadence; jittering the grid
     would show a user 09:04:37 for a job they wrote as 09:00."""
     trigger = _clock(
-        {"kind": "cron", "expr": "0 9 * * *", "timezone": "UTC", "jitter_secs": 600}, tid="grid"
+        {"kind": "cron", "expr": "0 9 * * *", "timezone": "UTC", "jitter_secs": 600},
+        tid="grid",
     )
     assert A.cadence_next_fire(trigger, now=NOW) < A.next_fire(trigger, now=NOW)

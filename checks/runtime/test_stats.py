@@ -1,4 +1,4 @@
-"""Tests for gideon.stats module.
+"""Tests for gideon.operations.stats module.
 
 Every counter in ``Stats`` must have a writer on a real runtime path. A counter nothing
 increments reports a confident ``0`` forever, which reads as "this never happened" rather than
@@ -19,11 +19,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from gideon.stats import Stats
+from gideon.operations.stats import Stats
 
-_SRC = Path(__file__).resolve().parent.parent / "src" / "gideon"
+_SRC = Path(__file__).resolve().parent.parent.parent / "runtime" / "gideon"
 
-# The counters, and the runtime path that writes each. Grouped so a failure names the subsystem.
 _WRITERS = {
     "sessions_created": "inc_session_created",
     "sessions_cleaned": "inc_session_cleaned",
@@ -40,7 +39,7 @@ _WRITERS = {
 
 
 def _called_methods() -> set[str]:
-    """Every ``.method(...)`` name invoked anywhere in src/gideon, excluding stats.py itself.
+    """Every ``.method(...)`` name invoked anywhere in runtime/gideon, excluding stats.py itself.
 
     Parsed rather than grepped: a grep for the method name also matches its own ``def`` line and
     any mention in a comment, which is how a writerless counter can look wired.
@@ -64,7 +63,11 @@ class TestStatsWriters(unittest.TestCase):
 
     def test_every_counter_has_a_writer(self) -> None:
         called = _called_methods()
-        orphans = {counter: helper for counter, helper in _WRITERS.items() if helper not in called}
+        orphans = {
+            counter: helper
+            for counter, helper in _WRITERS.items()
+            if helper not in called
+        }
         assert not orphans, (
             f"Counter(s) whose incrementer is never called on any runtime path: {orphans}. "
             "A counter with no writer renders a confident 0 forever. Either wire the call site "
@@ -72,19 +75,16 @@ class TestStatsWriters(unittest.TestCase):
         )
 
     def test_every_counter_is_declared_in_the_writer_map(self) -> None:
-        # The other direction: a NEW counter added to Stats must declare its writer here, so it
-        # cannot be introduced writerless. This is what would have caught the original seven.
         assert set(Stats().snapshot().keys()) == set(_WRITERS), (
             "Stats counters and the _WRITERS map disagree. A new counter must be added to "
             "_WRITERS with the method that increments it on a real path."
         )
 
     def test_no_writerless_helpers_remain_on_the_class(self) -> None:
-        # A leftover `inc_*` helper for a deleted counter would KeyError-free its way into
-        # _c via inc()'s .get() default, silently resurrecting the field.
-        # `inc_cost_usd` is deliberately exempt: it accumulates a float in `_cost_usd`, outside
-        # the `_c` counter dict, so it is not a snapshot key. It IS written (chat_runner).
-        helpers = {n for n in dir(Stats) if n.startswith("inc_")} - {"inc", "inc_cost_usd"}
+        helpers = {n for n in dir(Stats) if n.startswith("inc_")} - {
+            "inc",
+            "inc_cost_usd",
+        }
         assert helpers == set(_WRITERS.values()), (
             f"Unexpected inc_* helper(s): {helpers - set(_WRITERS.values())}. "
             "inc() creates missing keys on demand, so a stray helper re-adds a deleted counter."
@@ -96,12 +96,8 @@ class TestStats(unittest.TestCase):
     def setUp(self) -> None:
         Stats().reset()
 
-    # -- singleton --
-
     def test_singleton(self) -> None:
         assert Stats() is Stats()
-
-    # -- counters --
 
     def test_increment_and_read(self) -> None:
         s = Stats()
@@ -116,8 +112,6 @@ class TestStats(unittest.TestCase):
         assert snap["sessions_cleaned"] == 0
 
     def test_token_counters_accumulate_by_amount(self) -> None:
-        # Token counters take an n, unlike the lifecycle counters — a regression here would
-        # undercount every turn to 1.
         s = Stats()
         s.inc_input_tokens(1200)
         s.inc_output_tokens(340)
@@ -130,8 +124,6 @@ class TestStats(unittest.TestCase):
         assert snap["cache_read_tokens"] == 900
         assert snap["cache_creation_tokens"] == 50
         assert snap["total_duration_ms"] == 4500
-
-    # -- summary --
 
     def test_summary_reports_only_measured_counters(self) -> None:
         s = Stats()
@@ -147,23 +139,20 @@ class TestStats(unittest.TestCase):
         assert "tokens 10 in" in text
 
     def test_summary_makes_no_claim_about_messages_or_tool_approvals(self) -> None:
-        # The old summary led with `msgs 0 (ok 0 / fail 0) · tools approved 0 denied 0 auto 0 ·
-        # timeouts 0` on EVERY install — six writerless counters presented as measurements, which
-        # made a busy gateway look idle. Nothing unmeasured may reappear in this string.
-        # Matched on the old string's exact PHRASES, not bare words: "failed" legitimately appears
-        # now as `subagents N spawned, N completed, N failed`, which IS measured. A substring check
-        # for "fail" would forbid a real counter — the assertion has to name what it forbids.
         text = Stats().summary()
-        for absent in ("msgs ", "(ok ", "/ fail ", "approved ", "denied ", "auto ", "timeouts "):
+        for absent in (
+            "msgs ",
+            "(ok ",
+            "/ fail ",
+            "approved ",
+            "denied ",
+            "auto ",
+            "timeouts ",
+        ):
             assert absent not in text, f"summary() reports unmeasured {absent!r}"
 
     def test_daily_report_is_gone(self) -> None:
-        # It derived a health verdict (🟢 healthy / 🟡 degraded / 🔴 critical) from
-        # messages_success / messages_received, both writerless — so it could only ever emit
-        # "🔇 no messages". It had no caller; four tests covered it anyway.
         assert not hasattr(Stats, "daily_report")
-
-    # -- reset --
 
     def test_reset(self) -> None:
         s = Stats()
@@ -173,21 +162,19 @@ class TestStats(unittest.TestCase):
         snap = s.snapshot()
         assert all(v == 0 for v in snap.values())
 
-    # -- uptime --
-
     def test_uptime_str(self) -> None:
         s = Stats()
-        with patch("gideon.stats.time") as mock_time:
+        with patch("gideon.operations.stats.time") as mock_time:
             mock_time.monotonic.return_value = s._start_time + 3661
             assert s.uptime_str() == "1h 1m"
 
     def test_uptime_str_with_days(self) -> None:
         s = Stats()
-        with patch("gideon.stats.time") as mock_time:
-            mock_time.monotonic.return_value = s._start_time + 3 * 86400 + 14 * 3600 + 22 * 60
+        with patch("gideon.operations.stats.time") as mock_time:
+            mock_time.monotonic.return_value = (
+                s._start_time + 3 * 86400 + 14 * 3600 + 22 * 60
+            )
             assert s.uptime_str() == "3d 14h 22m"
-
-    # -- snapshot keys --
 
     def test_snapshot_keys(self) -> None:
         expected = {
@@ -204,8 +191,6 @@ class TestStats(unittest.TestCase):
             "total_duration_ms",
         }
         assert set(Stats().snapshot().keys()) == expected
-
-    # -- thread safety --
 
     def test_thread_safety(self) -> None:
         s = Stats()

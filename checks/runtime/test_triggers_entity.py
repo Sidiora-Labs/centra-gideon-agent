@@ -23,7 +23,7 @@ import dataclasses as dc
 
 import pytest
 
-from gideon.triggers.models import (
+from gideon.automation.triggers.models import (
     FIRE_OUTCOMES,
     GATE_KEYS,
     INERT_OUTCOMES,
@@ -58,9 +58,6 @@ def _raw(**over) -> dict:
     }
     base.update(over)
     return base
-
-
-# ── never-throw structural validation (R15) ──
 
 
 def test_a_VALID_trigger_parses_with_no_issues():
@@ -122,9 +119,6 @@ def test_an_unknown_field_is_DROPPED_not_echoed():
     assert "enable" not in trigger.to_dict()
 
 
-# ── the closed vocabularies ──
-
-
 def test_the_PHASE_2_kinds_are_not_accepted_yet():
     """A kind the service cannot dispatch would let a user author a trigger that never fires — the
     exact failure the never-throw validation exists to prevent."""
@@ -160,9 +154,6 @@ def test_autopaused_is_a_SEPARATE_state_from_paused():
     assert TriggerState.AUTOPAUSED.value != TriggerState.PAUSED.value
 
 
-# ── the clock spec (everything schedule.py carries) ──
-
-
 def test_a_cron_clock_needs_an_EXPRESSION():
     issues = validate_spec("clock", {"kind": "cron"})
     assert any(i.path == "spec.expr" and i.severity == "error" for i in issues)
@@ -191,8 +182,11 @@ def test_the_clock_spec_carries_schedule_py_s_semantics(key):
 
 def test_a_spec_key_from_ANOTHER_kind_is_flagged():
     """An unrecognized spec key is the likeliest authoring mistake and has the quietest failure: the
-    trigger loads, the service ignores the key, and the automation behaves inexplicably."""
-    issues = validate_spec("clock", {"kind": "cron", "expr": "* * * * *", "url": "http://x"})
+    trigger loads, the service ignores the key, and the automation behaves inexplicably.
+    """
+    issues = validate_spec(
+        "clock", {"kind": "cron", "expr": "* * * * *", "url": "http://x"}
+    )
     assert any(i.path == "spec.url" for i in issues)
 
 
@@ -200,9 +194,6 @@ def test_the_min_clock_interval_is_declared():
     """A floor rather than a hard rule — the plan makes it overridable — but it has to exist so a
     typed `* * * * *` is not an accident that runs an LLM every minute."""
     assert MIN_CLOCK_INTERVAL_SECS == 900
-
-
-# ── the other kinds ──
 
 
 def test_an_event_trigger_needs_a_SOURCE():
@@ -244,9 +235,6 @@ def test_an_AUTOPAUSED_trigger_never_fires_automatically():
     assert trigger.fires_automatically is False
 
 
-# ── gates, and their failure modes ──
-
-
 def test_an_unknown_GATE_is_flagged_as_never_enforced():
     """A gate the service does not read is a safety control the user believes they set."""
     issues = validate_gates({"max_spend": 5})
@@ -269,7 +257,7 @@ def test_an_UNCLASSIFIED_gate_fails_CLOSED():
 def test_the_security_relevant_gates_are_NOT_in_the_fail_open_set():
     """Capabilities, the injection screen and fencing fail closed: the cost of skipping them is
     unbounded, while the cost of a skipped budget check is one extra run."""
-    from gideon.triggers.models import FAIL_OPEN_GATES
+    from gideon.automation.triggers.models import FAIL_OPEN_GATES
 
     assert "idempotency" not in FAIL_OPEN_GATES
 
@@ -277,9 +265,6 @@ def test_the_security_relevant_gates_are_NOT_in_the_fail_open_set():
 def test_every_declared_gate_is_in_the_vocabulary():
     assert "quiet_hours" in GATE_KEYS
     assert "skip_dates" in GATE_KEYS
-
-
-# ── fire records: no silent drops (R2) ──
 
 
 def test_every_non_clean_outcome_MUST_carry_a_reason():
@@ -290,18 +275,24 @@ def test_every_non_clean_outcome_MUST_carry_a_reason():
         record = FireRecord(id="f", trigger_id="t", outcome=outcome)
         needs = require_reason(outcome)
         has_error = any(i.path == "reason" for i in fire_issues(record))
-        assert has_error is needs, f"{outcome}: reason-required={needs} but check said {has_error}"
+        assert (
+            has_error is needs
+        ), f"{outcome}: reason-required={needs} but check said {has_error}"
 
 
 def test_a_clean_run_needs_no_reason():
-    assert fire_issues(FireRecord(id="f", trigger_id="t", outcome=Outcome.RAN.value)) == []
+    assert (
+        fire_issues(FireRecord(id="f", trigger_id="t", outcome=Outcome.RAN.value)) == []
+    )
 
 
 def test_ran_late_is_only_meaningful_beside_its_MISSED_SLOT():
     """A run that started 40 minutes after its slot is a different story from one that
     started on time
     and took 40 minutes."""
-    record = FireRecord(id="f", trigger_id="t", outcome=Outcome.RAN_LATE.value, reason="woke late")
+    record = FireRecord(
+        id="f", trigger_id="t", outcome=Outcome.RAN_LATE.value, reason="woke late"
+    )
     assert any(i.path == "scheduled_for" for i in fire_issues(record))
     record.scheduled_for = "2026-08-03T03:00:00Z"
     assert fire_issues(record) == []
@@ -320,7 +311,10 @@ def test_only_a_TRUE_failure_counts_toward_autopause():
     assert TRUE_FAILURE_OUTCOMES == {Outcome.FAILED.value}
     assert (
         FireRecord(
-            id="f", trigger_id="t", outcome=Outcome.SKIPPED_GATE.value, reason="quiet hours"
+            id="f",
+            trigger_id="t",
+            outcome=Outcome.SKIPPED_GATE.value,
+            reason="quiet hours",
         ).counts_toward_autopause
         is False
     )
@@ -336,8 +330,12 @@ def test_PRODUCTIVITY_is_the_materiality_predicate_not_the_outcome():
     """§1.3 is explicit: the classification criterion is "did it mutate durable state". A
     view built on
     the outcome alone would show a page of runs that changed nothing."""
-    ran_but_inert = FireRecord(id="f", trigger_id="t", outcome=Outcome.RAN.value, mutated=False)
-    ran_and_wrote = FireRecord(id="f", trigger_id="t", outcome=Outcome.RAN.value, mutated=True)
+    ran_but_inert = FireRecord(
+        id="f", trigger_id="t", outcome=Outcome.RAN.value, mutated=False
+    )
+    ran_and_wrote = FireRecord(
+        id="f", trigger_id="t", outcome=Outcome.RAN.value, mutated=True
+    )
     assert ran_but_inert.productive is False
     assert ran_and_wrote.productive is True
 
@@ -369,15 +367,17 @@ def test_the_flywheel_feedback_fields_are_PRE_ALLOCATED():
 
 def test_incomplete_marks_a_count_that_was_CUT_SHORT():
     """So a reader is never misled by a number that stopped early — "at least N", not "N"."""
-    assert FireRecord(id="f", trigger_id="t", outcome=Outcome.RAN.value, incomplete=True).incomplete
-
-
-# ── record weight ──
+    assert FireRecord(
+        id="f", trigger_id="t", outcome=Outcome.RAN.value, incomplete=True
+    ).incomplete
 
 
 def test_a_single_action_fire_is_a_LEDGER_row():
     """This is what keeps a minutely trigger from producing 1440 run directories a day."""
-    assert classify_weight(node_count=1, has_llm=False, resumable=False) == RunWeight.LEDGER.value
+    assert (
+        classify_weight(node_count=1, has_llm=False, resumable=False)
+        == RunWeight.LEDGER.value
+    )
 
 
 @pytest.mark.parametrize(
@@ -393,20 +393,17 @@ def test_anything_multi_node_llm_or_resumable_is_FULL(kw):
     assert classify_weight(**kw) == RunWeight.FULL.value
 
 
-# ── the migration map (what makes session 66 lossless) ──
-
-
 def test_EVERY_ScheduleJob_field_is_accounted_for():
     """The measurement that shaped this session: 31 of 44 legacy fields have no same-named home on
     `Trigger`. A field with no map entry is one a migration drops silently."""
-    from gideon.schedule import ScheduleJob
+    from gideon.automation.schedule import ScheduleJob
 
     names = [f.name for f in dc.fields(ScheduleJob)]
     assert unmapped_legacy_fields("ScheduleJob", names) == []
 
 
 def test_EVERY_EventTrigger_field_is_accounted_for():
-    from gideon.event_triggers import EventTrigger
+    from gideon.automation.event_triggers import EventTrigger
 
     names = [f.name for f in dc.fields(EventTrigger)]
     assert unmapped_legacy_fields("EventTrigger", names) == []
@@ -421,14 +418,18 @@ def test_a_NEW_legacy_field_fails_here_rather_than_vanishing_later():
     ]
 
 
-@pytest.mark.parametrize("key", ["skip_dates", "strict_schedule", "timezone", "delete_after_run"])
+@pytest.mark.parametrize(
+    "key", ["skip_dates", "strict_schedule", "timezone", "delete_after_run"]
+)
 def test_the_QUIETLY_LOSABLE_schedule_fields_map_somewhere_real(key):
     """Each of these fails silently when dropped: a holiday fire, a catch-up the author refused, a
     run in the wrong timezone, a one-shot that resurrects."""
     assert LEGACY_FIELD_MAP["ScheduleJob"][key]
 
 
-@pytest.mark.parametrize("key", ["content_re", "key_glob", "max_fires", "debounce_secs"])
+@pytest.mark.parametrize(
+    "key", ["content_re", "key_glob", "max_fires", "debounce_secs"]
+)
 def test_the_event_trigger_MATCHERS_and_guards_map_somewhere_real(key):
     """A dropped `content_re` makes an event trigger fire on everything — the loudest possible
     quiet failure."""
@@ -442,17 +443,21 @@ def test_a_DELIBERATE_drop_is_recorded_as_None_with_a_reason():
     assert LEGACY_FIELD_MAP["ScheduleJob"]["acked_items"] is None
 
 
-# ── the entity round trip ──
-
-
 def test_a_trigger_round_trips_through_to_dict():
     trigger, _ = parse_trigger(
         _raw(
-            gates={"debounce_secs": 30, "quiet_hours": {"from": "22:00", "to": "07:00"}},
+            gates={
+                "debounce_secs": 30,
+                "quiet_hours": {"from": "22:00", "to": "07:00"},
+            },
             capabilities={"allowed_actions": ["bash"], "network": False},
             workflow={"ref": "nightly-backup"},
             resource_slots=["local-llm"],
-            skip_if_active={"dirty_git": ".", "lockfiles": ["run.lock"], "recent_secs": 120},
+            skip_if_active={
+                "dirty_git": ".",
+                "lockfiles": ["run.lock"],
+                "recent_secs": 120,
+            },
             catch_up=True,
         )
     )
@@ -463,10 +468,13 @@ def test_a_trigger_round_trips_through_to_dict():
 
 def test_skip_if_active_defaults_to_off_and_round_trips():
     """The default is an empty dict — a trigger that does not opt in is never deferred — and any
-    declared guard survives `to_dict`→`parse_trigger` so its reader (the `active` gate) sees it."""
+    declared guard survives `to_dict`→`parse_trigger` so its reader (the `active` gate) sees it.
+    """
     default, _ = parse_trigger(_raw())
     assert default.skip_if_active == {}
-    guarded, issues = parse_trigger(_raw(skip_if_active={"paths": ["notes/*"], "recent_secs": 300}))
+    guarded, issues = parse_trigger(
+        _raw(skip_if_active={"paths": ["notes/*"], "recent_secs": 300})
+    )
     assert issues == []
     assert guarded.skip_if_active == {"paths": ["notes/*"], "recent_secs": 300}
     assert parse_trigger(guarded.to_dict())[0] == guarded
@@ -483,5 +491,10 @@ def test_the_health_rollups_live_ON_the_row():
     """R7: computing them per render means reading every run of every trigger to draw one page of
     status dots."""
     names = {f.name for f in dc.fields(Trigger)}
-    assert {"last_success_at", "last_failure_at", "health_status", "last_error_summary"} <= names
+    assert {
+        "last_success_at",
+        "last_failure_at",
+        "health_status",
+        "last_error_summary",
+    } <= names
     assert TriggerHealth.OK.value == "ok"

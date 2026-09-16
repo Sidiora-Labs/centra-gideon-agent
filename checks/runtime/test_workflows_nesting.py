@@ -25,14 +25,19 @@ import asyncio
 
 import pytest
 
-from gideon.workflows import service, store
-from gideon.workflows.controller import EngineServices
-from gideon.workflows.engine import MAX_SUBWORKFLOW_DEPTH
-from gideon.workflows.journal import CHILD_RUN_ATTACH, ledger
-from gideon.workflows.models import InstanceState, Node, RunStatus, WorkflowRun
-from gideon.workflows.native_defs import register_native_provider
-from gideon.workflows.tick import Limits, frontier
-from gideon.workflows.watchdog import WorkflowWatchdog
+from gideon.automation.workflows import service, store
+from gideon.automation.workflows.controller import EngineServices
+from gideon.automation.workflows.engine import MAX_SUBWORKFLOW_DEPTH
+from gideon.automation.workflows.journal import CHILD_RUN_ATTACH, ledger
+from gideon.automation.workflows.models import (
+    InstanceState,
+    Node,
+    RunStatus,
+    WorkflowRun,
+)
+from gideon.automation.workflows.native_defs import register_native_provider
+from gideon.automation.workflows.tick import Limits, frontier
+from gideon.automation.workflows.watchdog import WorkflowWatchdog
 
 pytestmark = pytest.mark.anyio
 
@@ -46,8 +51,8 @@ def anyio_backend() -> str:
 def _isolated(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
-    from gideon.workflows import defs as defs_mod
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
+    from gideon.automation.workflows import defs as defs_mod
 
     saved = dict(defs_mod._providers)
     defs_mod._providers.clear()
@@ -59,7 +64,11 @@ def _isolated(tmp_path, monkeypatch):
         defs_mod._providers.update(saved)
 
 
-CHILD_ROOT = {"kind": "transform", "id": "c", "config": {"expr": "child got {{inputs.msg}}"}}
+CHILD_ROOT = {
+    "kind": "transform",
+    "id": "c",
+    "config": {"expr": "child got {{inputs.msg}}"},
+}
 
 
 async def _author_child(name: str = "child", root: dict | None = None) -> None:
@@ -83,7 +92,9 @@ def _parent_spec(ref: str = "child", inputs: dict | None = None) -> dict:
                     "config": {
                         "ref": ref,
                         "inputs": (
-                            inputs if inputs is not None else {"msg": "{{nodes.prep.output}}"}
+                            inputs
+                            if inputs is not None
+                            else {"msg": "{{nodes.prep.output}}"}
                         ),
                     },
                 },
@@ -97,9 +108,13 @@ def _parent_spec(ref: str = "child", inputs: dict | None = None) -> dict:
     }
 
 
-async def _run_parent(spec: dict, *, timeout: float = 30) -> tuple[WorkflowRun, RunStatus]:
+async def _run_parent(
+    spec: dict, *, timeout: float = 30
+) -> tuple[WorkflowRun, RunStatus]:
     wd = WorkflowWatchdog(None, EngineServices())
-    run = store.create(WorkflowRun(id="", workflow_name=str(spec.get("name", "parent"))))
+    run = store.create(
+        WorkflowRun(id="", workflow_name=str(spec.get("name", "parent")))
+    )
     store.write_spec(run.id, spec)
     controller = await wd.launch(run, spec)
     status = await controller.run_to_completion(timeout=timeout)
@@ -113,8 +128,6 @@ class TestNestingHappyPath:
         assert status == RunStatus.COMPLETE
         states = {p: i.state for p, i in store.read_state(run.id).items()}
         assert states["root.children[1]"] == InstanceState.DONE
-        # The node AFTER the subworkflow ran, which is the whole point of waiting for the child
-        # rather than firing it and forgetting.
         assert states["root.children[2]"] == InstanceState.DONE
 
     async def test_the_childs_inputs_are_RESOLVED_from_the_parent(self) -> None:
@@ -158,7 +171,8 @@ class TestGenealogy:
 
     async def test_child_run_attach_names_the_SPAWNING_NODE(self) -> None:
         """The run row records the parent edge; only the ledger records which node made it — and
-        that is what a rewind of that node needs in order to know what it invalidates."""
+        that is what a rewind of that node needs in order to know what it invalidates.
+        """
         await _author_child()
         run, _status = await _run_parent(_parent_spec())
         events = [e for e in ledger(run.id) if e.get("kind") == CHILD_RUN_ATTACH]
@@ -189,8 +203,6 @@ class TestGenealogy:
         raises, so the link cannot be success-only."""
         await _author_child(
             name="doomed",
-            # Fails at RUN time, not authoring: the validator correctly refuses an unresolvable
-            # binding, so a child that must reach the engine and then fail needs a runtime fault.
             root={
                 "kind": "action",
                 "id": "boom",
@@ -206,8 +218,6 @@ class TestGenealogy:
         """Otherwise the user is told a nested run failed with no way to find it."""
         await _author_child(
             name="doomed",
-            # Fails at RUN time, not authoring: the validator correctly refuses an unresolvable
-            # binding, so a child that must reach the engine and then fail needs a runtime fault.
             root={
                 "kind": "action",
                 "id": "boom",
@@ -230,12 +240,15 @@ class TestDepthCap:
         )
         spec = {
             "name": "recursive",
-            "root": {"kind": "subworkflow", "id": "again", "config": {"ref": "recursive"}},
+            "root": {
+                "kind": "subworkflow",
+                "id": "again",
+                "config": {"ref": "recursive"},
+            },
         }
         _run, status = await _run_parent(spec, timeout=45)
         assert status == RunStatus.FAILED
         rows, total = store.list_runs()
-        # Bounded by the cap, not by luck: one run per level plus the refusing one.
         assert total <= MAX_SUBWORKFLOW_DEPTH + 2, [r.id for r in rows]
 
     async def test_the_refusal_names_the_ref_and_the_fix(self) -> None:
@@ -245,7 +258,11 @@ class TestDepthCap:
         )
         spec = {
             "name": "recursive",
-            "root": {"kind": "subworkflow", "id": "again", "config": {"ref": "recursive"}},
+            "root": {
+                "kind": "subworkflow",
+                "id": "again",
+                "config": {"ref": "recursive"},
+            },
         }
         await _run_parent(spec, timeout=45)
         rows, _total = store.list_runs()
@@ -261,12 +278,14 @@ class TestDepthCap:
 
     async def test_the_cap_is_checked_BEFORE_a_run_is_created(self) -> None:
         """Refusing after creation would leave an orphan row and directory per attempt."""
-        from gideon.workflows.bindings import BindingContext
-        from gideon.workflows.engine import dispatch_subworkflow
+        from gideon.automation.workflows.bindings import BindingContext
+        from gideon.automation.workflows.engine import dispatch_subworkflow
 
         before, _ = store.list_runs()
         result = await dispatch_subworkflow(
-            Node.from_dict({"kind": "subworkflow", "id": "x", "config": {"ref": "anything"}}),
+            Node.from_dict(
+                {"kind": "subworkflow", "id": "x", "config": {"ref": "anything"}}
+            ),
             BindingContext(),
             depth=MAX_SUBWORKFLOW_DEPTH,
             supervisor=object(),
@@ -278,9 +297,9 @@ class TestDepthCap:
 
 class TestNestingRefusals:
     async def test_a_missing_ref_is_a_USER_failure(self) -> None:
-        from gideon.workflows.bindings import BindingContext
-        from gideon.workflows.engine import dispatch_subworkflow
-        from gideon.workflows.models import FailureClass
+        from gideon.automation.workflows.bindings import BindingContext
+        from gideon.automation.workflows.engine import dispatch_subworkflow
+        from gideon.automation.workflows.models import FailureClass
 
         result = await dispatch_subworkflow(
             Node.from_dict({"kind": "subworkflow", "id": "x", "config": {}}),
@@ -296,7 +315,9 @@ class TestNestingRefusals:
         inst = store.read_state(run.id)["root.children[1]"]
         assert "no-such-workflow" in inst.failure.cause_plain
 
-    async def test_an_unresolvable_input_fails_before_the_child_is_created(self) -> None:
+    async def test_an_unresolvable_input_fails_before_the_child_is_created(
+        self,
+    ) -> None:
         """A child created with a broken input would run with a hole in its context and produce
         confident nonsense — the failure has to happen here."""
         await _author_child()
@@ -306,18 +327,19 @@ class TestNestingRefusals:
         )
         assert status == RunStatus.FAILED
         after, _ = store.list_runs()
-        # Only the parent was created.
         assert len(after) == len(before) + 1
 
     async def test_no_supervisor_is_an_INTERNAL_failure(self) -> None:
         """It is an engine wiring problem, not a spec problem — the distinction is what stops a
         user hunting their own spec for a bug that is ours."""
-        from gideon.workflows.bindings import BindingContext
-        from gideon.workflows.engine import dispatch_subworkflow
-        from gideon.workflows.models import FailureClass
+        from gideon.automation.workflows.bindings import BindingContext
+        from gideon.automation.workflows.engine import dispatch_subworkflow
+        from gideon.automation.workflows.models import FailureClass
 
         result = await dispatch_subworkflow(
-            Node.from_dict({"kind": "subworkflow", "id": "x", "config": {"ref": "child"}}),
+            Node.from_dict(
+                {"kind": "subworkflow", "id": "x", "config": {"ref": "child"}}
+            ),
             BindingContext(),
             supervisor=None,
         )
@@ -333,7 +355,11 @@ class TestForeachConcurrency:
                 "kind": "foreach",
                 "id": "l",
                 "config": {"items": [1, 2, 3, 4, 5, 6], "max_concurrency": 2},
-                "body": {"kind": "transform", "id": "w", "config": {"expr": "{{item}}"}},
+                "body": {
+                    "kind": "transform",
+                    "id": "w",
+                    "config": {"expr": "{{item}}"},
+                },
             }
         )
         fr = frontier(root, {}, limits=Limits(lanes={"compute": 64, "llm": 9, "io": 9}))
@@ -347,7 +373,11 @@ class TestForeachConcurrency:
                 "kind": "foreach",
                 "id": "l",
                 "config": {"items": [1, 2, 3, 4, 5]},
-                "body": {"kind": "transform", "id": "w", "config": {"expr": "{{item}}"}},
+                "body": {
+                    "kind": "transform",
+                    "id": "w",
+                    "config": {"expr": "{{item}}"},
+                },
             }
         )
         fr = frontier(root, {}, limits=Limits(lanes={"compute": 64, "llm": 9, "io": 9}))
@@ -360,11 +390,17 @@ class TestForeachConcurrency:
                 "kind": "foreach",
                 "id": "l",
                 "config": {"items": [1, 2, 3, 4], "max_concurrency": 2},
-                "body": {"kind": "transform", "id": "w", "config": {"expr": "{{item}}"}},
+                "body": {
+                    "kind": "transform",
+                    "id": "w",
+                    "config": {"expr": "{{item}}"},
+                },
             }
         )
         states = {"root.body#0": InstanceState.DONE, "root.body#1": InstanceState.DONE}
-        fr = frontier(root, states, limits=Limits(lanes={"compute": 64, "llm": 9, "io": 9}))
+        fr = frontier(
+            root, states, limits=Limits(lanes={"compute": 64, "llm": 9, "io": 9})
+        )
         assert {r.path for r in fr.ready} == {"root.body#2", "root.body#3"}
 
     def test_an_in_flight_item_still_holds_its_slot(self) -> None:
@@ -375,12 +411,17 @@ class TestForeachConcurrency:
                 "kind": "foreach",
                 "id": "l",
                 "config": {"items": [1, 2, 3, 4], "max_concurrency": 2},
-                "body": {"kind": "transform", "id": "w", "config": {"expr": "{{item}}"}},
+                "body": {
+                    "kind": "transform",
+                    "id": "w",
+                    "config": {"expr": "{{item}}"},
+                },
             }
         )
         states = {"root.body#0": InstanceState.RUNNING}
-        fr = frontier(root, states, limits=Limits(lanes={"compute": 64, "llm": 9, "io": 9}))
-        # One slot left, so exactly one NEW item is admitted (the running one is not re-launched).
+        fr = frontier(
+            root, states, limits=Limits(lanes={"compute": 64, "llm": 9, "io": 9})
+        )
         assert {r.path for r in fr.ready} == {"root.body#1"}
 
     def test_a_multi_stage_item_holds_its_slot_across_stages(self) -> None:
@@ -401,9 +442,10 @@ class TestForeachConcurrency:
                 },
             }
         )
-        # Item 0 finished stage 1 and is mid-body.
         states = {"root.body#0.children[0]": InstanceState.DONE}
-        fr = frontier(root, states, limits=Limits(lanes={"compute": 64, "llm": 9, "io": 9}))
+        fr = frontier(
+            root, states, limits=Limits(lanes={"compute": 64, "llm": 9, "io": 9})
+        )
         paths = {r.path for r in fr.ready}
         assert paths == {"root.body#0.children[1]"}, paths
 
@@ -415,7 +457,11 @@ class TestForeachConcurrency:
                 "kind": "foreach",
                 "id": "l",
                 "config": {"items": [1, 2, 3], "max_concurrency": bad},
-                "body": {"kind": "transform", "id": "w", "config": {"expr": "{{item}}"}},
+                "body": {
+                    "kind": "transform",
+                    "id": "w",
+                    "config": {"expr": "{{item}}"},
+                },
             }
         )
         fr = frontier(root, {}, limits=Limits(lanes={"compute": 64, "llm": 9, "io": 9}))
@@ -429,15 +475,25 @@ class TestForeachConcurrency:
                 "kind": "foreach",
                 "id": "l",
                 "config": {"items": [1, 2, 3, 4, 5], "max_concurrency": 2},
-                "body": {"kind": "transform", "id": "w", "config": {"expr": "item {{item}}"}},
+                "body": {
+                    "kind": "transform",
+                    "id": "w",
+                    "config": {"expr": "item {{item}}"},
+                },
             },
         }
         run, status = await _run_parent(spec)
         assert status == RunStatus.COMPLETE
-        done = [i for i in store.read_state(run.id).values() if i.state == InstanceState.DONE]
+        done = [
+            i
+            for i in store.read_state(run.id).values()
+            if i.state == InstanceState.DONE
+        ]
         assert len(done) == 5
 
-    async def test_the_cap_is_honoured_at_RUN_TIME_not_just_in_the_frontier(self) -> None:
+    async def test_the_cap_is_honoured_at_RUN_TIME_not_just_in_the_frontier(
+        self,
+    ) -> None:
         """Measured, because a cap the scheduler computes but the controller ignores is no cap."""
         peak = {"n": 0, "max": 0}
 
@@ -468,7 +524,11 @@ class TestForeachConcurrency:
                 "kind": "foreach",
                 "id": "l",
                 "config": {"items": [1, 2, 3, 4, 5, 6], "max_concurrency": 2},
-                "body": {"kind": "action", "id": "w", "config": {"provider": "p", "with": {}}},
+                "body": {
+                    "kind": "action",
+                    "id": "w",
+                    "config": {"provider": "p", "with": {}},
+                },
             },
         }
         wd = WorkflowWatchdog(None, EngineServices(get_provider=provider))
@@ -503,14 +563,17 @@ class TestPipelineFlag:
                 },
             }
         )
-        # Item 0 finished stage 1; items 1 and 2 have not started.
         states = {"root.body#0.children[0]": InstanceState.DONE}
-        fr = frontier(root, states, limits=Limits(lanes={"compute": 64, "llm": 9, "io": 9}))
+        fr = frontier(
+            root, states, limits=Limits(lanes={"compute": 64, "llm": 9, "io": 9})
+        )
         paths = {r.path for r in fr.ready}
-        assert "root.body#0.children[1]" in paths, "item 0 is barriered behind its siblings"
+        assert (
+            "root.body#0.children[1]" in paths
+        ), "item 0 is barriered behind its siblings"
 
     def test_the_flag_is_accepted_by_the_validator(self) -> None:
-        from gideon.workflows.validator import validate_spec
+        from gideon.automation.workflows.validator import validate_spec
 
         spec = {
             "name": "p",
@@ -518,7 +581,11 @@ class TestPipelineFlag:
                 "kind": "foreach",
                 "id": "l",
                 "config": {"items": [1], "pipeline": True, "max_concurrency": 2},
-                "body": {"kind": "transform", "id": "w", "config": {"expr": "{{item}}"}},
+                "body": {
+                    "kind": "transform",
+                    "id": "w",
+                    "config": {"expr": "{{item}}"},
+                },
             },
         }
         assert validate_spec(spec, strict=True).issues == []

@@ -5,18 +5,17 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.loop import files as loop_files
-from gideon.loop import kinds, store
-from gideon.loop.loop import Loop
-from gideon.planning.session import PlanSession, PlanStep, StepStatus
+from gideon.automation.loop import files as loop_files
+from gideon.automation.loop import kinds, store
+from gideon.automation.loop.loop import Loop
+from gideon.cognition.planning.session import PlanSession, PlanStep, StepStatus
 
 
 @pytest.fixture(autouse=True)
 def _tmp_config(monkeypatch, tmp_path):
-    monkeypatch.setattr("gideon.loop.files.config_dir", lambda: tmp_path)
-    # on_finalize → decompose_sub_goals writes to the Tasks hierarchy store; isolate it.
-    monkeypatch.setattr("gideon.tasks.hierarchy.config_dir", lambda: tmp_path)
-    import gideon.tasks.native as nat
+    monkeypatch.setattr("gideon.automation.loop.files.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.engine.tasks.hierarchy.config_dir", lambda: tmp_path)
+    import gideon.engine.tasks.native as nat
 
     monkeypatch.setattr(nat, "config_dir", lambda: tmp_path, raising=False)
     return tmp_path
@@ -39,7 +38,12 @@ class TestGoalWalkthrough:
         wt = kinds.get("goal").walkthrough()
         assert wt.step_mode == "fixed"
         steps = wt.default_steps()
-        assert [s["kind"] for s in steps] == ["intent", "sub_goals", "quorum", "execution_plan"]
+        assert [s["kind"] for s in steps] == [
+            "intent",
+            "sub_goals",
+            "quorum",
+            "execution_plan",
+        ]
 
     def test_project_to_spec_into_unified_plan(self):
         kinds.ensure_loaded()
@@ -57,8 +61,13 @@ class TestGoalWalkthrough:
                         "success_criteria": "RCA documented",
                     },
                 ),
-                _approved("sub_goals", {"sub_goals": ["profile the hot path", "check the cache"]}),
-                _approved("quorum", {"roster": [{"role": "investigator"}, {"role": "fixer"}]}),
+                _approved(
+                    "sub_goals",
+                    {"sub_goals": ["profile the hot path", "check the cache"]},
+                ),
+                _approved(
+                    "quorum", {"roster": [{"role": "investigator"}, {"role": "fixer"}]}
+                ),
                 _approved(
                     "execution_plan",
                     {"execution_plan": [{"role": "investigator", "target": "profile"}]},
@@ -68,13 +77,17 @@ class TestGoalWalkthrough:
         spec = wt.project_to_spec(session)
         assert spec["success_criteria"] == "RCA documented"
         assert spec["summary"] == "Find the root cause."
-        # sub-goals → unified plan rows (keyed by title) + kind_config.sub_goals
-        assert spec["plan"] == [{"title": "profile the hot path"}, {"title": "check the cache"}]
-        assert spec["kind_config"]["sub_goals"] == ["profile the hot path", "check the cache"]
+        assert spec["plan"] == [
+            {"title": "profile the hot path"},
+            {"title": "check the cache"},
+        ]
+        assert spec["kind_config"]["sub_goals"] == [
+            "profile the hot path",
+            "check the cache",
+        ]
         assert spec["kind_config"]["execution_plan"] == [
             {"role": "investigator", "target": "profile"}
         ]
-        # two-member roster → multi_agent
         assert spec["execution"] == "multi_agent" and len(spec["roster"]) == 2
 
     def test_on_finalize_decomposes_sub_goals_into_linked_tasks(self):
@@ -96,10 +109,8 @@ class TestGoalWalkthrough:
         wt = kinds.get("goal").walkthrough()
         asyncio.get_event_loop().run_until_complete(wt.on_finalize(loop.id))
         out = store.get(loop.id)
-        # sub-goals became linked Tasks (the modern /decompose) + a backing Project
         assert len(out.linked_task_ids) == 2
         assert out.tasks_project_id != "" and "sub_goals" in out.task_list_ids
-        # idempotent — a second finalize doesn't double-create
         asyncio.get_event_loop().run_until_complete(wt.on_finalize(loop.id))
         assert len(store.get(loop.id).linked_task_ids) == 2
 
@@ -147,12 +158,13 @@ class TestCodeWalkthrough:
             ],
         )
         spec = wt.project_to_spec(session)
-        assert spec["plan"]  # generic implement→verify ladder, never empty
+        assert spec["plan"]
 
 
 class TestDesignWalkthrough:
     """Design is now a REAL planned loop (not skip-planning): a DYNAMIC walkthrough
-    authors the phased breakdown, projecting the approved build_plan into the loop plan."""
+    authors the phased breakdown, projecting the approved build_plan into the loop plan.
+    """
 
     def test_step_mode_dynamic(self):
         kinds.ensure_loaded()
@@ -162,13 +174,20 @@ class TestDesignWalkthrough:
     def test_project_build_plan_into_plan(self):
         kinds.ensure_loaded()
         loop = store.create(
-            Loop(id="", name="", kind="design", task="build a warm design system for a recipe app")
+            Loop(
+                id="",
+                name="",
+                kind="design",
+                task="build a warm design system for a recipe app",
+            )
         )
         wt = kinds.get("design").walkthrough()
         session = PlanSession(
             project_id=loop.id,
             steps=[
-                _approved("brief", {"markdown": "Warm, accessible recipe-app system.\nMore."}),
+                _approved(
+                    "brief", {"markdown": "Warm, accessible recipe-app system.\nMore."}
+                ),
                 _approved(
                     "build_plan",
                     {
@@ -190,15 +209,13 @@ class TestDesignWalkthrough:
         )
         spec = wt.project_to_spec(session)
         assert spec["summary"] == "Warm, accessible recipe-app system."
-        # build_plan phases → unified design plan rows (keyed by step→title)
         assert [p["step"] for p in spec["plan"]] == ["foundations", "export"]
-        # phase titles mirrored into kind_config.design_steps (cockpit/brief render them)
-        assert spec["kind_config"]["design_steps"] == ["Foundations", "Document & export"]
+        assert spec["kind_config"]["design_steps"] == [
+            "Foundations",
+            "Document & export",
+        ]
 
     def test_finalize_merges_approved_token_overrides_into_kind_config(self):
-        # D4 approve→populate: every approved token-step's token_overrides deep-merge
-        # into kind_config.token_overrides on finalize, so the cockpit opens populated
-        # with the approved system (authoritative server-side, not reliant on the FE).
         kinds.ensure_loaded()
         loop = store.create(Loop(id="", name="", kind="design", task="a warm system"))
         wt = kinds.get("design").walkthrough()
@@ -207,19 +224,29 @@ class TestDesignWalkthrough:
             steps=[
                 _approved(
                     "palette",
-                    {"token_overrides": {"color": {"primitive": {"brand": {"500": "#d65f2e"}}}}},
+                    {
+                        "token_overrides": {
+                            "color": {"primitive": {"brand": {"500": "#d65f2e"}}}
+                        }
+                    },
                 ),
                 _approved(
                     "typography",
-                    {"token_overrides": {"typography": {"family": {"sans": "Inter, sans-serif"}}}},
+                    {
+                        "token_overrides": {
+                            "typography": {"family": {"sans": "Inter, sans-serif"}}
+                        }
+                    },
                 ),
-                _approved("build_plan", {"phases": [{"step": "export", "title": "Export"}]}),
+                _approved(
+                    "build_plan", {"phases": [{"step": "export", "title": "Export"}]}
+                ),
             ],
         )
         spec = wt.project_to_spec(session)
         ov = spec["kind_config"]["token_overrides"]
-        assert ov["color"]["primitive"]["brand"]["500"] == "#d65f2e"  # palette merged
-        assert ov["typography"]["family"]["sans"] == "Inter, sans-serif"  # typography merged
+        assert ov["color"]["primitive"]["brand"]["500"] == "#d65f2e"
+        assert ov["typography"]["family"]["sans"] == "Inter, sans-serif"
 
     def test_no_build_plan_falls_back_to_default_phases(self):
         kinds.ensure_loaded()
@@ -232,7 +259,7 @@ class TestDesignWalkthrough:
             ],
         )
         spec = wt.project_to_spec(session)
-        assert spec["plan"]  # canonical default phases, never empty
+        assert spec["plan"]
         assert spec["kind_config"]["design_steps"]
 
 
@@ -243,7 +270,9 @@ class TestStepPassRetry:
 
     def _seed(self, kind="design"):
         kinds.ensure_loaded()
-        loop = store.create(Loop(id="", name="", kind=kind, task="design a tic-tac-toe system"))
+        loop = store.create(
+            Loop(id="", name="", kind=kind, task="design a tic-tac-toe system")
+        )
         session = PlanSession(
             project_id=loop.id,
             steps=[
@@ -263,15 +292,15 @@ class TestStepPassRetry:
     def test_retries_once_then_succeeds(self, monkeypatch):
         import asyncio
 
-        from gideon.loop import plan_walkthrough as pw
+        from gideon.automation.loop import plan_walkthrough as pw
 
         loop = self._seed()
         calls = {"n": 0}
 
-        async def _fake_run_pass(state, svc, lp, wt, *, brief, sentinel, timeout_secs=None):
+        async def _fake_run_pass(
+            state, svc, lp, wt, *, brief, sentinel, timeout_secs=None
+        ):
             calls["n"] += 1
-            # 1st call: planner pasted a code block (no sentinel written) → parse None.
-            # 2nd call (the correction): it actually wrote the artifact.
             if calls["n"] == 1:
                 return '```json\n{"markdown":"narrated, not written"}\n```'
             return "wrote step_artifact.json"
@@ -295,12 +324,14 @@ class TestStepPassRetry:
     def test_reverts_to_pending_when_retry_also_fails(self, monkeypatch):
         import asyncio
 
-        from gideon.loop import plan_walkthrough as pw
+        from gideon.automation.loop import plan_walkthrough as pw
 
         loop = self._seed()
         calls = {"n": 0}
 
-        async def _fake_run_pass(state, svc, lp, wt, *, brief, sentinel, timeout_secs=None):
+        async def _fake_run_pass(
+            state, svc, lp, wt, *, brief, sentinel, timeout_secs=None
+        ):
             calls["n"] += 1
             return "still just chatting, no file"
 
@@ -316,4 +347,4 @@ class TestStepPassRetry:
         assert calls["n"] == 2, "tries the original + exactly one retry, then gives up"
         assert step is None
         session = loop_files.read_plan_session(loop.id)
-        assert session.steps[0].status == StepStatus.PENDING.value  # honest revert
+        assert session.steps[0].status == StepStatus.PENDING.value

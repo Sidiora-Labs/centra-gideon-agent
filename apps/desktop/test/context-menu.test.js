@@ -1,6 +1,6 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
-const { buildMenuTemplate } = require("../context-menu");
+const { buildMenuTemplate } = require("../src/native/context-menu");
 
 function mockParams(overrides = {}) {
   const calls = { replaceMisspelling: [], addWord: [] };
@@ -101,7 +101,7 @@ describe("buildMenuTemplate", () => {
     assert.ok(!lookup.label.includes("\n"));
     const inner = lookup.label.slice("Look Up '".length, -1);
     assert.ok(inner.endsWith("\u2026"));
-    assert.equal(inner.length, 26); // 25 + ellipsis
+    assert.equal(inner.length, 26);
     assert.ok(!inner.includes("\n"));
   });
 
@@ -110,7 +110,6 @@ describe("buildMenuTemplate", () => {
     const t = buildMenuTemplate(params, "darwin", webContents);
     const lookup = t.find((i) => i.label?.startsWith("Look Up"));
     assert.ok(lookup);
-    // No runs of 2+ whitespace, no \t, no \n
     assert.ok(!/\s{2,}/.test(lookup.label));
     assert.ok(!lookup.label.includes("\t"));
   });

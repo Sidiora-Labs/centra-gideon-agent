@@ -7,11 +7,7 @@ extended scheduling fields: agent_sequence, env, persistent_session, silent).
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from gideon.apps.manifest import AppManifest, CronEntry
-
-# ---------------------------------------------------------------------------
-# Strategies
-# ---------------------------------------------------------------------------
+from gideon.extensions.apps.manifest import AppManifest, CronEntry
 
 
 def _env_dict() -> st.SearchStrategy[dict[str, str]]:
@@ -53,11 +49,6 @@ def _cron_entry() -> st.SearchStrategy[CronEntry]:
         persistent_session=st.booleans(),
         silent=st.booleans(),
     )
-
-
-# ---------------------------------------------------------------------------
-# Round-trip properties
-# ---------------------------------------------------------------------------
 
 
 class TestCronRoundTrip:

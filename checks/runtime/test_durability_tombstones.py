@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import json
 
-from gideon.durability import shards
-from gideon.durability import tombstones as tomb
+from gideon.operations.durability import shards
+from gideon.operations.durability import tombstones as tomb
 
 
 class TestRecordRead:
@@ -29,9 +29,9 @@ class TestRecordRead:
 
     def test_later_marker_wins_per_id(self, tmp_path):
         tomb.record_tombstone(tmp_path, "x", now="2026-08-01T00:00:00Z")
-        tomb.record_tombstone(tmp_path, "x", now="2026-08-09T00:00:00Z")  # recreated, re-deleted
+        tomb.record_tombstone(tmp_path, "x", now="2026-08-09T00:00:00Z")
         rows = tomb.read_tombstones(tmp_path)
-        assert rows == [{"id": "x", "deleted_at": "2026-08-09T00:00:00Z"}]  # one row, later ts
+        assert rows == [{"id": "x", "deleted_at": "2026-08-09T00:00:00Z"}]
 
     def test_corrupt_lines_are_skipped(self, tmp_path):
         (tmp_path / tomb.TOMBSTONE_FILE).write_text(
@@ -40,12 +40,10 @@ class TestRecordRead:
         assert tomb.read_tombstones(tmp_path) == [{"id": "ok", "deleted_at": "t"}]
 
     def test_log_file_is_underscore_jsonl_invisible_to_entity_glob(self, tmp_path):
-        # The store globs *.json; the exporter's entity extraction does too. A _*.jsonl
-        # side-log must not surface as a fake entity.
         tomb.record_tombstone(tmp_path, "gone", now="t")
         (tmp_path / "real.json").write_text('{"id": "real"}', encoding="utf-8")
         extracted = {r["id"] for r in shards._json_rows_from_entity_dir(tmp_path)}
-        assert extracted == {"real"}  # the side-log did not leak in
+        assert extracted == {"real"}
 
 
 class TestMergeIntoRows:
@@ -59,16 +57,14 @@ class TestMergeIntoRows:
         assert dead["deleted_at"] == "2026-08-06"
 
     def test_tombstone_dropped_when_row_is_live_again(self, tmp_path):
-        # Row was deleted, then recreated (same id now has a live file). The stale marker
-        # must NOT delete the resurrected entity — drop it.
         tomb.record_tombstone(tmp_path, "recreated", now="2026-08-01")
         live = [{"id": "recreated", "data": {"title": "back"}}]
         merged = tomb.merge_into_rows(tmp_path, live)
-        assert merged == live  # no tombstone row added
+        assert merged == live
 
     def test_no_log_is_a_passthrough(self, tmp_path):
         live = [{"id": "a", "data": {}}]
-        assert tomb.merge_into_rows(tmp_path, live) is live  # same object, no work
+        assert tomb.merge_into_rows(tmp_path, live) is live
 
 
 class TestPrune:
@@ -85,11 +81,12 @@ class TestPrune:
 
 class TestExportFold:
     def test_hard_deleted_task_marker_rides_the_export(self, tmp_path):
-        # A realistic tasks dir: one live task + a side-log for a hard-deleted one.
         home = tmp_path / "home"
         tasks = home / "tasks"
         tasks.mkdir(parents=True)
-        (tasks / "t-live.json").write_text('{"id": "t-live", "title": "here"}', encoding="utf-8")
+        (tasks / "t-live.json").write_text(
+            '{"id": "t-live", "title": "here"}', encoding="utf-8"
+        )
         tomb.record_tombstone(tasks, "t-deleted", now="2026-08-06T00:00:00Z")
 
         out = tmp_path / "shards"
@@ -97,5 +94,5 @@ class TestExportFold:
         shard = out / "tasks" / "entities.jsonl"
         rows = [json.loads(ln) for ln in shard.read_text().splitlines() if ln.strip()]
         by_id = {r["id"]: r for r in rows}
-        assert "t-live" in by_id  # the live task
-        assert by_id["t-deleted"].get("deleted_at")  # the delete marker rode along
+        assert "t-live" in by_id
+        assert by_id["t-deleted"].get("deleted_at")

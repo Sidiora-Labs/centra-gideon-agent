@@ -14,9 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.local_models import layouts
-
-# ── The HF hub name mangling ────────────────────────────────────────────
+from gideon.integrations.local_models import layouts
 
 
 @pytest.mark.parametrize(
@@ -32,9 +30,6 @@ from gideon.local_models import layouts
 def test_hf_repo_dirname(model, expected):
     """Mirrors the hub's escaping without importing it — the headless case must still work."""
     assert layouts.hf_repo_dirname(model) == expected
-
-
-# ── is_downloaded across every layout ───────────────────────────────────
 
 
 def test_finds_an_hf_snapshot(tmp_path):
@@ -92,9 +87,6 @@ def test_empty_model_id_is_not_downloaded(tmp_path, model):
     assert layouts.is_downloaded(tmp_path, model) is False
 
 
-# ── Partials are NOT downloaded ─────────────────────────────────────────
-
-
 @pytest.mark.parametrize("suffix", [".part", ".tmp", ".incomplete", ".download"])
 def test_a_partial_file_is_not_downloaded(tmp_path, suffix):
     """Reporting a partial as present gives a model that fails at load with no explanation."""
@@ -130,9 +122,6 @@ def test_an_empty_directory_is_not_downloaded(tmp_path):
     assert layouts.is_downloaded(tmp_path, "org/m") is False
 
 
-# ── Multiple layouts (the disk-leak shape) ──────────────────────────────
-
-
 def test_reports_every_layout_that_holds_the_model(tmp_path):
     """Two copies means two fetch paths — surfaced, not hidden."""
     snap = tmp_path / "models--org--m" / "snapshots" / "r1"
@@ -147,9 +136,6 @@ def test_reports_every_layout_that_holds_the_model(tmp_path):
 
 def test_downloaded_layouts_is_empty_when_absent(tmp_path):
     assert layouts.downloaded_layouts(tmp_path, "org/m") == []
-
-
-# ── Deleting is greedy ──────────────────────────────────────────────────
 
 
 def test_delete_removes_every_layout(tmp_path):
@@ -192,9 +178,6 @@ def test_delete_does_not_touch_a_different_model(tmp_path):
     assert (tmp_path / "keep.onnx").exists()
 
 
-# ── Cleanup candidates (§4.2) ───────────────────────────────────────────
-
-
 def test_cleanup_candidates_finds_partials(tmp_path):
     (tmp_path / "a.part").write_bytes(b"12345")
     nested = tmp_path / "models--org--m" / "blobs"
@@ -213,7 +196,9 @@ def test_cleanup_candidates_are_largest_first(tmp_path):
     """The UI shows what's worth reclaiming, so order matters."""
     (tmp_path / "small.part").write_bytes(b"1")
     (tmp_path / "big.part").write_bytes(b"1" * 100)
-    assert [c["path"].rsplit("/", 1)[-1] for c in layouts.cleanup_candidates(tmp_path)] == [
+    assert [
+        c["path"].rsplit("/", 1)[-1] for c in layouts.cleanup_candidates(tmp_path)
+    ] == [
         "big.part",
         "small.part",
     ]
@@ -234,16 +219,13 @@ def test_reclaimable_bytes_is_zero_when_clean(tmp_path):
     assert layouts.reclaimable_bytes(tmp_path) == 0
 
 
-# ── The runner's second opinion ─────────────────────────────────────────
-
-
 def test_runner_trusts_the_probe_when_the_provider_says_no(tmp_path, monkeypatch):
     """The asymmetry that matters: a false NO costs the user gigabytes.
 
     A provider checking only its own `save()` layout misses a model the HF hub fetched into
     `models--{org}--{name}/`, where the id never appears literally.
     """
-    from gideon.dashboard import model_downloads as md
+    from gideon.interfaces.dashboard import model_downloads as md
 
     class _Model:
         name = "openai/whisper-large-v3"
@@ -260,7 +242,7 @@ def test_runner_trusts_the_probe_when_the_provider_says_no(tmp_path, monkeypatch
 
 def test_runner_keeps_saying_no_when_nothing_is_on_disk(tmp_path, monkeypatch):
     """The probe only ever ADDS a yes — a false YES fails at load with no explanation."""
-    from gideon.dashboard import model_downloads as md
+    from gideon.interfaces.dashboard import model_downloads as md
 
     class _Model:
         name = "tiny-en"
@@ -273,7 +255,7 @@ def test_runner_keeps_saying_no_when_nothing_is_on_disk(tmp_path, monkeypatch):
 
 def test_runner_trusts_a_provider_yes_without_probing(tmp_path, monkeypatch):
     """Only the provider knows backend-specific layouts, so its YES is authoritative."""
-    from gideon.dashboard import model_downloads as md
+    from gideon.interfaces.dashboard import model_downloads as md
 
     class _Model:
         name = "tiny-en"
@@ -281,21 +263,22 @@ def test_runner_trusts_a_provider_yes_without_probing(tmp_path, monkeypatch):
 
     monkeypatch.setattr(md, "_list_models_for_provider", lambda n: [_Model()])
     monkeypatch.setattr(
-        md, "_cache_root", lambda n: (_ for _ in ()).throw(AssertionError("should not probe"))
+        md,
+        "_cache_root",
+        lambda n: (_ for _ in ()).throw(AssertionError("should not probe")),
     )
     assert md._is_downloaded("whisper", "tiny-en") is True
 
 
 def test_runner_survives_a_probe_failure(tmp_path, monkeypatch):
     """A probe error must not break the download decision."""
-    from gideon.dashboard import model_downloads as md
+    from gideon.interfaces.dashboard import model_downloads as md
 
     monkeypatch.setattr(md, "_list_models_for_provider", lambda n: [])
-    monkeypatch.setattr(md, "_cache_root", lambda n: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(
+        md, "_cache_root", lambda n: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
     assert md._is_downloaded("whisper", "x") is False
-
-
-# ── The test-suite invariant ────────────────────────────────────────────
 
 
 def test_every_fs_test_uses_tmp_path():
@@ -308,7 +291,7 @@ def test_every_fs_test_uses_tmp_path():
     """
     import inspect
 
-    import tests.test_local_model_layouts as mod
+    import checks.runtime.test_local_model_layouts as mod
 
     fs_verbs = ("write_bytes", "mkdir", "delete_all_layouts", "cleanup_candidates")
     offenders = []
@@ -316,7 +299,7 @@ def test_every_fs_test_uses_tmp_path():
         if not name.startswith("test_") or not callable(fn):
             continue
         if name == "test_every_fs_test_uses_tmp_path":
-            continue  # names the verbs it scans for; excluding it keeps the guard honest
+            continue
         try:
             src = inspect.getsource(fn)
         except OSError:  # pragma: no cover

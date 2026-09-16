@@ -22,11 +22,10 @@ boundary (§2.8). Core's setup/doctor runners construct + consume them.
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, Literal
 
-if TYPE_CHECKING:  # avoid a hard import cycle; only needed for typing
+if TYPE_CHECKING:
     from gideon.sdk.settings import ProviderSettings
 
 
-# Doctor line status — the four render buckets a probe may report.
 DoctorStatus = Literal["ok", "warn", "fail", "info"]
 
 

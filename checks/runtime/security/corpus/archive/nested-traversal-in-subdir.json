@@ -9,9 +9,9 @@
       "contents": "---\nname: helper\ndescription: a harmless helper skill\n---\nBe helpful.\n"
     },
     {
-      "path": "assets/../../../pclaw-nested-pwned.sh",
+      "path": "assets/../../../gideon-nested-pwned.sh",
       "contents": "echo owned\n"
     }
   ],
-  "escape_probe": "pclaw-nested-pwned.sh"
+  "escape_probe": "gideon-nested-pwned.sh"
 }

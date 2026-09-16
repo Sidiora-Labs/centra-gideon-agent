@@ -22,16 +22,16 @@ import ast
 import subprocess
 from pathlib import Path
 
-from harness.profiles import HARNESS_PY, profile_names
-from harness.specs import Spec, ValidationIssue
+from checks.harness.profiles import HARNESS_PY, profile_names
+from checks.harness.specs import Spec, ValidationIssue
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parent.parent
+    return Path(__file__).resolve().parent.parent.parent
 
 
 def _split_node_id(node_id: str) -> tuple[str, str]:
-    """Split ``tests/x.py::Klass::test_fn[param]`` into (``tests/x.py``, ``test_fn``).
+    """Split ``checks/runtime/x.py::Klass::test_fn[param]`` into (``checks/runtime/x.py``, ``test_fn``).
 
     Returns (file_part, leaf_function_name). The leaf is the last ``::`` segment with any
     ``[param]`` parametrization suffix stripped — the name a ``def`` would carry in the
@@ -66,7 +66,10 @@ def _file_defines(file_part: str, func_name: str) -> bool:
     except (OSError, SyntaxError):
         return False
     for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == func_name:
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == func_name
+        ):
             return True
     return False
 
@@ -75,7 +78,7 @@ def collect_test_ids(*, timeout: int = 180) -> tuple[set[str], int, str]:
     """Collect the ENTIRE test suite once. Returns (collected, rc, stderr).
 
     ``rc`` is ``-1`` if the subprocess couldn't be launched at all; otherwise pytest's
-    exit code. We collect the whole ``tests/`` tree (not the requested node-ids) and match
+    exit code. We collect the whole ``checks/runtime/`` tree (not the requested node-ids) and match
     in Python because passing an explicit node-id list is fragile: one un-collectable id in
     the batch (a genuinely missing test, or a module that ``pytest.skip``s at collection
     time) makes pytest abort the whole batch, which would poison resolution of every other
@@ -113,7 +116,6 @@ def collect_test_ids(*, timeout: int = 180) -> tuple[set[str], int, str]:
     except (OSError, subprocess.TimeoutExpired) as exc:
         return set(), -1, f"pytest collect failed to run: {exc}"
 
-    # `-q --collect-only` prints one collected node-id per line (plus a trailing summary).
     collected: set[str] = set()
     for line in proc.stdout.splitlines():
         line = line.strip()
@@ -128,7 +130,7 @@ def _node_id_matches(requested: str, collected: set[str]) -> bool:
 
     Match order:
     1. exact collection, or a collected node-id that starts with ``requested`` (so a file
-       or class prefix like ``tests/test_x.py`` matches ``tests/test_x.py::test_case``, and
+       or class prefix like ``checks/runtime/test_x.py`` matches ``checks/runtime/test_x.py::test_case``, and
        a bare test matches its parametrized ``test_case[param]`` variants);
     2. AST fallback — the file defines a ``def`` with the leaf name. This covers tests that
        are environment-skipped at module level or parametrized to an empty set here, which
@@ -159,17 +161,17 @@ def validate_refs(
     issues: list[ValidationIssue] = []
     profiles = profile_names()
 
-    # requiredProfiles must name real profiles (cheap, always run).
     for spec in specs:
         for prof in spec.get_list("requiredProfiles"):
             if prof not in profiles:
                 issues.append(
                     ValidationIssue(
-                        spec.path, "error", f"requiredProfiles names unknown profile {prof!r}"
+                        spec.path,
+                        "error",
+                        f"requiredProfiles names unknown profile {prof!r}",
                     )
                 )
 
-    # scanner check-ids on rule specs.
     for spec in specs:
         check = spec.meta.get("scanner")
         if not check:
@@ -185,10 +187,11 @@ def validate_refs(
             )
         elif check not in known_scanner_checks:
             issues.append(
-                ValidationIssue(spec.path, "error", f"unknown scanner check-id {check!r}")
+                ValidationIssue(
+                    spec.path, "error", f"unknown scanner check-id {check!r}"
+                )
             )
 
-    # requiredTests node-ids collect (the expensive round-trip; one pytest call for all).
     if check_tests:
         all_requested: dict[str, list[Spec]] = {}
         for spec in specs:
@@ -197,15 +200,9 @@ def validate_refs(
         if all_requested:
             collected, rc, stderr = collect_test_ids()
             if rc == -1 or (not collected and rc != 0):
-                # Either the subprocess couldn't be launched (rc == -1) or the whole-suite
-                # collection itself broke (non-zero rc AND nothing collected). Report once,
-                # don't blame every spec. A non-zero rc WITH a non-empty collection is
-                # normal here — the apps-boundary module skips at collection time, which
-                # pytest reports as rc 4 (usage) while still collecting everything else;
-                # the per-node AST fallback tells a real dangling reference from a skip.
                 issues.append(
                     ValidationIssue(
-                        _repo_root() / "harness",
+                        _repo_root() / "checks/harness",
                         "error",
                         f"could not collect the test suite (pytest rc={rc}): "
                         f"{stderr.strip()[:400]}",

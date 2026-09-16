@@ -7,14 +7,14 @@ backend needs (audio decoding), exposed here so the app doesn't reach into core
 internals.
 """
 
-from gideon.stt.provider import (  # noqa: F401
+from gideon.integrations.stt.provider import (
     SttModel,
     SttProvider,
     TranscriptResult,
     TranscriptSegment,
     TranscriptWord,
 )
-from gideon.transcribe import ensure_ffmpeg_in_path  # noqa: F401
+from gideon.integrations.transcribe import ensure_ffmpeg_in_path  # noqa: F401
 
 __all__ = [
     "SttProvider",

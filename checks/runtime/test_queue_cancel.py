@@ -13,11 +13,9 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.dashboard.chat import api_chat_session_queue_cancel
-from gideon.dashboard.sse import SseHub
-from gideon.dashboard.state import DashboardState, _ChatSession
-
-# ── Unit tests: _ChatSession queue helpers ──
+from gideon.interfaces.dashboard.chat import api_chat_session_queue_cancel
+from gideon.interfaces.dashboard.sse import SseHub
+from gideon.interfaces.dashboard.state import ConsoleState, _ChatSession
 
 
 class TestQueueHelpers:
@@ -91,17 +89,12 @@ class TestQueueHelpers:
         assert session._queue[0]["id"] == id1
 
 
-# ── API tests: DELETE /api/chat/sessions/{session}/queue/{queue_id} ──
-
-
 def _make_state():
-    state = DashboardState.__new__(DashboardState)
+    state = ConsoleState.__new__(ConsoleState)
     state._sessions = {}
     state._ws_clients = []
     state._sse = SseHub()
     state._background_tasks = set()
-    # YOLO is process-global (gideon.trust_mode); the autouse
-    # _reset_trust_mode fixture keeps it OFF — no instance field to set.
     state._restricted_keys = set()
     state.sessions = None
     state.conversation_log = None
@@ -128,7 +121,7 @@ class TestQueueCancelEndpoint:
         qid = session.queue_append("cancel me")
         session.append("queued", "cancel me", json.dumps({"queue_id": qid}))
 
-        with patch("gideon.sel.sel") as mock_sel:
+        with patch("gideon.security.sel.sel") as mock_sel:
             mock_sel.return_value = MagicMock()
             app = _make_app(state)
             async with TestClient(TestServer(app)) as client:
@@ -139,13 +132,12 @@ class TestQueueCancelEndpoint:
                 assert "cancel me" in data["content"]
 
         assert len(session._queue) == 0
-        # Queued message should also be removed from messages
         assert not any(m["role"] == "queued" for m in session.messages)
 
     @pytest.mark.asyncio
     async def test_cancel_session_not_found(self):
         state = _make_state()
-        with patch("gideon.sel.sel") as mock_sel:
+        with patch("gideon.security.sel.sel") as mock_sel:
             mock_sel.return_value = MagicMock()
             app = _make_app(state)
             async with TestClient(TestServer(app)) as client:
@@ -158,7 +150,7 @@ class TestQueueCancelEndpoint:
         session = state.get_or_create_session("chat-1")
         session.queue_append("keep me")
 
-        with patch("gideon.sel.sel") as mock_sel:
+        with patch("gideon.security.sel.sel") as mock_sel:
             mock_sel.return_value = MagicMock()
             app = _make_app(state)
             async with TestClient(TestServer(app)) as client:
@@ -167,7 +159,6 @@ class TestQueueCancelEndpoint:
                 data = await resp.json()
                 assert "not found" in data["error"]
 
-        # Queue should be untouched
         assert len(session._queue) == 1
 
     @pytest.mark.asyncio
@@ -179,7 +170,7 @@ class TestQueueCancelEndpoint:
         qid2 = session.queue_append("second")
         session.queue_append("third")
 
-        with patch("gideon.sel.sel") as mock_sel:
+        with patch("gideon.security.sel.sel") as mock_sel:
             mock_sel.return_value = MagicMock()
             app = _make_app(state)
             async with TestClient(TestServer(app)) as client:
@@ -196,7 +187,7 @@ class TestQueueCancelEndpoint:
         qid = session.queue_append("cancel me")
         state.broadcast_ws = MagicMock()
 
-        with patch("gideon.sel.sel") as mock_sel:
+        with patch("gideon.security.sel.sel") as mock_sel:
             mock_sel.return_value = MagicMock()
             app = _make_app(state)
             async with TestClient(TestServer(app)) as client:
@@ -214,11 +205,10 @@ class TestQueueCancelEndpoint:
         session = state.get_or_create_session("chat-1")
         id1 = session.queue_append("same text")
         id2 = session.queue_append("same text")
-        # Add queued placeholders with queue_id in cls metadata
         session.append("queued", "same text", json.dumps({"queue_id": id1}))
         session.append("queued", "same text", json.dumps({"queue_id": id2}))
 
-        with patch("gideon.sel.sel") as mock_sel:
+        with patch("gideon.security.sel.sel") as mock_sel:
             mock_sel.return_value = MagicMock()
             app = _make_app(state)
             async with TestClient(TestServer(app)) as client:
@@ -227,7 +217,6 @@ class TestQueueCancelEndpoint:
 
         assert len(session._queue) == 1
         assert session._queue[0]["id"] == id1
-        # The first placeholder (id1) should remain, second (id2) removed
         queued_msgs = [m for m in session.messages if m.get("role") == "queued"]
         assert len(queued_msgs) == 1
         cls = json.loads(queued_msgs[0].get("cls", "{}"))

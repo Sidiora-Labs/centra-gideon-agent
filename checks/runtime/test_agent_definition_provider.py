@@ -17,17 +17,14 @@ import dataclasses
 
 
 def test_all_three_agent_shapes_carry_provider():
-    from gideon.agents.marketplace import AgentDefinition
-    from gideon.agents.provider import AgentRuntimeDefinition
-    from gideon.config.loader import AgentProfile
+    from gideon.core.config.loader import AgentProfile
+    from gideon.engine.agents.marketplace import AgentDefinition
+    from gideon.engine.agents.provider import AgentRuntimeDefinition
 
-    # Default: empty provider → inherits the global agent.provider default.
     assert AgentProfile().provider == ""
-    assert AgentRuntimeDefinition(name="x").provider == "native"  # runtime default
+    assert AgentRuntimeDefinition(name="x").provider == "native"
     assert AgentDefinition(name="x").provider == ""
 
-    # Explicit per-agent provider is honored + round-trips for the persisted/
-    # transport shapes.
     prof = AgentProfile(provider="acp:claude-code")
     assert prof.provider == "acp:claude-code"
 
@@ -38,7 +35,7 @@ def test_all_three_agent_shapes_carry_provider():
 def test_marketplace_definition_provider_distinct_from_provider_entry():
     """`provider` (agent-runtime axis) is distinct from `provider_entry`
     (a ModelProvider entry name) — both can be set independently."""
-    from gideon.agents.marketplace import AgentDefinition
+    from gideon.engine.agents.marketplace import AgentDefinition
 
     d = AgentDefinition(name="z", provider="native", provider_entry="MyCloud")
     assert d.provider == "native"
@@ -50,22 +47,20 @@ def test_marketplace_from_dict_preserves_provider():
     drop it, so an agent bound to an ACP runtime silently
     lost the binding on every load → the connected ACP provider was never used
     and no ACP agents were chattable."""
-    from gideon.agents.marketplace import AgentDefinition
+    from gideon.engine.agents.marketplace import AgentDefinition
 
     d = AgentDefinition.from_dict({"name": "cc", "provider": "acp:claude-code"})
     assert d.provider == "acp:claude-code"
-    # Full round-trip through serialization is stable.
     assert AgentDefinition.from_dict(d.to_dict()).provider == "acp:claude-code"
 
 
 def test_local_marketplace_update_can_rebind_provider(tmp_path):
     """Regression: `provider` must be in the update allowlist so an agent can be
     (re)bound to an ACP runtime via the editor."""
-    from gideon.agents.marketplace import AgentDefinition, LocalAgentMarketplace
+    from gideon.engine.agents.marketplace import AgentDefinition, LocalAgentMarketplace
 
     market = LocalAgentMarketplace(base_dir=tmp_path / "agents")
     market.create(AgentDefinition(name="rebind", provider="native"))
     updated = market.update("rebind", {"provider": "acp:test-cli"})
     assert updated.provider == "acp:test-cli"
-    # Persisted + reloaded keeps the rebind.
     assert market.get("rebind").provider == "acp:test-cli"

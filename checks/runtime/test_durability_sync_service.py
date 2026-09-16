@@ -13,28 +13,32 @@ from unittest.mock import patch
 
 import pytest
 
-from gideon.config.loader import AppConfig, DurabilityConfig
-from gideon.durability import service
-from gideon.sync_transports.base import (
+from gideon.core.config.loader import AppConfig, DurabilityConfig
+from gideon.integrations.sync_transports.base import (
     ConnectionResult,
     PushResult,
     RemoteRef,
     SyncObject,
     SyncTransportProvider,
 )
+from gideon.operations.durability import service
 
 
 @pytest.fixture
 def cfg_file(tmp_path):
     p = tmp_path / "config.json"
-    with patch("gideon.config.loader.config_path", return_value=p):
+    with patch("gideon.core.config.loader.config_path", return_value=p):
         yield p
 
 
 class TestConfigRoundTrip:
     def test_sync_fields_default_off_and_closed(self):
         d = DurabilityConfig()
-        assert d.sync_enabled is False and d.sync_transport == "" and d.sync_stale_after_secs == 900
+        assert (
+            d.sync_enabled is False
+            and d.sync_transport == ""
+            and d.sync_stale_after_secs == 900
+        )
 
     def test_sync_fields_survive_save_load(self, cfg_file):
         cfg = AppConfig.load()
@@ -43,8 +47,7 @@ class TestConfigRoundTrip:
         cfg.durability.sync_stale_after_secs = 1800
         cfg.save()
         raw = json.loads(cfg_file.read_text(encoding="utf-8"))
-        assert raw["durability"]["sync_transport"] == "git-sync"  # asdict serialized it
-        # And it comes BACK from load()'s explicit mapping (not silently reverted).
+        assert raw["durability"]["sync_transport"] == "git-sync"
         again = AppConfig.load()
         assert again.durability.sync_enabled is True
         assert again.durability.sync_transport == "git-sync"
@@ -54,7 +57,6 @@ class TestConfigRoundTrip:
         cfg_file.write_text(
             json.dumps({"durability": {"sync_enabled": "not-a-bool"}}), encoding="utf-8"
         )
-        # A non-bool must read False (fail-closed): a sync surface must never self-enable.
         assert AppConfig.load().durability.sync_enabled is False
 
 
@@ -64,9 +66,6 @@ class _Cfg:
         self.sync_transport = transport
         self.sync_stale_after_secs = stale
         self.restore_drills = False
-        # DAS-9 added the `time_travel` guard flag, and `service._due_schedule` reads it on
-        # the sync path. Default False here: this stub exists to exercise SYNC scheduling,
-        # and leaving history off keeps that the only variable under test.
         self.time_travel = False
 
 
@@ -86,7 +85,9 @@ class FakeTransport(SyncTransportProvider):
 
     def pull(self, refs):
         return [
-            SyncObject(key=r.key, data=self.objects[r.key]) for r in refs if r.key in self.objects
+            SyncObject(key=r.key, data=self.objects[r.key])
+            for r in refs
+            if r.key in self.objects
         ]
 
     def cas_registry(self, e, d):
@@ -107,7 +108,9 @@ class TestSyncJobGuards:
         assert "no sync transport" in service.run_sync_job().skipped
 
     def test_unregistered_transport_is_skipped(self, monkeypatch):
-        monkeypatch.setattr(service, "_cfg", lambda: _Cfg(enabled=True, transport="ghost"))
+        monkeypatch.setattr(
+            service, "_cfg", lambda: _Cfg(enabled=True, transport="ghost")
+        )
         assert "not installed" in service.run_sync_job().skipped
 
 
@@ -117,10 +120,12 @@ class TestSyncJobRuns:
         (home / "tasks").mkdir(parents=True)
         (home / "tasks" / "t1.json").write_text('{"id":"t1"}', encoding="utf-8")
         monkeypatch.setenv("GIDEON_HOME", str(home))
-        monkeypatch.setattr(service, "_cfg", lambda: _Cfg(enabled=True, transport="fake"))
+        monkeypatch.setattr(
+            service, "_cfg", lambda: _Cfg(enabled=True, transport="fake")
+        )
 
         tr = FakeTransport()
-        from gideon.sync_transports import registry
+        from gideon.integrations.sync_transports import registry
 
         registry.register_transport(tr)
         try:
@@ -128,7 +133,7 @@ class TestSyncJobRuns:
         finally:
             registry.unregister_transport("fake")
         assert r.ok and not r.skipped
-        assert r.extra.get("seq_published") == 1  # published this machine's first seq
+        assert r.extra.get("seq_published") == 1
 
 
 class TestDueSchedule:
@@ -138,9 +143,10 @@ class TestDueSchedule:
 
     @pytest.fixture(autouse=True)
     def _no_real_jobs(self, monkeypatch):
-        # Neutralize the export/snapshot/drill branches so only the sync decision is exercised.
         monkeypatch.setattr(
-            service, "run_incremental_export", lambda: service.JobResult("export", skipped="stub")
+            service,
+            "run_incremental_export",
+            lambda: service.JobResult("export", skipped="stub"),
         )
         monkeypatch.setattr(
             service,
@@ -148,7 +154,9 @@ class TestDueSchedule:
             lambda **k: service.JobResult("snapshot", skipped="stub"),
         )
         monkeypatch.setattr(
-            service, "run_restore_drill", lambda **k: service.JobResult("drill", skipped="stub")
+            service,
+            "run_restore_drill",
+            lambda **k: service.JobResult("drill", skipped="stub"),
         )
         monkeypatch.setattr(service, "save_state", lambda s: None)
 
@@ -158,13 +166,13 @@ class TestDueSchedule:
             service, "_cfg", lambda: _Cfg(enabled=True, transport="fake", stale=900)
         )
         monkeypatch.setattr(
-            service, "run_sync_job", lambda: calls.append(1) or service.JobResult("sync")
+            service,
+            "run_sync_job",
+            lambda: calls.append(1) or service.JobResult("sync"),
         )
         monkeypatch.setattr(service, "load_state", lambda: {"last_sync": 1000.0})
-        # Not yet stale (100s < 900s window) → no sync.
         service.run_due_jobs(now=1100.0)
         assert calls == []
-        # Past the window (1000s elapsed) → sync runs.
         service.run_due_jobs(now=2000.0)
         assert calls == [1]
 
@@ -178,7 +186,7 @@ class TestDueSchedule:
             lambda: {"last_export": 1e12, "last_snapshot": 1e12, "last_drill": 1e12},
         )
         service.run_due_jobs(now=1e12)
-        assert calls == []  # sync_enabled=False short-circuits before the due check
+        assert calls == []
 
 
 class TestStatus:

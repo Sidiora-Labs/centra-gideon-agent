@@ -24,7 +24,7 @@ to the notice text cannot make these vacuous.
 
 from __future__ import annotations
 
-from gideon.guardrails.loop_breaker import (
+from gideon.security.guardrails.loop_breaker import (
     ANNOTATION_ARG_KEYS,
     BLOCK_THRESHOLD,
     CIRCUIT_THRESHOLD,
@@ -34,7 +34,6 @@ from gideon.guardrails.loop_breaker import (
     params_key,
 )
 
-# The exact shape measured on claude-code: identical command, enumerated description.
 _BOOM = "bash -c 'echo boom >&2; exit 3'"
 
 
@@ -52,7 +51,9 @@ class TestAnnotationKeysNoLongerFragmentTheBucket:
         """The consequence that matters: the rungs fire on repetition. Counted, not read
         off the notice text."""
         b = LoopBreaker()
-        streaks = [b.record(params_key("Bash", _claude_call(n)), True) for n in (1, 2, 3, 4, 5)]
+        streaks = [
+            b.record(params_key("Bash", _claude_call(n)), True) for n in (1, 2, 3, 4, 5)
+        ]
         assert streaks == [1, 2, 3, 4, 5], streaks
         assert streaks[WARN_THRESHOLD - 1] >= WARN_THRESHOLD
         assert streaks[BLOCK_THRESHOLD - 1] >= BLOCK_THRESHOLD
@@ -70,7 +71,9 @@ class TestAnnotationKeysNoLongerFragmentTheBucket:
         one = params_key("TodoWrite", {"description": "add auth"})
         two = params_key("TodoWrite", {"description": "delete auth"})
         assert one != two
-        assert normalize_call_args({"description": "add auth"}) == {"description": "add auth"}
+        assert normalize_call_args({"description": "add auth"}) == {
+            "description": "add auth"
+        }
 
     def test_the_acp_json_string_shape_is_handled_too(self):
         """ACP hands arguments over as an opaque JSON string; the fix has to reach through
@@ -85,8 +88,12 @@ class TestAnnotationKeysNoLongerFragmentTheBucket:
         """kiro's `__tool_use_purpose` (`G152`) and claude-code's `description` (`G154`) are
         the same defect through different doors — a call carrying BOTH must still be one
         bucket."""
-        a = params_key("Bash", {"command": _BOOM, "__tool_use_purpose": "first", "reason": "1/4"})
-        b = params_key("Bash", {"command": _BOOM, "__tool_use_purpose": "second", "reason": "4/4"})
+        a = params_key(
+            "Bash", {"command": _BOOM, "__tool_use_purpose": "first", "reason": "1/4"}
+        )
+        b = params_key(
+            "Bash", {"command": _BOOM, "__tool_use_purpose": "second", "reason": "4/4"}
+        )
         assert a == b
 
     def test_purpose_is_in_the_annotation_set_but_only_as_a_bare_key(self):
@@ -94,21 +101,23 @@ class TestAnnotationKeysNoLongerFragmentTheBucket:
         dunder rule. Keeping both is deliberate — an adapter that drops the prefix in a
         later version must not silently re-fragment the bucket."""
         assert "purpose" in ANNOTATION_ARG_KEYS
-        assert normalize_call_args({"path": "/tmp/a", "purpose": "look"}) == {"path": "/tmp/a"}
+        assert normalize_call_args({"path": "/tmp/a", "purpose": "look"}) == {
+            "path": "/tmp/a"
+        }
 
 
 class TestTheBreakerLivesForTheSession:
     def test_the_session_owns_one_breaker_instance(self):
-        from gideon.dashboard.state import _ChatSession
+        from gideon.interfaces.dashboard.state import _ChatSession
 
         s = _ChatSession("dashboard:aap6")
         assert isinstance(s._acp_breaker, LoopBreaker)
-        assert s._acp_breaker is s._acp_breaker  # a stable instance, not a property
+        assert s._acp_breaker is s._acp_breaker
 
     def test_two_sessions_do_not_share_a_breaker(self):
         """Vacuity floor: a class-level instance would make every session's failures one
         pool, and one wedged loop would abort an unrelated chat."""
-        from gideon.dashboard.state import _ChatSession
+        from gideon.interfaces.dashboard.state import _ChatSession
 
         a, b = _ChatSession("dashboard:a"), _ChatSession("dashboard:b")
         a._acp_breaker.record("k", True)
@@ -119,12 +128,12 @@ class TestTheBreakerLivesForTheSession:
         """`G155` verbatim: an unattended loop failing the same tool for twenty turns.
         Simulated as twenty turns of two failures — a per-turn breaker would have reported
         2 every time and never tripped; the session-scoped one reaches the ceiling."""
-        from gideon.dashboard.state import _ChatSession
+        from gideon.interfaces.dashboard.state import _ChatSession
 
         s = _ChatSession("dashboard:loop")
         key = params_key("Bash", {"command": _BOOM})
         for _turn in range(20):
-            breaker = s._acp_breaker  # exactly what _run_chat now reads, once per turn
+            breaker = s._acp_breaker
             breaker.record(key, True)
             breaker.record(key, True)
         assert s._acp_breaker.total_failures == 40
@@ -145,14 +154,16 @@ class TestTheBreakerLivesForTheSession:
         """Session lifetime must not turn a flaky-but-surviving tool into a blocked one:
         `record()` clears the KEY's streak on success. The total (the circuit's input)
         deliberately still counts the failures that happened."""
-        from gideon.dashboard.state import _ChatSession
+        from gideon.interfaces.dashboard.state import _ChatSession
 
         s = _ChatSession("dashboard:flaky")
         key = params_key("Bash", {"command": "flaky"})
         for _ in range(10):
             s._acp_breaker.record(key, True)
             s._acp_breaker.record(key, True)
-            assert s._acp_breaker.record(key, False) == 0, "a success must clear the streak"
+            assert (
+                s._acp_breaker.record(key, False) == 0
+            ), "a success must clear the streak"
         assert s._acp_breaker.count(key) == 0
         assert s._acp_breaker.total_failures == 20
 

@@ -5,7 +5,7 @@ app bundles. A few vendor-shaped *secret-detection / credential-key* literals ar
 deliberate keeps (secret patterns can't be renamed without breaking the control; the
 CRED_SLACK_* key names are what existing installs hold). This sweep pins that set:
 
-- It scans every core ``src/gideon/**/*.py`` for ACTIONABLE residue —
+- It scans every core ``runtime/gideon/**/*.py`` for ACTIONABLE residue —
   vendor SDK imports (``import slack_sdk`` / ``from slack ...``) and vendor
   credential/secret literals (``SLACK_*`` env/cred keys, ``xox`` token patterns).
 - Every file with such a hit MUST be listed in
@@ -23,17 +23,18 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-_CORE = Path(__file__).resolve().parents[1] / "src" / "gideon"
+_CORE = Path(__file__).resolve().parents[2] / "runtime" / "gideon"
 _KEEPS_FILE = (
-    Path(__file__).resolve().parents[1] / "docs" / "architecture" / "provider-boundary-keeps.txt"
+    Path(__file__).resolve().parents[2]
+    / "docs"
+    / "architecture"
+    / "provider-boundary-keeps.txt"
 )
 
-# Actionable-residue patterns (NOT plain vendor words in prose):
-#  - a vendor SDK import statement
-#  - a vendor credential-key literal (SLACK_*_TOKEN, GIDEON_OWNER via SLACK pairing)
-#  - a Slack token-shape detection pattern (xox...)
 _RESIDUE_PATTERNS = [
-    re.compile(r"^\s*(?:import|from)\s+(?:slack_sdk|slack|telegram|discord)\b", re.MULTILINE),
+    re.compile(
+        r"^\s*(?:import|from)\s+(?:slack_sdk|slack|telegram|discord)\b", re.MULTILINE
+    ),
     re.compile(r"SLACK_[A-Z_]*TOKEN"),
     re.compile(r"SLACK_USER_TOKEN"),
     re.compile(r"xox\[?[bpas]"),
@@ -60,7 +61,6 @@ def _keeps() -> set[str]:
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        # "<path> — <judgment>"
         path = line.split("—", 1)[0].strip()
         if path:
             paths.add(path)
@@ -68,7 +68,7 @@ def _keeps() -> set[str]:
 
 
 def _rel(p: Path) -> str:
-    return str(p.relative_to(_CORE.parents[1]))  # relative to repo root (src/...)
+    return str(p.relative_to(_CORE.parents[1]))
 
 
 def test_no_new_vendor_residue_outside_keeps():
@@ -98,7 +98,9 @@ def test_keeps_table_has_no_stale_entries():
         p = _CORE.parents[1] / rel
         if not p.is_file() or not _has_residue(p.read_text(encoding="utf-8")):
             stale.append(rel)
-    assert not stale, "Stale keeps entries (no residue found — remove them):\n" + "\n".join(
+    assert (
+        not stale
+    ), "Stale keeps entries (no residue found — remove them):\n" + "\n".join(
         f"  {s}" for s in sorted(stale)
     )
 
@@ -113,7 +115,9 @@ def test_sweep_has_teeth(tmp_path):
         "sweep would not catch real regrowth"
     )
     clean = tmp_path / "fine.py"
-    clean.write_text('"""A channel transport (e.g. the slack-channel app)."""\n', encoding="utf-8")
+    clean.write_text(
+        '"""A channel transport (e.g. the slack-channel app)."""\n', encoding="utf-8"
+    )
     assert not _has_residue(
         clean.read_text(encoding="utf-8")
     ), "residue patterns wrongly flagged a docstring vendor mention (prose is not residue)"

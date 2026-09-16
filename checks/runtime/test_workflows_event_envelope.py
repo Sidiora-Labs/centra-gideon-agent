@@ -21,9 +21,9 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.workflows import store
-from gideon.workflows.controller import EngineServices, RunController
-from gideon.workflows.models import NodeInstance, RunStatus, WorkflowRun
+from gideon.automation.workflows import store
+from gideon.automation.workflows.controller import EngineServices, RunController
+from gideon.automation.workflows.models import NodeInstance, RunStatus, WorkflowRun
 
 pytestmark = pytest.mark.anyio
 
@@ -37,7 +37,7 @@ def anyio_backend() -> str:
 def _isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
     return home
 
 
@@ -48,7 +48,11 @@ SPEC = {
         "id": "s",
         "children": [
             {"kind": "transform", "id": "a", "config": {"expr": {"n": 1}}},
-            {"kind": "transform", "id": "b", "config": {"expr": "got {{nodes.a.output.n}}"}},
+            {
+                "kind": "transform",
+                "id": "b",
+                "config": {"expr": "got {{nodes.a.output.n}}"},
+            },
         ],
     },
 }
@@ -102,11 +106,9 @@ class TestEnvelope:
         and only coincidentally agree on a short run."""
         c, events, _status = await _run()
         published = [p["seq"] for _n, p in events]
-        # The publish counter starts at 1 and is dense — that is the property a consumer
-        # relies on. The journal's counter is a DIFFERENT sequence over persisted records.
         assert published == list(range(1, len(published) + 1))
         assert c._event_seq == len(published)
-        assert c.journal.seq >= 1  # both advance; neither drives the other
+        assert c.journal.seq >= 1
 
     async def test_the_epoch_is_the_runs_max_not_a_single_nodes(self) -> None:
         """A rewind bumps only the region it resets. Using one node's epoch as the run's
@@ -114,7 +116,6 @@ class TestEnvelope:
         events, publish = _collector()
         run = store.create(WorkflowRun(id="", workflow_name="env"))
         store.write_spec(run.id, SPEC)
-        # Node `a` was rewound to epoch 3; `b` is untouched at 0.
         store.write_state(
             run.id,
             {
@@ -124,12 +125,11 @@ class TestEnvelope:
         )
         c = RunController(run, SPEC, services=EngineServices(publish=publish))
         await c.run_to_completion(timeout=20)
-        # 3, never 0 — `b` sitting at epoch 0 must not drag the run's epoch down, or a fresh
-        # event would look superseded to the FE. (The very first event can precede the state
-        # read, so the assertion is on the events that carry node identity.)
         node_events = [p for n, p in events if n.startswith("workflow_node_")]
         assert node_events
-        assert all(p["epoch"] == 3 for p in node_events), "run epoch must be the MAX, not a node's"
+        assert all(
+            p["epoch"] == 3 for p in node_events
+        ), "run epoch must be the MAX, not a node's"
 
     async def test_a_node_event_carries_its_own_epoch_too(self) -> None:
         """The finer key: a per-node supersede needs the NODE's epoch, which can lag the
@@ -149,16 +149,17 @@ class TestEnvelope:
         dicts are spread into the envelope, so a re-introduction would be invisible."""
         import inspect
 
-        from gideon.workflows import controller as ctrl
+        from gideon.automation.workflows import controller as ctrl
 
         source = inspect.getsource(ctrl.RunController)
-        # `_publish` itself sets the envelope epoch; no OTHER line may pass one in a payload.
         offenders = [
             line.strip()
             for line in source.splitlines()
             if '"epoch":' in line and "self._run_epoch()" not in line
         ]
-        assert not offenders, f"payload sets a bare epoch, overriding the envelope: {offenders}"
+        assert (
+            not offenders
+        ), f"payload sets a bare epoch, overriding the envelope: {offenders}"
 
     async def test_a_payload_field_is_never_clobbered_by_the_envelope(self) -> None:
         """The envelope is a floor, not an override — a call site that sets a field wins.
@@ -200,7 +201,6 @@ class TestNodeKeyedPatches:
         assert node_events
         for payload in node_events:
             assert payload.get("instance_path"), payload
-            # A full nodes_summary[] would defeat the point.
             assert "nodes" not in payload
 
     async def test_a_fan_out_publishes_one_event_per_instance(self) -> None:
@@ -210,11 +210,14 @@ class TestNodeKeyedPatches:
                 "kind": "foreach",
                 "id": "loop",
                 "config": {"items": [1, 2, 3]},
-                "body": {"kind": "transform", "id": "item", "config": {"expr": "{{item}}"}},
+                "body": {
+                    "kind": "transform",
+                    "id": "item",
+                    "config": {"expr": "{{item}}"},
+                },
             },
         }
         _c, events, status = await _run(spec)
         assert status == RunStatus.COMPLETE
         paths = {p["instance_path"] for n, p in events if n == "workflow_node_done"}
-        # One distinct instance path per item — not one event carrying all three.
         assert len(paths) >= 3

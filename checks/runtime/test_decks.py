@@ -18,8 +18,8 @@ import io
 
 import pytest
 
-from gideon.documents.deck_json import deck_from_dict, deck_to_dict
-from gideon.documents.model import (
+from gideon.workspace.documents.deck_json import deck_from_dict, deck_to_dict
+from gideon.workspace.documents.model import (
     DECK_LAYOUTS,
     MAX_BULLET_LEVEL,
     Bullet,
@@ -27,9 +27,9 @@ from gideon.documents.model import (
     ShapeBox,
     Slide,
 )
-from gideon.documents.model_codec import get_codec
-from gideon.documents.pptx_parser import parse_pptx
-from gideon.documents.writers.pptx_writer import render_pptx
+from gideon.workspace.documents.model_codec import get_codec
+from gideon.workspace.documents.pptx_parser import parse_pptx
+from gideon.workspace.documents.writers.pptx_writer import render_pptx
 
 
 def _lap(model: DeckModel) -> DeckModel:
@@ -51,9 +51,6 @@ def _slides(data: bytes):
 
 def _outline(model: DeckModel, index: int = 0) -> list[tuple[str, int]]:
     return [(b.text, b.level) for b in model.slides[index].bullets]
-
-
-# ── the headline: bullet depth ────────────────────────────────────────────────
 
 
 def test_bullet_depth_survives_the_round_trip() -> None:
@@ -87,12 +84,16 @@ def test_the_written_file_itself_carries_the_depth() -> None:
             slides=[
                 Slide(
                     title="Plan",
-                    bullets=[Bullet(text="a"), Bullet(text="b", level=3), Bullet(text="c")],
+                    bullets=[
+                        Bullet(text="a"),
+                        Bullet(text="b", level=3),
+                        Bullet(text="c"),
+                    ],
                 )
             ]
         )
     )
-    from gideon.documents.pptx_shapes import body_placeholder
+    from gideon.workspace.documents.pptx_shapes import body_placeholder
 
     body = body_placeholder(_slides(data)[0])
     assert body is not None
@@ -107,7 +108,9 @@ def test_the_first_bullet_keeps_its_depth_too() -> None:
     """The writer reuses the placeholder's EXISTING first paragraph rather than appending
     one, so the first bullet takes a different code path from the rest — and a fix applied
     only to the appended ones would leave a whole deck's opening line flat."""
-    deck = DeckModel(slides=[Slide(title="T", bullets=[Bullet(text="indented", level=2)])])
+    deck = DeckModel(
+        slides=[Slide(title="T", bullets=[Bullet(text="indented", level=2)])]
+    )
     assert _outline(_lap(deck)) == [("indented", 2)]
 
 
@@ -123,9 +126,9 @@ def test_a_depth_beyond_what_powerpoint_can_express_is_clamped() -> None:
     outline, and the deepest indent is what a reader would have seen anyway."""
     assert Bullet(text="x", level=40).level == MAX_BULLET_LEVEL
     assert Bullet(text="x", level=-3).level == 0
-    assert _outline(_lap(DeckModel(slides=[Slide(bullets=[Bullet(text="x", level=40)])]))) == [
-        ("x", MAX_BULLET_LEVEL)
-    ]
+    assert _outline(
+        _lap(DeckModel(slides=[Slide(bullets=[Bullet(text="x", level=40)])]))
+    ) == [("x", MAX_BULLET_LEVEL)]
 
 
 def test_a_second_lap_changes_nothing() -> None:
@@ -135,15 +138,16 @@ def test_a_second_lap_changes_nothing() -> None:
     deck = DeckModel(
         title="Cover",
         slides=[
-            Slide(title="A", bullets=[Bullet(text="a"), Bullet(text="b", level=1)], notes="n"),
+            Slide(
+                title="A",
+                bullets=[Bullet(text="a"), Bullet(text="b", level=1)],
+                notes="n",
+            ),
             Slide(title="B", layout="Section Header"),
         ],
     )
     once = _lap(deck)
     assert _lap(once) == once
-
-
-# ── layout and geometry ──────────────────────────────────────────────────────
 
 
 def test_the_declared_layouts_are_the_shipped_templates_own() -> None:
@@ -171,7 +175,9 @@ def test_a_slide_with_no_named_layout_is_laid_out_from_its_content() -> None:
 
 def test_a_moved_shape_keeps_its_position_through_the_round_trip() -> None:
     box = ShapeBox(left_in=1.25, top_in=0.5, width_in=6.0, height_in=1.5)
-    deck = DeckModel(slides=[Slide(title="Moved", bullets=[Bullet(text="b")], title_box=box)])
+    deck = DeckModel(
+        slides=[Slide(title="Moved", bullets=[Bullet(text="b")], title_box=box)]
+    )
     got = _lap(deck).slides[0].title_box
     assert got.placed
     assert (got.left_in, got.top_in, got.width_in, got.height_in) == pytest.approx(
@@ -201,14 +207,13 @@ def test_the_templates_own_slide_size_is_what_an_unset_size_means() -> None:
     assert (_lap(DeckModel(slides=[Slide(title="T")])).width_in) == 10.0
 
 
-# ── the cover slide ──────────────────────────────────────────────────────────
-
-
 def test_a_deck_title_round_trips_through_its_cover_slide() -> None:
     """The writer renders a deck title AS a title slide, so the parser reads that shape
     back into the title field. Without this, saving an edited title would append a SECOND
     cover on every save — the field and the slide list would both grow."""
-    parsed = _lap(DeckModel(title="Quarterly Review", slides=[Slide.outline("A", ["x"])]))
+    parsed = _lap(
+        DeckModel(title="Quarterly Review", slides=[Slide.outline("A", ["x"])])
+    )
     assert parsed.title == "Quarterly Review"
     assert [s.title for s in parsed.slides] == ["A"]
 
@@ -217,20 +222,25 @@ def test_a_first_slide_that_carries_content_is_NOT_folded_into_the_title() -> No
     """Folding removes a slide from the list, so it is only safe when nothing on it would
     have nowhere to go. A title slide with bullets stays a slide."""
     deck = DeckModel(
-        slides=[Slide(title="Cover-ish", layout="Title Slide", bullets=[Bullet(text="agenda")])]
+        slides=[
+            Slide(
+                title="Cover-ish", layout="Title Slide", bullets=[Bullet(text="agenda")]
+            )
+        ]
     )
     parsed = _lap(deck)
     assert parsed.title == ""
-    assert [(s.title, s.layout) for s in parsed.slides] == [("Cover-ish", "Title Slide")]
+    assert [(s.title, s.layout) for s in parsed.slides] == [
+        ("Cover-ish", "Title Slide")
+    ]
 
 
 def test_notes_and_the_image_reference_survive_the_lap() -> None:
-    deck = DeckModel(slides=[Slide(title="Chart", notes="mention Q3", artifact_slug="sales")])
+    deck = DeckModel(
+        slides=[Slide(title="Chart", notes="mention Q3", artifact_slug="sales")]
+    )
     notes = _lap(deck).slides[0].notes
     assert "mention Q3" in notes
-    # The writer records an unresolvable image reference in the notes rather than dropping
-    # it. The parser does NOT sniff it back out into `artifact_slug`: recovering a field by
-    # matching a text prefix is the guessing this family exists to abolish.
     assert "[image: sales]" in notes
 
 
@@ -239,14 +249,14 @@ def test_a_trailing_empty_paragraph_is_not_read_back_as_a_bullet() -> None:
     and emptied; carrying it would grow a stray bullet glyph on every save."""
     from pptx import Presentation
 
-    from gideon.documents.pptx_shapes import body_placeholder
+    from gideon.workspace.documents.pptx_shapes import body_placeholder
 
     prs = Presentation()
     slide = prs.slides.add_slide(prs.slide_layouts[1])
     slide.shapes.title.text = "T"
     frame = body_placeholder(slide).text_frame
     frame.text = "real"
-    frame.add_paragraph()  # the trailing empty one
+    frame.add_paragraph()
     buf = io.BytesIO()
     prs.save(buf)
 
@@ -255,16 +265,17 @@ def test_a_trailing_empty_paragraph_is_not_read_back_as_a_bullet() -> None:
     assert report.lossless, report.summary()
 
 
-# ── the loss report ──────────────────────────────────────────────────────────
-
-
 def test_a_plain_deck_is_lossless() -> None:
     """The shared vacuity leg for every loss test below: a deck this model can hold fully
     must report NOTHING, or a report of one item would mean nothing."""
     deck = DeckModel(
         title="Cover",
         slides=[
-            Slide(title="A", bullets=[Bullet(text="a"), Bullet(text="b", level=1)], notes="n"),
+            Slide(
+                title="A",
+                bullets=[Bullet(text="a"), Bullet(text="b", level=1)],
+                notes="n",
+            ),
             Slide(title="B"),
         ],
     )
@@ -291,26 +302,25 @@ def _bytes(prs) -> bytes:
 
 def test_a_layout_the_shipped_template_cannot_re_create_is_reported() -> None:
     prs, slide = _deck_with()
-    # A deck built from a corporate template carries its own layout names. Renamed through
-    # the XML because python-pptx exposes the name read-only — this is a FIXTURE standing
-    # in for a real template, not a mechanism under test.
     slide.slide_layout._element.cSld.set("name", "Acme Section Break")
     model, report = parse_pptx(_bytes(prs))
 
     assert [item.kind for item in report.items] == ["slide_layout"]
     assert report.items[0].where == "slide 1"
     assert "Acme Section Break" in report.items[0].detail
-    # …and the slide is still editable, on no declared layout, rather than being refused.
     assert model.slides[0].layout == ""
     assert model.slides[0].title == "T"
 
 
 def test_a_placeholder_the_model_has_no_field_for_is_reported_with_its_text() -> None:
     """A two-content layout has a second body. The model holds ONE outline, so the second
-    one's text is reported — and quoted, so it is findable rather than merely counted."""
+    one's text is reported — and quoted, so it is findable rather than merely counted.
+    """
     prs, slide = _deck_with(layout=3)
     bodies = [
-        ph for ph in slide.placeholders if ph.placeholder_format.idx != 0 and ph.has_text_frame
+        ph
+        for ph in slide.placeholders
+        if ph.placeholder_format.idx != 0 and ph.has_text_frame
     ]
     bodies[0].text_frame.text = "carried"
     bodies[1].text_frame.text = "the right hand column"
@@ -346,7 +356,7 @@ def test_a_free_shape_is_reported_not_dropped_silently() -> None:
 def test_character_formatting_inside_a_bullet_is_reported_at_that_bullet() -> None:
     """Located per BULLET, not per slide: "somewhere on slide 4 there was a bold word" is
     not something a person can act on."""
-    from gideon.documents.pptx_shapes import body_placeholder
+    from gideon.workspace.documents.pptx_shapes import body_placeholder
 
     prs, slide = _deck_with()
     frame = body_placeholder(slide).text_frame
@@ -359,8 +369,14 @@ def test_character_formatting_inside_a_bullet_is_reported_at_that_bullet() -> No
     third.runs[0].hyperlink.address = "https://example.invalid/x"
     report = parse_pptx(_bytes(prs))[1]
 
-    assert [item.kind for item in report.items] == ["bullet_run_style", "bullet_run_style"]
-    assert [item.where for item in report.items] == ["slide 1 · bullet 2", "slide 1 · bullet 3"]
+    assert [item.kind for item in report.items] == [
+        "bullet_run_style",
+        "bullet_run_style",
+    ]
+    assert [item.where for item in report.items] == [
+        "slide 1 · bullet 2",
+        "slide 1 · bullet 3",
+    ]
     assert "bold" in report.items[0].detail
     assert "https://example.invalid/x" in report.items[1].detail
 
@@ -369,7 +385,7 @@ def test_a_bullet_whose_formatting_is_inherited_is_not_reported() -> None:
     """Vacuity: ``None`` means "inherited from the layout", which is the normal case. A
     parser that read None as a style would put an item on every bullet of every deck."""
     prs, slide = _deck_with()
-    from gideon.documents.pptx_shapes import body_placeholder
+    from gideon.workspace.documents.pptx_shapes import body_placeholder
 
     body_placeholder(slide).text_frame.text = "plain"
     assert parse_pptx(_bytes(prs))[1].lossless
@@ -398,7 +414,9 @@ def test_a_loss_on_a_folded_cover_is_located_as_the_cover() -> None:
     model, report = parse_pptx(_bytes(prs))
 
     assert model.title == "Cover"
-    assert [(item.kind, item.where) for item in report.items] == [("slide_shape", "cover slide")]
+    assert [(item.kind, item.where) for item in report.items] == [
+        ("slide_shape", "cover slide")
+    ]
 
 
 def test_a_title_slides_strapline_is_carried_as_its_body_not_lost() -> None:
@@ -418,13 +436,10 @@ def test_a_title_slides_strapline_is_carried_as_its_body_not_lost() -> None:
     assert _lap(model).slides[0].bullets[0].text == "a strapline"
 
 
-# ── markdown → depth ─────────────────────────────────────────────────────────
-
-
 def test_markdown_indentation_becomes_bullet_depth() -> None:
     """Depth read from markdown's OWN encoding of it — leading whitespace — which
     `_BULLET`'s `^\\s*` used to consume and throw away."""
-    from gideon.documents.from_markup import deck_from_markdown
+    from gideon.workspace.documents.from_markup import deck_from_markdown
 
     deck = deck_from_markdown("## Plan\n- top\n  - under\n    - deeper\n- back\n")
     assert [(b.text, b.level) for b in deck.slides[0].bullets] == [
@@ -433,18 +448,19 @@ def test_markdown_indentation_becomes_bullet_depth() -> None:
         ("deeper", 2),
         ("back", 0),
     ]
-    # …and it reaches the FILE, not just the model.
-    assert _outline(_lap(deck)) == [("top", 0), ("under", 1), ("deeper", 2), ("back", 0)]
+    assert _outline(_lap(deck)) == [
+        ("top", 0),
+        ("under", 1),
+        ("deeper", 2),
+        ("back", 0),
+    ]
 
 
 def test_an_unindented_outline_is_all_top_level() -> None:
-    from gideon.documents.from_markup import deck_from_markdown
+    from gideon.workspace.documents.from_markup import deck_from_markdown
 
     deck = deck_from_markdown("## Plan\n- one\n- two\n")
     assert [b.level for b in deck.slides[0].bullets] == [0, 0]
-
-
-# ── the wire boundary ────────────────────────────────────────────────────────
 
 
 def test_a_deck_survives_the_json_boundary_unchanged() -> None:
@@ -499,9 +515,6 @@ def test_a_server_side_caller_cannot_name_a_layout_the_writer_cannot_resolve() -
     gets the same refusal rather than a slide that quietly rebuilt itself."""
     with pytest.raises(ValueError, match="unknown layout"):
         Slide(title="A", layout="Wonky")
-
-
-# ── the codec table ──────────────────────────────────────────────────────────
 
 
 def test_the_pptx_codec_is_wired_to_the_shipped_parser_and_writer() -> None:

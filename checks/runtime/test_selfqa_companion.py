@@ -25,19 +25,18 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import gideon.inbox_providers.native_source as ns
-from gideon.action_providers.base import ActionContext
-from gideon.action_providers.selfqa_finding_provider import SelfQaFindingActionProvider
-from gideon.action_providers.selfqa_triage_provider import SelfQaTriageActionProvider
-from gideon.action_providers.selfqa_watch_provider import SelfQaCommitWatchActionProvider
-from gideon.inbox import InboxState, InboxStore
-from gideon.ledger import DECISION, STEP_SKIPPED
-from gideon.selfqa import findings as findings_mod
-from gideon.selfqa import watch as watch_mod
-from gideon.selfqa.findings import ScenarioFinding, file_finding
-from gideon.selfqa.install import WATCH_TRIGGER_ID, reconcile, remove_retired_script
-from gideon.selfqa.ledger import record_triage
-from gideon.selfqa.triage import (
+import gideon.integrations.inbox_providers.native_source as ns
+from gideon.assurance.ledger import DECISION, STEP_SKIPPED
+from gideon.assurance.selfqa import findings as findings_mod
+from gideon.assurance.selfqa import watch as watch_mod
+from gideon.assurance.selfqa.findings import ScenarioFinding, file_finding
+from gideon.assurance.selfqa.install import (
+    WATCH_TRIGGER_ID,
+    reconcile,
+    remove_retired_script,
+)
+from gideon.assurance.selfqa.ledger import record_triage
+from gideon.assurance.selfqa.triage import (
     IMPACT_NONE,
     IMPACT_TEST,
     IMPACT_USER,
@@ -45,23 +44,29 @@ from gideon.selfqa.triage import (
     classify_paths,
     triage_commit,
 )
-from gideon.workflows.journal import Journal, ledger
+from gideon.automation.workflows.journal import Journal, ledger
+from gideon.integrations.action_providers.base import ActionContext
+from gideon.integrations.action_providers.selfqa_finding_provider import (
+    SelfQaFindingActionProvider,
+)
+from gideon.integrations.action_providers.selfqa_triage_provider import (
+    SelfQaTriageActionProvider,
+)
+from gideon.integrations.action_providers.selfqa_watch_provider import (
+    SelfQaCommitWatchActionProvider,
+)
+from gideon.integrations.inbox import InboxState, InboxStore
 
-BUNDLED = Path(__file__).resolve().parents[1] / "src/gideon/workflows/bundled/self-qa"
+BUNDLED = (
+    Path(__file__).resolve().parents[2]
+    / "runtime/gideon/automation/workflows/bundled/self-qa"
+)
 
-#: The ENGINE's instance key for the `self-qa` template's triage node — `root` is a sequence and
-#: `triage` is its first child, so `models.walk` names the instance `root.children[0]`. Written out
-#: rather than derived, because the whole point of the SC#6 surfacing half is that the ledger row
-#: must carry the engine's key and not the node id: `service.inspect_node` slices a run's ledger on
-#: `instance_path`, so a row stamped `triage` is durably written and invisible in the runs surface.
 TRIAGE_PATH = "root.children[0]"
 
 
 def _run(coro):
     return asyncio.run(coro)
-
-
-# ── fixtures ────────────────────────────────────────────────────────────────
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -118,7 +123,7 @@ def inbox_state(tmp_path, monkeypatch):
     total. That is the same class of error the clause is about — a count read beside the thing it
     is counting.
     """
-    from gideon.tasks import native as native_tasks
+    from gideon.engine.tasks import native as native_tasks
 
     task_home = tmp_path / "task-home"
     task_home.mkdir()
@@ -135,19 +140,12 @@ def inbox_state(tmp_path, monkeypatch):
     findings_mod.reset_filed_keys()
     yield store
     findings_mod.reset_filed_keys()
-    # `set_dashboard_state` is a module global. Left pointing at this test's MagicMock, the next
-    # test in the same xdist worker that calls `post_to_inbox` writes into a torn-down tmp dir
-    # instead of taking the no-state path — a cross-test leak `test_inbox_native_source.py`
-    # already clears and this fixture did not.
     ns.set_dashboard_state(None)
 
 
 def inbox_items(store) -> list:
     """`InboxStore.items` is a dict keyed by id — ordered by creation for these assertions."""
     return sorted(store.items.values(), key=lambda i: i.created_at)
-
-
-# ── Clause 1: a real commit fires the companion (now via the vcs trigger, SV-11) ─────
 
 
 class TestClauseOneWatcherFires:
@@ -171,20 +169,18 @@ class TestClauseOneWatcherFires:
     def test_a_real_commit_fires_on_the_next_check(self, repo):
         """The clause itself: one commit, then ONE fire, and the SHA is in the inputs."""
         watch_mod.check(str(repo))
-        sha = commit(repo, "src/gideon/thing.py", "x = 1\n", "feat: a thing")
+        sha = commit(repo, "runtime/gideon/thing.py", "x = 1\n", "feat: a thing")
         fire = watch_mod.check(str(repo))
         assert fire.inputs is not None
         assert fire.inputs["commits"] == [sha]
         assert fire.inputs["repo"] == str(repo)
-        # Keyed on the frontier, so two fires seeing the same HEAD open ONE run.
         assert fire.idempotency_key == f"selfqa-{sha}"
-        # The state advanced, so the same commit does not re-fire and burn a run per change.
         assert watch_mod.read_state()["last_sha"] == sha
 
     def test_no_new_commit_is_quiet_with_its_reason(self, repo):
         """The vacuity floor: a check that fired unconditionally would pass the test above."""
         watch_mod.check(str(repo))
-        commit(repo, "src/gideon/thing.py", "x = 1\n", "feat: a thing")
+        commit(repo, "runtime/gideon/thing.py", "x = 1\n", "feat: a thing")
         assert watch_mod.check(str(repo)).inputs is not None
         third = watch_mod.check(str(repo))
         assert third.inputs is None
@@ -207,11 +203,11 @@ class TestClauseOneWatcherFires:
     def test_the_provider_delegates_the_start_to_run_workflow(self, repo, monkeypatch):
         """The loop's closing edge: the fire STARTS the run, through the one seam that owns
         dedupe and supervisor registration — never a second start implementation."""
-        from gideon.action_providers import registry as reg
-        from gideon.action_providers.base import ActionResult
+        from gideon.integrations.action_providers import registry as reg
+        from gideon.integrations.action_providers.base import ActionResult
 
-        watch_mod.check(str(repo))  # first sight
-        sha = commit(repo, "src/gideon/thing.py", "x = 1\n", "feat: a thing")
+        watch_mod.check(str(repo))
+        sha = commit(repo, "runtime/gideon/thing.py", "x = 1\n", "feat: a thing")
 
         runner = MagicMock()
 
@@ -239,7 +235,7 @@ class TestClauseOneWatcherFires:
     def test_a_quiet_fire_is_a_success_carrying_its_reason(self, repo, monkeypatch):
         """First sight through the provider: no run started, and the skip SAYS why — a
         silent skip and a dead watcher must never look alike."""
-        from gideon.action_providers import registry as reg
+        from gideon.integrations.action_providers import registry as reg
 
         runner_provider = MagicMock()
         monkeypatch.setattr(reg, "get_action_provider", lambda name: runner_provider)
@@ -250,19 +246,26 @@ class TestClauseOneWatcherFires:
         assert "first sight" in (result.stdout or "")
         runner_provider.execute.assert_not_called()
 
-    def test_reconcile_swaps_an_interim_clock_row_in_place(self, repo, monkeypatch, tmp_path):
+    def test_reconcile_swaps_an_interim_clock_row_in_place(
+        self, repo, monkeypatch, tmp_path
+    ):
         """An upgraded Wave-2 home carries a `clock` row under the same id: the swap edits
         THAT row rather than minting a second watcher beside it."""
-        from gideon.config import loader as loader_mod
-        from gideon.triggers.models import Trigger
+        from gideon.automation.triggers.models import Trigger
+        from gideon.core.config import loader as loader_mod
 
         cfg = SimpleNamespace(
-            agent=SimpleNamespace(self_qa=SimpleNamespace(enabled=True, watched_repo=str(repo)))
+            agent=SimpleNamespace(
+                self_qa=SimpleNamespace(enabled=True, watched_repo=str(repo))
+            )
         )
         monkeypatch.setattr(loader_mod.AppConfig, "load", staticmethod(lambda: cfg))
 
         old = Trigger(
-            id=WATCH_TRIGGER_ID, name="Self-QA commit watch", kind="clock", created_by="system"
+            id=WATCH_TRIGGER_ID,
+            name="Self-QA commit watch",
+            kind="clock",
+            created_by="system",
         )
         loaded = SimpleNamespace(trigger=old)
         store = MagicMock()
@@ -274,10 +277,12 @@ class TestClauseOneWatcherFires:
         assert trigger.kind == "file"
         assert trigger.workflow["inline"]["provider"] == "selfqa-commit-watch"
 
-    def test_reconcile_removes_the_retired_script_artifacts(self, monkeypatch, tmp_path):
+    def test_reconcile_removes_the_retired_script_artifacts(
+        self, monkeypatch, tmp_path
+    ):
         """A Wave-2 home's installed script, config, and state are cleaned up — a dead
         script left in the fenced crons dir invites a user to schedule it."""
-        from gideon.config import loader as loader_mod
+        from gideon.core.config import loader as loader_mod
 
         crons = tmp_path / "crons"
         crons.mkdir()
@@ -289,7 +294,9 @@ class TestClauseOneWatcherFires:
             (crons / name).write_text("retired\n", encoding="utf-8")
 
         cfg = SimpleNamespace(
-            agent=SimpleNamespace(self_qa=SimpleNamespace(enabled=False, watched_repo=""))
+            agent=SimpleNamespace(
+                self_qa=SimpleNamespace(enabled=False, watched_repo="")
+            )
         )
         monkeypatch.setattr(loader_mod.AppConfig, "load", staticmethod(lambda: cfg))
         store = MagicMock()
@@ -297,7 +304,6 @@ class TestClauseOneWatcherFires:
         reconcile(store, crons_dir=crons)
 
         assert not any(crons.iterdir()), "retired artifacts survived the reconcile"
-        # And it is idempotent on the second pass.
         assert remove_retired_script(crons) == []
 
 
@@ -309,12 +315,12 @@ class TestTheInterimScriptStaysRetired:
     script (or resurrects the installer) fails here with the reason attached.
     """
 
-    SRC = Path(__file__).resolve().parents[1] / "src"
+    SRC = Path(__file__).resolve().parents[2] / "src"
 
     def test_the_vcs_trigger_kind_exists(self):
         """The precondition the rule is scoped to, asserted rather than assumed."""
-        from gideon.triggers.file_watch import vcs_patterns
-        from gideon.triggers.models import KINDS
+        from gideon.automation.triggers.file_watch import vcs_patterns
+        from gideon.automation.triggers.models import KINDS
 
         assert "file" in KINDS
         assert any("refs/heads" in p for p in vcs_patterns("."))
@@ -324,17 +330,16 @@ class TestTheInterimScriptStaysRetired:
         assert hits == [], f"the interim commit-watch script came back: {hits}"
 
     def test_install_no_longer_materializes_scripts(self):
-        import gideon.selfqa.install as install_mod
+        import gideon.assurance.selfqa.install as install_mod
 
         for retired in (
             "install_commit_watch_script",
             "write_watch_config",
             "packaged_script_source",
         ):
-            assert not hasattr(install_mod, retired), f"{retired} resurfaced in selfqa.install"
-
-
-# ── Clause 2: a test-only commit yields a ledger-only skip with a rationale ──
+            assert not hasattr(
+                install_mod, retired
+            ), f"{retired} resurfaced in selfqa.install"
 
 
 class TestClauseTwoLedgerOnlySkip:
@@ -347,7 +352,12 @@ class TestClauseTwoLedgerOnlySkip:
     """
 
     def test_a_test_only_commit_classifies_as_test_with_a_reason(self, repo):
-        sha = commit(repo, "tests/test_thing.py", "def test_x():\n    pass\n", "test: assertion")
+        sha = commit(
+            repo,
+            "checks/runtime/test_thing.py",
+            "def test_x():\n    pass\n",
+            "test: assertion",
+        )
         verdict = triage_commit(repo, sha)
         assert verdict.impact == IMPACT_TEST
         assert verdict.skipped is True
@@ -356,7 +366,12 @@ class TestClauseTwoLedgerOnlySkip:
 
     def test_the_skip_writes_a_ledger_row_carrying_the_rationale(self, repo):
         """The clause. Read back through the real ledger reader, not the writer's return value."""
-        sha = commit(repo, "tests/test_thing.py", "def test_x():\n    pass\n", "test: assertion")
+        sha = commit(
+            repo,
+            "checks/runtime/test_thing.py",
+            "def test_x():\n    pass\n",
+            "test: assertion",
+        )
         verdict = triage_commit(repo, sha)
         run_id = "selfqa-clause2"
         record_triage(Journal(run_id=run_id), verdict, instance_path=TRIAGE_PATH)
@@ -366,7 +381,9 @@ class TestClauseTwoLedgerOnlySkip:
         row = rows[0]
         assert row["sha"] == sha
         assert row["impact"] == IMPACT_TEST
-        assert row["rationale"].strip(), "a skip row with no rationale is the silence, restated"
+        assert row[
+            "rationale"
+        ].strip(), "a skip row with no rationale is the silence, restated"
         assert "\n" not in row["rationale"]
 
     def test_an_impactful_commit_writes_a_decision_not_a_skip(self, repo):
@@ -375,7 +392,7 @@ class TestClauseTwoLedgerOnlySkip:
         Without it, a `record_triage` that wrote `step_skipped` for EVERY commit would pass the
         test above while classifying nothing — the loop would skip its way through a release.
         """
-        sha = commit(repo, "src/gideon/thing.py", "x = 1\n", "feat: a thing")
+        sha = commit(repo, "runtime/gideon/thing.py", "x = 1\n", "feat: a thing")
         verdict = triage_commit(repo, sha)
         assert verdict.impact == IMPACT_USER
         run_id = "selfqa-clause2-floor"
@@ -394,13 +411,15 @@ class TestClauseTwoLedgerOnlySkip:
         The payload path stays under `tmp_path`: a shared absolute path would let one run's
         artifact fail a later run, which is how this test failed the first time it was written.
         """
-        import gideon.selfqa.triage as triage_mod
+        import gideon.assurance.selfqa.triage as triage_mod
 
         payload = tmp_path / "pwned"
         seen: list[tuple] = []
         real_git = triage_mod._git
         monkeypatch.setattr(
-            triage_mod, "_git", lambda root, *args: (seen.append(args), real_git(root, *args))[1]
+            triage_mod,
+            "_git",
+            lambda root, *args: (seen.append(args), real_git(root, *args))[1],
         )
 
         verdict = triage_commit(repo, f"--output={payload}")
@@ -409,10 +428,12 @@ class TestClauseTwoLedgerOnlySkip:
         assert seen == [], f"the refused ref still reached git: {seen}"
         assert not payload.exists(), "git ran and wrote the option's target"
 
-        # The floor: a real sha DOES reach git, or the assertions above pass because triage never
-        # calls git at all and the guard is proving nothing.
         good = _git(repo, "rev-parse", "HEAD")
-        assert triage_commit(repo, good).impact in (IMPACT_USER, IMPACT_TEST, IMPACT_NONE)
+        assert triage_commit(repo, good).impact in (
+            IMPACT_USER,
+            IMPACT_TEST,
+            IMPACT_NONE,
+        )
         assert seen, "a valid sha did not reach git either — the guard is vacuous"
 
     def test_a_rationale_less_verdict_is_refused(self):
@@ -424,22 +445,29 @@ class TestClauseTwoLedgerOnlySkip:
                 instance_path=TRIAGE_PATH,
             )
 
-    def test_the_triage_provider_records_every_verdict_and_files_nothing(self, repo, inbox_state):
+    def test_the_triage_provider_records_every_verdict_and_files_nothing(
+        self, repo, inbox_state
+    ):
         """The CALL SITE, not just the mechanism: the provider the template dispatches.
 
         Also the "ledger-ONLY" half — the same run that wrote the skip rows filed no Inbox item.
         """
-        test_sha = commit(repo, "tests/test_a.py", "def test_a():\n    pass\n", "test: a")
+        test_sha = commit(
+            repo, "checks/runtime/test_a.py", "def test_a():\n    pass\n", "test: a"
+        )
         doc_sha = commit(repo, "docs/guide.md", "# guide\n", "docs: guide")
         run_id = "selfqa-clause2-provider"
 
-        assert len(inbox_items(inbox_state)) == 0, "the inbox was not empty before the run"
+        assert (
+            len(inbox_items(inbox_state)) == 0
+        ), "the inbox was not empty before the run"
 
         result = _run(
             SelfQaTriageActionProvider().execute(
                 {"repo": str(repo), "commits": [test_sha, doc_sha]},
                 ActionContext(
-                    event="workflow_node", payload={"run_id": run_id, "instance_path": TRIAGE_PATH}
+                    event="workflow_node",
+                    payload={"run_id": run_id, "instance_path": TRIAGE_PATH},
                 ),
             )
         )
@@ -452,11 +480,13 @@ class TestClauseTwoLedgerOnlySkip:
         rows = ledger(run_id, kinds={STEP_SKIPPED})
         assert len(rows) == 2, rows
         assert all(r["rationale"].strip() for r in rows)
-        assert len(inbox_items(inbox_state)) == 0, "a ledger-only skip filed an inbox item"
+        assert (
+            len(inbox_items(inbox_state)) == 0
+        ), "a ledger-only skip filed an inbox item"
 
     def test_the_provider_routes_an_impactful_commit_forward(self, repo):
         """The vacuity floor for the provider: `has_impactful` must be able to be true."""
-        sha = commit(repo, "src/gideon/thing.py", "x = 1\n", "feat: a thing")
+        sha = commit(repo, "runtime/gideon/thing.py", "x = 1\n", "feat: a thing")
         result = _run(
             SelfQaTriageActionProvider().execute(
                 {"repo": str(repo), "commits": [sha]},
@@ -472,7 +502,9 @@ class TestClauseTwoLedgerOnlySkip:
 
     def test_the_scenario_cap_bounds_one_fire(self, repo):
         """A push of many commits must not open many browser sessions."""
-        shas = [commit(repo, f"src/m{i}.py", f"x={i}\n", f"feat: {i}") for i in range(5)]
+        shas = [
+            commit(repo, f"src/m{i}.py", f"x={i}\n", f"feat: {i}") for i in range(5)
+        ]
         result = _run(
             SelfQaTriageActionProvider().execute(
                 {"repo": str(repo), "commits": shas, "max_scenarios": 2},
@@ -489,28 +521,24 @@ class TestClauseTwoLedgerOnlySkip:
     @pytest.mark.parametrize(
         "paths,expected",
         [
-            (["tests/test_a.py"], IMPACT_TEST),
+            (["checks/runtime/test_a.py"], IMPACT_TEST),
             (["src/x/test_a.py"], IMPACT_TEST),
-            (["web/src/a.test.ts"], IMPACT_TEST),
+            (["apps/console/src/a.test.ts"], IMPACT_TEST),
             (["conftest.py"], IMPACT_TEST),
             (["docs/a.md"], IMPACT_NONE),
             (["README.md"], IMPACT_NONE),
             ([".github/workflows/ci.yml"], IMPACT_NONE),
             ([], IMPACT_NONE),
-            (["src/gideon/a.py"], IMPACT_USER),
-            (["web/src/App.tsx"], IMPACT_USER),
-            # One shipped line among a hundred test lines is still a shipped line.
-            (["tests/test_a.py", "src/gideon/a.py"], IMPACT_USER),
-            (["tests/test_a.py", "docs/a.md"], IMPACT_TEST),
+            (["runtime/gideon/a.py"], IMPACT_USER),
+            (["apps/console/src/App.tsx"], IMPACT_USER),
+            (["checks/runtime/test_a.py", "runtime/gideon/a.py"], IMPACT_USER),
+            (["checks/runtime/test_a.py", "docs/a.md"], IMPACT_TEST),
         ],
     )
     def test_the_classifier_verdicts(self, paths, expected):
         impact, rationale = classify_paths(paths)
         assert impact == expected, (paths, rationale)
         assert rationale.strip() and "\n" not in rationale
-
-
-# ── SC#6's other half: the skip is VISIBLE IN THE RUNS SURFACE ───────────────
 
 
 class TestTheSkipIsVisibleInTheRunsSurface:
@@ -528,7 +556,7 @@ class TestTheSkipIsVisibleInTheRunsSurface:
        Fixed by threading the instance path into the action payload (the engine is the only layer
        that knows it) and refusing an absent one, the way an absent rationale is already refused.
     2. **The surface rendered a row's `kind` and nothing else** — pinned in
-       `web/src/pages/workflows/NodeInspectorDrawer.test.tsx`, on rendered DOM.
+       `apps/console/src/pages/workflows/NodeInspectorDrawer.test.tsx`, on rendered DOM.
 
     The interesting property is SEVERAL rows under ONE node id: the companion writes one per
     commit, so a surface (or a slice) that kept only the latest would lose skips while still
@@ -541,7 +569,7 @@ class TestTheSkipIsVisibleInTheRunsSurface:
         If the bundled template ever moves the triage node, this fails here rather than silently
         stranding every row it writes outside its own node's slice again.
         """
-        from gideon.workflows.models import Node, walk
+        from gideon.automation.workflows.models import Node, walk
 
         spec = json.loads((BUNDLED / "workflow.json").read_text(encoding="utf-8"))
         paths = {path: node.id for path, node in walk(Node.from_dict(spec["root"]))}
@@ -552,9 +580,9 @@ class TestTheSkipIsVisibleInTheRunsSurface:
         hand it over — and `node_id` cannot stand in, because a `foreach` body shares one id
         across every item.
         """
-        from gideon.action_providers.base import ActionResult
-        from gideon.workflows.engine import dispatch_action
-        from gideon.workflows.models import Node
+        from gideon.automation.workflows.engine import dispatch_action
+        from gideon.automation.workflows.models import Node
+        from gideon.integrations.action_providers.base import ActionResult
 
         seen: dict = {}
 
@@ -566,7 +594,9 @@ class TestTheSkipIsVisibleInTheRunsSurface:
                 seen.update(ctx.payload)
                 return ActionResult(success=True, stdout="{}")
 
-        node = Node.from_dict({"kind": "action", "id": "triage", "config": {"provider": "capture"}})
+        node = Node.from_dict(
+            {"kind": "action", "id": "triage", "config": {"provider": "capture"}}
+        )
         _run(
             dispatch_action(
                 node,
@@ -577,10 +607,12 @@ class TestTheSkipIsVisibleInTheRunsSurface:
             )
         )
         assert seen.get("instance_path") == TRIAGE_PATH, seen
-        # The floor: absent an engine-supplied path the key is simply not there — the provider is
-        # never handed a fabricated one to write, which is how the invisible rows happened.
         seen.clear()
-        _run(dispatch_action(node, MagicMock(), get_provider=lambda _n: _Capture(), run_id="run-x"))
+        _run(
+            dispatch_action(
+                node, MagicMock(), get_provider=lambda _n: _Capture(), run_id="run-x"
+            )
+        )
         assert "instance_path" not in seen, seen
 
     def test_the_controller_hands_the_running_instances_path_to_the_provider(
@@ -593,9 +625,9 @@ class TestTheSkipIsVisibleInTheRunsSurface:
         assertion in this class would still be green — the engine would keep honouring a value
         nothing passes it, which is how a wired-but-unfed control looks from inside its own test.
         """
-        from gideon.workflows import store
-        from gideon.workflows.controller import EngineServices, RunController
-        from gideon.workflows.models import RunStatus, WorkflowRun
+        from gideon.automation.workflows import store
+        from gideon.automation.workflows.controller import EngineServices, RunController
+        from gideon.automation.workflows.models import RunStatus, WorkflowRun
 
         home = tmp_path / "wf-home"
         home.mkdir()
@@ -622,7 +654,11 @@ class TestTheSkipIsVisibleInTheRunsSurface:
                 "kind": "sequence",
                 "id": "root",
                 "children": [
-                    {"kind": "action", "id": "triage", "config": {"provider": "selfqa-triage"}}
+                    {
+                        "kind": "action",
+                        "id": "triage",
+                        "config": {"provider": "selfqa-triage"},
+                    }
                 ],
             },
         }
@@ -634,10 +670,10 @@ class TestTheSkipIsVisibleInTheRunsSurface:
         assert _run(controller.run_to_completion(timeout=20)) == RunStatus.COMPLETE
 
         assert seen, "the action provider never fired"
-        # The ENGINE's key for the instance that actually ran — the same string the run's node
-        # state is filed under, which is what makes the row findable in the runs surface.
         assert seen[0].get("instance_path") == TRIAGE_PATH, seen[0]
-        assert TRIAGE_PATH in store.read_state(run.id), "the path is not the run's own instance key"
+        assert TRIAGE_PATH in store.read_state(
+            run.id
+        ), "the path is not the run's own instance key"
 
     def test_three_skips_all_reach_the_runs_surface_with_their_reasons(
         self, repo, tmp_path, monkeypatch
@@ -648,15 +684,24 @@ class TestTheSkipIsVisibleInTheRunsSurface:
         The run is persisted with the engine's OWN writers (`store.write_state`/`write_output`, the
         real `Journal`), so this cannot drift from the shape the controller actually leaves behind.
         """
-        from gideon.workflows import service, store
-        from gideon.workflows.models import InstanceState, NodeInstance, WorkflowRun
+        from gideon.automation.workflows import service, store
+        from gideon.automation.workflows.models import (
+            InstanceState,
+            NodeInstance,
+            WorkflowRun,
+        )
 
         home = tmp_path / "wf-home"
         home.mkdir()
         monkeypatch.setattr(store, "config_dir", lambda: home)
 
         shas = [
-            commit(repo, f"tests/test_{i}.py", f"def test_{i}():\n    pass\n", f"test: {i}")
+            commit(
+                repo,
+                f"checks/runtime/test_{i}.py",
+                f"def test_{i}():\n    pass\n",
+                f"test: {i}",
+            )
             for i in range(3)
         ]
         run = store.create(WorkflowRun(id="", workflow_name="self-qa"))
@@ -666,7 +711,11 @@ class TestTheSkipIsVisibleInTheRunsSurface:
         ref = store.write_output(run.id, TRIAGE_PATH, {"recorded": 3})
         store.write_state(
             run.id,
-            {TRIAGE_PATH: NodeInstance(path=TRIAGE_PATH, state=InstanceState.DONE, output_ref=ref)},
+            {
+                TRIAGE_PATH: NodeInstance(
+                    path=TRIAGE_PATH, state=InstanceState.DONE, output_ref=ref
+                )
+            },
         )
 
         result = _run(
@@ -684,13 +733,16 @@ class TestTheSkipIsVisibleInTheRunsSurface:
         body = service.inspect_node(run.id, "triage")
         assert body["ok"], body
         skips = [e for e in body["ledger_events"] if e["kind"] == STEP_SKIPPED]
-        # All THREE, not the last one — the several-rows-under-one-node-id property.
         assert len(skips) == 3, body["ledger_events"]
         assert [e["sha"] for e in skips] == shas
         assert all(e["impact"] == IMPACT_TEST for e in skips)
         for e in skips:
-            assert e["rationale"].strip(), "a skip row reached the surface with no reason"
-            assert "\n" not in e["rationale"], "the rationale must stay ONE line on the surface"
+            assert e[
+                "rationale"
+            ].strip(), "a skip row reached the surface with no reason"
+            assert (
+                "\n" not in e["rationale"]
+            ), "the rationale must stay ONE line on the surface"
 
     def test_a_row_stamped_with_the_node_id_is_invisible_to_the_surface(
         self, tmp_path, monkeypatch
@@ -703,8 +755,12 @@ class TestTheSkipIsVisibleInTheRunsSurface:
         same read, while an identical row stamped with the engine's key comes through. Without this,
         the fix could be reverted and the test above would still be green.
         """
-        from gideon.workflows import service, store
-        from gideon.workflows.models import InstanceState, NodeInstance, WorkflowRun
+        from gideon.automation.workflows import service, store
+        from gideon.automation.workflows.models import (
+            InstanceState,
+            NodeInstance,
+            WorkflowRun,
+        )
 
         home = tmp_path / "wf-home"
         home.mkdir()
@@ -717,17 +773,21 @@ class TestTheSkipIsVisibleInTheRunsSurface:
         ref = store.write_output(run.id, TRIAGE_PATH, {"recorded": 2})
         store.write_state(
             run.id,
-            {TRIAGE_PATH: NodeInstance(path=TRIAGE_PATH, state=InstanceState.DONE, output_ref=ref)},
+            {
+                TRIAGE_PATH: NodeInstance(
+                    path=TRIAGE_PATH, state=InstanceState.DONE, output_ref=ref
+                )
+            },
         )
 
         journal = Journal(run_id=run.id)
         record_triage(
             journal,
-            CommitTriage("a" * 40, IMPACT_TEST, "reachable — stamped with the engine's key"),
+            CommitTriage(
+                "a" * 40, IMPACT_TEST, "reachable — stamped with the engine's key"
+            ),
             instance_path=TRIAGE_PATH,
         )
-        # The old shape, written directly past `record_triage`'s guard so the guard itself is not
-        # what this measures: the READ is.
         journal.write(
             STEP_SKIPPED,
             node_id="triage",
@@ -738,11 +798,12 @@ class TestTheSkipIsVisibleInTheRunsSurface:
             rationale="unreachable — stamped with the node id",
         )
 
-        # Both rows are genuinely on disk, so the absence below is about the SLICE, not the write.
         assert len(ledger(run.id, kinds={STEP_SKIPPED})) == 2
 
         body = service.inspect_node(run.id, "triage")
-        surfaced = [e["rationale"] for e in body["ledger_events"] if e["kind"] == STEP_SKIPPED]
+        surfaced = [
+            e["rationale"] for e in body["ledger_events"] if e["kind"] == STEP_SKIPPED
+        ]
         assert surfaced == ["reachable — stamped with the engine's key"], surfaced
 
     def test_a_pathless_verdict_is_refused(self):
@@ -756,9 +817,6 @@ class TestTheSkipIsVisibleInTheRunsSurface:
                 instance_path="  ",
             )
         assert ledger("selfqa-pathless", kinds={STEP_SKIPPED}) == []
-
-
-# ── Clause 3: the scenario drives the real UI via Chrome DevTools MCP ────────
 
 
 class TestClauseThreeScenarioDrivesTheUI:
@@ -832,7 +890,9 @@ class TestClauseThreeScenarioDrivesTheUI:
             assert node_id in nodes, f"the scenario subtree has no {node_id} node"
 
     @pytest.mark.parametrize(
-        "has_impactful,case", [(True, "true"), (False, "false")], ids=["impactful", "skip-only"]
+        "has_impactful,case",
+        [(True, "true"), (False, "false")],
+        ids=["impactful", "skip-only"],
     )
     def test_the_ENGINE_selects_that_case_not_just_the_JSON_declaring_it(
         self, has_impactful: bool, case: str
@@ -846,12 +906,14 @@ class TestClauseThreeScenarioDrivesTheUI:
         the entire time. So this drives the SHIPPED `route` node through the SHIPPED dispatcher
         with the SHIPPED provider's output shape.
         """
-        from gideon.workflows.bindings import BindingContext
-        from gideon.workflows.engine import dispatch_branch
-        from gideon.workflows.models import InstanceState, Node
+        from gideon.automation.workflows.bindings import BindingContext
+        from gideon.automation.workflows.engine import dispatch_branch
+        from gideon.automation.workflows.models import InstanceState, Node
 
         route = Node.from_dict(self._nodes(self._spec())["route"])
-        verdict = CommitTriage(sha="a" * 40, impact=IMPACT_USER, rationale="shipped code changed")
+        verdict = CommitTriage(
+            sha="a" * 40, impact=IMPACT_USER, rationale="shipped code changed"
+        )
         output = {
             "has_impactful": has_impactful,
             "impactful": [verdict.to_dict()] if has_impactful else [],
@@ -873,14 +935,15 @@ class TestClauseThreeScenarioDrivesTheUI:
         normalisation that made the branch reachable — it would be measuring a
         case-insensitive match that also merges two distinct cases.
         """
-        from gideon.workflows.bindings import BindingContext
-        from gideon.workflows.engine import dispatch_branch
-        from gideon.workflows.models import InstanceState, Node
+        from gideon.automation.workflows.bindings import BindingContext
+        from gideon.automation.workflows.engine import dispatch_branch
+        from gideon.automation.workflows.models import InstanceState, Node
 
         route = Node.from_dict(self._nodes(self._spec())["route"])
         result = asyncio.run(
             dispatch_branch(
-                route, BindingContext(node_outputs={"triage": {"has_impactful": "True"}})
+                route,
+                BindingContext(node_outputs={"triage": {"has_impactful": "True"}}),
             )
         )
         assert result.state == InstanceState.FAILED
@@ -889,7 +952,9 @@ class TestClauseThreeScenarioDrivesTheUI:
         """The clause names the driver. A stage that does not say so drives nothing."""
         prompt = self._nodes(self._spec())["execute"]["config"]["prompt"]
         assert "Chrome DevTools MCP" in prompt
-        assert "NEW page" in prompt, "co-tenant discipline: never take over the user's page"
+        assert (
+            "NEW page" in prompt
+        ), "co-tenant discipline: never take over the user's page"
 
     def test_the_scenario_prompt_requires_a_state_mutation(self):
         """Render-checking is the failure mode this clause exists to exclude."""
@@ -897,8 +962,6 @@ class TestClauseThreeScenarioDrivesTheUI:
         prompt = cfg["prompt"]
         assert "MUST mutate state" in prompt
         assert "Opening a page and reading it is not a scenario" in prompt
-        # The mutation is a required output field AND gated by success_when, so a scenario that
-        # forgot to name one fails the node instead of proceeding to drive nothing.
         assert "mutation" in cfg["schema"]
         assert "output.mutation != ''" in cfg["success_when"]
 
@@ -916,10 +979,12 @@ class TestClauseThreeScenarioDrivesTheUI:
         file-glob `required_artifacts` gate) — never an LLM stage grading its own bundle.
         The refusal behaviour itself is pinned in `test_selfqa_evidence.py`; this pins the
         TEMPLATE wiring and what the default gate requires."""
-        from gideon.selfqa import evidence as ev
+        from gideon.assurance.selfqa import evidence as ev
 
         node = self._nodes(self._spec())["evidence"]
-        assert node["kind"] == "action", "the proof seam regressed to a self-reporting stage"
+        assert (
+            node["kind"] == "action"
+        ), "the proof seam regressed to a self-reporting stage"
         assert node["config"]["provider"] == "selfqa-evidence"
         assert ev.DEFAULT_REQUIRED_KINDS == (
             ev.KIND_SCREENSHOT,
@@ -937,9 +1002,6 @@ class TestClauseThreeScenarioDrivesTheUI:
         assert spec["inputs"]["fix_branch_enabled"]["default"] is False
         prompt = self._nodes(spec)["fix-branch"]["config"]["prompt"]
         assert "Do NOT merge it and do NOT push it" in prompt
-
-
-# ── Clause 4: a failing scenario files ONE Inbox item + ONE Task ─────────────
 
 
 class TestClauseFourFilesOneOfEach:
@@ -965,25 +1027,31 @@ class TestClauseFourFilesOneOfEach:
 
     @staticmethod
     def _tasks():
-        from gideon.tasks.registry import list_all_tasks
+        from gideon.engine.tasks.registry import list_all_tasks
 
         tasks, _total = _run(list_all_tasks())
         return tasks
 
     def test_one_failing_scenario_files_exactly_one_of_each(self, inbox_state):
-        assert len(inbox_items(inbox_state)) == 0, "the inbox was not empty before the call"
+        assert (
+            len(inbox_items(inbox_state)) == 0
+        ), "the inbox was not empty before the call"
         assert len(self._tasks()) == 0, "tasks existed before the call"
 
         filed = _run(file_finding(self._finding()))
 
-        assert len(inbox_items(inbox_state)) == 1, [i.message for i in inbox_items(inbox_state)]
+        assert len(inbox_items(inbox_state)) == 1, [
+            i.message for i in inbox_items(inbox_state)
+        ]
         tasks = self._tasks()
         assert len(tasks) == 1, [t.title for t in tasks]
         assert filed.already_filed is False
         assert filed.task_id == tasks[0].id
         assert filed.inbox_item_id == inbox_items(inbox_state)[0].id
 
-    def test_the_inbox_item_says_what_broke_and_points_at_the_evidence(self, inbox_state):
+    def test_the_inbox_item_says_what_broke_and_points_at_the_evidence(
+        self, inbox_state
+    ):
         _run(file_finding(self._finding()))
         message = inbox_items(inbox_state)[0].message
         assert "01234567" in message, "the item does not name the commit"
@@ -1007,7 +1075,9 @@ class TestClauseFourFilesOneOfEach:
 
         assert first.already_filed is False
         assert second.already_filed is True
-        assert len(inbox_items(inbox_state)) == 1, [i.message for i in inbox_items(inbox_state)]
+        assert len(inbox_items(inbox_state)) == 1, [
+            i.message for i in inbox_items(inbox_state)
+        ]
         assert len(self._tasks()) == 1
 
     def test_a_task_failure_does_not_double_post_the_inbox_on_its_replay(
@@ -1021,7 +1091,7 @@ class TestClauseFourFilesOneOfEach:
         (the ceiling — the bug this closes) and exactly one Task (the floor — a dedup flag set
         before the Task instead of after would satisfy the ceiling by never filing the work).
         """
-        import gideon.tasks.registry as task_registry
+        import gideon.engine.tasks.registry as task_registry
 
         real_create = task_registry.create_task
         calls = {"n": 0}
@@ -1036,13 +1106,19 @@ class TestClauseFourFilesOneOfEach:
 
         with pytest.raises(RuntimeError, match="task store unavailable"):
             _run(file_finding(self._finding()))
-        assert len(inbox_items(inbox_state)) == 1, "the inbox item did not land before the failure"
+        assert (
+            len(inbox_items(inbox_state)) == 1
+        ), "the inbox item did not land before the failure"
         assert len(self._tasks()) == 0
 
         replay = _run(file_finding(self._finding()))
 
-        assert replay.already_filed is False, "the replay reported filed while the task was missing"
-        assert len(inbox_items(inbox_state)) == 1, [i.message for i in inbox_items(inbox_state)]
+        assert (
+            replay.already_filed is False
+        ), "the replay reported filed while the task was missing"
+        assert len(inbox_items(inbox_state)) == 1, [
+            i.message for i in inbox_items(inbox_state)
+        ]
         assert len(self._tasks()) == 1, [t.title for t in self._tasks()]
         assert calls["n"] == 2, "the replay did not retry the task"
 
@@ -1075,14 +1151,18 @@ class TestClauseFourFilesOneOfEach:
         assert len(inbox_items(inbox_state)) == 1
         assert len(self._tasks()) == 1
 
-    def test_the_provider_replay_is_a_suppressed_skip_not_a_second_filing(self, inbox_state):
+    def test_the_provider_replay_is_a_suppressed_skip_not_a_second_filing(
+        self, inbox_state
+    ):
         provider = SelfQaFindingActionProvider()
         config = {
             "sha": "0123456789abcdef",
             "scenario_id": "s1",
             "title": "Sending a message does not persist it",
         }
-        ctx = ActionContext(event="workflow_node", payload={"run_id": "selfqa-c4-replay"})
+        ctx = ActionContext(
+            event="workflow_node", payload={"run_id": "selfqa-c4-replay"}
+        )
         _run(provider.execute(config, ctx))
         again = _run(provider.execute(config, ctx))
         assert again.success and again.outcome == "skip"
@@ -1102,9 +1182,6 @@ class TestClauseFourFilesOneOfEach:
         assert len(self._tasks()) == 0
 
 
-# ── the config round trip (SELF-VERIFICATION §5, all four wiring points) ─────
-
-
 class TestSelfQaConfigRoundTrip:
     """The four points, asserted individually. `test_config_roundtrip.py` covers three of five
     contract points generically, so the write path and the load mapping are pinned here too —
@@ -1112,7 +1189,7 @@ class TestSelfQaConfigRoundTrip:
     """
 
     def test_defaults_are_off(self):
-        from gideon.config.loader import SelfQaConfig
+        from gideon.core.config.loader import SelfQaConfig
 
         cfg = SelfQaConfig()
         assert cfg.enabled is False
@@ -1124,7 +1201,7 @@ class TestSelfQaConfigRoundTrip:
         """Point (a): a field with no `_meta` is unreachable from Settings."""
         from dataclasses import fields
 
-        from gideon.config.loader import SelfQaConfig
+        from gideon.core.config.loader import SelfQaConfig
 
         for f in fields(SelfQaConfig):
             assert f.metadata.get("label"), f.name
@@ -1132,7 +1209,7 @@ class TestSelfQaConfigRoundTrip:
 
     def test_load_maps_every_field(self, tmp_path, monkeypatch):
         """Point (b): the explicit mapping. An omitted field loads as its default, silently."""
-        from gideon.config import loader as loader_mod
+        from gideon.core.config import loader as loader_mod
 
         home = tmp_path / "home"
         home.mkdir()
@@ -1161,19 +1238,20 @@ class TestSelfQaConfigRoundTrip:
 
     def test_load_clamps_the_scenario_ceiling(self, tmp_path, monkeypatch):
         """The file cannot express a ceiling the dashboard would refuse."""
-        from gideon.config import loader as loader_mod
+        from gideon.core.config import loader as loader_mod
 
         home = tmp_path / "home"
         home.mkdir()
         (home / "config.json").write_text(
-            json.dumps({"agent": {"self_qa": {"max_scenarios_per_fire": 9999}}}), encoding="utf-8"
+            json.dumps({"agent": {"self_qa": {"max_scenarios_per_fire": 9999}}}),
+            encoding="utf-8",
         )
         monkeypatch.setattr(loader_mod, "config_dir", lambda: home)
         assert loader_mod.AppConfig.load().agent.self_qa.max_scenarios_per_fire == 20
 
     def test_to_dict_round_trips(self, tmp_path, monkeypatch):
         """Point (c): what `to_dict()` emits must load back to the same values."""
-        from gideon.config import loader as loader_mod
+        from gideon.core.config import loader as loader_mod
 
         home = tmp_path / "home"
         home.mkdir()
@@ -1197,8 +1275,8 @@ class TestSelfQaConfigRoundTrip:
         """Point (d): a field absent from `_EDITABLE_CONFIG` cannot be changed from the UI."""
         from dataclasses import fields
 
-        from gideon.config.loader import SelfQaConfig
-        from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+        from gideon.core.config.loader import SelfQaConfig
+        from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
         for f in fields(SelfQaConfig):
             assert f"agent.self_qa.{f.name}" in _EDITABLE_CONFIG, f.name
@@ -1222,10 +1300,10 @@ class TestTheSelfQaPanelRowsPatchTheNestedPath:
     """
 
     PANEL = (
-        Path(__file__).resolve().parents[1]
-        / "web"
+        Path(__file__).resolve().parents[2]
+        / "apps/console"
         / "src"
-        / "pages"
+        / "features"
         / "settings"
         / "AgentDefaultsPanel.tsx"
     )
@@ -1291,14 +1369,11 @@ class TestTheSelfQaPanelRowsPatchTheNestedPath:
 
     def test_the_flat_path_each_row_would_have_sent_is_rejected(self):
         """Why a mis-bound row reverts instead of writing the wrong key — the backend half."""
-        from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+        from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
         for field in self._rows():
             assert f"agent.self_qa.{field}" in _EDITABLE_CONFIG, field
             assert f"agent.{field}" not in _EDITABLE_CONFIG, field
-
-
-# ── registration (the two providers the template names must be dispatchable) ──
 
 
 class TestWatchTriggerReconcile:
@@ -1306,7 +1381,7 @@ class TestWatchTriggerReconcile:
 
     @staticmethod
     def _store(tmp_path):
-        from gideon.triggers.store import TriggerStore
+        from gideon.automation.triggers.store import TriggerStore
 
         base = tmp_path / "trigger-home"
         base.mkdir(exist_ok=True)
@@ -1314,7 +1389,7 @@ class TestWatchTriggerReconcile:
 
     @staticmethod
     def _configure(tmp_path, monkeypatch, **fields):
-        from gideon.config import loader as loader_mod
+        from gideon.core.config import loader as loader_mod
 
         home = tmp_path / "cfg-home"
         home.mkdir(exist_ok=True)
@@ -1325,7 +1400,7 @@ class TestWatchTriggerReconcile:
 
     def test_off_registers_nothing(self, tmp_path, monkeypatch):
         """A user who never asked for the companion must not find a disabled cron in their list."""
-        from gideon.selfqa.install import WATCH_TRIGGER_ID, reconcile
+        from gideon.assurance.selfqa.install import WATCH_TRIGGER_ID, reconcile
 
         self._configure(tmp_path, monkeypatch, enabled=False)
         store = self._store(tmp_path)
@@ -1333,18 +1408,17 @@ class TestWatchTriggerReconcile:
         assert store.get(WATCH_TRIGGER_ID) is None
 
     def test_enabled_with_a_repo_arms_the_watcher(self, tmp_path, monkeypatch):
-        from gideon.selfqa.install import WATCH_TRIGGER_ID, reconcile
+        from gideon.assurance.selfqa.install import WATCH_TRIGGER_ID, reconcile
 
-        self._configure(tmp_path, monkeypatch, enabled=True, watched_repo="/tmp/watched")
+        self._configure(
+            tmp_path, monkeypatch, enabled=True, watched_repo="/tmp/watched"
+        )
         store = self._store(tmp_path)
         reconcile(store, crons_dir=tmp_path / "crons")
 
         row = store.get(WATCH_TRIGGER_ID)
         assert row is not None, "enabling the companion registered no watcher"
         assert row.trigger.enabled is True
-        # SV-11: the vcs preset, not an interval. A `file` trigger is POLLED (file_poll
-        # surfaces it by kind), so there is no `next_fire_at` to assert — the arming property
-        # is the kind + the preset paths themselves.
         assert row.trigger.kind == "file"
         paths = row.trigger.spec["paths"]
         assert any("refs/heads" in p for p in paths), paths
@@ -1354,30 +1428,33 @@ class TestWatchTriggerReconcile:
         inline = row.trigger.workflow["inline"]
         assert inline["provider"] == "selfqa-commit-watch"
         assert inline["config"] == {"repo": "/tmp/watched"}
-        # Decision 7: an action that starts a workflow run is write-capable, so the fence
-        # needs the frozen grant. Without it the fire is screened off and the watcher is
-        # inert a second way.
         assert "selfqa-commit-watch" in row.trigger.capabilities.get("providers", [])
 
     def test_enabled_without_a_repo_does_not_arm(self, tmp_path, monkeypatch):
         """A watcher with nowhere to look would tick forever doing nothing."""
-        from gideon.selfqa.install import WATCH_TRIGGER_ID, reconcile
+        from gideon.assurance.selfqa.install import WATCH_TRIGGER_ID, reconcile
 
         self._configure(tmp_path, monkeypatch, enabled=True, watched_repo="")
         store = self._store(tmp_path)
         reconcile(store, crons_dir=tmp_path / "crons")
         assert store.get(WATCH_TRIGGER_ID) is None
 
-    def test_disabling_switches_the_row_off_rather_than_deleting_it(self, tmp_path, monkeypatch):
+    def test_disabling_switches_the_row_off_rather_than_deleting_it(
+        self, tmp_path, monkeypatch
+    ):
         """Deleting the last cron entry has been observed to stop the scheduler outright."""
-        from gideon.selfqa.install import WATCH_TRIGGER_ID, reconcile
+        from gideon.assurance.selfqa.install import WATCH_TRIGGER_ID, reconcile
 
         store = self._store(tmp_path)
-        self._configure(tmp_path, monkeypatch, enabled=True, watched_repo="/tmp/watched")
+        self._configure(
+            tmp_path, monkeypatch, enabled=True, watched_repo="/tmp/watched"
+        )
         reconcile(store, crons_dir=tmp_path / "crons")
         assert store.get(WATCH_TRIGGER_ID).trigger.enabled is True
 
-        self._configure(tmp_path, monkeypatch, enabled=False, watched_repo="/tmp/watched")
+        self._configure(
+            tmp_path, monkeypatch, enabled=False, watched_repo="/tmp/watched"
+        )
         reconcile(store, crons_dir=tmp_path / "crons")
         row = store.get(WATCH_TRIGGER_ID)
         assert row is not None, "the row was deleted instead of disabled"
@@ -1385,7 +1462,7 @@ class TestWatchTriggerReconcile:
 
     def test_repointing_the_repo_converges_one_row(self, tmp_path, monkeypatch):
         """The vacuity floor for convergence: a non-deterministic id would add a second watcher."""
-        from gideon.selfqa.install import WATCH_TRIGGER_ID, reconcile
+        from gideon.assurance.selfqa.install import WATCH_TRIGGER_ID, reconcile
 
         store = self._store(tmp_path)
         self._configure(tmp_path, monkeypatch, enabled=True, watched_repo="/tmp/one")
@@ -1409,17 +1486,16 @@ class TestWatchTriggerReconcile:
         silently loses the status — and with it the headless profile and the budgets. Asserted
         against the real predicate rather than by reading the format string.
         """
-        from gideon.guardrails.policy import is_unattended_session
-        from gideon.selfqa.install import WATCH_TRIGGER_ID
+        from gideon.assurance.selfqa.install import WATCH_TRIGGER_ID
+        from gideon.security.guardrails.policy import is_unattended_session
 
         assert is_unattended_session(f"cron:{WATCH_TRIGGER_ID}") is True
-        # The floor: the predicate must be capable of saying no, or the assertion above is vacuous.
         assert is_unattended_session(f"cron_{WATCH_TRIGGER_ID}") is False
 
 
 class TestProvidersAreDispatchable:
     def test_both_providers_register(self):
-        from gideon.action_providers.registry import (
+        from gideon.integrations.action_providers.registry import (
             _ensure_default_providers_registered,
             get_action_provider,
         )
@@ -1430,16 +1506,18 @@ class TestProvidersAreDispatchable:
 
     def test_both_are_allowed_on_a_hook(self):
         """A registered provider missing from this set is one the scheduler would refuse."""
-        from gideon.validation import ALLOWED_HOOK_PROVIDERS
+        from gideon.assurance.validation import ALLOWED_HOOK_PROVIDERS
 
         assert "selfqa-triage" in ALLOWED_HOOK_PROVIDERS
         assert "selfqa-file-finding" in ALLOWED_HOOK_PROVIDERS
 
     def test_both_carry_an_autonomy_declaration(self):
         """A provider in the dispatch registry with no declaration is an ungoverned action."""
-        from gideon.guardrails.autonomy import action_type_for_provider
-        from gideon.guardrails.rungs import ensure_core_action_types
+        from gideon.security.guardrails.autonomy import action_type_for_provider
+        from gideon.security.guardrails.rungs import ensure_core_action_types
 
         ensure_core_action_types()
         assert action_type_for_provider("selfqa-triage").key == "action.selfqa_triage"
-        assert action_type_for_provider("selfqa-file-finding").key == "action.create_task"
+        assert (
+            action_type_for_provider("selfqa-file-finding").key == "action.create_task"
+        )

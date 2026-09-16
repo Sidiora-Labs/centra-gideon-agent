@@ -22,11 +22,12 @@ import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
-from gideon import _spawn_exec_shim as shim
-from gideon.sandbox import (
+from gideon.engine import _spawn_exec_shim as shim
+from gideon.security.sandbox import (
     PROFILE_BUILD,
     PROFILE_NONE,
     PROFILE_SESSION_HOST,
@@ -35,10 +36,7 @@ from gideon.sandbox import (
     spawn_shim_argv,
 )
 
-_SRC = os.path.join(os.path.dirname(os.path.dirname(__file__)), "src")
-
-
-# ── the shim is a pure-stdlib leaf ────────────────────────────────────────────
+_SRC = str(Path(__file__).resolve().parents[2] / "runtime")
 
 
 def test_shim_imports_no_other_core_module():
@@ -46,13 +44,15 @@ def test_shim_imports_no_other_core_module():
     other than the package root and the shim itself — the property that lets it run in a
     bare exec'd child."""
     code = (
-        "import sys, gideon._spawn_exec_shim as s;"
+        "import sys, gideon.engine._spawn_exec_shim as s;"
         "extra=sorted(m for m in sys.modules if m.startswith('gideon.') "
-        "and m != 'gideon._spawn_exec_shim');"
+        "and m not in {'gideon.engine', 'gideon.engine._spawn_exec_shim'});"
         "print(repr(extra))"
     )
     env = {**os.environ, "PYTHONPATH": _SRC}
-    out = subprocess.check_output([sys.executable, "-c", code], env=env, text=True).strip()
+    out = subprocess.check_output(
+        [sys.executable, "-c", code], env=env, text=True
+    ).strip()
     assert out == "[]", f"shim import pulled in extra core modules: {out}"
 
 
@@ -65,41 +65,66 @@ def test_shim_source_imports_only_stdlib():
     for node in ast.walk(ast.parse(src)):
         if isinstance(node, ast.Import):
             bad += [a.name for a in node.names if a.name.startswith("gideon")]
-        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("gideon"):
+        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith(
+            "gideon"
+        ):
             bad.append(node.module or "")
     assert not bad, f"shim imports core modules: {bad}"
 
 
-# ── the shim actually lowers the child's ceiling ──────────────────────────────
-
-
-@pytest.mark.skipif(shim._resource is None, reason="resource module unavailable (Windows)")
+@pytest.mark.skipif(
+    shim._resource is None, reason="resource module unavailable (Windows)"
+)
 def test_shim_child_reports_lowered_nofile():
     """A child launched through the shim reports the reduced NOFILE soft cap — the
     ``ulimit -n`` the done-when calls for."""
-    policy = json.dumps({"limits": {"RLIMIT_NOFILE": [128, "hard"]}, "oom_score_adj": None})
+    policy = json.dumps(
+        {"limits": {"RLIMIT_NOFILE": [128, "hard"]}, "oom_score_adj": None}
+    )
     child = "import resource; print(resource.getrlimit(resource.RLIMIT_NOFILE)[0])"
     env = {**os.environ, "PYTHONPATH": _SRC}
     out = subprocess.check_output(
-        [sys.executable, "-m", shim.__name__, policy, "--", sys.executable, "-c", child],
+        [
+            sys.executable,
+            "-m",
+            shim.__name__,
+            policy,
+            "--",
+            sys.executable,
+            "-c",
+            child,
+        ],
         env=env,
         text=True,
     ).strip()
     assert int(out) == 128
 
 
-@pytest.mark.skipif(shim._resource is None, reason="resource module unavailable (Windows)")
+@pytest.mark.skipif(
+    shim._resource is None, reason="resource module unavailable (Windows)"
+)
 def test_shim_hard_sentinel_resolves_to_inherited_hard_limit():
     """The ``"hard"`` sentinel raises the soft cap to the inherited hard limit (the
     session_host mechanism), never above it."""
     import resource
 
     _soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
-    policy = json.dumps({"limits": {"RLIMIT_NOFILE": ["hard", "hard"]}, "oom_score_adj": None})
+    policy = json.dumps(
+        {"limits": {"RLIMIT_NOFILE": ["hard", "hard"]}, "oom_score_adj": None}
+    )
     child = "import resource; print(resource.getrlimit(resource.RLIMIT_NOFILE)[0])"
     env = {**os.environ, "PYTHONPATH": _SRC}
     out = subprocess.check_output(
-        [sys.executable, "-m", shim.__name__, policy, "--", sys.executable, "-c", child],
+        [
+            sys.executable,
+            "-m",
+            shim.__name__,
+            policy,
+            "--",
+            sys.executable,
+            "-c",
+            child,
+        ],
         env=env,
         text=True,
     ).strip()
@@ -110,11 +135,21 @@ def test_shim_execs_target_with_no_limits_when_resource_absent(monkeypatch):
     """With ``resource`` unavailable (Windows degradation), the shim applies no limits and
     still execs the target — it never crashes the child."""
     monkeypatch.setattr(shim, "_resource", None)
-    # _apply_limits is a no-op; the child still runs. Prove via a real exec of `true`-like.
     env = {**os.environ, "PYTHONPATH": _SRC}
-    policy = json.dumps({"limits": {"RLIMIT_NOFILE": [64, "hard"]}, "oom_score_adj": 1000})
+    policy = json.dumps(
+        {"limits": {"RLIMIT_NOFILE": [64, "hard"]}, "oom_score_adj": 1000}
+    )
     rc = subprocess.call(
-        [sys.executable, "-m", shim.__name__, policy, "--", sys.executable, "-c", "pass"],
+        [
+            sys.executable,
+            "-m",
+            shim.__name__,
+            policy,
+            "--",
+            sys.executable,
+            "-c",
+            "pass",
+        ],
         env=env,
     )
     assert rc == 0
@@ -124,14 +159,11 @@ def test_shim_malformed_argv_exits_nonzero():
     """A missing ``--`` separator or empty target is the one hard failure — there is
     nothing to exec, so the shim exits non-zero with a diagnostic."""
     with pytest.raises(SystemExit):
-        shim._split_argv(["{}"])  # no '--'
+        shim._split_argv(["{}"])
     with pytest.raises(SystemExit):
-        shim._split_argv(["{}", "--"])  # nothing after '--'
+        shim._split_argv(["{}", "--"])
     with pytest.raises(SystemExit):
-        shim._split_argv(["--", "echo"])  # nothing before '--'
-
-
-# ── the four profiles ─────────────────────────────────────────────────────────
+        shim._split_argv(["--", "echo"])
 
 
 def test_tool_profile_caps_nofile_and_biases_oom():
@@ -144,12 +176,15 @@ def test_tool_profile_caps_nofile_and_biases_oom():
 
 def test_session_host_raises_nofile_and_has_no_oom_bias():
     """The EMFILE-regression guard: session_host raises NOFILE to the inherited hard limit
-    (never clamps it below the tool cap a many-pipe host needs) and carries NO OOM bias."""
+    (never clamps it below the tool cap a many-pipe host needs) and carries NO OOM bias.
+    """
     cel = ResourceCeilings(nofile=1024, max_pids=256, max_rss_mb=0)
     p = cel.policy(PROFILE_SESSION_HOST)
-    assert p["limits"]["RLIMIT_NOFILE"] == ["hard", "hard"]  # raised, not the 1024 tool cap
-    assert p["oom_score_adj"] is None  # a trusted host must not be the preferred kill target
-    # NPROC still bounds fork bombs even on a host.
+    assert p["limits"]["RLIMIT_NOFILE"] == [
+        "hard",
+        "hard",
+    ]  # raised, not the 1024 tool cap
+    assert p["oom_score_adj"] is None
     assert p["limits"]["RLIMIT_NPROC"] == [256, 256]
 
 
@@ -179,30 +214,26 @@ def test_max_rss_translates_to_rlimit_as_bytes():
     cel = ResourceCeilings(nofile=0, max_pids=0, max_rss_mb=512)
     p = cel.policy(PROFILE_TOOL)
     assert p["limits"]["RLIMIT_AS"] == [512 * 1024 * 1024, 512 * 1024 * 1024]
-    assert "RLIMIT_NOFILE" not in p["limits"]  # nofile=0 disables the cap
+    assert "RLIMIT_NOFILE" not in p["limits"]
 
 
 def test_spawn_shim_argv_wraps_with_shim_module():
     cel = ResourceCeilings(nofile=1024, max_pids=64)
     wrapped = spawn_shim_argv(["bash", "-lc", "echo hi"], PROFILE_TOOL, ceilings=cel)
     assert wrapped[0] == sys.executable
-    assert wrapped[1:3] == ["-m", "gideon._spawn_exec_shim"]
+    assert wrapped[1:3] == ["-m", "gideon.engine._spawn_exec_shim"]
     assert "--" in wrapped
     sep = wrapped.index("--")
     assert wrapped[sep + 1 :] == ["bash", "-lc", "echo hi"]
-    # The policy is valid JSON carrying the tool ceiling.
     policy = json.loads(wrapped[3])
     assert policy["limits"]["RLIMIT_NOFILE"] == [1024, "hard"]
-
-
-# ── config four-point round-trip ──────────────────────────────────────────────
 
 
 def test_sandbox_config_roundtrips(tmp_path, monkeypatch):
     """sandbox.nofile / max_pids / max_rss_mb survive load → to_dict → load and land in
     config.json under the ``sandbox`` section."""
-    from gideon.config import loader as loader_mod
-    from gideon.config.loader import AppConfig
+    from gideon.core.config import loader as loader_mod
+    from gideon.core.config.loader import AppConfig
 
     cfg_path = tmp_path / "config.json"
     cfg_path.write_text("{}", encoding="utf-8")
@@ -228,10 +259,6 @@ def test_sandbox_config_roundtrips(tmp_path, monkeypatch):
 def test_sandbox_config_in_to_dict():
     d = AppConfig_to_dict()
     assert "sandbox" in d
-    # env_passthrough is the child-env allowlist's declared-needs seam (PHF-4) — same
-    # section, same round-trip contract, so it belongs in this exact-set assertion.
-    # cgroup_scopes is PHF-2's opt-in Linux enforcement tier: it decides whether max_pids
-    # and max_rss_mb are enforced at all, so it round-trips with the ceilings it governs.
     assert set(d["sandbox"]) == {
         "nofile",
         "max_pids",
@@ -242,22 +269,19 @@ def test_sandbox_config_in_to_dict():
 
 
 def AppConfig_to_dict():
-    from gideon.config.loader import AppConfig
+    from gideon.core.config.loader import AppConfig
 
     return AppConfig().to_dict()
 
 
 def test_sandbox_keys_in_editable_config_allowlist():
     """The PATCH write path accepts each sandbox key (the fourth of the four points)."""
-    from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+    from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
     for key in ("sandbox.nofile", "sandbox.max_pids", "sandbox.max_rss_mb"):
         assert key in _EDITABLE_CONFIG, f"{key} missing from _EDITABLE_CONFIG"
         assert _EDITABLE_CONFIG[key]["type"] == "int"
-    # The child-env allowlist's declared-needs seam is a name list, not a ceiling.
     assert _EDITABLE_CONFIG["sandbox.env_passthrough"]["type"] == "str_list"
-    # PHF-2's tier is a flag, not a ceiling — but it must be PATCH-reachable for the same
-    # reason: a hardening tier nothing can turn on is a tier nobody has.
     assert _EDITABLE_CONFIG["sandbox.cgroup_scopes"]["type"] == "bool"
 
 
@@ -267,17 +291,22 @@ def test_default_ceilings_do_not_emit_nproc():
     ('cannot fork' in a git worktree or npm build). The default ceiling therefore emits
     NOFILE only, never NPROC. (Real per-subtree fork-bomb containment is the cgroup tier.)
     """
-    cel = ResourceCeilings()  # ship defaults: nofile=4096, max_pids=0, max_rss_mb=0
+    cel = ResourceCeilings()
     p = cel.policy(PROFILE_TOOL)
-    assert "RLIMIT_NPROC" not in p["limits"], "default ceiling must not set a per-user NPROC cap"
+    assert (
+        "RLIMIT_NPROC" not in p["limits"]
+    ), "default ceiling must not set a per-user NPROC cap"
     assert p["limits"]["RLIMIT_NOFILE"] == [4096, "hard"]
 
 
-@pytest.mark.skipif(shim._resource is None, reason="resource module unavailable (Windows)")
+@pytest.mark.skipif(
+    shim._resource is None, reason="resource module unavailable (Windows)"
+)
 def test_default_ceiling_still_lets_a_child_fork(tmp_path):
     """End-to-end guard for the regression that a default NPROC cap caused: a child under
-    the DEFAULT tool ceiling can still fork a grandchild (a build/git worktree pattern)."""
-    from gideon.sandbox import spawn_shim_argv as _wrap
+    the DEFAULT tool ceiling can still fork a grandchild (a build/git worktree pattern).
+    """
+    from gideon.security.sandbox import spawn_shim_argv as _wrap
 
     argv = _wrap(
         [
@@ -294,7 +323,7 @@ def test_default_ceiling_still_lets_a_child_fork(tmp_path):
 
 
 def test_from_config_reads_live_sandbox(tmp_path, monkeypatch):
-    from gideon.config import loader as loader_mod
+    from gideon.core.config import loader as loader_mod
 
     cfg_path = tmp_path / "config.json"
     cfg_path.write_text(

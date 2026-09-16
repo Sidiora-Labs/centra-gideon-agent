@@ -1,16 +1,9 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
 
-const { makeLoginItem, registerLoginItemIpc, SUPPORTED_PLATFORMS } = require("../loginItem");
-const { buildTrayMenuTemplate } = require("../trayPresence");
+const { makeLoginItem, registerLoginItemIpc, SUPPORTED_PLATFORMS } = require("../src/native/login-item");
+const { buildTrayMenuTemplate } = require("../src/native/tray-presence");
 
-/**
- * A fake Electron `app`. NOTHING in this file may reach the real login-item registry:
- * every read and write lands here, and `writes` is what the idempotence and
- * opt-in assertions inspect. There is no filesystem path involved on either side —
- * the real implementation calls `app.setLoginItemSettings()`, so mocking that API IS
- * the boundary.
- */
 function fakeApp({ openAtLogin = false, throwOnGet = false, throwOnSet = false, ignoreWrites = false } = {}) {
   const app = {
     state: { openAtLogin },
@@ -84,7 +77,6 @@ describe("login item — reversibility", () => {
     assert.equal(item.isEnabled(), true);
     item.set(false);
     assert.equal(item.isEnabled(), false);
-    // Both writes are plain openAtLogin flips — no second mechanism to unwind.
     assert.deepStrictEqual(
       app.writes.map((w) => w.openAtLogin),
       [true, false]
@@ -123,8 +115,6 @@ describe("login item — degradation", () => {
   });
 
   it("a write the OS silently ignores is NOT reported as success", () => {
-    // The inert-control case: setLoginItemSettings returns void, so trusting it
-    // would let a toggle claim success while nothing was registered.
     const item = makeLoginItem({ app: fakeApp({ ignoreWrites: true }), platform: "darwin" });
     const res = item.set(true);
     assert.equal(res.ok, false);
@@ -144,17 +134,14 @@ describe("login item — IPC surface", () => {
     const item = makeLoginItem({ app, platform: "darwin" });
     const handlers = new Map();
     const ipcMain = { handle: (ch, fn) => handlers.set(ch, fn) };
-    const channels = { loginItemGet: "pclaw:login-item-get", loginItemSet: "pclaw:login-item-set" };
+    const channels = { loginItemGet: "gideon:login-item-get", loginItemSet: "gideon:login-item-set" };
 
     registerLoginItemIpc(ipcMain, item, channels);
-    // Vacuity floor: a registration that wired nothing would pass every assertion
-    // below by never being called.
     assert.equal(handlers.size, 2, "both login-item channels must be registered");
 
     const got = await handlers.get(channels.loginItemGet)(null);
     assert.deepStrictEqual({ enabled: got.enabled, supported: got.supported }, { enabled: false, supported: true });
 
-    // A compromised renderer can send anything over IPC; the main process coerces.
     const set = await handlers.get(channels.loginItemSet)(null, "yes please");
     assert.equal(set.enabled, true);
     assert.equal(app.writes[0].openAtLogin, true, "the argument must be coerced to a boolean");
@@ -167,27 +154,10 @@ describe("login item — IPC surface", () => {
   });
 });
 
-/**
- * ONE registration, TWO surfaces (DC-4 T4.3).
- *
- * The tray checkbox and the Settings toggle must not be two mechanisms. The bar these
- * cases hold is the one that makes them one: drive each surface against a single
- * `makeLoginItem` over a single fake `app`, and read the OTHER surface's rendered
- * state afterwards. If either write could be removed without reddening a case here,
- * they would be two mechanisms wearing one label.
- *
- * `buildTrayMenuTemplate` is imported deliberately: the tray's rendered checkbox is
- * the observable the Settings path has to move, and asserting on `loginItem.isEnabled()`
- * instead would pass even while the menu showed a stale value — which is exactly the
- * bug this closes.
- */
 describe("login item — one registration, two surfaces", () => {
-  /** The `checked`/`enabled` the menu-bar item would actually draw. */
   const trayCheckbox = (state) =>
     buildTrayMenuTemplate({ loginItem: state }).find((row) => row.label === "Open at Login");
 
-  /** The wiring `main.js` performs: one writer of the tray's cached state, called by
-   * every surface that can write the registration. */
   function wire({ platform = "darwin" } = {}) {
     const app = fakeApp();
     const item = makeLoginItem({ app, platform });
@@ -196,15 +166,13 @@ describe("login item — one registration, two surfaces", () => {
       trayState = { supported: item.supported, enabled: item.isEnabled() };
     };
     const handlers = new Map();
-    const channels = { loginItemGet: "pclaw:login-item-get", loginItemSet: "pclaw:login-item-set" };
+    const channels = { loginItemGet: "gideon:login-item-get", loginItemSet: "gideon:login-item-set" };
     registerLoginItemIpc({ handle: (ch, fn) => handlers.set(ch, fn) }, item, channels, syncToTray);
     return {
       app,
       item,
-      // The Settings surface: the renderer's `pclawDesktop.loginItem.set()`.
       settingsSet: (v) => handlers.get(channels.loginItemSet)(null, v),
       settingsGet: () => handlers.get(channels.loginItemGet)(null),
-      // The tray surface: the checkbox's own click path from `main.js`.
       trayClick: (next) => { item.set(next); syncToTray(); },
       tray: () => trayCheckbox(trayState),
     };
@@ -232,9 +200,6 @@ describe("login item — one registration, two surfaces", () => {
 
   it("the two surfaces write the SAME registration, not one each", async () => {
     const w = wire();
-    // Settings on, tray off, Settings on again — if these were two mechanisms the
-    // second write would not see the first one's state and the writes would not
-    // alternate.
     await w.settingsSet(true);
     w.trayClick(false);
     await w.settingsSet(true);

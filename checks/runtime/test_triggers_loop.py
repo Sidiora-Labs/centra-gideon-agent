@@ -24,12 +24,12 @@ import asyncio
 
 import pytest
 
-from gideon.triggers import claims as C
-from gideon.triggers import loop as L
-from gideon.triggers import service as SVC
-from gideon.triggers import wakeup as WK
-from gideon.triggers.models import Trigger
-from gideon.triggers.store import TriggerStore
+from gideon.automation.triggers import claims as C
+from gideon.automation.triggers import loop as L
+from gideon.automation.triggers import service as SVC
+from gideon.automation.triggers import wakeup as WK
+from gideon.automation.triggers.models import Trigger
+from gideon.automation.triggers.store import TriggerStore
 
 NOW = 1_800_000_000.0
 
@@ -40,9 +40,9 @@ class _Provider:
 
 
 def _manager(*keys):
-    from gideon.session import SessionManager, _Session
+    from gideon.engine.session import ConversationDirectory, _Session
 
-    manager = SessionManager.__new__(SessionManager)
+    manager = ConversationDirectory.__new__(ConversationDirectory)
     manager._sessions = {}
     for key in keys:
         manager._sessions[key] = _Session(provider=_Provider())
@@ -67,9 +67,6 @@ async def _ok(_payload):
     return {"status": "ok"}
 
 
-# ── 🔴 the loop that was missing ──
-
-
 def test_one_iteration_fires_dispatches_and_executes(tmp_path):
     """🔴 THE gap: the tick could decide, but nothing drove it. This is the whole chain in one call —
     tick → dispatch (S89) → drain (S90) — with only the LLM turn injected."""
@@ -92,18 +89,23 @@ def test_one_iteration_fires_dispatches_and_executes(tmp_path):
 def test_the_claim_is_released_so_the_next_slot_fires(tmp_path):
     """🔴 Found while wiring this loop: `executor.drain` took no `base_dir`, so `run_one`'s claim
     release was a no-op on every drained fire — which would block an `overlap: skip` trigger for the
-    full 1h claim expiry after its first run. The release only works if the root reaches it."""
+    full 1h claim expiry after its first run. The release only works if the root reaches it.
+    """
     store = TriggerStore(base_dir=tmp_path)
     store.upsert(_clock())
     manager = _manager(WK.session_key_for("j"))
-    asyncio.run(L.tick_once(store, runner=_ok, sessions=manager, base_dir=tmp_path, now=NOW))
+    asyncio.run(
+        L.tick_once(store, runner=_ok, sessions=manager, base_dir=tmp_path, now=NOW)
+    )
     assert C.is_running("j", now=NOW, base_dir=tmp_path) is False
 
     trigger = store.get("j").trigger
     trigger.next_fire_at = SVC.to_iso(NOW + 59)
     store.upsert(trigger)
     again = asyncio.run(
-        L.tick_once(store, runner=_ok, sessions=manager, base_dir=tmp_path, now=NOW + 60)
+        L.tick_once(
+            store, runner=_ok, sessions=manager, base_dir=tmp_path, now=NOW + 60
+        )
     )
     assert [f.trigger.id for f in again.fires] == ["j"]
 
@@ -112,7 +114,9 @@ def test_the_next_fire_advances(tmp_path):
     store = TriggerStore(base_dir=tmp_path)
     store.upsert(_clock())
     manager = _manager(WK.session_key_for("j"))
-    asyncio.run(L.tick_once(store, runner=_ok, sessions=manager, base_dir=tmp_path, now=NOW))
+    asyncio.run(
+        L.tick_once(store, runner=_ok, sessions=manager, base_dir=tmp_path, now=NOW)
+    )
     assert SVC.to_epoch(store.get("j").trigger.next_fire_at) > NOW
 
 
@@ -128,7 +132,9 @@ def test_nothing_due_is_a_quiet_no_op(tmp_path):
         return {"status": "ok"}
 
     result = asyncio.run(
-        L.tick_once(store, runner=runner, sessions=_manager(), base_dir=tmp_path, now=NOW)
+        L.tick_once(
+            store, runner=runner, sessions=_manager(), base_dir=tmp_path, now=NOW
+        )
     )
     assert result.fires == []
     assert ran == []
@@ -136,12 +142,11 @@ def test_nothing_due_is_a_quiet_no_op(tmp_path):
 
 def test_an_empty_store_is_a_no_op(tmp_path):
     result = asyncio.run(
-        L.tick_once(TriggerStore(base_dir=tmp_path), runner=_ok, base_dir=tmp_path, now=NOW)
+        L.tick_once(
+            TriggerStore(base_dir=tmp_path), runner=_ok, base_dir=tmp_path, now=NOW
+        )
     )
     assert result.fires == []
-
-
-# ── resilience: the loop must outlive a bad fire ──
 
 
 def test_a_failing_runner_does_not_stop_the_iteration(tmp_path):
@@ -163,7 +168,7 @@ def test_a_failing_runner_does_not_stop_the_iteration(tmp_path):
         L.tick_once(store, runner=flaky, sessions=manager, base_dir=tmp_path, now=NOW)
     )
     assert sorted(f.trigger.id for f in result.fires) == ["a", "b"]
-    assert sorted(seen) == ["a", "b"]  # both attempted
+    assert sorted(seen) == ["a", "b"]
 
 
 def test_no_session_manager_leaves_the_fires_decided_not_dropped(tmp_path):
@@ -171,7 +176,9 @@ def test_no_session_manager_leaves_the_fires_decided_not_dropped(tmp_path):
     persisted each next fire and wrote a ledger row) rather than vanishing silently."""
     store = TriggerStore(base_dir=tmp_path)
     store.upsert(_clock())
-    result = asyncio.run(L.tick_once(store, runner=_ok, sessions=None, base_dir=tmp_path, now=NOW))
+    result = asyncio.run(
+        L.tick_once(store, runner=_ok, sessions=None, base_dir=tmp_path, now=NOW)
+    )
     assert [f.trigger.id for f in result.fires] == ["j"]
     assert result.ledger_rows
 
@@ -194,7 +201,7 @@ def test_run_forever_survives_a_raising_tick(monkeypatch, tmp_path):
     monkeypatch.setattr(L.asyncio, "sleep", no_sleep)
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(L.run_forever(TriggerStore(base_dir=tmp_path), runner=_ok))
-    assert calls["n"] == 2  # it kept going after the RuntimeError
+    assert calls["n"] == 2
 
 
 def test_the_iteration_sleep_is_bounded(monkeypatch, tmp_path):
@@ -221,22 +228,21 @@ def test_the_iteration_sleep_is_bounded(monkeypatch, tmp_path):
     assert slept == [L.MAX_ITERATION_SLEEP_SECS]
 
 
-# ── 🔴 the cutover: exactly one clock engine ──
-
-
 def test_boot_rotates_run_history_without_a_legacy_service():
     """🔴 SUPERSEDED (S112). This asserted `load_without_timer` — the legacy service's boot call.
 
     That method did two things: load `crons.json` (for CRUD nothing uses any more) and rotate run
-    history. Only the rotation was load-bearing, and `ScheduleRunStore` owns it, so boot calls that
+    history. Only the rotation was load-bearing, and `ExecutionJournal` owns it, so boot calls that
     directly and the class is gone.
     """
     import inspect
 
-    from gideon.gateway import GatewayOrchestrator
+    from gideon.engine.automation_boot import AutomationBoot
+    from gideon.engine.gateway import RuntimeCoordinator
 
-    src = inspect.getsource(GatewayOrchestrator._init_cron)
-    assert "ScheduleRunStore(config_dir()).rotate_all()" in src
+    assert "AutomationBoot" in inspect.getsource(RuntimeCoordinator._init_cron)
+    src = inspect.getsource(AutomationBoot)
+    assert "ExecutionJournal(self.home()).rotate_all()" in src
     assert "load_without_timer" not in src
 
 
@@ -247,11 +253,11 @@ def test_boot_has_no_legacy_timer_left_to_arm(tmp_path):
     it, so there is no second engine left to arm by accident."""
     import inspect
 
-    from gideon.gateway import GatewayOrchestrator
+    from gideon.engine.automation_boot import AutomationBoot
+    from gideon.engine.gateway import RuntimeCoordinator
 
-    src = inspect.getsource(GatewayOrchestrator._init_cron)
-    # Strip comments: the boot path still EXPLAINS what retired, and the property under test is
-    # about the CODE. Asserting on prose would make a docstring edit fail a behaviour test.
+    assert "AutomationBoot" in inspect.getsource(RuntimeCoordinator._init_cron)
+    src = inspect.getsource(AutomationBoot)
     code = "\n".join(ln for ln in src.split("\n") if not ln.strip().startswith("#"))
     assert "cron_svc" not in code
     assert "ScheduleService(" not in code
@@ -261,21 +267,38 @@ def test_boot_starts_the_clock_loop(tmp_path):
     """A loop nobody launches is the defect this session opened with."""
     import inspect
 
-    from gideon.gateway import GatewayOrchestrator
+    from gideon.engine.automation_boot import AutomationBoot
+    from gideon.engine.gateway import RuntimeCoordinator
 
-    src = inspect.getsource(GatewayOrchestrator._init_cron)
+    assert "AutomationBoot" in inspect.getsource(RuntimeCoordinator._init_cron)
+    src = inspect.getsource(AutomationBoot)
     assert "_clock_loop" in src
     assert "_clock_task" in src
 
 
 def test_shutdown_cancels_the_clock_loop():
-    """A dangling clock task across shutdown leaks a firing loop into the next process."""
+    """The gateway delegates shutdown to the owner that cancels its clock task."""
+    import ast
     import inspect
 
-    from gideon.gateway import GatewayOrchestrator
+    from gideon.engine.gateway import RuntimeCoordinator
+    from gideon.engine.lifecycle import retire
 
-    src = inspect.getsource(GatewayOrchestrator._shutdown)
-    assert "_clock_task" in src
+    assert "await retire(self)" in inspect.getsource(RuntimeCoordinator._shutdown)
+    body = ast.parse(inspect.getsource(retire))
+    cancellations = [
+        node
+        for node in ast.walk(body)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "cancel_tasks"
+    ]
+    assert any(
+        isinstance(node, ast.Attribute) and node.attr == "_clock_task"
+        for call in cancellations
+        for argument in call.args
+        for node in ast.walk(argument)
+    )
 
 
 def test_one_dispatch_path_serves_both_clock_and_file_fires():
@@ -284,34 +307,33 @@ def test_one_dispatch_path_serves_both_clock_and_file_fires():
     delegates to `_fire_store_trigger`."""
     import inspect
 
-    from gideon.gateway import GatewayOrchestrator
+    from gideon.engine.automation_routes import AutomationRoutes
+    from gideon.engine.gateway import RuntimeCoordinator
 
-    src = inspect.getsource(GatewayOrchestrator._fire_file_trigger)
-    assert "_fire_store_trigger" in src
-    # And the shared dispatch must not hard-code one source's event name.
-    shared = inspect.getsource(GatewayOrchestrator._fire_store_trigger)
+    src = inspect.getsource(RuntimeCoordinator._fire_file_trigger)
+    assert "AutomationRoutes" in src
+    assert "_fire_store_trigger" in inspect.getsource(AutomationRoutes.file)
+    shared = inspect.getsource(RuntimeCoordinator._fire_store_trigger)
     assert "event: str" in shared
 
 
 def test_the_shared_dispatch_reads_both_action_shapes(tmp_path):
     """A migrated cron nests its action under `workflow.inline`; S92's chat tools write a flat
-    `{provider, config}`. Reading only one would render half a real store's triggers unfireable."""
+    `{provider, config}`. Reading only one would render half a real store's triggers unfireable.
+    """
     import inspect
 
-    from gideon.gateway import GatewayOrchestrator
+    from gideon.engine.trigger_dispatch import TriggerAction
 
-    src = inspect.getsource(GatewayOrchestrator._fire_store_trigger)
+    src = inspect.getsource(TriggerAction.resolve)
     assert "inline" in src
-
-
-# ── the live refresh a scheduled fire pushes (S107) ──
 
 
 def _orch_with_state(state):
     """A bare orchestrator carrying just the dashboard state — enough to drive the fire path."""
-    from gideon.gateway import GatewayOrchestrator
+    from gideon.engine.gateway import RuntimeCoordinator
 
-    orch = object.__new__(GatewayOrchestrator)
+    orch = object.__new__(RuntimeCoordinator)
     orch.dashboard_state = state
     return orch
 
@@ -352,7 +374,10 @@ def test_a_failing_fire_still_pushes_the_refresh():
     trigger = SimpleNamespace(
         id="clock:x", workflow={"provider": "bash", "config": {"command": "true"}}
     )
-    with patch("gideon.action_providers.get_action_provider", lambda name: BadProvider()):
+    with patch(
+        "gideon.integrations.action_providers.get_action_provider",
+        lambda name: BadProvider(),
+    ):
         asyncio.run(orch._fire_store_trigger(trigger, {"trigger_id": "clock:x"}))
 
     assert state.pushed == [("crons", "cron_history")]
@@ -360,7 +385,7 @@ def test_a_failing_fire_still_pushes_the_refresh():
 
 def test_a_dashboardless_gateway_does_not_fail_on_the_refresh():
     """`--no-dashboard` has nothing to notify."""
-    _orch_with_state(None)._push_trigger_refresh()  # must not raise
+    _orch_with_state(None)._push_trigger_refresh()
 
 
 def test_an_orchestrator_with_no_dashboard_attribute_at_all_survives():
@@ -370,11 +395,11 @@ def test_an_orchestrator_with_no_dashboard_attribute_at_all_survives():
     `test_gateway_file_watch.py` drives the fire path) has no such attribute — and an AttributeError
     raised from the fire path's `finally` would REPLACE the fire's own outcome. Hence `getattr`.
     """
-    from gideon.gateway import GatewayOrchestrator
+    from gideon.engine.gateway import RuntimeCoordinator
 
-    bare = GatewayOrchestrator.__new__(GatewayOrchestrator)
+    bare = RuntimeCoordinator.__new__(RuntimeCoordinator)
     assert not hasattr(bare, "dashboard_state")
-    bare._push_trigger_refresh()  # must not raise
+    bare._push_trigger_refresh()
 
 
 def test_a_broken_broadcast_never_fails_a_fire():
@@ -382,7 +407,7 @@ def test_a_broken_broadcast_never_fails_a_fire():
         def push_refresh(self, *kinds):
             raise RuntimeError("websocket closed")
 
-    _orch_with_state(Boom())._push_trigger_refresh()  # must not raise
+    _orch_with_state(Boom())._push_trigger_refresh()
 
 
 def test_the_legacy_refresh_callback_is_gone():
@@ -394,20 +419,16 @@ def test_the_legacy_refresh_callback_is_gone():
 
     import pytest
 
-    from gideon.gateway import GatewayOrchestrator
+    from gideon.engine.gateway import RuntimeCoordinator
 
-    # S112 deleted the whole class, which is a stronger statement than "the method is gone".
     with pytest.raises(ImportError):
-        from gideon.schedule import ScheduleService  # noqa: F401
-    src = inspect.getsource(GatewayOrchestrator)
+        from gideon.automation.schedule import ScheduleService  # noqa: F401
+    src = inspect.getsource(RuntimeCoordinator)
     assert "set_refresh_callback" not in src
 
 
-# ── S142: criterion 7's two SEPARATE wake sources, both of which had no caller ──
-
-
 def _spool_one(home, *, key="notes/x"):
-    from gideon.triggers.dispatch import Envelope, spool_fire
+    from gideon.automation.triggers.dispatch import Envelope, spool_fire
 
     return spool_fire(
         Envelope(
@@ -430,16 +451,18 @@ def test_an_IDLE_tick_still_drains_the_spool(tmp_path, monkeypatch):
     still drain it". An idle machine is exactly when a spooled fire is waiting.
     """
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.config import loader
+    from gideon.core.config import loader
 
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
-    from gideon.triggers.dispatch import drain_spool
+    from gideon.automation.triggers.dispatch import drain_spool
 
-    store = TriggerStore(base_dir=tmp_path)  # no triggers at all -> zero fires
+    store = TriggerStore(base_dir=tmp_path)
     assert _spool_one(tmp_path)
     assert len(drain_spool()[0]) == 1
 
-    result = asyncio.run(L.tick_once(store, runner=_ok, sessions=None, base_dir=tmp_path, now=NOW))
+    result = asyncio.run(
+        L.tick_once(store, runner=_ok, sessions=None, base_dir=tmp_path, now=NOW)
+    )
     assert result.fires == []
     assert drain_spool()[0] == [], "an idle tick must still consume the spool"
 
@@ -448,20 +471,24 @@ def test_the_spool_drains_EXACTLY_ONCE(tmp_path, monkeypatch):
     """Criterion 7's "no double-fire". `clear_spool` acks only what was handled, so a second tick
     finds nothing — and a fire that arrives DURING a drain survives it."""
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.config import loader
+    from gideon.core.config import loader
 
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
-    from gideon.triggers.dispatch import drain_spool
+    from gideon.automation.triggers.dispatch import drain_spool
 
     store = TriggerStore(base_dir=tmp_path)
     _spool_one(tmp_path)
     fired: list[str] = []
-    import gideon.event_triggers as et
+    import gideon.automation.event_triggers as et
 
     monkeypatch.setattr(et, "emit_event", lambda **kw: fired.append(kw["key"]))
-    asyncio.run(L.tick_once(store, runner=_ok, sessions=None, base_dir=tmp_path, now=NOW))
+    asyncio.run(
+        L.tick_once(store, runner=_ok, sessions=None, base_dir=tmp_path, now=NOW)
+    )
     assert fired == ["notes/x"]
-    asyncio.run(L.tick_once(store, runner=_ok, sessions=None, base_dir=tmp_path, now=NOW + 1))
+    asyncio.run(
+        L.tick_once(store, runner=_ok, sessions=None, base_dir=tmp_path, now=NOW + 1)
+    )
     assert fired == ["notes/x"], "the second tick must not re-fire an acked spool entry"
     assert drain_spool()[0] == []
 
@@ -471,17 +498,21 @@ def test_a_spooled_fire_re_enters_through_the_SAME_seam(tmp_path, monkeypatch):
     LIVE memory write uses, so it cannot skip a gate a live fire walks — which is exactly how the
     `web_watch` screen gap (S134) opened."""
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.config import loader
+    from gideon.core.config import loader
 
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
     seen: list[dict] = []
-    import gideon.event_triggers as et
+    import gideon.automation.event_triggers as et
 
     monkeypatch.setattr(et, "emit_event", lambda **kw: seen.append(kw))
     _spool_one(tmp_path)
     asyncio.run(
         L.tick_once(
-            TriggerStore(base_dir=tmp_path), runner=_ok, sessions=None, base_dir=tmp_path, now=NOW
+            TriggerStore(base_dir=tmp_path),
+            runner=_ok,
+            sessions=None,
+            base_dir=tmp_path,
+            now=NOW,
         )
     )
     assert seen and seen[0]["event_type"] == "memory_write", seen
@@ -492,38 +523,34 @@ def test_a_DAMAGED_spool_line_does_not_hide_the_rest(tmp_path, monkeypatch):
     """A partial write at power-loss damages one line. Append-only JSONL is chosen so the others
     survive; the skipped line is logged, because it is a fire nobody will ever run."""
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.config import loader
+    from gideon.core.config import loader
 
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
-    from gideon.triggers.dispatch import spool_path
+    from gideon.automation.triggers.dispatch import spool_path
 
     _spool_one(tmp_path, key="good")
     with spool_path().open("a", encoding="utf-8") as handle:
         handle.write('{"seq": 1, "truncated\n')
     fired: list[str] = []
-    import gideon.event_triggers as et
+    import gideon.automation.event_triggers as et
 
     monkeypatch.setattr(et, "emit_event", lambda **kw: fired.append(kw["key"]))
     asyncio.run(
         L.tick_once(
-            TriggerStore(base_dir=tmp_path), runner=_ok, sessions=None, base_dir=tmp_path, now=NOW
+            TriggerStore(base_dir=tmp_path),
+            runner=_ok,
+            sessions=None,
+            base_dir=tmp_path,
+            now=NOW,
         )
     )
     assert fired == ["good"]
 
 
-# ── WF2AUT-13: §3.3's cursor rule had a complete decision layer and ZERO production callers ──
-#
-# `Handling`, `DrainAction`, `drain_decision` and `classify_handler_outcome` were written,
-# documented and unit tested; nothing in `src/` referenced any of them. The drain did
-# `handled += 1` unconditionally and its own comment named "the poison pill `drain_decision`
-# names" while never calling it. Every test below drives the REAL drain (`tick_once`), not
-# `drain_decision` directly — a decision layer proven only by its own unit tests is exactly the
-# shape that shipped inert.
-
-
-def _spool_kind(home, *, kind="memory.memory_write", key="notes/x", value="hi", now=NOW):
-    from gideon.triggers.dispatch import Envelope, spool_fire
+def _spool_kind(
+    home, *, kind="memory.memory_write", key="notes/x", value="hi", now=NOW
+):
+    from gideon.automation.triggers.dispatch import Envelope, spool_fire
 
     return spool_fire(
         Envelope(
@@ -538,14 +565,14 @@ def _spool_kind(home, *, kind="memory.memory_write", key="notes/x", value="hi", 
 
 def _isolate(tmp_path, monkeypatch):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.config import loader
+    from gideon.core.config import loader
 
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
 
 
 def _engine_down(monkeypatch):
     """Make the PRE-DELIVERY engine resolve fail — a failure provably before any side effect."""
-    import gideon.event_triggers as et
+    import gideon.automation.event_triggers as et
 
     def _boom():
         raise RuntimeError("event engine unreachable")
@@ -556,16 +583,21 @@ def _engine_down(monkeypatch):
 def _tick(tmp_path, *, now=NOW):
     return asyncio.run(
         L.tick_once(
-            TriggerStore(base_dir=tmp_path), runner=_ok, sessions=None, base_dir=tmp_path, now=now
+            TriggerStore(base_dir=tmp_path),
+            runner=_ok,
+            sessions=None,
+            base_dir=tmp_path,
+            now=now,
         )
     )
 
 
 def test_a_TRANSIENT_pre_delivery_failure_is_HELD_not_acked(tmp_path, monkeypatch):
     """The inert policy, now live. A re-entry that failed BEFORE the side-effect boundary used to
-    be counted `handled += 1` and acked off the spool; it is now held for a bounded retry."""
+    be counted `handled += 1` and acked off the spool; it is now held for a bounded retry.
+    """
     _isolate(tmp_path, monkeypatch)
-    from gideon.triggers.dispatch import drain_spool, read_spool_hold
+    from gideon.automation.triggers.dispatch import drain_spool, read_spool_hold
 
     _spool_kind(tmp_path)
     _engine_down(monkeypatch)
@@ -573,11 +605,18 @@ def test_a_TRANSIENT_pre_delivery_failure_is_HELD_not_acked(tmp_path, monkeypatc
     _tick(tmp_path)
 
     kept = drain_spool()[0]
-    assert len(kept) == 1, "a transient pre-delivery failure must NOT be acked off the spool"
-    assert read_spool_hold() == (kept[0].event_id, 1), "the budget must be on disk, not in memory"
+    assert (
+        len(kept) == 1
+    ), "a transient pre-delivery failure must NOT be acked off the spool"
+    assert read_spool_hold() == (
+        kept[0].event_id,
+        1,
+    ), "the budget must be on disk, not in memory"
 
 
-def test_a_failure_AFTER_the_side_effect_boundary_is_NEVER_retried(tmp_path, monkeypatch):
+def test_a_failure_AFTER_the_side_effect_boundary_is_NEVER_retried(
+    tmp_path, monkeypatch
+):
     """🔴 THE SAFETY PIN. HOLD means an envelope can run twice, and a double-fire is the one
     outcome criterion 7 bans. So the boundary is `emit_event` itself: once entered, the drain
     cannot know how far it got, and "I don't know" must resolve to DELIVERED.
@@ -586,8 +625,8 @@ def test_a_failure_AFTER_the_side_effect_boundary_is_NEVER_retried(tmp_path, mon
     into a debug log), so a test is the only way to reach the branch that must not retry.
     """
     _isolate(tmp_path, monkeypatch)
-    import gideon.event_triggers as et
-    from gideon.triggers.dispatch import drain_spool, read_spool_hold
+    import gideon.automation.event_triggers as et
+    from gideon.automation.triggers.dispatch import drain_spool, read_spool_hold
 
     _spool_kind(tmp_path)
     entered: list[str] = []
@@ -604,7 +643,9 @@ def test_a_failure_AFTER_the_side_effect_boundary_is_NEVER_retried(tmp_path, mon
     assert read_spool_hold() == ("", 0)
 
     _tick(tmp_path, now=NOW + 1)
-    assert entered == ["notes/x"], "a second tick must not re-enter an envelope whose action ran"
+    assert entered == [
+        "notes/x"
+    ], "a second tick must not re-enter an envelope whose action ran"
 
 
 def test_the_retry_budget_IS_DURABLE_and_bounded(tmp_path, monkeypatch):
@@ -616,7 +657,7 @@ def test_the_retry_budget_IS_DURABLE_and_bounded(tmp_path, monkeypatch):
     Each `tick_once` call re-reads the sidecar from disk, which is exactly what a restart does.
     """
     _isolate(tmp_path, monkeypatch)
-    from gideon.triggers.dispatch import (
+    from gideon.automation.triggers.dispatch import (
         MAX_TRANSIENT_RETRIES,
         drain_spool,
         read_spool_hold,
@@ -636,17 +677,20 @@ def test_the_retry_budget_IS_DURABLE_and_bounded(tmp_path, monkeypatch):
 
     assert counts == [1, 2, 3, 4, 0], counts
     assert drain_spool()[0] == [], "the poison pill must be given up, not held forever"
-    assert not spool_hold_path().exists(), "the budget must be forgotten once the envelope is gone"
+    assert (
+        not spool_hold_path().exists()
+    ), "the budget must be forgotten once the envelope is gone"
     assert event_id
 
 
 def test_a_HOLD_is_HEAD_OF_LINE_and_keeps_the_tail_in_ORDER(tmp_path, monkeypatch):
     """`clear_spool(handled=N)` can only ack a PREFIX — there is no "keep line 1, ack line 2". So
     the drain stops at the first envelope it must hold and leaves the tail on disk, in order.
-    Re-entering the tail first would reorder the stream; acking it would strand the head."""
+    Re-entering the tail first would reorder the stream; acking it would strand the head.
+    """
     _isolate(tmp_path, monkeypatch)
-    import gideon.event_triggers as et
-    from gideon.triggers.dispatch import drain_spool
+    import gideon.automation.event_triggers as et
+    from gideon.automation.triggers.dispatch import drain_spool
 
     _spool_kind(tmp_path, key="first")
     _spool_kind(tmp_path, key="second")
@@ -670,8 +714,8 @@ def test_an_IDENTICAL_payload_spooled_twice_fires_ONCE(tmp_path, monkeypatch):
     (source, kind, payload), so two lines with one hash inside `DEDUP_WINDOW_SECS` are the work
     the window was written to collapse — "an fs event fired twice for one save"."""
     _isolate(tmp_path, monkeypatch)
-    import gideon.event_triggers as et
-    from gideon.triggers.dispatch import drain_spool
+    import gideon.automation.event_triggers as et
+    from gideon.automation.triggers.dispatch import drain_spool
 
     _spool_kind(tmp_path, key="same")
     _spool_kind(tmp_path, key="same")
@@ -680,15 +724,18 @@ def test_an_IDENTICAL_payload_spooled_twice_fires_ONCE(tmp_path, monkeypatch):
 
     _tick(tmp_path)
     assert fired == ["same"], "the second identical line must be skipped, not re-fired"
-    assert drain_spool()[0] == [], "and it must still be ACKED, not left to retry forever"
+    assert (
+        drain_spool()[0] == []
+    ), "and it must still be ACKED, not left to retry forever"
 
 
 def test_the_dedup_window_does_not_collapse_two_SEPARATE_facts(tmp_path, monkeypatch):
     """Compared on EMIT times, not on the tick's clock: the same payload seen an hour apart is two
-    facts. A window that read the tick's `now` for both would make every re-spool a duplicate."""
+    facts. A window that read the tick's `now` for both would make every re-spool a duplicate.
+    """
     _isolate(tmp_path, monkeypatch)
-    import gideon.event_triggers as et
-    from gideon.triggers.dispatch import DEDUP_WINDOW_SECS
+    import gideon.automation.event_triggers as et
+    from gideon.automation.triggers.dispatch import DEDUP_WINDOW_SECS
 
     _spool_kind(tmp_path, key="same", now=NOW)
     _spool_kind(tmp_path, key="same", now=NOW + DEDUP_WINDOW_SECS + 1)
@@ -703,10 +750,11 @@ def test_an_envelope_with_no_event_kind_is_PERMANENT_not_retried(tmp_path, monke
     """`Handling.PERMANENT`'s honest producer, and a real drop this found: an envelope with no
     kind used to reach `emit_event` with an empty `event_type`, match nothing, and be counted as a
     delivered fire — a drop wearing a success. No retry can make it routable, so it is consumed
-    LOUDLY rather than held (holding would be the poison pill `drain_decision` warns about)."""
+    LOUDLY rather than held (holding would be the poison pill `drain_decision` warns about).
+    """
     _isolate(tmp_path, monkeypatch)
-    import gideon.event_triggers as et
-    from gideon.triggers.dispatch import drain_spool
+    import gideon.automation.event_triggers as et
+    from gideon.automation.triggers.dispatch import drain_spool
 
     _spool_kind(tmp_path, kind="", key="unroutable")
     called: list[dict] = []
@@ -717,21 +765,23 @@ def test_an_envelope_with_no_event_kind_is_PERMANENT_not_retried(tmp_path, monke
     assert drain_spool()[0] == [], "and must be acked, because no retry can route it"
 
 
-def test_a_HOLD_that_cannot_persist_its_budget_is_ACKED_not_retried_forever(tmp_path, monkeypatch):
+def test_a_HOLD_that_cannot_persist_its_budget_is_ACKED_not_retried_forever(
+    tmp_path, monkeypatch
+):
     """The one place the design refuses to hold. An unbounded retry is worse than the swallow this
-    replaced, so a drain that cannot write the count acks the envelope loudly instead."""
+    replaced, so a drain that cannot write the count acks the envelope loudly instead.
+    """
     _isolate(tmp_path, monkeypatch)
-    from gideon.triggers import dispatch as D
+    from gideon.automation.triggers import dispatch as D
 
     _spool_kind(tmp_path)
     _engine_down(monkeypatch)
     monkeypatch.setattr(D, "write_spool_hold", lambda **kw: False)
 
     _tick(tmp_path)
-    assert D.drain_spool()[0] == [], "an unbudgetable hold must be acked, not retried forever"
-
-
-# ── the exhaustiveness ratchet (the WV-13/WV-14 pattern: a raising tail + an AST read) ──
+    assert (
+        D.drain_spool()[0] == []
+    ), "an unbudgetable hold must be acked, not retried forever"
 
 
 class TestTheDrainIsExhaustive:
@@ -741,16 +791,16 @@ class TestTheDrainIsExhaustive:
         test while leaving the next member's semantics undeclared."""
         import ast
         import inspect
+        import textwrap
         from pathlib import Path
 
-        from gideon.triggers.dispatch import DrainAction
+        from gideon.automation.triggers.dispatch import DrainAction
+        from gideon.automation.triggers.spool_replay import SpoolReplay
 
-        source = Path(inspect.getsourcefile(L) or "").read_text(encoding="utf-8")
-        fn = next(
-            node
-            for node in ast.parse(source).body
-            if isinstance(node, ast.FunctionDef) and node.name == "_drain_spool"
-        )
+        assert "SpoolReplay" in inspect.getsource(L._drain_spool)
+        assert "self.settle" in inspect.getsource(SpoolReplay.run)
+        source = textwrap.dedent(inspect.getsource(SpoolReplay.settle))
+        fn = ast.parse(source).body[0]
         named = {
             node.attr
             for node in ast.walk(fn)
@@ -764,9 +814,10 @@ class TestTheDrainIsExhaustive:
         self, tmp_path, monkeypatch
     ) -> None:
         """Proof the ratchet CAN fail. A member with no branch must refuse, not inherit whichever
-        action happened to be written last — the silent ack this whole atom exists to remove."""
+        action happened to be written last — the silent ack this whole atom exists to remove.
+        """
         _isolate(tmp_path, monkeypatch)
-        from gideon.triggers import dispatch as D
+        from gideon.automation.triggers import dispatch as D
 
         _spool_kind(tmp_path)
         monkeypatch.setattr(D, "drain_decision", lambda **kw: ("future_action", ""))
@@ -778,7 +829,7 @@ class TestTheDrainIsExhaustive:
         import inspect
         from pathlib import Path
 
-        from gideon.triggers import dispatch as D
+        from gideon.automation.triggers import dispatch as D
 
         source = Path(inspect.getsourcefile(D) or "").read_text(encoding="utf-8")
         fn = next(
@@ -795,10 +846,12 @@ class TestTheDrainIsExhaustive:
         }
         assert named == {member.name for member in D.Handling}
 
-    def test_an_unhandled_handling_raises_rather_than_inheriting_the_transient_rule(self) -> None:
+    def test_an_unhandled_handling_raises_rather_than_inheriting_the_transient_rule(
+        self,
+    ) -> None:
         """The transient rules used to be the FALLTHROUGH, so an unknown handling string silently
         inherited "retry five times then drop"."""
-        from gideon.triggers.dispatch import drain_decision
+        from gideon.automation.triggers.dispatch import drain_decision
 
         with pytest.raises(AssertionError, match="no branch for handling"):
             drain_decision(handling="future_handling", held_retries=0)
@@ -808,10 +861,11 @@ class TestTheDrainIsExhaustive:
         self, member, tmp_path, monkeypatch
     ) -> None:
         """Producers, not just branches. `Handling` had no writer anywhere in `src/` — every member
-        must now come out of `_reenter_spooled` for a state a real spooled envelope can be in."""
+        must now come out of `_reenter_spooled` for a state a real spooled envelope can be in.
+        """
         _isolate(tmp_path, monkeypatch)
-        import gideon.event_triggers as et
-        from gideon.triggers.dispatch import Envelope, Handling
+        import gideon.automation.event_triggers as et
+        from gideon.automation.triggers.dispatch import Envelope, Handling
 
         kind = "memory.memory_write"
         if member == "PERMANENT":
@@ -821,13 +875,16 @@ class TestTheDrainIsExhaustive:
         else:
             monkeypatch.setattr(et, "emit_event", lambda **kw: None)
         handling, _detail = L._reenter_spooled(
-            Envelope(seq=0, source="event:e-1", kind=kind, payload={"key": "k"}, emitted_at=NOW),
+            Envelope(
+                seq=0,
+                source="event:e-1",
+                kind=kind,
+                payload={"key": "k"},
+                emitted_at=NOW,
+            ),
             now=NOW,
         )
         assert handling == getattr(Handling, member).value
-
-
-# ── S142: pending approvals re-arm (`retry_queue` had no caller either) ──
 
 
 class _Unready:
@@ -847,14 +904,17 @@ class _Unready:
 
 
 def _resume(tid="t-0"):
-    return WK.Wakeup(kind="resume", trigger_id=tid, session_key=f"s-{tid}", seq=1, emitted_at=NOW)
+    return WK.Wakeup(
+        kind="resume", trigger_id=tid, session_key=f"s-{tid}", seq=1, emitted_at=NOW
+    )
 
 
 def test_an_undeliverable_RESUME_is_held_and_re_armed():
     """🔴 `wakeup.retry_queue` had NO caller, so criterion 7's "pending approvals re-arm" was
     implemented and unreachable: a resume whose session was not ready was built, classified
     REQUEUED, and thrown away. §3.2 refuses to let anyone drop one — it carries a gate answer, and
-    eating it strands the parked run forever waiting for a reply the user already gave."""
+    eating it strands the parked run forever waiting for a reply the user already gave.
+    """
     sessions = _Unready()
     delivery = WK.deliver(sessions, _resume())
     assert delivery.needs_retry, delivery.disposition
@@ -864,7 +924,9 @@ def test_an_undeliverable_RESUME_is_held_and_re_armed():
     assert len(pending) == 1
 
     assert L._retry_pending_resumes(sessions, pending) == 0
-    assert len(pending) == 1, "a still-unready session must KEEP the resume, not drop it"
+    assert (
+        len(pending) == 1
+    ), "a still-unready session must KEEP the resume, not drop it"
 
     sessions.ready = True
     assert L._retry_pending_resumes(sessions, pending) == 1
@@ -875,7 +937,9 @@ def test_a_droppable_WAKE_is_never_held():
     """Only a resume is un-droppable. Holding wakes too would re-fire a scheduled trigger whose
     session was merely busy — which `overlap: skip` exists to prevent."""
     sessions = _Unready()
-    wake = WK.Wakeup(kind="wake", trigger_id="t-1", session_key="s-1", seq=1, emitted_at=NOW)
+    wake = WK.Wakeup(
+        kind="wake", trigger_id="t-1", session_key="s-1", seq=1, emitted_at=NOW
+    )
     delivery = WK.deliver(sessions, wake)
     pending: list = []
     L._hold_resumes(WK, [delivery], pending)
@@ -916,22 +980,9 @@ def test_the_retry_queue_SURVIVES_a_tick(tmp_path):
             pending_resumes=pending,
         )
     )
-    assert len(pending) == 1, "an unready session must leave the held resume in place across a tick"
-
-
-# ── 🔴 #402: no scheduled trigger had ever executed its action ────────────────
-#
-# `test_one_iteration_fires_dispatches_and_executes` above proves the chain works — but it
-# calls `_manager(WK.session_key_for("j"))`, hand-building the one piece of state production
-# never builds. Nothing in the tree creates a trigger's session: `get_or_create` has no caller
-# with a trigger key. So on a real gateway `enqueue` returned False, `deliver` reported
-# NO_SESSION, and the old loop drained an inbox that had never received anything.
-#
-# Measured on a live gateway before the fix: 46 cycles of accumulated state held run records
-# from `manual` and `replay` only, never one from a schedule, while the UI showed each trigger
-# enabled with an advancing next-run time.
-#
-# These tests use an EMPTY manager, which is what production has.
+    assert (
+        len(pending) == 1
+    ), "an unready session must leave the held resume in place across a tick"
 
 
 def _empty_manager():
@@ -956,7 +1007,9 @@ def test_a_fire_with_NO_session_inbox_still_executes(tmp_path):
         return {"status": "ok"}
 
     result = asyncio.run(
-        L.tick_once(store, runner=runner, sessions=_empty_manager(), base_dir=tmp_path, now=NOW)
+        L.tick_once(
+            store, runner=runner, sessions=_empty_manager(), base_dir=tmp_path, now=NOW
+        )
     )
     assert [f.trigger.id for f in result.fires] == ["j"]
     assert ran == ["j"], "the fire was decided, claimed, ledgered — and never executed"
@@ -969,7 +1022,9 @@ def test_a_fire_with_no_session_inbox_RELEASES_its_claim(tmp_path):
     store = TriggerStore(base_dir=tmp_path)
     store.upsert(_clock())
     asyncio.run(
-        L.tick_once(store, runner=_ok, sessions=_empty_manager(), base_dir=tmp_path, now=NOW)
+        L.tick_once(
+            store, runner=_ok, sessions=_empty_manager(), base_dir=tmp_path, now=NOW
+        )
     )
     assert not C.is_running("j", now=NOW, base_dir=tmp_path), "the claim leaked for 1h"
 
@@ -991,7 +1046,11 @@ def test_the_SECOND_slot_of_a_sessionless_trigger_also_fires(tmp_path):
             store, runner=runner, sessions=_empty_manager(), base_dir=tmp_path, now=NOW
         )
         await L.tick_once(
-            store, runner=runner, sessions=_empty_manager(), base_dir=tmp_path, now=NOW + 120
+            store,
+            runner=runner,
+            sessions=_empty_manager(),
+            base_dir=tmp_path,
+            now=NOW + 120,
         )
 
     asyncio.run(two_slots())
@@ -1008,16 +1067,20 @@ def test_a_skipped_running_fire_does_NOT_run_but_DOES_release_its_claim(tmp_path
     store = TriggerStore(base_dir=tmp_path)
     store.upsert(_clock())
     manager = _manager(WK.session_key_for("j"))
-    manager._sessions[WK.session_key_for("j")].semaphore._value = 0  # a turn in flight
+    manager._sessions[WK.session_key_for("j")].semaphore._value = 0
     ran: list[str] = []
 
     async def runner(payload):
         ran.append(payload.get("trigger_id", ""))
         return {"status": "ok"}
 
-    asyncio.run(L.tick_once(store, runner=runner, sessions=manager, base_dir=tmp_path, now=NOW))
+    asyncio.run(
+        L.tick_once(store, runner=runner, sessions=manager, base_dir=tmp_path, now=NOW)
+    )
     assert ran == [], "a wake for a busy session must not pile on"
-    assert not C.is_running("j", now=NOW, base_dir=tmp_path), "the skip jammed the trigger for 1h"
+    assert not C.is_running(
+        "j", now=NOW, base_dir=tmp_path
+    ), "the skip jammed the trigger for 1h"
 
 
 def test_a_conversation_bound_fire_drains_the_key_it_was_DELIVERED_to(tmp_path):
@@ -1035,16 +1098,20 @@ def test_a_conversation_bound_fire_drains_the_key_it_was_DELIVERED_to(tmp_path):
     trigger.session = "conversation:chat-abc"
     store = TriggerStore(base_dir=tmp_path)
     store.upsert(trigger)
-    manager = _manager("chat-abc")  # the conversation exists; `cron:j` does not
+    manager = _manager("chat-abc")
     ran: list[str] = []
 
     async def runner(payload):
         ran.append(payload.get("trigger_id", ""))
         return {"status": "ok"}
 
-    asyncio.run(L.tick_once(store, runner=runner, sessions=manager, base_dir=tmp_path, now=NOW))
+    asyncio.run(
+        L.tick_once(store, runner=runner, sessions=manager, base_dir=tmp_path, now=NOW)
+    )
     assert ran == ["j"]
-    assert manager.dequeue("chat-abc") is None, "the delivered payload was left in the inbox"
+    assert (
+        manager.dequeue("chat-abc") is None
+    ), "the delivered payload was left in the inbox"
 
 
 def test_a_queued_fire_still_drains_through_the_session(tmp_path):
@@ -1060,7 +1127,9 @@ def test_a_queued_fire_still_drains_through_the_session(tmp_path):
         seen.append(payload.get("trigger_id", ""))
         return {"status": "ok"}
 
-    asyncio.run(L.tick_once(store, runner=runner, sessions=manager, base_dir=tmp_path, now=NOW))
+    asyncio.run(
+        L.tick_once(store, runner=runner, sessions=manager, base_dir=tmp_path, now=NOW)
+    )
     assert seen == ["j"]
     assert manager.dequeue(WK.session_key_for("j")) is None
 
@@ -1075,7 +1144,7 @@ def test_nothing_in_the_tree_creates_a_trigger_session(tmp_path):
     import pathlib
     import re
 
-    src = pathlib.Path(__file__).resolve().parent.parent / "src" / "gideon"
+    src = pathlib.Path(__file__).resolve().parent.parent.parent / "runtime" / "gideon"
     creators = []
     for py in sorted(src.rglob("*.py")):
         for n, line in enumerate(py.read_text(encoding="utf-8").splitlines(), 1):

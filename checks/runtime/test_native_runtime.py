@@ -17,11 +17,11 @@ import asyncio
 
 import pytest
 
-from gideon.agents.native.approval import APPROVE, REJECT, ApprovalGate
-from gideon.agents.native.runtime import NativeAgentRuntime
-from gideon.agents.provider import AgentRuntimeDefinition
-from gideon.cancellation import CANCEL_INTERNAL
-from gideon.llm.events import (
+from gideon.core.cancellation import CANCEL_INTERNAL
+from gideon.engine.agents.native.approval import APPROVE, REJECT, ApprovalGate
+from gideon.engine.agents.native.runtime import NativeAgentRuntime
+from gideon.engine.agents.provider import AgentRuntimeDefinition
+from gideon.integrations.llm.events import (
     EVENT_COMPLETE,
     EVENT_PERMISSION_REQUEST,
     EVENT_TEXT_CHUNK,
@@ -29,7 +29,11 @@ from gideon.llm.events import (
     EVENT_TOOL_RESULT,
     AgentEvent,
 )
-from gideon.tool_providers.base import ToolDefinition, ToolProvider, ToolResult
+from gideon.integrations.tool_providers.base import (
+    ToolDefinition,
+    ToolProvider,
+    ToolResult,
+)
 
 
 class _ScriptedModel:
@@ -118,7 +122,10 @@ async def test_steer_drains_at_model_boundary():
         [
             [
                 AgentEvent(
-                    kind=EVENT_TOOL_CALL, tool_call_id="c1", title="echo", tool_input='{"x":"hi"}'
+                    kind=EVENT_TOOL_CALL,
+                    tool_call_id="c1",
+                    title="echo",
+                    tool_input='{"x":"hi"}',
                 ),
                 AgentEvent(kind=EVENT_COMPLETE, input_tokens=10, output_tokens=5),
             ],
@@ -129,54 +136,67 @@ async def test_steer_drains_at_model_boundary():
         ]
     )
     tool = _Tool(requires_approval=False)
-    rt = NativeAgentRuntime(definition=_defn(), model_provider=model, tool_providers=[tool])
+    rt = NativeAgentRuntime(
+        definition=_defn(), model_provider=model, tool_providers=[tool]
+    )
     await rt.start()
-    # one steer, delivered once (then the source is empty)
     pending = ["also check the logs"]
     rt.set_steer_source(lambda: [pending.pop(0)] if pending else [])
     await _drain(rt)
-    # the SECOND inference's message list must contain the steer as a user message
     second = model.seen_messages[1]
-    assert any(m["role"] == "user" and "also check the logs" in str(m["content"]) for m in second)
+    assert any(
+        m["role"] == "user" and "also check the logs" in str(m["content"])
+        for m in second
+    )
 
 
 @pytest.mark.asyncio
 async def test_steer_capped_per_turn():
     """No more than _MAX_STEERS_PER_TURN steers are injected within one turn (#37)."""
-    from gideon.agents.native.runtime import _MAX_STEERS_PER_TURN
+    from gideon.engine.agents.native.runtime import _MAX_STEERS_PER_TURN
 
-    # Many tool turns so there are many model boundaries to drain at.
     turns = [
         [
             AgentEvent(
-                kind=EVENT_TOOL_CALL, tool_call_id=f"c{i}", title="echo", tool_input='{"x":"y"}'
+                kind=EVENT_TOOL_CALL,
+                tool_call_id=f"c{i}",
+                title="echo",
+                tool_input='{"x":"y"}',
             ),
             AgentEvent(kind=EVENT_COMPLETE),
         ]
         for i in range(_MAX_STEERS_PER_TURN + 5)
     ]
-    turns.append([AgentEvent(kind=EVENT_TEXT_CHUNK, text="fin"), AgentEvent(kind=EVENT_COMPLETE)])
+    turns.append(
+        [AgentEvent(kind=EVENT_TEXT_CHUNK, text="fin"), AgentEvent(kind=EVENT_COMPLETE)]
+    )
     model = _ScriptedModel(turns)
-    rt = NativeAgentRuntime(definition=_defn(), model_provider=model, tool_providers=[_Tool()])
+    rt = NativeAgentRuntime(
+        definition=_defn(), model_provider=model, tool_providers=[_Tool()]
+    )
     await rt.start()
-    # the source always has a steer available
     rt.set_steer_source(lambda: ["nudge"])
     await _drain(rt)
-    # each boundary re-sends the full history, so count DISTINCT steer messages in
-    # the final message list instead.
     final = model.seen_messages[-1]
-    steer_msgs = [m for m in final if m["role"] == "user" and "Steering" in str(m["content"])]
+    steer_msgs = [
+        m for m in final if m["role"] == "user" and "Steering" in str(m["content"])
+    ]
     assert len(steer_msgs) == _MAX_STEERS_PER_TURN
 
 
 @pytest.mark.asyncio
 async def test_no_steer_source_is_noop():
     model = _ScriptedModel(
-        [[AgentEvent(kind=EVENT_TEXT_CHUNK, text="hi"), AgentEvent(kind=EVENT_COMPLETE)]]
+        [
+            [
+                AgentEvent(kind=EVENT_TEXT_CHUNK, text="hi"),
+                AgentEvent(kind=EVENT_COMPLETE),
+            ]
+        ]
     )
     rt = NativeAgentRuntime(definition=_defn(), model_provider=model, tool_providers=[])
     await rt.start()
-    evs = await _drain(rt)  # no steer source set → loop runs normally
+    evs = await _drain(rt)
     assert evs[-1].kind == EVENT_COMPLETE
 
 
@@ -197,12 +217,16 @@ class _FailingTool(_Tool):
 @pytest.mark.asyncio
 async def test_tool_result_carries_recovery_hints_on_failure():
     """TC5: a failed tool's recovery_hints reach the TOOL_RESULT event's tool_meta so
-    the chat card can surface a 'Next steps' note (they were dropped at the WS boundary)."""
+    the chat card can surface a 'Next steps' note (they were dropped at the WS boundary).
+    """
     model = _ScriptedModel(
         [
             [
                 AgentEvent(
-                    kind=EVENT_TOOL_CALL, tool_call_id="c1", title="echo", tool_input='{"x":"hi"}'
+                    kind=EVENT_TOOL_CALL,
+                    tool_call_id="c1",
+                    title="echo",
+                    tool_input='{"x":"hi"}',
                 ),
                 AgentEvent(kind=EVENT_COMPLETE, input_tokens=10, output_tokens=5),
             ],
@@ -228,7 +252,10 @@ async def test_tool_loop_feeds_result_back():
         [
             [
                 AgentEvent(
-                    kind=EVENT_TOOL_CALL, tool_call_id="c1", title="echo", tool_input='{"x":"hi"}'
+                    kind=EVENT_TOOL_CALL,
+                    tool_call_id="c1",
+                    title="echo",
+                    tool_input='{"x":"hi"}',
                 ),
                 AgentEvent(kind=EVENT_COMPLETE, input_tokens=10, output_tokens=5),
             ],
@@ -239,7 +266,9 @@ async def test_tool_loop_feeds_result_back():
         ]
     )
     tool = _Tool(requires_approval=False)
-    rt = NativeAgentRuntime(definition=_defn(), model_provider=model, tool_providers=[tool])
+    rt = NativeAgentRuntime(
+        definition=_defn(), model_provider=model, tool_providers=[tool]
+    )
     await rt.start()
     evs = await _drain(rt)
     assert [e.kind for e in evs] == [
@@ -249,10 +278,10 @@ async def test_tool_loop_feeds_result_back():
         EVENT_COMPLETE,
     ]
     assert tool.invoked == [{"x": "hi"}]
-    # the 2nd inference saw the tool result in history
     second = model.seen_messages[1]
-    assert any(m.get("role") == "tool" and "OUT:hi" in str(m.get("content")) for m in second)
-    # usage aggregated across both model calls
+    assert any(
+        m.get("role") == "tool" and "OUT:hi" in str(m.get("content")) for m in second
+    )
     assert evs[-1].input_tokens == 18 and evs[-1].output_tokens == 8
 
 
@@ -263,30 +292,41 @@ async def test_complete_carries_turn_telemetry():
     model = _ScriptedModel(
         [
             [
-                AgentEvent(kind=EVENT_TOOL_CALL, tool_call_id="c1", title="echo", tool_input="{}"),
+                AgentEvent(
+                    kind=EVENT_TOOL_CALL,
+                    tool_call_id="c1",
+                    title="echo",
+                    tool_input="{}",
+                ),
                 AgentEvent(kind=EVENT_COMPLETE),
             ],
-            [AgentEvent(kind=EVENT_TEXT_CHUNK, text="ok"), AgentEvent(kind=EVENT_COMPLETE)],
+            [
+                AgentEvent(kind=EVENT_TEXT_CHUNK, text="ok"),
+                AgentEvent(kind=EVENT_COMPLETE),
+            ],
         ]
     )
     tool = _Tool(requires_approval=False)
-    rt = NativeAgentRuntime(definition=_defn(), model_provider=model, tool_providers=[tool])
+    rt = NativeAgentRuntime(
+        definition=_defn(), model_provider=model, tool_providers=[tool]
+    )
     await rt.start()
     evs = await _drain(rt)
     final = evs[-1]
     assert final.kind == EVENT_COMPLETE
-    # One tool call across the two turns.
     assert final.tool_call_count == 1
-    # Every event observed this prompt is tallied: turn-1 (tool_call + complete)
-    # + the tool-execution events (tool_call card + tool_result) + turn-2
-    # (text_chunk + complete) = 6.
     assert final.event_count == 6
-    # A plain (tool-less) turn reports zero tool calls but still a positive
-    # event count, so the stats line still appears.
     model2 = _ScriptedModel(
-        [[AgentEvent(kind=EVENT_TEXT_CHUNK, text="hi"), AgentEvent(kind=EVENT_COMPLETE)]]
+        [
+            [
+                AgentEvent(kind=EVENT_TEXT_CHUNK, text="hi"),
+                AgentEvent(kind=EVENT_COMPLETE),
+            ]
+        ]
     )
-    rt2 = NativeAgentRuntime(definition=_defn(), model_provider=model2, tool_providers=[])
+    rt2 = NativeAgentRuntime(
+        definition=_defn(), model_provider=model2, tool_providers=[]
+    )
     await rt2.start()
     final2 = (await _drain(rt2))[-1]
     assert final2.tool_call_count == 0
@@ -305,25 +345,27 @@ async def test_cancel_midturn_pairs_pending_tool_calls():
             super().__init__(turns)
             self._rt_box = rt_box
 
-        async def complete(self, messages, *, tools=None, model=None, reasoning_effort=""):
+        async def complete(
+            self, messages, *, tools=None, model=None, reasoning_effort=""
+        ):
             self.seen_messages.append(list(messages))
             self.calls += 1
-            yield AgentEvent(kind=EVENT_TOOL_CALL, tool_call_id="c1", title="echo", tool_input="{}")
-            # Simulate the watchdog cancelling the turn before the tool runs. INTERNAL,
-            # not user: a watchdog trip is "we gave up", so the turn must still end
-            # "cancelled" rather than "stopped_by_user" (PR2-12).
+            yield AgentEvent(
+                kind=EVENT_TOOL_CALL, tool_call_id="c1", title="echo", tool_input="{}"
+            )
             self._rt_box[0]._cancel.request(reason=CANCEL_INTERNAL)
             yield AgentEvent(kind=EVENT_COMPLETE)
 
     box: list = [None]
     model = _CancellingModel(box, [[]])
-    rt = NativeAgentRuntime(definition=_defn(), model_provider=model, tool_providers=[_Tool()])
+    rt = NativeAgentRuntime(
+        definition=_defn(), model_provider=model, tool_providers=[_Tool()]
+    )
     box[0] = rt
     await rt.start()
     evs = await _drain(rt)
     assert evs[-1].stop_reason == "cancelled"
 
-    # Every assistant tool_call id is answered by a tool message in history.
     history = rt._messages
     call_ids = {
         tc["id"]
@@ -337,9 +379,10 @@ async def test_cancel_midturn_pairs_pending_tool_calls():
 
 @pytest.mark.asyncio
 async def test_respects_max_turns():
-    # model always calls a tool → would loop forever without max_turns.
     loop_turn = [
-        AgentEvent(kind=EVENT_TOOL_CALL, tool_call_id="c", title="echo", tool_input="{}"),
+        AgentEvent(
+            kind=EVENT_TOOL_CALL, tool_call_id="c", title="echo", tool_input="{}"
+        ),
         AgentEvent(kind=EVENT_COMPLETE),
     ]
     model = _ScriptedModel([loop_turn])
@@ -369,20 +412,27 @@ async def test_approval_gate_parks_then_approves():
         [
             [
                 AgentEvent(
-                    kind=EVENT_TOOL_CALL, tool_call_id="c1", title="echo", tool_input='{"x":"y"}'
+                    kind=EVENT_TOOL_CALL,
+                    tool_call_id="c1",
+                    title="echo",
+                    tool_input='{"x":"y"}',
                 ),
                 AgentEvent(kind=EVENT_COMPLETE),
             ],
-            [AgentEvent(kind=EVENT_TEXT_CHUNK, text="ok"), AgentEvent(kind=EVENT_COMPLETE)],
+            [
+                AgentEvent(kind=EVENT_TEXT_CHUNK, text="ok"),
+                AgentEvent(kind=EVENT_COMPLETE),
+            ],
         ]
     )
     tool = _Tool(requires_approval=True)
-    rt = NativeAgentRuntime(definition=_defn(), model_provider=model, tool_providers=[tool])
+    rt = NativeAgentRuntime(
+        definition=_defn(), model_provider=model, tool_providers=[tool]
+    )
     await rt.start()
 
     seen, gen = [], rt.stream("go")
 
-    # Pump until the permission request surfaces, then approve out-of-band.
     async def pump():
         async for ev in gen:
             seen.append(ev)
@@ -393,7 +443,7 @@ async def test_approval_gate_parks_then_approves():
     kinds = [e.kind for e in seen]
     assert EVENT_PERMISSION_REQUEST in kinds
     assert EVENT_TOOL_RESULT in kinds
-    assert tool.invoked == [{"x": "y"}]  # approved → invoked
+    assert tool.invoked == [{"x": "y"}]
 
 
 @pytest.mark.asyncio
@@ -401,14 +451,24 @@ async def test_approval_reject_skips_invoke():
     model = _ScriptedModel(
         [
             [
-                AgentEvent(kind=EVENT_TOOL_CALL, tool_call_id="c1", title="echo", tool_input="{}"),
+                AgentEvent(
+                    kind=EVENT_TOOL_CALL,
+                    tool_call_id="c1",
+                    title="echo",
+                    tool_input="{}",
+                ),
                 AgentEvent(kind=EVENT_COMPLETE),
             ],
-            [AgentEvent(kind=EVENT_TEXT_CHUNK, text="ok"), AgentEvent(kind=EVENT_COMPLETE)],
+            [
+                AgentEvent(kind=EVENT_TEXT_CHUNK, text="ok"),
+                AgentEvent(kind=EVENT_COMPLETE),
+            ],
         ]
     )
     tool = _Tool(requires_approval=True)
-    rt = NativeAgentRuntime(definition=_defn(), model_provider=model, tool_providers=[tool])
+    rt = NativeAgentRuntime(
+        definition=_defn(), model_provider=model, tool_providers=[tool]
+    )
     await rt.start()
     seen = []
 
@@ -420,23 +480,28 @@ async def test_approval_reject_skips_invoke():
 
     await asyncio.wait_for(pump(), timeout=5)
     result = next(e for e in seen if e.kind == EVENT_TOOL_RESULT)
-    # The reject feeds back a recovery observation (why + adapt-don't-repeat),
-    # not a bare error, so an unattended agent can self-correct.
     _out = str(result.tool_output).lower()
     assert "declined" in _out and "do not retry" in _out
-    assert tool.invoked == []  # rejected → never invoked
+    assert tool.invoked == []
 
 
 @pytest.mark.asyncio
 async def test_denylist_blocks_before_invoke():
-    # "rm -rf" style — use a tool name the deny-list rejects.
     model = _ScriptedModel(
         [
             [
-                AgentEvent(kind=EVENT_TOOL_CALL, tool_call_id="c1", title="echo", tool_input="{}"),
+                AgentEvent(
+                    kind=EVENT_TOOL_CALL,
+                    tool_call_id="c1",
+                    title="echo",
+                    tool_input="{}",
+                ),
                 AgentEvent(kind=EVENT_COMPLETE),
             ],
-            [AgentEvent(kind=EVENT_TEXT_CHUNK, text="ok"), AgentEvent(kind=EVENT_COMPLETE)],
+            [
+                AgentEvent(kind=EVENT_TEXT_CHUNK, text="ok"),
+                AgentEvent(kind=EVENT_COMPLETE),
+            ],
         ]
     )
     tool = _Tool(name="echo", requires_approval=False)
@@ -450,7 +515,7 @@ async def test_denylist_blocks_before_invoke():
     seen = await _drain(rt, "go")
     result = next(e for e in seen if e.kind == EVENT_TOOL_RESULT)
     assert "error" in str(result.tool_output).lower()
-    assert tool.invoked == []  # deny-list → never invoked
+    assert tool.invoked == []
 
 
 @pytest.mark.asyncio
@@ -469,24 +534,28 @@ async def test_task_mode_ask_blocks_mutation_even_when_auto_approved():
                 ),
                 AgentEvent(kind=EVENT_COMPLETE),
             ],
-            [AgentEvent(kind=EVENT_TEXT_CHUNK, text="ok"), AgentEvent(kind=EVENT_COMPLETE)],
+            [
+                AgentEvent(kind=EVENT_TEXT_CHUNK, text="ok"),
+                AgentEvent(kind=EVENT_COMPLETE),
+            ],
         ]
     )
-    tool = _Tool(name="write_file", requires_approval=False)  # auto-approved
-    rt = NativeAgentRuntime(definition=_defn(), model_provider=model, tool_providers=[tool])
-    rt.set_approval_policy("yolo")  # most permissive approval
-    rt.set_task_mode("ask")  # most restrictive task mode
+    tool = _Tool(name="write_file", requires_approval=False)
+    rt = NativeAgentRuntime(
+        definition=_defn(), model_provider=model, tool_providers=[tool]
+    )
+    rt.set_approval_policy("yolo")
+    rt.set_task_mode("ask")
     await rt.start()
     seen = await _drain(rt, "write a file")
     result = next(e for e in seen if e.kind == EVENT_TOOL_RESULT)
     assert "ask mode" in str(result.tool_output).lower()
-    assert tool.invoked == []  # gated before invoke despite yolo auto-approve
+    assert tool.invoked == []
 
 
 @pytest.mark.asyncio
 async def test_task_mode_plan_allows_read_blocks_write():
     """Plan mode allows read-only tools (so the plan is grounded) but blocks writes."""
-    # A read-only tool runs; a write tool is gated. Two separate runtimes.
     read_model = _ScriptedModel(
         [
             [
@@ -498,7 +567,10 @@ async def test_task_mode_plan_allows_read_blocks_write():
                 ),
                 AgentEvent(kind=EVENT_COMPLETE),
             ],
-            [AgentEvent(kind=EVENT_TEXT_CHUNK, text="ok"), AgentEvent(kind=EVENT_COMPLETE)],
+            [
+                AgentEvent(kind=EVENT_TEXT_CHUNK, text="ok"),
+                AgentEvent(kind=EVENT_COMPLETE),
+            ],
         ]
     )
     read_tool = _Tool(name="read_file", requires_approval=False)
@@ -508,7 +580,7 @@ async def test_task_mode_plan_allows_read_blocks_write():
     rt.set_task_mode("plan")
     await rt.start()
     await _drain(rt, "read it")
-    assert read_tool.invoked == [{"path": "x"}]  # read RAN in plan mode
+    assert read_tool.invoked == [{"path": "x"}]
 
     write_model = _ScriptedModel(
         [
@@ -521,7 +593,10 @@ async def test_task_mode_plan_allows_read_blocks_write():
                 ),
                 AgentEvent(kind=EVENT_COMPLETE),
             ],
-            [AgentEvent(kind=EVENT_TEXT_CHUNK, text="ok"), AgentEvent(kind=EVENT_COMPLETE)],
+            [
+                AgentEvent(kind=EVENT_TEXT_CHUNK, text="ok"),
+                AgentEvent(kind=EVENT_COMPLETE),
+            ],
         ]
     )
     write_tool = _Tool(name="write_file", requires_approval=False)
@@ -533,10 +608,7 @@ async def test_task_mode_plan_allows_read_blocks_write():
     seen2 = await _drain(rt2, "write it")
     result = next(e for e in seen2 if e.kind == EVENT_TOOL_RESULT)
     assert "plan mode" in str(result.tool_output).lower()
-    assert write_tool.invoked == []  # write GATED in plan mode
-
-
-# ── T5: no-interaction toolset for unattended runs ──
+    assert write_tool.invoked == []
 
 
 @pytest.mark.asyncio
@@ -554,8 +626,8 @@ async def test_unattended_strips_interactive_tools():
     )
     await rt.start()
     names = {t.name for t in rt._tool_defs}
-    assert "AskUserQuestion" not in names  # stripped
-    assert "echo" in names  # kept
+    assert "AskUserQuestion" not in names
+    assert "echo" in names
 
 
 @pytest.mark.asyncio
@@ -596,10 +668,18 @@ async def test_unattended_approval_fails_fast_no_park():
     model = _ScriptedModel(
         [
             [
-                AgentEvent(kind=EVENT_TOOL_CALL, tool_call_id="c1", title="echo", tool_input="{}"),
+                AgentEvent(
+                    kind=EVENT_TOOL_CALL,
+                    tool_call_id="c1",
+                    title="echo",
+                    tool_input="{}",
+                ),
                 AgentEvent(kind=EVENT_COMPLETE),
             ],
-            [AgentEvent(kind=EVENT_TEXT_CHUNK, text="ok"), AgentEvent(kind=EVENT_COMPLETE)],
+            [
+                AgentEvent(kind=EVENT_TEXT_CHUNK, text="ok"),
+                AgentEvent(kind=EVENT_COMPLETE),
+            ],
         ]
     )
     tool = _Tool(name="echo", requires_approval=True)
@@ -610,15 +690,13 @@ async def test_unattended_approval_fails_fast_no_park():
         unattended=True,
     )
     await rt.start()
-    # No out-of-band approver: an attended run would park here and time out at
-    # 300s; the unattended path returns immediately. Bound at 5s to prove it.
     seen = await asyncio.wait_for(_drain(rt, "go"), timeout=5)
     kinds = [e.kind for e in seen]
-    assert EVENT_PERMISSION_REQUEST not in kinds  # never surfaced a prompt
+    assert EVENT_PERMISSION_REQUEST not in kinds
     result = next(e for e in seen if e.kind == EVENT_TOOL_RESULT)
     _out = str(result.tool_output).lower()
     assert "unattended" in _out and "do not retry" in _out
-    assert tool.invoked == []  # never invoked
+    assert tool.invoked == []
 
 
 @pytest.mark.asyncio
@@ -629,11 +707,17 @@ async def test_unattended_auto_policy_still_runs_approval_tool():
         [
             [
                 AgentEvent(
-                    kind=EVENT_TOOL_CALL, tool_call_id="c1", title="echo", tool_input='{"x":"z"}'
+                    kind=EVENT_TOOL_CALL,
+                    tool_call_id="c1",
+                    title="echo",
+                    tool_input='{"x":"z"}',
                 ),
                 AgentEvent(kind=EVENT_COMPLETE),
             ],
-            [AgentEvent(kind=EVENT_TEXT_CHUNK, text="ok"), AgentEvent(kind=EVENT_COMPLETE)],
+            [
+                AgentEvent(kind=EVENT_TEXT_CHUNK, text="ok"),
+                AgentEvent(kind=EVENT_COMPLETE),
+            ],
         ]
     )
     tool = _Tool(name="echo", requires_approval=True)
@@ -647,10 +731,7 @@ async def test_unattended_auto_policy_still_runs_approval_tool():
     await rt.start()
     seen = await asyncio.wait_for(_drain(rt, "go"), timeout=5)
     assert EVENT_PERMISSION_REQUEST not in [e.kind for e in seen]
-    assert tool.invoked == [{"x": "z"}]  # auto-approved → invoked
-
-
-# ── T9: dry-run observe-mode ──
+    assert tool.invoked == [{"x": "z"}]
 
 
 class _RiskyTool(ToolProvider):
@@ -669,7 +750,7 @@ class _RiskyTool(ToolProvider):
         return "Mock"
 
     async def list_tools(self):
-        from gideon.tool_providers.base import RiskLevel
+        from gideon.integrations.tool_providers.base import RiskLevel
 
         return [
             ToolDefinition(
@@ -704,11 +785,17 @@ async def test_dry_run_intercepts_write_tool():
         [
             [
                 AgentEvent(
-                    kind=EVENT_TOOL_CALL, tool_call_id="c1", title="write_thing", tool_input="{}"
+                    kind=EVENT_TOOL_CALL,
+                    tool_call_id="c1",
+                    title="write_thing",
+                    tool_input="{}",
                 ),
                 AgentEvent(kind=EVENT_COMPLETE),
             ],
-            [AgentEvent(kind=EVENT_TEXT_CHUNK, text="ok"), AgentEvent(kind=EVENT_COMPLETE)],
+            [
+                AgentEvent(kind=EVENT_TEXT_CHUNK, text="ok"),
+                AgentEvent(kind=EVENT_COMPLETE),
+            ],
         ]
     )
     tool = _RiskyTool()
@@ -719,7 +806,7 @@ async def test_dry_run_intercepts_write_tool():
     seen = await _drain(rt, "go")
     result = next(e for e in seen if e.kind == EVENT_TOOL_RESULT)
     assert "DRY RUN" in str(result.tool_output)
-    assert tool.writes == 0  # never executed
+    assert tool.writes == 0
 
 
 @pytest.mark.asyncio
@@ -729,11 +816,17 @@ async def test_dry_run_allows_read_tool():
         [
             [
                 AgentEvent(
-                    kind=EVENT_TOOL_CALL, tool_call_id="c1", title="read_thing", tool_input="{}"
+                    kind=EVENT_TOOL_CALL,
+                    tool_call_id="c1",
+                    title="read_thing",
+                    tool_input="{}",
                 ),
                 AgentEvent(kind=EVENT_COMPLETE),
             ],
-            [AgentEvent(kind=EVENT_TEXT_CHUNK, text="ok"), AgentEvent(kind=EVENT_COMPLETE)],
+            [
+                AgentEvent(kind=EVENT_TEXT_CHUNK, text="ok"),
+                AgentEvent(kind=EVENT_COMPLETE),
+            ],
         ]
     )
     tool = _RiskyTool()
@@ -743,7 +836,7 @@ async def test_dry_run_allows_read_tool():
     await rt.start()
     seen = await _drain(rt, "go")
     result = next(e for e in seen if e.kind == EVENT_TOOL_RESULT)
-    assert "READ" in str(result.tool_output)  # really ran
+    assert "READ" in str(result.tool_output)
     assert tool.reads == 1
 
 
@@ -765,32 +858,30 @@ async def test_toolless_model_single_shot():
         supports_tools = False
 
     model = _NoTools(
-        [[AgentEvent(kind=EVENT_TEXT_CHUNK, text="hi"), AgentEvent(kind=EVENT_COMPLETE)]]
+        [
+            [
+                AgentEvent(kind=EVENT_TEXT_CHUNK, text="hi"),
+                AgentEvent(kind=EVENT_COMPLETE),
+            ]
+        ]
     )
-    rt = NativeAgentRuntime(definition=_defn(), model_provider=model, tool_providers=[_Tool()])
+    rt = NativeAgentRuntime(
+        definition=_defn(), model_provider=model, tool_providers=[_Tool()]
+    )
     await rt.start()
     await _drain(rt)
-    assert model.last_tools is None  # no tool schema sent to a tool-less model
-
-
-# ── ApprovalGate unit ──
+    assert model.last_tools is None
 
 
 @pytest.mark.asyncio
 async def test_approval_gate_resolve_and_timeout():
     gate = ApprovalGate()
-    # resolve
     fut = asyncio.ensure_future(gate.request("r1", timeout=5))
     await asyncio.sleep(0.01)
     assert gate.approve("r1") is True
     assert await fut == APPROVE
-    # timeout → REJECT (fail-closed)
     assert await gate.request("r2", timeout=0.05) == REJECT
-    # resolve unknown id
     assert gate.reject("nope") is False
-
-
-# ── progressive tool disclosure (PT1): catalog tier + tool_schema ──
 
 
 class _ManyTools(ToolProvider):
@@ -834,18 +925,17 @@ async def test_reduced_turn_injects_catalog_and_both_meta_tools():
     await rt.start()
     await _drain(rt, "do something unrelated to any niche tool")
     names = {t["function"]["name"] for t in (model.last_tools or [])}
-    # both discovery tools are always in the full-schema set on a reduced turn
     assert "tool_search" in names and "tool_schema" in names
-    # the long tail is disclosed as a catalog in a system message (not hidden)
-    sys_msgs = [m["content"] for m in model.seen_messages[-1] if m.get("role") == "system"]
+    sys_msgs = [
+        m["content"] for m in model.seen_messages[-1] if m.get("role") == "system"
+    ]
     catalog = "\n".join(sys_msgs)
     assert "[tool catalog]" in catalog
-    assert "niche_tool_" in catalog  # a non-surfaced tool is still NAMED
+    assert "niche_tool_" in catalog
 
 
 @pytest.mark.asyncio
 async def test_tool_schema_expands_a_catalog_tool():
-    # model: turn 1 calls tool_schema("niche_tool_42"); turn 2 stops.
     model = _ScriptedModel(
         [
             [
@@ -857,7 +947,10 @@ async def test_tool_schema_expands_a_catalog_tool():
                 ),
                 AgentEvent(kind=EVENT_COMPLETE),
             ],
-            [AgentEvent(kind=EVENT_TEXT_CHUNK, text="done"), AgentEvent(kind=EVENT_COMPLETE)],
+            [
+                AgentEvent(kind=EVENT_TEXT_CHUNK, text="done"),
+                AgentEvent(kind=EVENT_COMPLETE),
+            ],
         ]
     )
     rt = NativeAgentRuntime(
@@ -868,13 +961,11 @@ async def test_tool_schema_expands_a_catalog_tool():
     results = [e for e in seen if e.kind == EVENT_TOOL_RESULT]
     assert results, "tool_schema should produce a result"
     out = str(results[0].tool_output or "")
-    assert "niche_tool_42" in out and "parameters" in out  # returned the real schema
+    assert "niche_tool_42" in out and "parameters" in out
 
 
 @pytest.mark.asyncio
 async def test_catalog_only_tool_is_dispatchable():
-    # A tool that was NOT in the surfaced full-schema set is still callable by name
-    # (dispatch via _tool_index is independent of the per-turn schema).
     model = _ScriptedModel(
         [
             [
@@ -886,11 +977,16 @@ async def test_catalog_only_tool_is_dispatchable():
                 ),
                 AgentEvent(kind=EVENT_COMPLETE),
             ],
-            [AgentEvent(kind=EVENT_TEXT_CHUNK, text="ok"), AgentEvent(kind=EVENT_COMPLETE)],
+            [
+                AgentEvent(kind=EVENT_TEXT_CHUNK, text="ok"),
+                AgentEvent(kind=EVENT_COMPLETE),
+            ],
         ]
     )
     many = _ManyTools(80)
-    rt = NativeAgentRuntime(definition=_defn(), model_provider=model, tool_providers=[many])
+    rt = NativeAgentRuntime(
+        definition=_defn(), model_provider=model, tool_providers=[many]
+    )
     await rt.start()
     await _drain(rt, "unrelated query")
     assert any(name == "niche_tool_7" for name, _ in many.invoked)
@@ -918,7 +1014,7 @@ async def test_tool_schema_unknown_points_at_search():
     await rt.start()
     seen = await _drain(rt, "unrelated")
     out = "".join(str(e.tool_output or "") for e in seen if e.kind == EVENT_TOOL_RESULT)
-    assert "tool_search" in out  # recovery hint names the discovery tool
+    assert "tool_search" in out
 
 
 class _McpTool(ToolProvider):
@@ -970,14 +1066,18 @@ async def test_sanitized_name_falls_back_to_real_tool():
                 ),
                 AgentEvent(kind=EVENT_COMPLETE),
             ],
-            [AgentEvent(kind=EVENT_TEXT_CHUNK, text="ok"), AgentEvent(kind=EVENT_COMPLETE)],
+            [
+                AgentEvent(kind=EVENT_TEXT_CHUNK, text="ok"),
+                AgentEvent(kind=EVENT_COMPLETE),
+            ],
         ]
     )
     mcp = _McpTool(["mcp/everything/echo", "mcp/everything/get-sum"])
-    rt = NativeAgentRuntime(definition=_defn(), model_provider=model, tool_providers=[mcp])
+    rt = NativeAgentRuntime(
+        definition=_defn(), model_provider=model, tool_providers=[mcp]
+    )
     await rt.start()
     seen = await _drain(rt, "echo something")
-    # Dispatched to the REAL tool id, not the sanitized name.
     assert any(name == "mcp/everything/echo" for name, _ in mcp.invoked)
     out = "".join(str(e.tool_output or "") for e in seen if e.kind == EVENT_TOOL_RESULT)
     assert "unknown tool" not in out
@@ -998,11 +1098,16 @@ async def test_exact_name_still_primary_path():
                 ),
                 AgentEvent(kind=EVENT_COMPLETE),
             ],
-            [AgentEvent(kind=EVENT_TEXT_CHUNK, text="ok"), AgentEvent(kind=EVENT_COMPLETE)],
+            [
+                AgentEvent(kind=EVENT_TEXT_CHUNK, text="ok"),
+                AgentEvent(kind=EVENT_COMPLETE),
+            ],
         ]
     )
     mcp = _McpTool(["mcp/everything/echo"])
-    rt = NativeAgentRuntime(definition=_defn(), model_provider=model, tool_providers=[mcp])
+    rt = NativeAgentRuntime(
+        definition=_defn(), model_provider=model, tool_providers=[mcp]
+    )
     await rt.start()
     await _drain(rt, "echo")
     assert mcp.invoked and mcp.invoked[0][0] == "mcp/everything/echo"
@@ -1027,16 +1132,14 @@ async def test_ambiguous_sanitized_collision_not_remapped():
             [AgentEvent(kind=EVENT_COMPLETE)],
         ]
     )
-    # Both sanitize to "mcp_everything_a_b".
-    # Both sanitize to "mcp_everything_a_b" ("/" -> "_", "_" already legal).
     mcp = _McpTool(["mcp/everything/a/b", "mcp/everything/a_b"])
-    rt = NativeAgentRuntime(definition=_defn(), model_provider=model, tool_providers=[mcp])
+    rt = NativeAgentRuntime(
+        definition=_defn(), model_provider=model, tool_providers=[mcp]
+    )
     await rt.start()
-    # Auto-approve so an unknown tool reaches _invoke (returns the error) instead
-    # of parking on the approval gate.
     rt.set_approval_policy("auto")
     assert "mcp_everything_a_b" not in rt._tool_sanitized_index
     seen = await _drain(rt, "go")
-    assert not mcp.invoked  # neither tool dispatched
+    assert not mcp.invoked
     out = "".join(str(e.tool_output or "") for e in seen if e.kind == EVENT_TOOL_RESULT)
     assert "unknown tool" in out

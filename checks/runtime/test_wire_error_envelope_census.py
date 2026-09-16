@@ -49,7 +49,7 @@ So the scanner now does two things instead:
    (counted flat) or not (counted unresolved). Both directions red.
 
 **Scope.** Only the wire envelope. ``AgentError``'s ``ERR_UPPER_SNAKE`` envelope
-(:mod:`gideon.errors`) is a DIFFERENT surface and is deliberately left
+(:mod:`gideon.core.errors`) is a DIFFERENT surface and is deliberately left
 distinct; success envelopes are explicitly out of scope (the same convention says
 they imitate the neighboring handler and are not standardized retroactively).
 """
@@ -60,199 +60,23 @@ import ast
 import pathlib
 from dataclasses import dataclass, field
 
-SRC = pathlib.Path(__file__).resolve().parent.parent / "src" / "gideon"
+SRC = pathlib.Path(__file__).resolve().parent.parent.parent / "runtime" / "gideon"
 
-# ── The measured baseline (PL-8, re-measured 2026-08-21 on this tree) ──────────
-#
-# Re-measure with this suite, never by hand. The atom that introduced this census
-# quoted 98 structured / 134 flat "measured at authoring"; neither number
-# reproduces at call-site, per-function, or per-file granularity on this tree —
-# the real call-site population was an order of magnitude larger on the flat side.
-# These rows are what THIS scanner measures, and they are the baseline from here.
 
-#: Direct ``json_response({"error": {"code": ...}})`` sites. A FLOOR (may only grow):
-#: every one of these is a route a client can branch on, and losing one is a
-#: regression. Falls only when a site is converted to :func:`json_error`, which is
-#: counted separately below — so the SUM is the number that must never fall.
 STRUCTURED_DIRECT_BASELINE = 118
 
-#: Calls to the one emitter. A FLOOR. This is also the population the append-only
-#: rail must inspect (see ``EMITTER_SITE_FLOOR``).
 EMITTER_SITE_BASELINE = 132
 
-#: Direct ``json_response({"error": "<prose>"})`` sites — the shape that carries no
-#: code. A CEILING (may only shrink). Every one of these is a route where a client
-#: must match prose. PL-8 removed the four helpers that manufactured them wholesale;
-#: the remaining population is per-site work for later atoms.
-#:
-#: Deliberately still counts DIRECT sites only, so the number stays comparable with
-#: every earlier measurement of it. The population the widened scanner newly sees is
-#: counted separately below rather than folded in here — folding it in would have
-#: required raising this ceiling, which is the one move a ratchet cannot survive.
-#: 🔁 RATCHETED 1507 -> 1504 on 2026-08-28. `main` had drifted to 1508 — one over — and the four
-#: offending sites were `handlers/apps.py`'s "JSON body must be an object" plus the three
-#: `_reject_name` refusals in `handlers/files.py`. All four now emit `json_error`, so the
-#: population fell to 1504 and the ceiling follows it down: shrink-only means a shrink is
-#: LOCKED IN, not banked as slack a later flat envelope could spend.
-#: 🔁 RATCHETED 1504 -> 1499 on 2026-08-28, applying that same rule to somebody else's shrink.
-#: `b4bfdc5f6` ("give the hierarchy handler's malformed-body refusals a wire code") converted five
-#: refusals in `tasks/hierarchy_handlers.py` and left this ceiling untouched, so the population sat
-#: at 1499 against 1504. Five slack is not neutral: it is five future flat envelopes that can land
-#: green, which is precisely the "banked, not locked in" state the line above argues against. That
-#: file still carries 27 flat sites, so the next shrink there should ratchet this again.
 FLAT_BASELINE = 1499
 
-#: Flat sites reached through a WRAPPER (see the module docstring). A CEILING, measured
-#: on this tree the moment the scanner could see them at all. The first measurement was
-#: **18** — eleven in ``inbound/bridge.py`` and seven in ``inbound/mcp_http.py``. The
-#: bridge's eleven were converted to :func:`~gideon.http_errors.json_error` in the
-#: same change that widened the scanner (baseline 18 → 7); `mcp_http`'s seven, routed
-#: through its ``_json``/``_done`` helpers, were converted in the follow-up atom the
-#: 7 was left visible for. Hence **0**.
-#:
-#: Zero is the strongest form of this ceiling and the most fragile to read: ``0 <= 0``
-#: also passes when the detector has stopped working. Three things stop that from being
-#: indistinguishable from success —
-#: :func:`test_the_wrapper_detector_still_fires_on_the_real_tree` (the tree still HAS
-#: wrappers), :func:`test_a_renamed_helper_cannot_escape_the_wrapper_scan` (shape, not
-#: name), and :func:`test_a_flat_envelope_planted_back_into_mcp_http_is_counted`, which
-#: re-plants one of the converted envelopes into the real module's real source and
-#: asserts this bucket counts it. Do not delete that last one to make this ceiling
-#: cheaper; it is the only thing that makes the zero mean anything.
 FLAT_VIA_WRAPPER_BASELINE = 0
 
-#: The honest single number going forward: no client cares which spelling of
-#: indirection carried the envelope that gave it no code to branch on.
 FLAT_TOTAL_BASELINE = FLAT_BASELINE + FLAT_VIA_WRAPPER_BASELINE
 
-#: ``json_response``/wrapper sites whose payload the scanner CANNOT resolve to a dict
-#: literal — a variable, a call, a comprehension, an await. A CEILING, because this is
-#: precisely the hole the bridge's eleven hid in: a site the scanner declines to
-#: classify must not be a site it declines to *count*. Measured on this tree at 204
-#: (mostly plain names and calls, with a tail of comprehensions/lists/awaits), 14 of
-#: them reached through a wrapper. A wrapper's OWN forwarding line is excluded — it is
-#: accounted for at the wrapper's call sites, so counting it would seed this ceiling
-#: with rows nobody can ever fix.
-#:
-#: A new unresolvable site reds this, which is the point: a new flat envelope must now
-#: either resolve (and hit a flat ceiling) or fail to resolve (and hit this one). There
-#: is no third option any more.
-#:
-#: 204 → **202**: converting `mcp_http`'s refusals also retired two rows that were hiding
-#: HERE rather than in the wrapper bucket — an admission refusal built by a ternary into a
-#: local (``refusal``) and the rate-limit body built into a local (``payload``). Both were
-#: flat envelopes; neither was visible as one, because the scanner correctly refuses to
-#: read a variable's shape. A ceiling that falls when work lands is the ratchet working,
-#: so it is lowered rather than left slack.
-#:
-#: 202 → **204** (ES-3): the retrieval ablation's two new reads on the evals surface,
-#: ``json_response(view)`` and ``json_response(card)``. Both are 200 SUCCESS bodies built by a
-#: view function, which is the same shape the three reads already on that surface use
-#: (judge-bench, studies, ablation). Spelling their keys out at the call site would resolve
-#: them, and was rejected: it duplicates the view's schema in two places, which is the drift
-#: this repo keeps finding. The 2 is bought and then PINNED by
-#: :func:`test_the_evals_surface_hides_no_flat_envelope_in_its_unresolved_rows`, so the slack
-#: cannot be spent on a flat error envelope later — that is the hazard this ceiling exists for,
-#: and every error on that surface goes through :func:`json_error` instead.
-#:
-#: 204 → **205** (LV-3): the learning summary's one new read on the learning surface,
-#: ``json_response(compose_learning_summary(...).to_payload())``. Same shape as the ES-3 pair
-#: above — a 200 SUCCESS body built by a composer — and spelling its keys out at the call site
-#: was rejected for the same reason: it would duplicate ``LearningSummary``'s schema in two
-#: places, which is the drift this repo keeps finding. The 1 is bought and then PINNED by
-#: :func:`test_the_learning_surface_hides_no_flat_envelope_in_its_unresolved_rows`.
-#:
-#: 205 → **208** (EA-8): three 200-status SUCCESS bodies on the A2A gateway — the agent card
-#: and the two A2A Task documents (``POST /a2a/tasks``, ``GET /a2a/tasks/{id}``). All three are
-#: protocol documents whose shape is defined by the A2A spec and built by ``a2a.build_card`` /
-#: ``a2a._task_envelope``; spelling their keys out at the call site would duplicate the wire
-#: schema in two places, which is the drift this repo keeps finding. The 3 is bought and then
-#: PINNED by :func:`test_the_a2a_surface_hides_no_flat_envelope_in_its_unresolved_rows`, which
-#: takes the ES-3 pin's stronger shape: that module emits NO flat envelope at all.
-#: 205 → **207** (LV-4): the identity report's two new 200 SUCCESS bodies on the same learning
-#: surface — ``json_response(compose_identity_report(...).to_payload())`` and
-#: ``json_response(delivery.to_payload())``. Identical shape and identical reasoning to the LV-3
-#: row above (a composer's return value; spelling its keys out would duplicate
-#: ``IdentityReport``/``IdentityReportDelivery``'s schema in two places). **The slack is not
-#: spendable on an error envelope:** LV-4's four refusals go through :func:`json_error`, which
-#: needs no payload dict at all, so the learning surface's FLAT count is unchanged at 14 and
-#: :func:`test_the_learning_surfaces_new_unresolved_row_cannot_become_a_flat_envelope` pins it
-#: there. Measured: the first draft used flat ``{"error": str}`` bodies and reds three of these
-#: ratchets at once, which is how the structured envelope came to be used here.
-#: **208 + 2 = 210 (union).** Both rows above were measured against the SAME base of 205 —
-#: EA-8 bought +3 and LV-4 bought +2, independently — so NEITHER side's number is correct
-#: for a tree carrying both, and taking either one would silently un-pin the other surface.
-#: The ceiling is the sum, and the two per-surface FLAT pins above are what keep the slack
-#: from being spent on an error envelope.
-#: 210 → **211** (PEP-5): one 200-status SUCCESS body on the onboarding surface —
-#: ``json_response(report.to_dict())`` in ``handlers/onboarding_import.py``. Same shape and
-#: same reasoning as the LV-3/LV-4 rows above: it is a composer's return value, and spelling
-#: its keys out at the call site would duplicate ``ImportReport``'s schema in two places —
-#: exactly the drift this census exists to catch. **The slack is not spendable on an error
-#: envelope:** the import route's refusals go through ``json_error``, which needs no payload
-#: dict at all, so the onboarding surface's FLAT count is unchanged.
-#: 211 → **212** (PEP-9): one 200-status SUCCESS body on the artifact-deploy route — the
-#: ``{"ok": True, "deployment": …, "build": …}`` payload, whose members are the stores' own
-#: ``to_dict()`` returns. Same reasoning as the LV-3/LV-4 rows above.
-#: **The slack is not spendable on an error envelope:** this atom's two refusals were CONVERTED
-#: to :func:`json_error` (``artifact_build_failed`` 422, ``artifact_slug_invalid`` 400) rather
-#: than accommodated, so ``FLAT_BASELINE`` stayed at 1507 — it is shrink-only and was not raised.
-#: **Measured against `origin/main`, not carried forward.** An earlier revision of this branch
-#: recorded a net delta of ZERO, and that reading expired: it was taken before ES-7 landed a site
-#: of its own. The delta a branch needs is main-RELATIVE, so it has to be re-measured at every
-#: rebase rather than reused — main now measures 211 and this branch measures 212.
-#: 212 → **213** (AS-6): one 200-status SUCCESS body on the tile-action route —
-#: ``POST /api/dashboard/views/{view}/tiles/action`` answers with the record
-#: ``tile_actions.check`` builds, whose ``violations`` member is a list of tuples the checker
-#: owns. Spelling those out at the call site would duplicate the fence's own shape in two places.
-#: **The slack is not spendable on an error envelope:** the route's refusals are part of that same
-#: 200 record BY DESIGN — the fence reports what it refused so the caller can name the denied
-#: provider — and no flat ``{"error": …}`` body was added, so ``FLAT_BASELINE`` stays 1507.
-#: Measured against `origin/main` at rebase time: main 212, this branch 213. This row read
-#: "211 → 212" one rebase ago; the step is MAIN-RELATIVE and moves whenever another atom lands
-#: one of these, so it is re-measured at every rebase rather than carried forward.
-#: 213 → **214** (AS-6, the L2 overlay producer): one 200-status SUCCESS body on the new
-#: surface-overlay read route — ``GET /api/surfaces/overlays`` answers with
-#: ``web.json_response(overlay_payload())`` in ``dashboard/handlers/surfaces.py``, and
-#: ``surface_overlay.overlay_payload`` is the loader's own composer
-#: (``{"overlays": [...to_dict()], "refusals": [...to_dict()], "dir": str}``). Spelling those
-#: keys out at the call site would duplicate the overlay loader's wire schema in two places —
-#: the drift this census exists to catch — and it would put the ``dir``/refusal shape in a
-#: handler that "owns nothing but the JSON". **The slack is not spendable on an error
-#: envelope:** this route has no flat refusal at all. Its refusals ride the SAME 200 record by
-#: design (an overlay naming a component that does not exist is reported beside the surface it
-#: belongs to, because a 4xx would be indistinguishable from a broken request), so no flat
-#: ``{"error": …}`` body was added and ``FLAT_BASELINE`` stays 1507 — shrink-only, not raised.
-#: The one added unresolved site is ``dashboard/handlers/surfaces.py:28``. AS-6 LANDED FIRST, so
-#: this row's 213 → 214 step is now part of `origin/main`'s own measurement.
-#: 213 → **214** (EA-5): one 200-status SUCCESS body on the capture import route —
-#: ``POST /capture/import`` answers with ``web.json_response(report)`` in
-#: ``inbound/capture_proxy.py``, where ``report`` is verbatim what
-#: ``capture_import.import_capture_file`` returned (``-> dict[str, Any]``: the normalised
-#: counts, the staged record ids and the per-line rejections). Spelling those keys out at the
-#: call site would duplicate the importer's own report schema in two places — the drift this
-#: census exists to catch — and would make the proxy the second author of a shape the importer
-#: owns. **The slack is not spendable on an error envelope:** every refusal on this route
-#: already goes through :func:`json_error` (``capture_import_failed`` 500 immediately above this
-#: site, plus the admission refusals), which needs no payload dict at all, so no flat
-#: ``{"error": …}`` body was added and ``FLAT_BASELINE`` stays 1507 — shrink-only, not raised.
-#: The one added unresolved site is ``inbound/capture_proxy.py``'s import route.
-#: **214 + 1 = 215 (union).** The two rows above were measured against the SAME base of 213 —
-#: AS-6's overlay producer and EA-5's capture import each bought +1, independently — so NEITHER
-#: side's 214 is correct for a tree carrying both, exactly as the 208 + 2 = 210 row above records.
-#: AS-6 landed first, so `origin/main` now measures 214 and this branch measures 215; taking
-#: either row's 214 would silently un-pin the other surface. Measured at rebase time, both with
-#: ``files_scanned`` 1033 and the flat total identical at 1507 on both sides, so ``FLAT_BASELINE``
-#: stays 1507 — shrink-only, not raised. MAIN-RELATIVE, so re-measure at the next rebase.
 UNRESOLVED_PAYLOAD_CEILING = 215
 
-#: What the append-only rail must inspect. Derived from the census so a matcher that
-#: stops matching cannot read as clean: if the rail's scan finds fewer emitter sites
-#: than the census counted, the rail is measuring itself, not the code.
 EMITTER_SITE_FLOOR = EMITTER_SITE_BASELINE
 
-#: Vacuity floor for the scan itself. The tree has ~950 modules; a scan that walks
-#: a handful has lost its root, and every count below would read as an improvement.
 FILES_SCANNED_FLOOR = 800
 
 
@@ -262,23 +86,11 @@ class Census:
     structured_direct: list[tuple[str, int]] = field(default_factory=list)
     flat: list[tuple[str, int]] = field(default_factory=list)
     emitter_sites: list[tuple[str, int]] = field(default_factory=list)
-    #: ``(file, line, code)`` for every emitter call whose code is a string literal.
     emitter_literal_codes: list[tuple[str, int, str]] = field(default_factory=list)
-    #: Emitter calls whose code is computed (``exc.reason``, an f-string, a constant
-    #: reference). Not statically checkable against the registry — counted so they
-    #: cannot become a hiding place for unregistered codes.
     emitter_dynamic_sites: list[tuple[str, int]] = field(default_factory=list)
-    #: Flat/structured sites reached through a module-local response WRAPPER rather
-    #: than at a ``json_response`` call directly. Kept in their own lists so the
-    #: long-standing direct ceilings stay comparable across measurements.
     flat_via_wrapper: list[tuple[str, int]] = field(default_factory=list)
     structured_via_wrapper: list[tuple[str, int]] = field(default_factory=list)
-    #: ``(file, name)`` for every response wrapper the scanner recognised. The vacuity
-    #: anchor for the whole wrapper mechanism: if this empties, the two buckets above
-    #: read clean for the wrong reason.
     wrapper_defs: list[tuple[str, str]] = field(default_factory=list)
-    #: ``(file, line, node_type, via_wrapper)`` for every emit site whose payload the
-    #: scanner refused to classify. LOUD by construction — see the docstring.
     unresolved: list[tuple[str, int, str, bool]] = field(default_factory=list)
 
     @property
@@ -343,7 +155,9 @@ def _response_wrappers(tree: ast.Module) -> tuple[dict[str, tuple[int, str]], se
     """
     found: dict[str, tuple[int, str]] = {}
     functions = [
-        n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
     ]
 
     def _forwarded_param(call: ast.Call) -> ast.expr | None:
@@ -373,8 +187,6 @@ def _response_wrappers(tree: ast.Module) -> tuple[dict[str, tuple[int, str]], se
         if not grew:
             break
 
-    # Second pass, once `found` is complete: EVERY forwarding call in EVERY recognised
-    # wrapper, not just the first one the fixpoint happened to stop on.
     accounted: set[int] = set()
     for fn in functions:
         if fn.name not in found:
@@ -465,16 +277,13 @@ def scan_source(source: str, rel: str, census: Census) -> None:
         else:
             continue
         if payload is None:
-            # A genuinely payload-less call (``json_response()``); nothing to classify
-            # and nothing hidden.
             continue
         if not isinstance(payload, ast.Dict):
             if id(node) in accounted:
-                # A wrapper forwarding its own parameter. Not unaccounted-for: the values
-                # that flow through it are classified at the wrapper's call sites.
                 continue
-            # REFUSED, not skipped. See UNRESOLVED_PAYLOAD_CEILING.
-            census.unresolved.append((rel, node.lineno, type(payload).__name__, via_wrapper))
+            census.unresolved.append(
+                (rel, node.lineno, type(payload).__name__, via_wrapper)
+            )
             continue
         for key, value in zip(payload.keys, payload.values):
             if not (isinstance(key, ast.Constant) and key.value == "error"):
@@ -483,14 +292,18 @@ def scan_source(source: str, rel: str, census: Census) -> None:
                 isinstance(k, ast.Constant) and k.value == "code" for k in value.keys
             )
             if via_wrapper:
-                bucket = census.structured_via_wrapper if has_code else census.flat_via_wrapper
+                bucket = (
+                    census.structured_via_wrapper
+                    if has_code
+                    else census.flat_via_wrapper
+                )
             else:
                 bucket = census.structured_direct if has_code else census.flat
             bucket.append((rel, node.lineno))
 
 
 def scan() -> Census:
-    """Walk every module under ``src/gideon`` and classify each error site.
+    """Walk every module under ``runtime/gideon`` and classify each error site.
 
     AST, not grep: a multi-line dict literal and a single-line one must count the
     same, and a mention of ``"error"`` in a docstring or a comment must not count
@@ -512,9 +325,6 @@ def scan() -> Census:
     return census
 
 
-# ── vacuity: a scan that measures nothing must not read as clean ──────────────
-
-
 def test_the_scan_is_not_vacuous():
     """Every count below is only as good as the walk that produced it."""
     census = scan()
@@ -523,17 +333,13 @@ def test_the_scan_is_not_vacuous():
         f"{FILES_SCANNED_FLOOR}) — the scan lost its root, so every count below "
         f"would read as an improvement. Check SRC={SRC}."
     )
-    assert census.structured_direct, "no structured site found at all — the matcher is broken"
+    assert (
+        census.structured_direct
+    ), "no structured site found at all — the matcher is broken"
     assert census.flat, "no flat site found at all — the matcher is broken"
-    assert census.emitter_sites, "no json_error call found at all — the matcher is broken"
-
-
-# ── the wrapper mechanism, proved against synthetic source ────────────────────
-#
-# These do not measure the tree. They measure the SCANNER, on source written here, so
-# that "the wrapper buckets are empty" can be told apart from "the wrapper detector
-# stopped working" — which is the failure mode that let eleven envelopes hide in the
-# first place, one level up.
+    assert (
+        census.emitter_sites
+    ), "no json_error call found at all — the matcher is broken"
 
 
 _WRAPPED = '''
@@ -601,9 +407,6 @@ def test_the_scanner_refuses_loudly_when_it_cannot_resolve_the_payload():
     census = Census()
     scan_source(_WRAPPED, "synthetic.py", census)
     unresolved = [(ln, kind, via) for _f, ln, kind, via in census.unresolved]
-    # Exactly one: `refuse_from_a_local`. The two wrappers' OWN forwarding lines are
-    # accounted for at their call sites and must not be counted here as well — otherwise
-    # the ceiling fills with rows nobody can fix.
     assert len(unresolved) == 1, unresolved
     _line, kind, via = unresolved[0]
     assert kind == "Name" and via is True, unresolved
@@ -626,7 +429,6 @@ def test_a_renamed_helper_cannot_escape_the_wrapper_scan():
     )
 
 
-#: The line the plant below swaps out. A real, converted refusal in `mcp_http.handle_mcp`.
 _MCP_HTTP = SRC / "inbound" / "mcp_http.py"
 _CONVERTED_LINE = (
     '        return _refuse(json_error("not_found", status=404, headers=_NO_STORE), '
@@ -651,7 +453,6 @@ def test_a_flat_envelope_planted_back_into_mcp_http_is_counted():
     """
     real = _MCP_HTTP.read_text(encoding="utf-8")
 
-    # 1) The module as it ships scores zero — so a red below is the plant, not the tree.
     baseline = Census()
     scan_source(real, "inbound/mcp_http.py", baseline)
     assert not baseline.flat_via_wrapper, (
@@ -659,17 +460,16 @@ def test_a_flat_envelope_planted_back_into_mcp_http_is_counted():
         f"attribute the plant: {baseline.flat_via_wrapper}"
     )
 
-    # 2) The plant APPLIED. A swap that silently matched nothing would make step 3 a
-    #    tautology about unmodified source — the exact shape of a vacuous guard.
     planted = real.replace(_CONVERTED_LINE, _PLANTED_LINE, 1)
     assert planted != real, (
         f"the planted-regression swap matched nothing in {_MCP_HTTP.name}; _CONVERTED_LINE "
         f"has drifted from the shipped source, so this floor is measuring nothing. "
         f"Re-anchor it on a live `_refuse(json_error(...))` line."
     )
-    assert _PLANTED_LINE in planted, "the swap applied but the plant is not in the source"
+    assert (
+        _PLANTED_LINE in planted
+    ), "the swap applied but the plant is not in the source"
 
-    # 3) The detector sees it — through two wrapper hops, in the real module.
     census = Census()
     scan_source(planted, "inbound/mcp_http.py", census)
     assert len(census.flat_via_wrapper) == 1, (
@@ -696,9 +496,6 @@ def test_the_wrapper_detector_still_fires_on_the_real_tree():
         "same change) or _response_wrappers stopped resolving — and then "
         "census.flat_via_wrapper reads clean for the wrong reason."
     )
-
-
-# ── the ratchets ──────────────────────────────────────────────────────────────
 
 
 def test_the_structured_population_never_shrinks():
@@ -777,7 +574,9 @@ def test_unclassifiable_payloads_do_not_grow():
         f"response body at the call site — or emit the error with "
         f"gideon.http_errors.json_error, which needs no payload dict at all. New "
         f"sites:\n"
-        + "\n".join(f"  {f}:{ln} ({kind})" for f, ln, kind, _via in census.unresolved[-12:])
+        + "\n".join(
+            f"  {f}:{ln} ({kind})" for f, ln, kind, _via in census.unresolved[-12:]
+        )
     )
 
 
@@ -824,10 +623,13 @@ def test_no_module_local_error_helper_came_back():
             if node.name not in ("_err", "_error", "_bad_request"):
                 continue
             emits = any(
-                isinstance(inner, ast.Call) and _is_json_response(inner) for inner in ast.walk(node)
+                isinstance(inner, ast.Call) and _is_json_response(inner)
+                for inner in ast.walk(node)
             )
             if emits:
-                offenders.append(f"{path.relative_to(SRC.parent.parent)}:{node.lineno} {node.name}")
+                offenders.append(
+                    f"{path.relative_to(SRC.parent.parent)}:{node.lineno} {node.name}"
+                )
     assert not offenders, (
         "a module-local wire-error helper came back — use "
         "gideon.http_errors.json_error instead:\n  " + "\n  ".join(offenders)
@@ -845,9 +647,8 @@ def test_the_evals_surface_hides_no_flat_envelope_in_its_unresolved_rows():
     would land in ``census.flat`` and red the flat ceiling, not quietly occupy this slack.
     """
     census = scan()
-    module = "src/gideon/dashboard/handlers/evals.py"
+    module = "runtime/gideon/interfaces/dashboard/handlers/evals.py"
     unresolved = [row for row in census.unresolved if row[0] == module]
-    # judge-bench view, studies list, ablation view, retrieval view, retrieval card.
     assert len(unresolved) == 5, unresolved
     assert {row[2] for row in unresolved} == {"Name"}, unresolved
     assert all(row[3] is False for row in unresolved), "none of these is via a wrapper"
@@ -855,8 +656,6 @@ def test_the_evals_surface_hides_no_flat_envelope_in_its_unresolved_rows():
     assert [row for row in census.flat_via_wrapper if row[0] == module] == []
 
 
-#: The learning surface's flat-envelope rows at the time LV-3 bought its slack. Unlike the
-#: evals surface this module is NOT flat-free, so the ES-3 pin's shape does not transfer.
 _LEARNING_FLAT_BASELINE = 14
 
 
@@ -881,12 +680,9 @@ def test_the_learning_surfaces_new_unresolved_row_cannot_become_a_flat_envelope(
     and would red here even though the total stayed at 4.
     """
     census = scan()
-    module = "src/gideon/dashboard/handlers/learning.py"
+    module = "runtime/gideon/interfaces/dashboard/handlers/learning.py"
 
     unresolved = [row for row in census.unresolved if row[0] == module]
-    # 4 → 6 (LV-4): the identity report's GET preview and POST delivery bodies. Both are
-    # composer return values, both `Call`, neither via a wrapper — exactly the shape the
-    # ceiling is raised for, and the flat assertion below is what keeps the slack unspendable.
     assert len(unresolved) == 6, unresolved
     assert {row[2] for row in unresolved} == {"Call"}, unresolved
     assert all(row[3] is False for row in unresolved), "none of these is via a wrapper"
@@ -913,9 +709,8 @@ def test_the_a2a_surface_hides_no_flat_envelope_in_its_unresolved_rows():
     the flat ceiling rather than quietly occupying this slack.
     """
     census = scan()
-    module = "src/gideon/inbound/a2a.py"
+    module = "runtime/gideon/integrations/inbound/a2a.py"
     unresolved = [row for row in census.unresolved if row[0] == module]
-    # agent card, task start, task poll.
     assert len(unresolved) == 3, unresolved
     assert {row[2] for row in unresolved} == {"Name"}, unresolved
     assert all(row[3] is False for row in unresolved), "none of these is via a wrapper"

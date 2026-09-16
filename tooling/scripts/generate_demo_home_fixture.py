@@ -7,7 +7,7 @@ Most of ``demo-home`` is therefore hand-authored JSON/markdown and needs no tool
 Two surfaces cannot be: **knowledge** and **loops** are SQLite-only.
 
 - Knowledge lives solely in ``workspace/knowledge/knowledge.db``
-  (:func:`gideon.knowledge.store.knowledge_db_path`), whose schema includes an
+  (:func:`gideon.cognition.knowledge.store.knowledge_db_path`), whose schema includes an
   FTS5 virtual table. There is no boot-time re-ingest from any file, so markdown
   under ``workspace/knowledge/`` would simply never be read.
 - A loop's row lives in ``loop/loops.db``. The file dir is the optional half: the
@@ -22,9 +22,9 @@ change is how the fixture is kept current.
 
 Run it from the repo root, then commit the changed ``.db`` files::
 
-    PYTHONPATH=src python scripts/generate_demo_home_fixture.py
+    PYTHONPATH=src python tooling/scripts/generate_demo_home_fixture.py
 
-``tests/test_seed_demo_home.py`` boots the fixture and asserts a non-zero count per
+``checks/runtime/test_seed_demo_home.py`` boots the fixture and asserts a non-zero count per
 surface, so a schema change that invalidates these files fails loudly rather than
 shipping a demo home that boots empty.
 """
@@ -40,17 +40,11 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-FIXTURE = REPO_ROOT / "src" / "gideon" / "tests_fixtures" / "demo-home"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+FIXTURE = REPO_ROOT / 'runtime' / 'gideon' / 'tests_fixtures' / "demo-home"
 
-# The fixture's authored project ids (see ``demo-home/projects/``). The loop is
-# scoped to "Reading Pipeline" so the Loops surface shows a real project link
-# rather than an orphan.
 PROJECT_READING_PIPELINE = "p-2d6f5c83"
 
-# Fixed so re-running the generator produces the same fixture rather than a diff of
-# churned ids/timestamps. Dates line up with the authored memory history
-# (``workspace/memory/history/2026-08-1{2,4}.md``).
 LOOP_ID = "a17c3f92"
 
 
@@ -58,10 +52,6 @@ def _ts(iso: str) -> float:
     return datetime.fromisoformat(iso).replace(tzinfo=timezone.utc).timestamp()
 
 
-# ── the demo content ──────────────────────────────────────────────────────────
-# Believable, non-personal, non-proprietary: a fictional reading-digest side project
-# and a home NAS. No real names, emails, hostnames or tokens. URLs use the RFC 2606
-# reserved ``example.com`` so nothing here resolves to a real site.
 
 KNOWLEDGE_ITEMS = [
     {
@@ -145,14 +135,6 @@ KNOWLEDGE_ITEMS = [
     },
 ]
 
-# The loop's six cycles, two per plan phase. These are the LEDGER, not decoration: since PP-16
-# seam 4a retired the `loops.total_cycles` column, a loop's cycle count IS its `step_completed`
-# count, so a fixture that wants to show a six-cycle run has to ship six cycles. The version this
-# replaced stored `total_cycles=6` on the row with an EMPTY ledger — six cycles claimed, zero
-# recorded — which is exactly the cache/projection divergence that retirement removes, and it made
-# the demo cockpit render "6 cycles ran — no per-cycle detail recorded for this loop."
-# `step` keys each cycle to its plan phase (``journal._node_id`` reads it), so the mined trajectory
-# has real structure rather than six identical nodes.
 LOOP_CYCLES = [
     {
         "step": "survey",
@@ -272,11 +254,11 @@ LOOP_PLAN = [
 
 def build(home: Path) -> None:
     """Write the knowledge items + the one loop into ``home`` via the real writers."""
-    # GIDEON_HOME must be set before importing gideon: several stores
-    # resolve config_dir() at import time and freeze it.
-    from gideon.knowledge.store import KnowledgeStore, knowledge_db_path
-    from gideon.loop import store as loop_store
-    from gideon.loop.loop import Loop, LoopStatus
+    from gideon.cognition.knowledge.store import KnowledgeStore
+    from gideon.cognition.knowledge.store import knowledge_db_path
+    from gideon.automation.loop import store as loop_store
+    from gideon.automation.loop.loop import Loop
+    from gideon.automation.loop.loop import LoopStatus
 
     store = KnowledgeStore(str(knowledge_db_path(home)))
     made = 0
@@ -302,8 +284,6 @@ def build(home: Path) -> None:
         ),
         plan=LOOP_PLAN,
         phase_status={"survey": "done", "synthesize": "done", "verify": "done"},
-        # Terminal on purpose. A seeded 'running' or 'planning' loop is re-armed at
-        # gateway boot and would spend real model calls on someone's demo machine.
         status=LoopStatus.COMPLETE.value,
         created_at=_ts("2026-08-11T09:12:00"),
         completed_at=_ts("2026-08-14T17:40:00"),
@@ -334,8 +314,8 @@ def _write_loop_ledger(loop_id: str) -> None:
       (``store.get_findings`` projects off the ledger), so shipping them would put a second copy
       of every cycle in the fixture for no reader.
     """
-    from gideon.ledger import writer as ledger_writer
-    from gideon.loop.journal import LoopJournal
+    from gideon.assurance.ledger import writer as ledger_writer
+    from gideon.automation.loop.journal import LoopJournal
 
     stamps = [
         "2026-08-11T10:40:00Z",
@@ -395,15 +375,7 @@ def main() -> int:
 
     tmp = Path(tempfile.mkdtemp(prefix="demo-home-gen-"))
     home = tmp / "home"
-    # Start from the authored text tree so the generated DBs sit in a home that
-    # already has the projects/tasks the loop refers to.
     shutil.copytree(FIXTURE, home)
-    # …but NOT this script's own previous output. Every writer below is additive
-    # (``create_typed_item`` appends, ``loop_store.create`` INSERTs a fixed id), so building on
-    # top of the committed artifacts duplicated the five knowledge items and failed outright on
-    # ``UNIQUE constraint failed: loops.id``. The docstring promises re-running the generator is
-    # how the fixture is kept current, so the generated half is discarded first and rebuilt from
-    # the authored text tree alone. Anything listed here MUST be produced below.
     for generated in (
         home / "workspace" / "knowledge" / "knowledge.db",
         home / "loop" / "loops.db",
@@ -431,10 +403,6 @@ def main() -> int:
         (FIXTURE / "loop").mkdir(parents=True, exist_ok=True)
         shutil.copy2(knowledge_db, FIXTURE / "workspace" / "knowledge" / "knowledge.db")
         shutil.copy2(loops_db, FIXTURE / "loop" / "loops.db")
-        # status.json is written by loop_store.create() and is the worker's interface; the two
-        # jsonl files are the loop's LEDGER, which is where its cycle count now lives (PP-16 seam
-        # 4a — `total_cycles` is no longer a column, so an empty ledger means a zero-cycle loop).
-        # The dir survives the boot-time orphan reap because the DB row exists.
         dest = FIXTURE / "loop" / LOOP_ID
         for name in ("status.json", "journal.jsonl", "events.jsonl"):
             src = home / "loop" / LOOP_ID / name

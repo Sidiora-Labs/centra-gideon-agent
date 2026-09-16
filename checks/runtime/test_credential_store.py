@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from gideon.llm.credentials import Credential, CredentialStore
+from gideon.integrations.llm.credentials import Credential, CredentialStore
 
 
 def _write_credentials(home: Path, descriptors: dict[str, dict[str, object]]) -> Path:
@@ -25,12 +25,17 @@ def _write_credentials(home: Path, descriptors: dict[str, dict[str, object]]) ->
 class TestResolveChain:
     """Resolution order R4.1: env → inline value → .env → none."""
 
-    # ── R4.1 step 1: env var present ─────────────────────────────────
-
-    def test_env_var_only(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_env_var_only(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         _write_credentials(
             tmp_path,
-            {"anthropic_api_key": {"type": "api_key", "value_env": "ANTHROPIC_API_KEY"}},
+            {
+                "anthropic_api_key": {
+                    "type": "api_key",
+                    "value_env": "ANTHROPIC_API_KEY",
+                }
+            },
         )
         monkeypatch.setenv("ANTHROPIC_API_KEY", "env-secret")
 
@@ -40,8 +45,6 @@ class TestResolveChain:
         assert cred.kind == "api_key"
         assert cred.secret == "env-secret"
         assert cred.source == "env"
-
-    # ── R4.3: env beats inline value ─────────────────────────────────
 
     def test_env_var_preferred_over_inline_value(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -64,8 +67,6 @@ class TestResolveChain:
         assert cred.secret == "env-secret"
         assert cred.source == "env"
 
-    # ── R4.1 step 2: inline value when env unset ─────────────────────
-
     def test_inline_value_when_env_unset(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -87,16 +88,19 @@ class TestResolveChain:
         assert cred.secret == "inline-secret"
         assert cred.source == "file"
 
-    # ── R4.1 step 3: <HOME>/.env fallback ────────────────────────────
-
-    def test_env_file_fallback(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_env_file_fallback(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         _write_credentials(
             tmp_path,
             {"openai_api_key": {"type": "api_key"}},
         )
         env_file = tmp_path / CredentialStore.ENV_FILE
         env_file.write_text(
-            "# comment line\n" "\n" "openai_api_key=from-env-file\n" "OTHER_KEY=ignored\n",
+            "# comment line\n"
+            "\n"
+            "openai_api_key=from-env-file\n"
+            "OTHER_KEY=ignored\n",
             encoding="utf-8",
         )
         env_file.chmod(0o600)
@@ -108,9 +112,9 @@ class TestResolveChain:
         assert cred.secret == "from-env-file"
         assert cred.source == "file"
 
-    # ── R4.1 step 4: nothing configured ──────────────────────────────
-
-    def test_no_value_anywhere(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_no_value_anywhere(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         _write_credentials(
             tmp_path,
             {"openai_api_key": {"type": "api_key", "value_env": "OPENAI_API_KEY"}},
@@ -158,7 +162,10 @@ class TestListNeverLeaksSecrets:
         _write_credentials(
             tmp_path,
             {
-                "anthropic_api_key": {"type": "api_key", "value_env": "ANTHROPIC_API_KEY"},
+                "anthropic_api_key": {
+                    "type": "api_key",
+                    "value_env": "ANTHROPIC_API_KEY",
+                },
                 "openai_api_key": {"type": "api_key", "value": "inline"},
                 "ollama_local": {"type": "none"},
             },
@@ -176,10 +183,7 @@ class TestListNeverLeaksSecrets:
         for cred in listed:
             assert cred.secret is None, f"{cred.name} leaked a secret"
 
-        # Sanity-check that the secret IS available through resolve(),
-        # so the list-stripping is meaningful (not just "no secret to leak").
         assert store.resolve("anthropic_api_key").secret == "should-not-leak"
-        # And the stringified list should not contain the secret either.
         assert "should-not-leak" not in repr(listed)
 
 
@@ -188,14 +192,15 @@ class TestPermissions:
 
     def test_save_creates_file_with_mode_0600(self, tmp_path: Path) -> None:
         store = CredentialStore(tmp_path)
-        store.save({"anthropic_api_key": {"type": "api_key", "value_env": "ANTHROPIC_API_KEY"}})
+        store.save(
+            {"anthropic_api_key": {"type": "api_key", "value_env": "ANTHROPIC_API_KEY"}}
+        )
 
         creds_path = tmp_path / CredentialStore.CREDENTIALS_FILE
         assert creds_path.is_file()
         mode = creds_path.stat().st_mode & 0o777
         assert mode == 0o600, f"expected 0o600, got {oct(mode)}"
 
-        # Round-trip: reload and confirm the saved descriptor is visible.
         store2 = CredentialStore(tmp_path)
         assert store2.has("anthropic_api_key")
 
@@ -218,3 +223,43 @@ class TestPermissions:
         cred = store.resolve("k")
         assert isinstance(cred, Credential)
         assert cred.kind == "none"
+
+
+def test_concurrent_saves_publish_complete_private_snapshots(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    stores = [CredentialStore(tmp_path) for _ in range(12)]
+    snapshots = [
+        {f"key-{index}": {"type": "api_key", "value": f"secret-{index}"}}
+        for index in range(len(stores))
+    ]
+    with ThreadPoolExecutor(max_workers=6) as workers:
+        list(workers.map(lambda pair: pair[0].save(pair[1]), zip(stores, snapshots)))
+    destination = tmp_path / CredentialStore.CREDENTIALS_FILE
+    assert json.loads(destination.read_text()) in snapshots
+    assert destination.stat().st_mode & 0o777 == 0o600
+    assert list(tmp_path.iterdir()) == [destination]
+    for store, expected in zip(stores, snapshots):
+        name = next(iter(expected))
+        assert store.resolve(name).secret == expected[name]["value"]
+
+
+def test_invalid_snapshot_leaves_previous_state_and_file_intact(tmp_path):
+    store = CredentialStore(tmp_path)
+    store.save({"stable": {"type": "api_key", "value": "retained"}})
+    original = (tmp_path / store.CREDENTIALS_FILE).read_bytes()
+    with pytest.raises(TypeError):
+        store.save({"invalid": {"value": object()}})
+    assert (tmp_path / store.CREDENTIALS_FILE).read_bytes() == original
+    assert store.resolve("stable").secret == "retained"
+    assert not store.has("invalid")
+
+
+def test_save_copies_descriptors_and_dotenv_preserves_literal_values(tmp_path):
+    (tmp_path / ".env").write_text('# ignored=secret\nkey = "a=b"\n')
+    store = CredentialStore(tmp_path)
+    descriptors = {"key": {"type": "static_token"}}
+    store.save(descriptors)
+    descriptors["key"]["value"] = "later mutation"
+    assert store.resolve("key").secret == '"a=b"'
+    assert store.list()[0].secret is None

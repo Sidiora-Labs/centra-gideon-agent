@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from gideon.guardrails.registries import (
+from gideon.security.guardrails.registries import (
     MATCHER_EXACT,
     MATCHER_NAME_GLOB,
     MATCHER_PATH_GLOB,
@@ -32,9 +32,7 @@ from gideon.guardrails.registries import (
 
 HOME = str(Path.home())
 
-# (item, pattern, expected, why)
 CASES: tuple[tuple[str, str, bool, str], ...] = (
-    # ── the three rows the plan named ────────────────────────────────────────
     (
         "/a/b",
         "/a/**/../b",
@@ -71,9 +69,6 @@ CASES: tuple[tuple[str, str, bool, str], ...] = (
         "PLAN ROW 2, pre-expanded: the same property must hold when the caller passes "
         "absolute paths rather than '~'.",
     ),
-    # PLAN ROW 3 (a relative item against an absolute deny) is cwd-dependent, so it lives
-    # in its own chdir-fixed test below.
-    # ── expansion of the queried item ────────────────────────────────────────
     ("~/.ssh/id_rsa", "~/.ssh/**", True, "'~' expands on both sides."),
     (
         "$HOME/.ssh/id_rsa",
@@ -88,8 +83,12 @@ CASES: tuple[tuple[str, str, bool, str], ...] = (
         "'**' crosses separators — the old fnmatch matcher lowered '**' to '*' and MISSED "
         "this, which is why a nested key escaped a '~/.ssh/**' deny.",
     ),
-    ("~/.sshfoo/key", "~/.ssh/**", False, "'~/.ssh/**' must not match a sibling prefix."),
-    # ── anchoring ────────────────────────────────────────────────────────────
+    (
+        "~/.sshfoo/key",
+        "~/.ssh/**",
+        False,
+        "'~/.ssh/**' must not match a sibling prefix.",
+    ),
     (
         "/app/.env.production",
         "**/.env*",
@@ -115,12 +114,15 @@ CASES: tuple[tuple[str, str, bool, str], ...] = (
         "An UNANCHORED pattern is treated as '**/id_rsa': for a deny that direction fails "
         "closed, which is the direction a security rule must fail.",
     ),
-    # ── single-star does not cross a separator ───────────────────────────────
-    ("/a/b/c", "/a/*", False, "'*' stops at a separator, so it cannot swallow a subtree."),
+    (
+        "/a/b/c",
+        "/a/*",
+        False,
+        "'*' stops at a separator, so it cannot swallow a subtree.",
+    ),
     ("/a/b", "/a/*", True, "'*' matches one segment."),
     ("/a/bc", "/a/b?", True, "'?' matches exactly one non-separator character."),
     ("/a/b/c", "/a/b?", False, "'?' does not match a separator."),
-    # ── no match on an empty pattern (a rule with no content denies nothing) ──
     ("/a/b", "", False, "An empty pattern matches nothing rather than everything."),
 )
 
@@ -148,15 +150,10 @@ def test_relative_item_cannot_dodge_an_absolute_deny(tmp_path, monkeypatch):
     monkeypatch.chdir(nested)
 
     deny = f"{root}/a/**"
-    # The dodge attempt: a relative path that reaches back into the denied subtree.
     assert path_glob("../a/secret", deny) is True
     assert path_glob("./secret", deny) is True
-    # The same string a matcher without absolutization would compare, which is why the
-    # dodge worked: as raw text it does not resemble the deny at all.
     assert not Path("../a/secret").is_absolute()
-    # A '..' traversal stated absolutely still collapses into the denied subtree.
     assert path_glob(f"{root}/a/x/../secret", deny) is True
-    # And leaving the subtree really does leave it (the rule is not just "always True").
     assert path_glob("../../elsewhere", deny) is False
 
 
@@ -169,7 +166,12 @@ def _normpathing_path_glob(item: str, pattern: str) -> bool:
     if not pattern:
         return False
     pat = os.path.normpath(os.path.expandvars(os.path.expanduser(pattern.strip())))
-    regex = re.escape(pat).replace(r"\*\*", ".*").replace(r"\*", "[^/]*").replace(r"\?", "[^/]")
+    regex = (
+        re.escape(pat)
+        .replace(r"\*\*", ".*")
+        .replace(r"\*", "[^/]*")
+        .replace(r"\?", "[^/]")
+    )
     return bool(re.match(f"^{regex}$", normalize_item(item)))
 
 
@@ -209,8 +211,8 @@ def test_name_glob_has_no_path_semantics():
     assert name_glob("bash", "bash") is True
     assert name_glob("read_file", "read_*") is True
     assert name_glob("write_file", "read_*") is False
-    assert name_glob("bash", "/**/bash") is False  # no path anchoring is applied
-    assert name_glob("Bash", "bash") is False  # case-sensitive: tool names are exact
+    assert name_glob("bash", "/**/bash") is False
+    assert name_glob("Bash", "bash") is False
 
 
 def test_exact_matcher():

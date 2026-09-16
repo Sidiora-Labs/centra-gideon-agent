@@ -24,21 +24,20 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon import notification_kinds
-from gideon import proposals_contract as pc
-from gideon.apps import app_manager, manager
-from gideon.apps.manifest import AppManifest, Permissions, ProposalKind
-from gideon.dashboard import handlers_inbox
-
-# ── the manifest field ──
+from gideon.cognition import proposals_contract as pc
+from gideon.extensions.apps import app_manager, manager
+from gideon.extensions.apps.manifest import AppManifest, Permissions, ProposalKind
+from gideon.interfaces.dashboard import handlers_inbox
+from gideon.workspace import notification_kinds
 
 
 def test_permissions_roundtrip_carries_proposals():
     p = Permissions(proposals=[ProposalKind(kind_suffix="draft", label="Draft reply")])
-    assert p.to_dict()["proposals"] == [{"kind_suffix": "draft", "label": "Draft reply"}]
+    assert p.to_dict()["proposals"] == [
+        {"kind_suffix": "draft", "label": "Draft reply"}
+    ]
     back = Permissions.from_dict(p.to_dict())
     assert back.proposals == p.proposals
-    # Empty is omitted from the consent surface (same discipline as appMessaging).
     assert "proposals" not in Permissions().to_dict()
 
 
@@ -61,7 +60,12 @@ def _manifest(**perms) -> AppManifest:
 
 @pytest.mark.parametrize(
     "suffix,expected",
-    [("draft", ""), ("Draft", "must be a slug"), ("a/b", "must be a slug"), ("", "kind_suffix")],
+    [
+        ("draft", ""),
+        ("Draft", "must be a slug"),
+        ("a/b", "must be a slug"),
+        ("", "kind_suffix"),
+    ],
 )
 def test_validate_rejects_a_suffix_that_would_break_the_rules_key(suffix, expected):
     errs = _manifest(proposals=[{"kind_suffix": suffix}]).validate()
@@ -73,7 +77,9 @@ def test_validate_rejects_a_suffix_that_would_break_the_rules_key(suffix, expect
 
 
 def test_validate_rejects_a_duplicate_suffix():
-    errs = _manifest(proposals=[{"kind_suffix": "draft"}, {"kind_suffix": "draft"}]).validate()
+    errs = _manifest(
+        proposals=[{"kind_suffix": "draft"}, {"kind_suffix": "draft"}]
+    ).validate()
     assert any("duplicate proposal kind_suffix" in e for e in errs)
 
 
@@ -81,13 +87,10 @@ def test_declared_proposals_reach_the_pre_install_consent_payload():
     """The Store's install-consent panel is the ONLY place a user sees what an app may
     raise, so the field has to survive ``catalog._manifest_consent`` — not merely
     ``to_dict``."""
-    from gideon.apps.catalog import _manifest_consent
+    from gideon.extensions.apps.catalog import _manifest_consent
 
     perms, _crons = _manifest_consent(_manifest(proposals=[{"kind_suffix": "draft"}]))
     assert perms["proposals"] == [{"kind_suffix": "draft", "label": "draft"}]
-
-
-# ── enable-time registration ──
 
 
 @pytest.fixture()
@@ -100,11 +103,12 @@ def clean_registry():
 
 
 def test_register_app_kinds_mints_a_verifiable_attention_pair(clean_registry):
-    kinds = pc.register_app_proposal_kinds("demo", _manifest(proposals=[{"kind_suffix": "draft"}]))
+    kinds = pc.register_app_proposal_kinds(
+        "demo", _manifest(proposals=[{"kind_suffix": "draft"}])
+    )
     assert kinds == ["proposal:draft"]
     k = notification_kinds.resolve_kind("app:demo", "proposal:draft")
     assert (k.source, k.kind) == ("app:demo", "proposal:draft")
-    # verifiable → INU-6's skeptic MAY apply once a rule opts in; attention → durable row.
     assert k.verifiable is True and k.attention is True
 
 
@@ -118,7 +122,6 @@ def test_deregister_leaves_no_phantom_kind(clean_registry):
     m = _manifest(proposals=[{"kind_suffix": "draft"}])
     pc.register_app_proposal_kinds("demo", m)
     assert pc.deregister_app_proposal_kinds("demo", m) == ["proposal:draft"]
-    # resolve_kind fails OPEN to a generic, so the tell is the registry itself.
     assert ("app:demo", "proposal:draft") not in notification_kinds._REGISTRY
 
 
@@ -130,11 +133,8 @@ def test_two_apps_declaring_the_same_suffix_do_not_collide(clean_registry):
     assert ("app:b", "proposal:draft") in notification_kinds._REGISTRY
 
 
-# ── HTTP: POST /api/inbox/proposals ──
-
-
 class _State:
-    """The minimum DashboardState surface the two handlers touch."""
+    """The minimum ConsoleState surface the two handlers touch."""
 
     def __init__(self) -> None:
         self.broadcasts: list[tuple[str, dict]] = []
@@ -150,12 +150,13 @@ class _State:
 @asynccontextmanager
 async def _client(tmp_path, monkeypatch):
     """``X-Test-App`` stands in for the verified app-scoped token: the middleware stamps
-    ``request["app"]`` exactly as token auth would, so identity is un-spoofable by body."""
+    ``request["app"]`` exactly as token auth would, so identity is un-spoofable by body.
+    """
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     with (
-        patch("gideon.config.loader.config_dir", return_value=tmp_path),
+        patch("gideon.core.config.loader.config_dir", return_value=tmp_path),
         patch.object(manager, "config_dir", return_value=tmp_path),
-        patch("gideon.inbox.config_dir", return_value=tmp_path),
+        patch("gideon.integrations.inbox.config_dir", return_value=tmp_path),
     ):
 
         @web.middleware
@@ -167,8 +168,12 @@ async def _client(tmp_path, monkeypatch):
 
         app = web.Application(middlewares=[stamp_app])
         app["state"] = _State()
-        app.router.add_post("/api/inbox/proposals", handlers_inbox.api_inbox_proposal_create)
-        app.router.add_post("/api/inbox/{id}/apply", handlers_inbox.api_inbox_proposal_apply)
+        app.router.add_post(
+            "/api/inbox/proposals", handlers_inbox.api_inbox_proposal_create
+        )
+        app.router.add_post(
+            "/api/inbox/{id}/apply", handlers_inbox.api_inbox_proposal_apply
+        )
         async with TestClient(TestServer(app)) as client:
             yield client
 
@@ -176,7 +181,12 @@ async def _client(tmp_path, monkeypatch):
 def _install(tmp_path: Path, name: str, *, proposals: list[dict] | None = None):
     d = tmp_path / "src" / name
     d.mkdir(parents=True)
-    mani: dict = {"name": name, "version": "1.0.0", "displayName": name, "description": "x"}
+    mani: dict = {
+        "name": name,
+        "version": "1.0.0",
+        "displayName": name,
+        "description": "x",
+    }
     if proposals is not None:
         mani["permissions"] = {"proposals": proposals, "api": ["/api/inbox/proposals"]}
     (d / "app.json").write_text(json.dumps(mani), encoding="utf-8")
@@ -207,12 +217,17 @@ async def test_no_app_identity_is_refused(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_undeclared_kind_is_refused_and_audited(tmp_path, monkeypatch):
     """Deny by default: the app is real and authenticated, it just never declared this
-    kind. The 403 reads the MANIFEST, so an app cannot widen its own reach by posting."""
+    kind. The 403 reads the MANIFEST, so an app cannot widen its own reach by posting.
+    """
     async with _client(tmp_path, monkeypatch) as client:
         _install(tmp_path, "demo", proposals=[{"kind_suffix": "draft"}])
         r = await client.post(
             "/api/inbox/proposals",
-            json={"kind_suffix": "wire-money", "title": "t", "apply": {"workflow": {"ref": "w"}}},
+            json={
+                "kind_suffix": "wire-money",
+                "title": "t",
+                "apply": {"workflow": {"ref": "w"}},
+            },
             headers={"X-Test-App": "demo"},
         )
         assert r.status == 403
@@ -252,11 +267,15 @@ async def test_a_foreign_app_callback_is_refused(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_own_app_callback_is_accepted_and_the_identity_is_stamped(tmp_path, monkeypatch):
+async def test_own_app_callback_is_accepted_and_the_identity_is_stamped(
+    tmp_path, monkeypatch
+):
     """A callback with NO `app` defaults to the caller — and is stamped, not trusted: the
     stored payload names the token's app, so apply cannot be redirected later."""
     async with _client(tmp_path, monkeypatch) as client:
-        _install(tmp_path, "demo", proposals=[{"kind_suffix": "draft", "label": "Draft"}])
+        _install(
+            tmp_path, "demo", proposals=[{"kind_suffix": "draft", "label": "Draft"}]
+        )
         r = await client.post(
             "/api/inbox/proposals",
             json={
@@ -270,7 +289,7 @@ async def test_own_app_callback_is_accepted_and_the_identity_is_stamped(tmp_path
         assert r.status == 201, await r.text()
         item_id = (await r.json())["id"]
 
-        from gideon.inbox import InboxStore
+        from gideon.integrations.inbox import InboxStore
 
         store = InboxStore()
         store.load()
@@ -309,8 +328,9 @@ async def test_apply_endpoint_reports_a_failure_as_ok_false_and_keeps_the_row(
     tmp_path, monkeypatch
 ):
     """The HTTP shape of the stays-PENDING rule: 200 with ``ok:false`` and the item still
-    PENDING, because a status code alone cannot say "nothing happened, it's still here"."""
-    from gideon.inbox import InboxStore, ItemStatus
+    PENDING, because a status code alone cannot say "nothing happened, it's still here".
+    """
+    from gideon.integrations.inbox import InboxStore, ItemStatus
 
     async with _client(tmp_path, monkeypatch) as client:
         _install(tmp_path, "demo", proposals=[{"kind_suffix": "draft"}])

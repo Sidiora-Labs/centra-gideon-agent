@@ -39,15 +39,12 @@ from __future__ import annotations
 import ast
 import pathlib
 
-SRC = pathlib.Path(__file__).resolve().parents[1] / "src" / "gideon"
+SRC = pathlib.Path(__file__).resolve().parents[2] / "runtime" / "gideon"
 
-#: The three functions `DCU-2` ships as the chain's steps 2, 4 and 5, plus `DCU-5`'s step 4b.
-#: One census for all four: "how many places decide whether this drive may happen" is a single
-#: question, and a screen kept out of it would be the one that silently grows a second caller.
-_SCREENS = frozenset({"check_app", "check_input_target", "check_autonomy", "require_computer_use"})
+_SCREENS = frozenset(
+    {"check_app", "check_input_target", "check_autonomy", "require_computer_use"}
+)
 
-#: Where each screen is DEFINED. A definition is not a call site, and ``ast.Call`` already
-#: excludes it — these are named only so the failure message can point at the owner.
 _DEFINED_IN = {
     "check_app": "computer_use/policy.py",
     "check_input_target": "computer_use/policy.py",
@@ -84,31 +81,6 @@ def _production_call_sites() -> dict[str, list[str]]:
     return found
 
 
-# ── the census ───────────────────────────────────────────────────────────────
-
-
-#: The ONLY production file permitted to consult the screens, and which ones it consults.
-#:
-#: One entry, deliberately. `DCU-4`'s chain is a single central dispatch — ``service.py``'s
-#: ``computer_dispatch`` — so "which files call a screen" and "how many places decide" are the
-#: same question, and the answer has to be one.
-#:
-#: **Each screen appears exactly ONCE, which is a measured fact and not a coincidence.** The
-#: multiplicity is pinned (the value is a list, not a set) because it is the interesting number:
-#: ``check_app`` is called once even though the chain screens both the "app named in the
-#: arguments" and the "app the snapshot walked" shapes, and ``require_computer_use`` is called
-#: once even though the audit fires on three different exits — both because the dispatch funnels
-#: them through single call sites (``policy.check_app(app, …)`` after the app is resolved either
-#: way, and ``_audit`` for every exit). A second call site appearing here means the funnel was
-#: broken open, which is exactly when two paths start disagreeing. What this cannot see is an
-#: exit that stops calling ``_audit`` at all — that is covered behaviourally by
-#: ``test_computer_use_dispatch.py::test_every_attempt_writes_exactly_one_row`` plus the three
-#: tests that assert the allowed, refused and keystone-refused rows separately.
-#: `DCU-5`'s ``check_autonomy`` appears once and UNCONDITIONALLY, which is the difference worth
-#: pinning next to its siblings: the other screens sit behind a ``spec.screen_*`` flag because
-#: they are about the TARGET, and a tool with no app argument has no app to screen. This one is
-#: about the CALLER, so there is no tool it does not apply to — including ``computer_list_apps``,
-#: whose enumeration of somebody's open windows is the reconnaissance half of driving them.
 _EXPECTED_CALL_SITES: dict[str, list[str]] = {
     "computer_use/service.py": [
         "check_app",
@@ -132,7 +104,7 @@ def test_the_dcu2_screens_are_consulted_only_by_the_dispatch():
       exactly the inert state it was written to complain about.
 
     The per-screen behavioural assertions the old marker demanded of whoever wired these live in
-    ``tests/test_computer_use_dispatch.py``: a non-allowlisted app refused *through the
+    ``checks/runtime/test_computer_use_dispatch.py``: a non-allowlisted app refused *through the
     dispatch*, a secure-field type refused the same way, and a SEL row on the ALLOWED path
     asserted separately from the refused one — against a real ``SecurityEventLog``, not a fake.
     """
@@ -145,9 +117,6 @@ def test_the_dcu2_screens_are_consulted_only_by_the_dispatch():
         "row on the allowed path as well as the refused one, separately). If you removed one, "
         "the chain just lost a screen."
     )
-
-
-# ── the vacuity floor: prove the census can see a caller at all ──────────────
 
 
 def test_the_scanner_detects_a_caller():
@@ -164,7 +133,7 @@ def test_the_scanner_detects_a_caller():
         "    enable_state.require_enabled('computer_type')\n"
         "    policy.check_app(app, tool='computer_type')\n"
         "    check_input_target(target, tool='computer_type')\n"
-        "    gideon.computer_use.gate.require_computer_use(\n"
+        "    gideon.integrations.computer_use.gate.require_computer_use(\n"
         "        tool='computer_type', outcome='completed'\n"
         "    )\n"
     )

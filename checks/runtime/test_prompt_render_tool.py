@@ -16,8 +16,8 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import patch
 
-from gideon.mcp_prompts import _call_tool, _list_tools
-from gideon.validation import MCP_CORE_SCHEMAS
+from gideon.assurance.validation import MCP_CORE_SCHEMAS
+from gideon.integrations.mcp_prompts import _call_tool, _list_tools
 
 
 class TestPromptRenderRegistration:
@@ -28,9 +28,9 @@ class TestPromptRenderRegistration:
         assert "prompt_render" in MCP_CORE_SCHEMAS
 
     def test_discoverable_in_native_loop(self) -> None:
-        from gideon.agents.native.tools import InProcessMcpToolProvider
+        from gideon.engine.agents.native.tools import InProcessMcpToolProvider
 
-        prov = InProcessMcpToolProvider(module="gideon.mcp_prompts")
+        prov = InProcessMcpToolProvider(module="gideon.integrations.mcp_prompts")
         names = {t.name for t in asyncio.run(prov.list_tools())}
         assert "prompt_render" in names
 
@@ -38,13 +38,14 @@ class TestPromptRenderRegistration:
 class TestPromptRenderDispatch:
     def test_renders_with_vars(self) -> None:
         with patch(
-            "gideon.mcp_prompts._post",
+            "gideon.integrations.mcp_prompts._post",
             return_value={"name": "report", "rendered": "Report on the infra team."},
         ) as mock_post:
-            out = _call_tool("prompt_render", {"prompt_id": "report", "vars": {"team": "infra"}})
+            out = _call_tool(
+                "prompt_render", {"prompt_id": "report", "vars": {"team": "infra"}}
+            )
         assert "Report on the infra team." in out
         assert "carry out" in out.lower()
-        # vars are forwarded to the render endpoint.
         _path, body = mock_post.call_args[0]
         assert body == {"variables": {"team": "infra"}}
 
@@ -54,14 +55,16 @@ class TestPromptRenderDispatch:
 
     def test_render_error_surfaces(self) -> None:
         with patch(
-            "gideon.mcp_prompts._post",
+            "gideon.integrations.mcp_prompts._post",
             return_value={"error": "missing required variable: team"},
         ):
             out = _call_tool("prompt_render", {"prompt_id": "report"})
         assert out.startswith("Error") and "missing required variable" in out
 
     def test_empty_render_is_error(self) -> None:
-        with patch("gideon.mcp_prompts._post", return_value={"rendered": "   "}):
+        with patch(
+            "gideon.integrations.mcp_prompts._post", return_value={"rendered": "   "}
+        ):
             out = _call_tool("prompt_render", {"prompt_id": "blank"})
         assert out.startswith("Error") and "empty" in out
 
@@ -79,9 +82,9 @@ class TestPromptsCategoryIsIndependent:
         import importlib
 
         try:
-            wf = importlib.import_module("gideon.mcp_workflows")
+            wf = importlib.import_module("gideon.integrations.mcp_workflows")
         except ModuleNotFoundError:
-            return  # deleted (between Phase 1 and Slice 6a) — trivially satisfied
+            return
         names = {t["name"] for t in wf._list_tools()}
         assert "prompt_render" not in names
         assert all(n.startswith("workflow_") for n in names)
@@ -90,21 +93,22 @@ class TestPromptsCategoryIsIndependent:
         """A dependency back onto the doomed module would defeat the relocation."""
         from pathlib import Path
 
-        import gideon.mcp_prompts as mod
+        import gideon.integrations.mcp_prompts as mod
 
         source = Path(mod.__file__).read_text(encoding="utf-8")
-        assert "import" in source  # sanity: we really read the module
+        assert "import" in source
         offending = [
             line
             for line in source.splitlines()
-            if line.strip().startswith(("import ", "from ")) and "workflow" in line.lower()
+            if line.strip().startswith(("import ", "from "))
+            and "workflow" in line.lower()
         ]
         assert offending == [], f"mcp_prompts must not import workflows: {offending}"
 
     def test_aggregated_surface_still_exposes_prompt_render(self):
         """The ACP MCP-server surface aggregates category modules explicitly; a new
         module that is not listed is invisible to every ACP agent."""
-        from gideon.mcp_core import _aggregated_list_tools
+        from gideon.integrations.mcp_core import _aggregated_list_tools
 
         names = {t["name"] for t in _aggregated_list_tools()}
         assert "prompt_render" in names

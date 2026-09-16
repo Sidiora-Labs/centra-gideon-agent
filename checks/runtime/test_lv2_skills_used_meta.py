@@ -29,18 +29,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from chat_test_helpers import _make_state
 
-from gideon.context_engine import AssembledContext
-from gideon.context_headroom import HeadroomState
-from gideon.dashboard import chat_runner
-from gideon.llm.base import EVENT_COMPLETE, EVENT_TEXT_CHUNK, LLMEvent
-from gideon.skills.allocation import SkillLoadState
-
-# ── The turn harness: a real _ChatSession driven through run_chat ──────────────────
-#
-# Deliberately NOT a unit test of a private helper. The reset, the metadata read and the
-# meta stamp live at three different points of one turn, and the contract is what a
-# finished turn LEAVES ON THE MESSAGE — a per-site unit test would pass with the reset
-# deleted.
+from gideon.cognition.context_engine import AssembledContext
+from gideon.cognition.context_headroom import HeadroomState
+from gideon.extensions.skills.allocation import SkillLoadState
+from gideon.integrations.llm.base import EVENT_COMPLETE, EVENT_TEXT_CHUNK, LLMEvent
+from gideon.interfaces.dashboard import chat_runner
 
 
 def _decision(name: str, state: SkillLoadState, loaded_tokens: int) -> dict:
@@ -77,20 +70,19 @@ def turn(tmp_path, monkeypatch):
     Calling it twice on the returned session runs a SECOND turn on the same session,
     which is how the per-turn reset becomes observable.
     """
-    monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+    )
     state = _make_state(tmp_path)
     state.broadcast_ws = MagicMock()
     state.push_sessions_update = MagicMock()
-    # Truthy: the assembly branch this contract reads from is `elif state.context_builder:`.
     state.context_builder = MagicMock()
     state.consolidator = None
     state._hook_store = None
-    import gideon.trust_mode as _tm
+    import gideon.security.trust_mode as _tm
 
     _tm.disable_yolo()
 
-    # The headroom verdict is not what is under test; a real check would need a bound
-    # model and a window lookup.
     async def _fits(_assembled, **_kw):
         return SimpleNamespace(state=HeadroomState.FITS, notice=lambda: "")
 
@@ -103,7 +95,9 @@ def turn(tmp_path, monkeypatch):
         monkeypatch.setattr(
             chat_runner,
             "assemble_context",
-            lambda *_a, **_k: AssembledContext(message="hello", metadata=dict(metadata)),
+            lambda *_a, **_k: AssembledContext(
+                message="hello", metadata=dict(metadata)
+            ),
         )
         await chat_runner.run_chat(state, session, "hello")
         return session
@@ -115,12 +109,11 @@ def turn(tmp_path, monkeypatch):
 
 def _last_assistant_meta(session) -> dict:
     msgs = [m for m in session.messages if m.get("role") == "assistant"]
-    assert msgs, "the turn produced no assistant message — the harness, not the contract, broke"
+    assert (
+        msgs
+    ), "the turn produced no assistant message — the harness, not the contract, broke"
     meta = msgs[-1].get("meta")
     return meta if isinstance(meta, dict) else {}
-
-
-# ── T2.1 ──────────────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -136,14 +129,10 @@ async def test_skills_used_carries_admitted_and_reduced_but_never_refused(turn):
         }
     )
     used = _last_assistant_meta(turn.session)["skills_used"]
-    # Allocation order preserved: the hover list reads in the order they were admitted.
     assert [r["name"] for r in used] == ["git-hygiene", "code-review"]
     assert [r["state"] for r in used] == ["admitted", "reduced"]
     assert [r["loaded_tokens"] for r in used] == [900, 140]
-    # The refused skill is absent by NAME, not merely by state — it was never used.
     assert "release-notes" not in {r["name"] for r in used}
-    # Exactly the three keys the frontend was briefed on: the allocator's bookkeeping
-    # (tier / cap_tokens / body_tokens / reason / forced) is not the chip's business.
     assert all(set(r) == {"name", "state", "loaded_tokens"} for r in used)
 
 
@@ -165,16 +154,15 @@ async def test_a_later_turn_does_not_inherit_an_earlier_turns_skills(turn):
     Without the reset the session slot still holds turn 1's list and turn 2's message is
     stamped with skills it never loaded — a chip that lies in the most ordinary way.
     """
-    await turn({"skill_decisions": [_decision("git-hygiene", SkillLoadState.ADMITTED, 900)]})
+    await turn(
+        {"skill_decisions": [_decision("git-hygiene", SkillLoadState.ADMITTED, 900)]}
+    )
     first = _last_assistant_meta(turn.session)["skills_used"]
     assert [r["name"] for r in first] == ["git-hygiene"]
 
-    await turn({})  # second turn, no allocation at all
+    await turn({})
     assert "skills_used" not in _last_assistant_meta(turn.session)
     assert turn.session._skills_used == []
-
-
-# ── T2.2: the three learned-chip origins ──────────────────────────────────────────
 
 
 def _learning_state():
@@ -201,31 +189,32 @@ def _learning_session():
 
 
 def _learned(events: list[tuple[str, dict]]) -> list[dict]:
-    return [p for n, p in events if n == "activity_event" and p.get("kind") == "learned"]
+    return [
+        p for n, p in events if n == "activity_event" and p.get("kind") == "learned"
+    ]
 
 
 @pytest.mark.parametrize(
     ("facet", "lesson", "worthwhile", "expected_origin"),
     [
-        # Facet capture runs unconditionally on a permitted turn — below the expensive
-        # gate, so `worthwhile=False` isolates it from the lesson path.
         ("prefers terse replies", None, False, "facet"),
-        # …and the expensive review's correction→lesson, with the facet path silent.
         (None, "always run make lint before pushing", True, "lesson"),
     ],
 )
-def test_after_turn_review_origins(monkeypatch, facet, lesson, worthwhile, expected_origin):
+def test_after_turn_review_origins(
+    monkeypatch, facet, lesson, worthwhile, expected_origin
+):
     """The two synchronous captures are distinguishable, and both stay ``kind: learned``."""
-    import gideon.after_turn_review as atr
-    import gideon.learning as learning
+    import gideon.cognition.after_turn_review as atr
+    import gideon.cognition.learning as learning
 
     monkeypatch.setattr(atr, "capture_preference_facet", lambda *_a, **_k: facet)
     monkeypatch.setattr(atr, "run_after_turn_review", lambda **_k: lesson)
     monkeypatch.setattr(atr, "is_correction_signal", lambda *_a, **_k: True)
     monkeypatch.setattr(atr, "record_procedural_outcomes", lambda *_a, **_k: None)
-    monkeypatch.setattr("gideon.memory_service.service_for", lambda _m: object())
-    # §3.2 writes a denial row for the not-worthwhile turn; the row is not under test and
-    # its writer would reach for a real store.
+    monkeypatch.setattr(
+        "gideon.cognition.memory_service.service_for", lambda _m: object()
+    )
     monkeypatch.setattr(learning, "record_denial", lambda *_a, **_k: None)
 
     state = _learning_state()
@@ -241,7 +230,7 @@ def test_after_turn_review_origins(monkeypatch, facet, lesson, worthwhile, expec
 
     chips = _learned(state.events)
     assert len(chips) == 1, f"expected exactly one learned chip, got {state.events}"
-    assert chips[0]["kind"] == "learned"  # unchanged: live FE consumers key on this
+    assert chips[0]["kind"] == "learned"
     assert chips[0]["origin"] == expected_origin
 
 
@@ -249,7 +238,7 @@ def test_after_turn_review_origins(monkeypatch, facet, lesson, worthwhile, expec
 async def test_skill_ladder_origin_is_proposal():
     """The ladder's chip is a PROPOSAL — its tap belongs on the approve/edit surface for a
     proposed skill, not on a facet or a lesson."""
-    import gideon.after_turn_review as atr
+    import gideon.cognition.after_turn_review as atr
 
     async def _summary(**_k):
         return "Proposed skill: tighten the release checklist"
@@ -266,8 +255,9 @@ async def test_skill_ladder_origin_is_proposal():
             tool_calls=6,
             decision=SimpleNamespace(permitted=True, worthwhile=True, allowed=True),
         )
-        # The ladder is a forked-LLM pass scheduled as a background task on purpose.
-        assert state._background_tasks, "the ladder scheduled nothing — the gate, not the origin"
+        assert (
+            state._background_tasks
+        ), "the ladder scheduled nothing — the gate, not the origin"
         await asyncio.gather(*list(state._background_tasks))
     finally:
         atr.run_skill_ladder_review = original  # type: ignore[assignment]
@@ -280,23 +270,12 @@ async def test_skill_ladder_origin_is_proposal():
 
 def test_the_three_origins_are_distinct_and_closed():
     """A discriminator whose values collide routes two captures to one surface."""
-    origins = set(re.findall(r'"origin":\s*"([a-z]+)"', Path(chat_runner.__file__).read_text()))
+    origins = set(
+        re.findall(r'"origin":\s*"([a-z]+)"', Path(chat_runner.__file__).read_text())
+    )
     assert origins == {"facet", "lesson", "proposal"}
 
 
-# ── The atom's "zero new WS/SSE channels" clause ──────────────────────────────────
-
-#: Every WS event name ``chat_runner`` broadcasts, pinned. Verified to cover 49/49
-#: ``broadcast_ws(`` call sites in the module, so a miss here is a real new channel and
-#: not a regex that stopped matching. Both contracts above are additive payload on names
-#: ALREADY in this set (``meta`` on ``chat_segment``'s message; a key on
-#: ``activity_event``), so landing them must leave it byte-for-byte unchanged.
-#:
-#: This is a shared-module baseline, so it drifts on merge with changes that have nothing
-#: to do with LV-2 — and a rebaseline is only honest when the new name is provably not
-#: ours. ``queue_push`` arrived from ``57194f48`` (PR2-10's ACP mid-turn steer echo) and
-#: appears **zero** times in the LV-2 diff; that provenance, not the fact that the
-#: assertion was red, is what licensed adding it.
 _BASELINE_WS_EVENTS = {
     "activity_event",
     "approval",
@@ -326,38 +305,30 @@ _WS_NAME_RE = re.compile(r'broadcast_ws\(\s*"([a-z_]+)"')
 def test_no_new_ws_channel_was_introduced():
     src = Path(chat_runner.__file__).read_text()
     found = _WS_NAME_RE.findall(src)
-    # Vacuity floor: the regex must still see EVERY call site, or an unmatched new channel
-    # would read as "no new channel".
     assert len(found) == src.count("broadcast_ws("), (
         "the event-name regex no longer covers every broadcast_ws call site — fix the rail "
         "before trusting it"
     )
     assert set(found) == _BASELINE_WS_EVENTS
-    # Neither LV-2 contract may mint a channel named after itself.
     assert not [n for n in set(found) if "skill" in n or "learn" in n]
 
 
 @pytest.mark.asyncio
 async def test_a_turn_carrying_skills_used_broadcasts_only_known_events(turn):
     """The runtime half of the same clause: the payload rides existing traffic."""
-    await turn({"skill_decisions": [_decision("git-hygiene", SkillLoadState.ADMITTED, 900)]})
+    await turn(
+        {"skill_decisions": [_decision("git-hygiene", SkillLoadState.ADMITTED, 900)]}
+    )
     names = {c.args[0] for c in turn.state.broadcast_ws.call_args_list if c.args}
     assert names, "the turn broadcast nothing — the harness, not the contract, broke"
-    assert names <= _BASELINE_WS_EVENTS, f"new channel(s): {sorted(names - _BASELINE_WS_EVENTS)}"
+    assert (
+        names <= _BASELINE_WS_EVENTS
+    ), f"new channel(s): {sorted(names - _BASELINE_WS_EVENTS)}"
 
 
-# ── The LOOP half's two unguarded seams ───────────────────────────────────────────
-#
-# The chat chip reads `meta["skills_used"]` off a message the page already holds. The LOOP
-# cockpit cannot: its live stream carries no message meta, so it reads the worker transcript
-# over `GET /api/chat/sessions/{key}` and finds that key on `GET /api/loops/{id}`. That makes
-# the cockpit chip depend on TWO backend contracts that no test named, and both fail SILENTLY
-# — a dropped `session_key` leaves `workerKey` empty and a clobbered `meta` leaves the list
-# empty, and the chip's own "absent when the run loaded nothing" rule renders each as simply
-# no chip. Nothing would go red. These two pin them.
-
-
-def test_the_loop_detail_view_serves_the_session_key_the_cockpit_reads(monkeypatch, tmp_path):
+def test_the_loop_detail_view_serves_the_session_key_the_cockpit_reads(
+    monkeypatch, tmp_path
+):
     """`workerKey` comes from the redacted loop view — if it stops, the chip goes inert.
 
     Drives ``get_redacted``, the function ``api_loop_get`` actually calls, rather than the
@@ -365,14 +336,11 @@ def test_the_loop_detail_view_serves_the_session_key_the_cockpit_reads(monkeypat
     and stayed GREEN when the endpoint's own view dropped the key, which is precisely the
     regression it is here to catch. Isolated to ``tmp_path`` — it writes a loop row.
     """
-    from gideon.loop import store as loop_store
-    from gideon.loop.loop import Loop
+    from gideon.automation.loop import store as loop_store
+    from gideon.automation.loop.loop import Loop
 
-    monkeypatch.setattr("gideon.loop.files.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.automation.loop.files.config_dir", lambda: tmp_path)
     loop_store.create(Loop(id="abc12345", name="n", kind="goal", task="t"))
-    # Vacuity floor: BEFORE the writer runs the field is empty, so the assertion below
-    # cannot be riding a hardcoded value — and this also pins that the cockpit's honest
-    # answer for a never-started loop is "no key" rather than a bogus one.
     assert loop_store.get_redacted("abc12345")["session_key"] == ""
 
     loop_store.set_session_key("abc12345", "loop-abc12345")
@@ -385,20 +353,31 @@ def test_session_detail_does_not_clobber_skills_used_with_cls_meta():
     The cockpit (and ChatPage's graft) read `skills_used` back out of this endpoint, so the
     overwrite branch sitting one line away from the payload is the risk worth pinning.
     """
-    from gideon.dashboard.chat_utils import _prepare_messages, parse_cls_meta
+    from gideon.interfaces.dashboard.chat_utils import _prepare_messages, parse_cls_meta
 
     used = [{"name": "auto/release-flow", "state": "admitted", "loaded_tokens": 900}]
     out = _prepare_messages(
-        [{"role": "assistant", "content": "hi", "cls": "msg msg-a", "meta": {"skills_used": used}}],
+        [
+            {
+                "role": "assistant",
+                "content": "hi",
+                "cls": "msg msg-a",
+                "meta": {"skills_used": used},
+            }
+        ],
         False,
     )
     assert out[0]["meta"]["skills_used"] == used
-    # Vacuity: the clobber branch is LIVE, not dead code this test merely misses. A `cls`
-    # holding a JSON dict does replace `meta` wholesale — which is exactly why a plain
-    # assistant message (`cls="msg msg-a"`, not JSON) has to fall through it.
     assert parse_cls_meta("msg msg-a") is None
     clobbered = _prepare_messages(
-        [{"role": "assistant", "content": "hi", "cls": '{"tool": "read"}', "meta": {"gone": 1}}],
+        [
+            {
+                "role": "assistant",
+                "content": "hi",
+                "cls": '{"tool": "read"}',
+                "meta": {"gone": 1},
+            }
+        ],
         False,
     )
     assert "gone" not in clobbered[0]["meta"], "the overwrite branch stopped firing"

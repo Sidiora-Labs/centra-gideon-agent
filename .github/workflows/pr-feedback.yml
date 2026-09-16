@@ -1,20 +1,20 @@
-# PR feedback relay — post CI's remediation into the PR conversation, including fork PRs.
+                                                                                         
 #
-# WHY THIS WORKFLOW EXISTS. `ci.yml` runs on `pull_request`, and a `pull_request` run from a
-# FORK is handed a read-only GITHUB_TOKEN no matter what its `permissions:` block asks for.
-# So the remediation comment could never be posted from inside CI on exactly the PRs that
-# needed it. Measured across every fork PR this repo has had — #678, #680, #1210, #1211 —
-# zero `lint-help` comments were ever posted, and the only visible signal was a red job.
+                                                                                            
+                                                                                           
+                                                                                         
+                                                                                         
+                                                                                        
 #
-# `workflow_run` fires in the BASE repo's context after CI finishes, where the token is
-# genuinely write-capable, so the comment can be posted from here for fork and same-repo
-# PRs alike through one path.
+                                                                                       
+                                                                                        
+                             
 #
-# SAFETY. This workflow never checks out the PR's code and never runs it. It reads two
-# small text files from an artifact CI produced and calls the issues API. The artifact is
-# untrusted INPUT: the violations text is inserted inside a fenced block, and the PR number
-# is parsed as an integer and rejected unless it is one. Treat any change here that starts
-# executing artifact content as a pwn-request and don't make it.
+                                                                                      
+                                                                                         
+                                                                                           
+                                                                                          
+                                                                
 name: PR feedback
 
 on:
@@ -24,20 +24,20 @@ on:
 
 permissions:
   contents: read
-  actions: read           # download the artifact from the CI run
-  pull-requests: write    # post/update the remediation comment
+  actions: read                                                  
+  pull-requests: write                                         
 
 jobs:
   lint-help:
-    # Only a FAILED CI run can carry remediation. A success uploads no artifact, and the
-    # download step below would find nothing anyway — this just avoids the pointless run.
+                                                                                        
+                                                                                         
     if: github.event.workflow_run.conclusion == 'failure'
     runs-on: ubuntu-latest
     steps:
       - name: Download the lint feedback CI left behind
         id: dl
         uses: actions/download-artifact@v8
-        continue-on-error: true   # most CI failures are test/web, which upload nothing
+        continue-on-error: true                                                        
         with:
           name: lint-feedback
           path: feedback

@@ -1,6 +1,6 @@
 """PHF-7 — the seam that BINDS the offline scripted provider, and its guardrails.
 
-Four properties of ``gideon.llm.registry``'s scripted registration:
+Four properties of ``gideon.integrations.llm.registry``'s scripted registration:
 
 1. With the opt-in ABSENT the type is not registered at all — the registry's type
    set is identical to a fresh one, asserted against a NON-EMPTY baseline so
@@ -16,7 +16,7 @@ Four properties of ``gideon.llm.registry``'s scripted registration:
 4. The declared capability set is exactly the honest minimum, asserted as an
    EQUALITY so a later widening reds instead of sliding in.
 
-``gideon.llm.scripted`` is a sibling deliverable of the same atom and is not
+``gideon.integrations.llm.scripted`` is a sibling deliverable of the same atom and is not
 on this branch. These tests inject a stub module into ``sys.modules`` under its
 real name: that lets the suite run standalone AND proves the production code really
 imports that symbol from that module (a wrong module path would fail here).
@@ -30,9 +30,9 @@ import types
 
 import pytest
 
-import gideon.llm as _llm_pkg
-from gideon.llm.capabilities import Capability, ProviderCapability
-from gideon.llm.registry import (
+import gideon.integrations.llm as _llm_pkg
+from gideon.integrations.llm.capabilities import Capability, ProviderCapability
+from gideon.integrations.llm.registry import (
     SCRIPTED_PROVIDER_CAPABILITY,
     SCRIPTED_PROVIDER_ENTRY_NAME,
     SCRIPTED_PROVIDER_ENV,
@@ -47,8 +47,6 @@ from gideon.llm.registry import (
     scripted_provider_enabled,
     sync_entries_from_config,
 )
-
-# ── The sibling's provider, stubbed ───────────────────────────────────────────
 
 
 class _StubScriptedProvider:
@@ -70,17 +68,13 @@ class _StubScriptedProvider:
 
 @pytest.fixture
 def stub_scripted_module(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
-    """Install a stub ``gideon.llm.scripted`` for the duration of one test."""
-    mod = types.ModuleType("gideon.llm.scripted")
+    """Install a stub ``gideon.integrations.llm.scripted`` for the duration of one test."""
+    mod = types.ModuleType("gideon.integrations.llm.scripted")
     mod.ScriptedProvider = _StubScriptedProvider  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "gideon.llm.scripted", mod)
-    # Also bind it on the parent package so the ``from ... import`` fromlist path
-    # resolves regardless of which branch the import machinery takes.
+    monkeypatch.setitem(sys.modules, "gideon.integrations.llm.scripted", mod)
     monkeypatch.setattr(_llm_pkg, "scripted", mod, raising=False)
     return mod
 
-
-# ── A REAL, credential-declaring type (the anti-bypass counterparty) ─────────
 
 _REAL_TYPE = "credentialed_real"
 
@@ -96,25 +90,19 @@ _REAL_CAPABILITY = ProviderCapability(
 )
 
 
-def _real_factory(*, entry: ProviderEntry, session_key: str | None = None, **kwargs: object):
+def _real_factory(
+    *, entry: ProviderEntry, session_key: str | None = None, **kwargs: object
+):
     """A real provider's factory, refusing through the PRODUCTION credential path.
 
     ``llm.branded_specs.resolve_credential`` is the one helper every shipped
     model-app factory calls, and it is what raises ``CredentialMissing`` — so this
     stand-in exercises the real refusal instead of imitating it.
     """
-    # ``sdk.model`` FIRST, deliberately: the two modules import each other (model.py
-    # imports BrandedProviderSpec from provider_helpers at its foot, provider_helpers
-    # imports from model.py at its head), so importing provider_helpers first raises
-    # ImportError on a partially initialized module. Production always reaches
-    # ``sdk.model`` first; this keeps the test on the same order.
     import gideon.sdk.model  # noqa: F401
-    from gideon.llm.branded_specs import resolve_credential
+    from gideon.integrations.llm.branded_specs import resolve_credential
 
     resolve_credential(entry, kwargs, label=_REAL_TYPE)
-    # Reaching this line means the credential check did NOT refuse — which is
-    # exactly the auth hole the rail exists to catch. Return rather than raise, so
-    # the failure reads as the honest "DID NOT RAISE CredentialMissing".
     return _StubScriptedProvider(model=entry.model)
 
 
@@ -136,12 +124,9 @@ def _registered_types(registry: ProviderRegistry) -> set[str]:
 
 def _write_config(providers: list[dict]) -> None:
     """Write a ``config.json`` at the path production reads, under the fake home."""
-    from gideon.config.loader import config_path
+    from gideon.core.config.loader import config_path
 
     config_path().write_text(json.dumps({"providers": providers}), encoding="utf-8")
-
-
-# ── Fixtures ──────────────────────────────────────────────────────────────────
 
 
 @pytest.fixture(autouse=True)
@@ -167,16 +152,14 @@ def opt_in(monkeypatch: pytest.MonkeyPatch, tmp_path) -> str:
     return str(script)
 
 
-# ── 1. Opt-in ABSENT: nothing is registered ──────────────────────────────────
-
-
 def test_opt_in_absent_registers_no_scripted_type_or_entry():
     registry = get_default_registry()
     _seed_real_type(registry)
     baseline = _registered_types(registry)
 
-    # VACUITY FLOOR: "unchanged" is trivially true of an empty set.
-    assert baseline, "baseline type set is empty — the unchanged assertion below would be vacuous"
+    assert (
+        baseline
+    ), "baseline type set is empty — the unchanged assertion below would be vacuous"
 
     assert scripted_provider_enabled() is False
     assert sync_entries_from_config() == 0
@@ -185,23 +168,21 @@ def test_opt_in_absent_registers_no_scripted_type_or_entry():
     assert SCRIPTED_PROVIDER_TYPE not in _registered_types(registry)
     assert [e.name for e in registry.list_entries()] == []
 
-    # capability_of behaves exactly as it does for any unknown type.
     with pytest.raises(ProviderResolutionError):
         registry.capability_of(SCRIPTED_PROVIDER_TYPE)
 
 
 def test_opt_in_absent_leaves_a_configured_real_provider_untouched():
     """The absent-opt-in path must not perturb the ordinary config sync at all."""
-    _write_config([{"name": "Real", "type": _REAL_TYPE, "model": "m", "credential": "real-key"}])
+    _write_config(
+        [{"name": "Real", "type": _REAL_TYPE, "model": "m", "credential": "real-key"}]
+    )
     registry = get_default_registry()
     _seed_real_type(registry)
 
     assert sync_entries_from_config() == 1
     assert [e.name for e in registry.list_entries()] == ["Real"]
     assert registry.get_entry("Real").credential == "real-key"
-
-
-# ── 2. Opt-in PRESENT: registered once, idempotent, buildable ────────────────
 
 
 def test_opt_in_present_registers_the_type_once_and_stays_idempotent(
@@ -213,11 +194,11 @@ def test_opt_in_present_registers_the_type_once_and_stays_idempotent(
     assert sync_entries_from_config() == 1
 
     assert SCRIPTED_PROVIDER_TYPE in _registered_types(registry)
-    assert registry.capability_of(SCRIPTED_PROVIDER_TYPE) is SCRIPTED_PROVIDER_CAPABILITY
+    assert (
+        registry.capability_of(SCRIPTED_PROVIDER_TYPE) is SCRIPTED_PROVIDER_CAPABILITY
+    )
     assert [e.name for e in registry.list_entries()] == [SCRIPTED_PROVIDER_ENTRY_NAME]
 
-    # register_type is strict about duplicates by design, so a second sync would
-    # RAISE if the repeat-call tolerance were missing. Prove the claimed idempotence.
     assert sync_entries_from_config() == 1
     assert sync_entries_from_config() == 1
     assert [e.name for e in registry.list_entries()] == [SCRIPTED_PROVIDER_ENTRY_NAME]
@@ -234,24 +215,17 @@ def test_build_returns_the_scripted_provider_with_no_credential(
     assert entry.type == SCRIPTED_PROVIDER_TYPE
     assert entry.credential is None
 
-    # No credential, and no credential_store kwarg — the whole point of the fixture.
     provider = registry.build(SCRIPTED_PROVIDER_ENTRY_NAME)
     assert isinstance(provider, _StubScriptedProvider)
 
-    # The model id lives on the ENTRY, not on the built provider, and that is the real
-    # contract rather than a limitation. This used to assert
-    # `provider.model == SCRIPTED_PROVIDER_MODEL` and that a `model="other-1"` override
-    # won — both describing a factory that passed `model=` into the constructor. The real
-    # `ScriptedProvider.__init__` takes only `self` (a `script_path` kwarg would be a hole
-    # in its env gate), so there was nowhere for either value to go: the reply text comes
-    # from the script file the opt-in names, and a model id cannot change it. Asserting the
-    # entry keeps the descriptive value is the honest form.
-    assert registry.get_entry(SCRIPTED_PROVIDER_ENTRY_NAME).model == SCRIPTED_PROVIDER_MODEL
+    assert (
+        registry.get_entry(SCRIPTED_PROVIDER_ENTRY_NAME).model
+        == SCRIPTED_PROVIDER_MODEL
+    )
 
-    # A per-turn model override must therefore be ACCEPTED AND IGNORED — never an error,
-    # because the resolver threads one for every provider type.
     assert isinstance(
-        registry.build(SCRIPTED_PROVIDER_ENTRY_NAME, model="other-1"), _StubScriptedProvider
+        registry.build(SCRIPTED_PROVIDER_ENTRY_NAME, model="other-1"),
+        _StubScriptedProvider,
     )
 
 
@@ -264,7 +238,7 @@ def test_the_entry_declares_the_capability_a_chat_turn_resolves_on(
     capabilities contain ``_capability_enum(use_case)``; asserting against that
     function keeps this honest if the mapping ever changes.
     """
-    from gideon.providers.provider_bridge import _capability_enum
+    from gideon.extensions.providers.provider_bridge import _capability_enum
 
     sync_entries_from_config()
     entry = get_default_registry().get_entry(SCRIPTED_PROVIDER_ENTRY_NAME)
@@ -284,21 +258,18 @@ def test_the_chat_resolver_actually_returns_the_fixture_with_no_credential(
     ``resolve_provider_for_use_case``. Asserting the entry merely *declares* chat
     would leave "and resolution picks it up" untested.
     """
-    from gideon.providers.provider_bridge import _resolve_from_config_registry
+    from gideon.extensions.providers.provider_bridge import (
+        _resolve_from_config_registry,
+    )
 
     sync_entries_from_config()
 
     resolved = _resolve_from_config_registry("chat")
     assert isinstance(resolved, _StubScriptedProvider)
-    # The entry carries the descriptive model id; the built fixture takes no arguments at
-    # all (see the note in test_build_returns_the_scripted_provider_with_no_credential).
     assert (
         get_default_registry().get_entry(SCRIPTED_PROVIDER_ENTRY_NAME).model
         == SCRIPTED_PROVIDER_MODEL
     )
-
-
-# ── 3. Anti-bypass: a real type still refuses without a credential ───────────
 
 
 def test_a_real_type_still_raises_credential_missing_under_the_opt_in(
@@ -311,25 +282,24 @@ def test_a_real_type_still_raises_credential_missing_under_the_opt_in(
     the production credential helper — in the SAME registry state in which the
     fixture builds with none.
     """
-    _write_config([{"name": "Real", "type": _REAL_TYPE, "model": "m", "credential": "real-key"}])
+    _write_config(
+        [{"name": "Real", "type": _REAL_TYPE, "model": "m", "credential": "real-key"}]
+    )
     registry = get_default_registry()
     _seed_real_type(registry)
 
-    assert sync_entries_from_config() == 2  # the fixture + the real entry
+    assert sync_entries_from_config() == 2
 
-    # (a) Building the real type still REFUSES. Asserted FIRST, deliberately: an
-    # assertion placed after a cheaper one only ever reds via that one, and this is
-    # the security-critical claim, so it must be the assertion that bites.
     with pytest.raises(CredentialMissing):
         registry.build("Real")
 
-    # (b) ...because the exemption did not spread into the config-derived entry.
     real = registry.get_entry("Real")
     assert real.credential == "real-key"
 
-    # (c) ...while the fixture, in the same registry, needs none.
     assert registry.get_entry(SCRIPTED_PROVIDER_ENTRY_NAME).credential is None
-    assert isinstance(registry.build(SCRIPTED_PROVIDER_ENTRY_NAME), _StubScriptedProvider)
+    assert isinstance(
+        registry.build(SCRIPTED_PROVIDER_ENTRY_NAME), _StubScriptedProvider
+    )
 
 
 def test_the_exemption_is_a_property_of_the_type_not_of_the_opt_in(
@@ -352,13 +322,9 @@ def test_the_exemption_is_a_property_of_the_type_not_of_the_opt_in(
     sync_entries_from_config()
 
     for name in ("RealOne", "RealTwo"):
-        # The refusal first, for the same reason as above.
         with pytest.raises(CredentialMissing):
             registry.build(name)
         assert registry.get_entry(name).credential
-
-
-# ── 4. Capabilities are exactly the honest minimum ───────────────────────────
 
 
 def test_declared_capabilities_are_exactly_the_minimum_set(
@@ -379,7 +345,6 @@ def test_declared_capabilities_are_exactly_the_minimum_set(
     entry = get_default_registry().get_entry(SCRIPTED_PROVIDER_ENTRY_NAME)
     assert entry.declared_capabilities == expected
 
-    # The graded/boolean axes agree with the flag set — a fixture replays a string.
     assert SCRIPTED_PROVIDER_CAPABILITY.supports_streaming is False
     assert SCRIPTED_PROVIDER_CAPABILITY.supports_embeddings is False
     assert SCRIPTED_PROVIDER_CAPABILITY.supports_vision is False
@@ -400,19 +365,6 @@ def test_the_omitted_capabilities_are_named_so_the_omission_is_deliberate():
         assert absent not in SCRIPTED_PROVIDER_CAPABILITY.capabilities
 
 
-# ── Integration rails: the two defects only the MERGED tree can see ───────────────
-#
-# Both halves of PHF-7 were built on separate branches against a written contract, and
-# `pyproject.toml` sets `ignore_missing_imports = true`, so mypy said NOTHING about either
-# mismatch: `make lint` was exit 0 on both branches while the pair was broken. These rails
-# turn that into a test failure instead of a TypeError in a running gateway.
-#
-# They deliberately do NOT use `stub_scripted_module` — a stub is exactly what hid both
-# defects, since it accepts any constructor call and needs no script file.
-
-
-#: Env-var spellings the tree deliberately NARRATES as dead (the drift these rails were written
-#: after). Kept because the story is why the rails exist; asserted to be read by nothing.
 RETIRED_ENV_NAMES = frozenset({"GIDEON_SCRIPTED_LLM"})
 
 
@@ -426,8 +378,8 @@ def test_the_registry_and_the_fixture_name_the_SAME_env_var() -> None:
     construct, the other builds nothing because no type is registered. Neither branch's
     suite could fail on its own.
     """
-    from gideon.llm import registry as R
-    from gideon.llm import scripted as S
+    from gideon.integrations.llm import registry as R
+    from gideon.integrations.llm import scripted as S
 
     assert R.SCRIPTED_PROVIDER_ENV == S.SCRIPT_ENV_VAR, (
         "the registration gate and the fixture's own gate name different env vars, so the "
@@ -436,42 +388,37 @@ def test_the_registry_and_the_fixture_name_the_SAME_env_var() -> None:
 
 
 def test_the_harness_spells_the_env_var_the_SAME_way() -> None:
-    """The other two spellings of the one switch — and this one had ALREADY drifted.
+    """Playwright owns fixture activation; Make invokes that console harness.
 
-    The test above pins the two PYTHON constants together. But the switch is named in two more
-    places that no Python assertion reaches, because the harness that sets it is not Python:
-    `web/playwright.config.ts` (which actually exports the value the gateway is launched with)
-    and the `test-e2e` recipe's own explanation of why the gate is credential-free.
-
-    Measured, not hypothesised: the Makefile said `GIDEON_SCRIPTED_SCRIPT` — a variable
-    that exists nowhere — while `playwright.config.ts` set the real one. Nothing failed, because
-    the wrong name was in a COMMENT: the gate worked and its stated reason for working was
-    false. That is the more corrosive half of a drift, since the next person to wire a fixture
-    reads the prose. Asserting the prose is cheap; a comment nobody checks is how the four
-    spellings got to three.
-
-    Names that are DELIBERATELY narrated as dead are declared in `RETIRED_ENV_NAMES` above and
-    separately asserted to be read by nothing — narration of a fixed bug is worth keeping, and a
-    sweep that banned it would just get deleted. What is not allowed is a third spelling that is
-    neither the live switch nor a declared retirement.
+    Both files must reject unknown switch spellings, including stale prose, while
+    only the configuration that launches the gateway must set the live switch.
     """
-    from gideon.llm import registry as R
+    from gideon.integrations.llm import registry as R
 
     env = R.SCRIPTED_PROVIDER_ENV
-    root = pathlib.Path(__file__).resolve().parents[1]
-    for rel in ("web/playwright.config.ts", "Makefile"):
-        text = (root / rel).read_text(encoding="utf-8")
-        assert env in text, f"{rel} never names {env} — the harness cannot enable the fixture"
+    root = pathlib.Path(__file__).resolve().parents[2]
+    harness_files = {
+        rel: (root / rel).read_text(encoding="utf-8")
+        for rel in ("apps/console/playwright.config.ts", "Makefile")
+    }
+    assert env in harness_files["apps/console/playwright.config.ts"]
+    makefile = harness_files["Makefile"]
+    assert re.search(r"(?m)^WEB_DIR\s*:?=\s*apps/console\s*$", makefile)
+    recipe = re.search(r"(?m)^test-e2e:[^\n]*\n((?:\t[^\n]*\n)+)", makefile)
+    assert recipe, "Makefile has no test-e2e recipe"
+    assert re.search(
+        r"(?m)^\tcd\s+\$\(WEB_DIR\)\s*&&\s*npx\s+playwright\s+test(?:\s|$)",
+        recipe.group(1),
+    ), "test-e2e must launch the console Playwright configuration"
+    for rel, text in harness_files.items():
         unknown = {
-            tok
-            for tok in re.findall(r"GIDEON_SCRIPTED[A-Z_]*", text)
-            if tok not in {env, "GIDEON_SCRIPTED", *RETIRED_ENV_NAMES}
+            token
+            for token in re.findall(r"GIDEON_SCRIPTED[A-Z_]*", text)
+            if token not in {env, "GIDEON_SCRIPTED", *RETIRED_ENV_NAMES}
         }
         assert not unknown, (
-            f"{rel} names {sorted(unknown)}, which is neither the live switch ({env}) nor a "
-            f"declared retirement. If it is a historical mention, add it to RETIRED_ENV_NAMES; "
-            f"otherwise fix it. A wrong name in a comment leaves the gate working and its "
-            f"stated reason false — which is the state this test was written after finding."
+            f"{rel} names {sorted(unknown)}, which is neither the live switch "
+            f"({env}) nor a declared retirement"
         )
 
 
@@ -482,8 +429,8 @@ def test_no_retired_env_name_is_still_read_by_anything() -> None:
     stale name and the assertion goes green while a module still reads it. So the retirement is
     checked against the shipped source rather than trusted.
     """
-    root = pathlib.Path(__file__).resolve().parents[1]
-    src = root / "src"
+    root = pathlib.Path(__file__).resolve().parents[2]
+    src = root / "runtime"
     live = sorted(
         p.name
         for p in src.rglob("*.py")
@@ -494,7 +441,9 @@ def test_no_retired_env_name_is_still_read_by_anything() -> None:
         f"these shipped modules still name a RETIRED env var {sorted(RETIRED_ENV_NAMES)}: "
         f"{live}. It is not retired; either the allowlist is wrong or the module is."
     )
-    assert RETIRED_ENV_NAMES, "the retirement list is empty — the sweep above allows nothing extra"
+    assert (
+        RETIRED_ENV_NAMES
+    ), "the retirement list is empty — the sweep above allows nothing extra"
 
 
 def test_the_factory_builds_the_REAL_fixture_through_the_registry(
@@ -510,12 +459,12 @@ def test_the_factory_builds_the_REAL_fixture_through_the_registry(
     """
     import json
 
-    from gideon.llm.registry import (
+    from gideon.integrations.llm.registry import (
         SCRIPTED_PROVIDER_ENTRY_NAME,
         get_default_registry,
         register_scripted_provider_type,
     )
-    from gideon.llm.scripted import ScriptedProvider
+    from gideon.integrations.llm.scripted import ScriptedProvider
 
     script = tmp_path / "chat-script.json"
     script.write_text(

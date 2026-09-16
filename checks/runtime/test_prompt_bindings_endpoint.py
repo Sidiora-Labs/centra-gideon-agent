@@ -11,14 +11,14 @@ import json
 import pytest
 from aiohttp.test_utils import make_mocked_request
 
-from gideon.dashboard.handlers.prompts import api_prompt_bindings
-from gideon.providers import prompt_use_cases as puc
+from gideon.extensions.providers import prompt_use_cases as puc
+from gideon.interfaces.dashboard.handlers.prompts import api_prompt_bindings
 
 
 @pytest.fixture(autouse=True)
 def _home(tmp_path, monkeypatch):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    import gideon.prompt_providers.registry as reg
+    import gideon.integrations.prompt_providers.registry as reg
 
     reg._providers.clear()
     yield
@@ -26,7 +26,9 @@ def _home(tmp_path, monkeypatch):
 
 
 async def _payload():
-    resp = await api_prompt_bindings(make_mocked_request("GET", "/api/prompts/bindings"))
+    resp = await api_prompt_bindings(
+        make_mocked_request("GET", "/api/prompts/bindings")
+    )
     return json.loads(resp.body)
 
 
@@ -38,7 +40,6 @@ async def test_every_binding_arrives_named_described_and_grouped():
         assert b["label"], f"{b['use_case']} unnamed"
         assert b["hint"], f"{b['use_case']} undescribed"
         assert b["category"] in puc.PROMPT_CATEGORY_ORDER
-        # The measured defect: the row rendered `b.use_case` verbatim.
         if "_" in b["use_case"]:
             assert b["label"] != b["use_case"]
 
@@ -47,7 +48,6 @@ async def test_every_binding_arrives_named_described_and_grouped():
 async def test_categories_are_present_ordered_and_non_empty():
     data = await _payload()
     keys = [c["key"] for c in data["categories"]]
-    # Declared order, not dict/insertion order — the panel renders them in sequence.
     assert keys == [k for k in puc.PROMPT_CATEGORY_ORDER if k in keys]
     assert keys, "at least one group"
     for c in data["categories"]:
@@ -55,13 +55,12 @@ async def test_categories_are_present_ordered_and_non_empty():
         assert any(
             b["category"] == c["key"] for b in data["bindings"]
         ), f"{c['key']} is a heading over nothing"
-    # And nothing may fall outside a sent group, or a binding becomes unreachable.
     assert {b["category"] for b in data["bindings"]} <= set(keys)
 
 
 @pytest.mark.asyncio
 async def test_an_app_owned_use_case_is_grouped_with_the_rest():
-    from gideon.apps import prompt_registry
+    from gideon.extensions.apps import prompt_registry
 
     prompt_registry.register_use_case(
         "widget_summarize",

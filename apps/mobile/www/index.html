@@ -5,27 +5,23 @@
     <!--
       `viewport-fit=cover` is what makes `env(safe-area-inset-*)` resolve to anything but 0px.
       This is the shell's OWN document; the served companion gets its insets natively instead
-      (see `shell/safeArea.mjs`).
+      (see `platform/safe-area.mjs`).
     -->
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Gideon</title>
-    <link rel="stylesheet" href="shell/shell.css" />
+    <link rel="stylesheet" href="bootstrap/shell.css" />
   </head>
   <body>
-    <!--
-      The shell's entire UI: an address field. There is deliberately nothing here that resembles
-      the companion — no loops, no inbox, no tasks, no design-system component. Everything the
-      owner actually uses is the gateway's served `#/companion`, reached by leaving this page.
-    -->
+    
     <main id="shell">
-      <h1>Gideon</h1>
+      <div class="identity"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/gideon-dark.png"><img src="assets/gideon-light.png" width="56" height="56" alt=""></picture><h1>Gideon</h1></div>
       <p class="lede">Connect this device to your gateway.</p>
       <form id="connect">
         <label for="gateway">Gateway address</label>
         <input
           id="gateway"
           name="gateway"
-          type="url"
+          type="text"
           inputmode="url"
           autocomplete="url"
           autocapitalize="off"
@@ -41,6 +37,6 @@
         address, or pair this device from Settings &rsaquo; Devices.
       </p>
     </main>
-    <script type="module" src="shell/boot.mjs"></script>
+    <script type="module" src="bootstrap/start.mjs"></script>
   </body>
 </html>

@@ -13,7 +13,7 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.dashboard.server import spa_fallback
+from gideon.interfaces.dashboard.server import spa_fallback
 
 
 def _make_app() -> web.Application:
@@ -22,8 +22,6 @@ def _make_app() -> web.Application:
     async def _post_only(_request: web.Request) -> web.Response:
         return web.json_response({"ok": True})
 
-    # A POST-only route on the /api surface, and a sibling off it, so the same
-    # wrong-method request can be asserted to differ by path.
     app.router.add_post("/api/thing", _post_only)
     app.router.add_post("/notapi/thing", _post_only)
     return app
@@ -32,19 +30,17 @@ def _make_app() -> web.Application:
 @pytest.mark.asyncio
 async def test_api_405_answers_in_the_wire_envelope() -> None:
     async with TestClient(TestServer(_make_app())) as client:
-        resp = await client.get("/api/thing")  # POST-only route, wrong method
+        resp = await client.get("/api/thing")
         assert resp.status == 405
         assert resp.content_type == "application/json"
         body = await resp.json()
         assert body["error"]["code"] == "method_not_allowed"
-        assert body["error"]["message"]  # a human sentence, not empty
-        # The router's Allow header (the methods that WOULD work) is preserved.
+        assert body["error"]["message"]
         assert resp.headers.get("Allow") == "POST"
 
 
 @pytest.mark.asyncio
 async def test_non_api_405_is_left_as_the_aiohttp_default() -> None:
-    # Off the /api surface the envelope does not apply; the default 405 stands.
     async with TestClient(TestServer(_make_app())) as client:
         resp = await client.get("/notapi/thing")
         assert resp.status == 405
@@ -53,7 +49,6 @@ async def test_non_api_405_is_left_as_the_aiohttp_default() -> None:
 
 @pytest.mark.asyncio
 async def test_api_404_still_answers_in_the_wire_envelope() -> None:
-    # The sibling 404 branch (which this fix sits beside) is unchanged.
     async with TestClient(TestServer(_make_app())) as client:
         resp = await client.get("/api/does-not-exist")
         assert resp.status == 404

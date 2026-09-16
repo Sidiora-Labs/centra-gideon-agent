@@ -2,17 +2,17 @@
 
 The defect the issue filed was a wrong default. The COST it named was different: "every
 trigger author now has to rediscover this pattern independently", and one first-party
-surface already had. Derived by AST + interprocedural taint over `src/gideon/` (a
+surface already had. Derived by AST + interprocedural taint over `runtime/gideon/` (a
 fixpoint over "which functions RETURN a tzinfo or a zone name", not a grep for one name),
 the pre-fix population was **seven** hand-rolled resolvers that did not agree:
 
-    src/gideon/triggers/arm.py:44                _trigger_tz()      → UTC
-    src/gideon/schedule.py:432                   get_local_tz()     → UTC   (!)
-    src/gideon/schedule.py:445                   _job_tz()          → UTC
-    src/gideon/triggers/calendar.py:564          _resolve_zone()    → server-local
-    src/gideon/knowledge/research_reports.py:396 _report_tz()       → UTC
-    src/gideon/knowledge/report_schedules.py:76  _effective_tz()    → "" (= UTC)
-    src/gideon/cli_setup.py:292      _detect_system_timezone()      → own /etc reader
+    runtime/gideon/automation/triggers/arm.py:44                _trigger_tz()      → UTC
+    runtime/gideon/automation/schedule.py:432                   get_local_tz()     → UTC   (!)
+    runtime/gideon/automation/schedule.py:445                   _job_tz()          → UTC
+    runtime/gideon/automation/triggers/calendar.py:564          _resolve_zone()    → server-local
+    runtime/gideon/cognition/knowledge/research_reports.py:396 _report_tz()       → UTC
+    runtime/gideon/cognition/knowledge/report_schedules.py:76  _effective_tz()    → "" (= UTC)
+    runtime/gideon/interfaces/cli/setup.py:292      _detect_system_timezone()      → own /etc reader
 
 The last two are why a name-based search is not enough: neither constructs a `ZoneInfo`, so
 neither appears in `grep -rn ZoneInfo`. `_effective_tz` was found by the taint fixpoint (it
@@ -52,19 +52,12 @@ from pathlib import Path
 
 import pytest
 
-SRC = Path(__file__).resolve().parents[1] / "src" / "gideon"
+SRC = Path(__file__).resolve().parents[2] / "runtime" / "gideon"
 
-#: The one module allowed to resolve a zone. Everything else calls into it.
 OWNER = "timezones.py"
 
-#: Filesystem paths that name the machine's zone. Matched as EXACT string constants so a
-#: docstring mentioning `/etc/localtime` (several now do, explaining this rail) is not a hit.
 MACHINE_ZONE_PATHS = frozenset({"/etc/localtime", "/etc/timezone"})
 
-#: Every module that legitimately resolves a zone — by CALLING the owner, never by
-#: reimplementing it. This is the derived owner set from the docstring above; the rail asserts
-#: each one still routes through `gideon.timezones`, so "rewired" cannot silently
-#: regress to "rewritten".
 DERIVED_CONSUMERS = (
     "triggers/arm.py",
     "schedule.py",
@@ -77,9 +70,9 @@ DERIVED_CONSUMERS = (
 
 @dataclass(frozen=True)
 class Site:
-    path: str  # relative to src/gideon
+    path: str  # relative to runtime/gideon
     line: int
-    kind: str  # "ZoneInfo" | "machine-path" | "time.tzname"
+    kind: str
     detail: str
 
     def __str__(self) -> str:  # pragma: no cover - failure output only
@@ -110,7 +103,10 @@ def zone_resolution_sites(root: Path) -> list[Site]:
         except SyntaxError:  # pragma: no cover - a parse failure is a separate problem
             continue
         for node in ast.walk(tree):
-            if isinstance(node, ast.Call) and _dotted(node.func).split(".")[-1] == "ZoneInfo":
+            if (
+                isinstance(node, ast.Call)
+                and _dotted(node.func).split(".")[-1] == "ZoneInfo"
+            ):
                 sites.append(Site(rel, node.lineno, "ZoneInfo", _dotted(node.func)))
             elif isinstance(node, ast.Attribute) and _dotted(node) == "time.tzname":
                 sites.append(Site(rel, node.lineno, "time.tzname", "time.tzname"))
@@ -119,14 +115,11 @@ def zone_resolution_sites(root: Path) -> list[Site]:
     return sites
 
 
-# ── the rail ──────────────────────────────────────────────────────────────────────────
-
-
 def test_only_the_owner_module_resolves_a_timezone():
     strays = [s for s in zone_resolution_sites(SRC) if s.path != OWNER]
     assert not strays, (
         "a second timezone resolver appeared — route it through "
-        "`gideon.timezones.resolve_zone` instead (#2520):\n  "
+        "`gideon.core.timezones.resolve_zone` instead (#2520):\n  "
         + "\n  ".join(str(s) for s in strays)
     )
 
@@ -135,7 +128,9 @@ def test_time_tzname_is_banned_everywhere_including_the_owner():
     """The gotcha the issue paid for: `time.tzname` yields `('PST', 'PDT')`, and `ZoneInfo`
     rejects both. There is no correct use of it here, so the owner gets no exemption."""
     hits = [s for s in zone_resolution_sites(SRC) if s.kind == "time.tzname"]
-    assert not hits, "time.tzname yields abbreviations ZoneInfo cannot resolve:\n  " + "\n  ".join(
+    assert (
+        not hits
+    ), "time.tzname yields abbreviations ZoneInfo cannot resolve:\n  " + "\n  ".join(
         str(s) for s in hits
     )
 
@@ -150,10 +145,13 @@ def _imports_the_owner(path: Path) -> bool:
     """
     tree = ast.parse(path.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and (node.module or "") == "gideon.timezones":
+        if (
+            isinstance(node, ast.ImportFrom)
+            and (node.module or "") == "gideon.core.timezones"
+        ):
             return True
         if isinstance(node, ast.Import) and any(
-            alias.name == "gideon.timezones" for alias in node.names
+            alias.name == "gideon.core.timezones" for alias in node.names
         ):
             return True
     return False
@@ -170,11 +168,8 @@ def test_every_derived_consumer_calls_the_owner(module):
     """
     assert _imports_the_owner(SRC / module), (
         f"{module} is a derived timezone-resolution site and must import "
-        "`gideon.timezones`; it has no import of the owner"
+        "`gideon.core.timezones`; it has no import of the owner"
     )
-
-
-# ── vacuity floor A: the scanner really reds on a planted resolver ─────────────────────
 
 
 def test_the_rail_reds_on_a_planted_zoneinfo_resolver(tmp_path):
@@ -206,14 +201,11 @@ def test_the_rail_reds_on_a_planted_time_tzname_reader(tmp_path):
 def test_the_rail_is_quiet_on_a_module_that_only_MENTIONS_the_paths(tmp_path):
     """A docstring explaining the rail must not trip it — several now do."""
     (tmp_path / "innocent.py").write_text(
-        '"""We resolve through /etc/localtime, see gideon.timezones."""\n'
+        '"""We resolve through /etc/localtime, see gideon.core.timezones."""\n'
         "\n\ndef f():\n    return 1\n",
         encoding="utf-8",
     )
     assert zone_resolution_sites(tmp_path) == []
-
-
-# ── vacuity floor B: the scan cannot be green by matching nothing ──────────────────────
 
 
 def test_the_scan_is_not_vacuous_it_finds_the_owners_own_resolutions():
@@ -225,12 +217,15 @@ def test_the_scan_is_not_vacuous_it_finds_the_owners_own_resolutions():
     """
     sites = zone_resolution_sites(SRC)
     owned = [s for s in sites if s.path == OWNER and s.kind == "ZoneInfo"]
-    assert len(owned) >= 3, f"the owner constructs zones; the scan found {len(owned)}: {sites}"
+    assert (
+        len(owned) >= 3
+    ), f"the owner constructs zones; the scan found {len(owned)}: {sites}"
 
     machine = [s for s in sites if s.path == OWNER and s.kind == "machine-path"]
-    assert len(machine) >= 2, f"the owner reads /etc/localtime AND /etc/timezone: {machine}"
+    assert (
+        len(machine) >= 2
+    ), f"the owner reads /etc/localtime AND /etc/timezone: {machine}"
 
-    # Independent mechanism — plain text, no `ast` involved.
     raw = (SRC / OWNER).read_text(encoding="utf-8")
     assert raw.count("ZoneInfo(") >= 3
     assert raw.count('"/etc/localtime"') >= 1
@@ -240,7 +235,8 @@ def test_the_scan_is_not_vacuous_it_finds_the_owners_own_resolutions():
 def test_the_scan_really_visits_the_whole_package():
     """The other way a scan goes vacuous: a wrong root, so it parses ~nothing. Counted by
     glob rather than by the parse, and floored well under the real number (1099 files at the
-    time of writing) so ordinary growth or pruning does not make this a maintenance tax."""
+    time of writing) so ordinary growth or pruning does not make this a maintenance tax.
+    """
     parsed = sum(1 for _ in SRC.rglob("*.py"))
     assert parsed >= 400, f"only {parsed} modules under {SRC} — is the root right?"
     assert (SRC / OWNER).is_file(), f"the owner module is missing from {SRC}"

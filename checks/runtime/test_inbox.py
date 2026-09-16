@@ -4,16 +4,14 @@ import json
 import time
 from unittest.mock import patch
 
-from gideon.config.loader import InboxConfig
-from gideon.inbox import (
+from gideon.core.config.loader import InboxConfig
+from gideon.integrations.inbox import (
     InboxItem,
     InboxState,
     InboxStore,
     ItemStatus,
     UserResolver,
 )
-
-# ── InboxConfig ──
 
 
 def test_inbox_config_defaults():
@@ -40,8 +38,8 @@ def test_inbox_config_loaded_from_json(tmp_path):
             }
         )
     )
-    with patch("gideon.config.loader.config_path", return_value=config_json):
-        from gideon.config.loader import AppConfig
+    with patch("gideon.core.config.loader.config_path", return_value=config_json):
+        from gideon.core.config.loader import AppConfig
 
         cfg = AppConfig.load()
     assert cfg.inbox.enabled is True
@@ -54,14 +52,11 @@ def test_inbox_config_loaded_from_json(tmp_path):
 def test_inbox_config_min_poll_interval(tmp_path):
     config_json = tmp_path / "config.json"
     config_json.write_text(json.dumps({"inbox": {"poll_interval_seconds": 5}}))
-    with patch("gideon.config.loader.config_path", return_value=config_json):
-        from gideon.config.loader import AppConfig
+    with patch("gideon.core.config.loader.config_path", return_value=config_json):
+        from gideon.core.config.loader import AppConfig
 
         cfg = AppConfig.load()
     assert cfg.inbox.poll_interval_seconds >= 30
-
-
-# ── UserResolver ──
 
 
 def test_user_resolver_cache():
@@ -82,11 +77,8 @@ def test_user_resolver_dump_load():
 
 def test_user_resolver_ttl_expired():
     resolver = UserResolver()
-    resolver._cache["U1"] = ("Alice", time.time() - 90000)  # expired
+    resolver._cache["U1"] = ("Alice", time.time() - 90000)
     assert resolver.get_cached("U1") is None
-
-
-# ── InboxState ──
 
 
 def test_state_save_load(tmp_path):
@@ -109,11 +101,8 @@ def test_state_save_load(tmp_path):
 
 def test_state_load_missing_file(tmp_path):
     state = InboxState(tmp_path / "nope.json")
-    state.load()  # should not raise
+    state.load()
     assert state.last_read_ts == {}
-
-
-# ── InboxItem ──
 
 
 def test_item_roundtrip():
@@ -134,9 +123,6 @@ def test_item_roundtrip():
     assert item2.status == ItemStatus.PENDING
 
 
-# ── InboxStore ──
-
-
 def test_inbox_add_and_pending(tmp_path):
     inbox = InboxStore(tmp_path / "inbox.json")
     item = InboxItem(
@@ -151,7 +137,6 @@ def test_inbox_add_and_pending(tmp_path):
     )
     inbox.add(item)
     assert len(inbox.pending()) == 1
-    # add() marks dirty but doesn't save yet
     assert inbox._dirty is True
     assert not (tmp_path / "inbox.json").exists()
 
@@ -177,7 +162,7 @@ def test_inbox_flush_saves(tmp_path):
 
 def test_inbox_flush_noop_when_clean(tmp_path):
     inbox = InboxStore(tmp_path / "inbox.json")
-    inbox.flush()  # nothing to save
+    inbox.flush()
     assert not (tmp_path / "inbox.json").exists()
 
 
@@ -236,13 +221,9 @@ def test_inbox_cleanup_by_retention(tmp_path):
     assert removed == 1
     assert "C1_old" not in inbox.items
     assert "agent_new" in inbox.items
-    # persisted
     inbox2 = InboxStore(tmp_path / "inbox.json")
     inbox2.load()
     assert "C1_old" not in inbox2.items
-
-
-# ── Alert evaluation ──
 
 
 def test_evaluate_alert_reads_the_notification_rule(tmp_path, monkeypatch):
@@ -252,8 +233,8 @@ def test_evaluate_alert_reads_the_notification_rule(tmp_path, monkeypatch):
     but sourced from `notification_rules.json` so the identical escalation is expressible
     for every notification kind — that generalization is the whole point of S3.
     """
-    from gideon import notification_rules as nr
-    from gideon.inbox import evaluate_alert
+    from gideon.integrations.inbox import evaluate_alert
+    from gideon.workspace import notification_rules as nr
 
     (tmp_path / "entity_settings").mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(nr, "config_dir", lambda: tmp_path)
@@ -264,7 +245,10 @@ def test_evaluate_alert_reads_the_notification_rule(tmp_path, monkeypatch):
                 "rules": {
                     "inbox/alert": {
                         "mode": "immediate",
-                        "conditions": {"keywords": list(keywords), "name_mention": name_mention},
+                        "conditions": {
+                            "keywords": list(keywords),
+                            "name_mention": name_mention,
+                        },
                     }
                 }
             }
@@ -287,26 +271,24 @@ def test_evaluate_alert_reads_the_notification_rule(tmp_path, monkeypatch):
     rule(keywords=["nomatch"])
     assert evaluate_alert(item("this is URGENT: prod is down")) == ""
 
-    # Full configured name, message uses one part → still fires (word-boundary match per
-    # name part, short particles skipped).
     rule(name_mention=True)
-    assert evaluate_alert(item("hey Marlow can you look?"), "Jordan Marlow") == "name mention"
-    # A substring inside another word must NOT fire.
+    assert (
+        evaluate_alert(item("hey Marlow can you look?"), "Jordan Marlow")
+        == "name mention"
+    )
     assert evaluate_alert(item("the marlowe novel arrived"), "Marlow") == ""
-    # No name configured → nothing to match.
     assert evaluate_alert(item("hey Marlow"), "") == ""
 
     rule(name_mention=False)
     assert evaluate_alert(item("hey Marlow can you look?"), "marlow") == ""
 
-    # No rules file at all: no conditions ⇒ no alerts, and no crash.
     (tmp_path / "entity_settings" / "notification_rules.json").unlink()
     assert evaluate_alert(item("this is URGENT")) == ""
 
 
 def test_evaluate_alert_ignores_an_empty_message(tmp_path, monkeypatch):
-    from gideon import notification_rules as nr
-    from gideon.inbox import evaluate_alert
+    from gideon.integrations.inbox import evaluate_alert
+    from gideon.workspace import notification_rules as nr
 
     (tmp_path / "entity_settings").mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(nr, "config_dir", lambda: tmp_path)
@@ -326,7 +308,7 @@ def test_evaluate_alert_ignores_an_empty_message(tmp_path, monkeypatch):
 def test_notify_inbox_alert_redacts_and_notifies():
     from unittest.mock import MagicMock
 
-    from gideon.inbox import notify_inbox_alert
+    from gideon.integrations.inbox import notify_inbox_alert
 
     item = InboxItem(
         id="C1_3",
@@ -344,7 +326,7 @@ def test_notify_inbox_alert_redacts_and_notifies():
     assert kind == "inbox_alert"
     assert "Alice" in title and "#general" in title
     assert "keyword: urgent" in body
-    notify_inbox_alert(None, item, "x")  # headless → no raise
+    notify_inbox_alert(None, item, "x")
 
 
 def test_inbox_save_load(tmp_path):

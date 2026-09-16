@@ -2,15 +2,15 @@
 
 `gideon.sdk.*` is the ONLY import path an app is allowed to use, and every sdk
 module's docstring makes the same promise: core can move its internals without breaking
-apps. `sdk/channel.py` broke that promise in the most literal way available —
+apps. `packages/python-client/channel.py` broke that promise in the most literal way available —
 
-    from gideon.dashboard.chat import _run_chat, _save_session_to_history
+    from gideon.interfaces.dashboard.chat import _run_chat, _save_session_to_history
 
 — two underscore-prefixed core internals on a versioned surface, resolvable at runtime and
 imported by three bundled channel apps. A name whose spelling says "private, may change
 without notice" cannot also be a contract, so one of the two claims had to give.
 
-`sdk/channel.py` was also the only sdk module with no `__all__`, which is not a
+`packages/python-client/channel.py` was also the only sdk module with no `__all__`, which is not a
 coincidence: with 45 scattered `# noqa: F401` suppressions and no declared surface, there
 was nowhere for a reviewer to notice the leak. Both halves are asserted here — no private
 re-exports, and every module says what it publishes — because either one alone leaves the
@@ -24,7 +24,7 @@ import pathlib
 
 import pytest
 
-SDK = pathlib.Path(__file__).resolve().parent.parent / "src/gideon/sdk"
+SDK = pathlib.Path(__file__).resolve().parent.parent.parent / "runtime/gideon/sdk"
 
 
 def _modules() -> list[pathlib.Path]:
@@ -44,7 +44,9 @@ def _reexported(path: pathlib.Path) -> list[str]:
 def test_no_sdk_module_reexports_a_private_name():
     """The defect: `_run_chat` and `_save_session_to_history` on the app surface."""
     leaked = {
-        p.name: [n for n in _reexported(p) if n.startswith("_") and not n.startswith("__")]
+        p.name: [
+            n for n in _reexported(p) if n.startswith("_") and not n.startswith("__")
+        ]
         for p in _modules()
     }
     leaked = {k: v for k, v in leaked.items() if v}
@@ -61,7 +63,9 @@ def test_the_scan_is_not_vacuous():
     mods = _modules()
     assert len(mods) >= 20, f"the sdk module scan found only {len(mods)} files"
     total = sum(len(_reexported(p)) for p in mods)
-    assert total >= 200, f"the re-export scan found only {total} names — it is not reading"
+    assert (
+        total >= 200
+    ), f"the re-export scan found only {total} names — it is not reading"
 
 
 def test_the_scan_can_actually_fail(tmp_path):
@@ -72,7 +76,7 @@ def test_the_scan_can_actually_fail(tmp_path):
     """
     probe = tmp_path / "leaky.py"
     probe.write_text(
-        "from gideon.dashboard.chat import _run_chat, _save_session_to_history\n",
+        "from gideon.interfaces.dashboard.chat import _run_chat, _save_session_to_history\n",
         encoding="utf-8",
     )
     found = [n for n in _reexported(probe) if n.startswith("_")]
@@ -117,8 +121,12 @@ def test_channel_declares_every_name_it_reexports():
 
     declared = set(channel.__all__)
     actual = set(_reexported(SDK / "channel.py"))
-    assert not (actual - declared), f"re-exported but undeclared: {sorted(actual - declared)}"
-    assert not (declared - actual), f"declared but not re-exported: {sorted(declared - actual)}"
+    assert not (
+        actual - declared
+    ), f"re-exported but undeclared: {sorted(actual - declared)}"
+    assert not (
+        declared - actual
+    ), f"declared but not re-exported: {sorted(declared - actual)}"
 
 
 @pytest.mark.parametrize("name", ["save_session_to_history"])
@@ -131,14 +139,18 @@ def test_the_promoted_names_resolve_and_the_private_ones_are_gone(name):
 
     `run_chat` was promoted here by the same change and is STILL on the facade. EA-7 wants
     it gone — it is a second route past the sender-trust gate, and the chokepoint
-    (`gideon.channel_inbound`) is only a chokepoint if it is the only route — but four
+    (`gideon.integrations.channel_inbound`) is only a chokepoint if it is the only route — but four
     shipping channel apps import it from this path, and the apps repo cannot land
     atomically with core, so the removal is sequenced after they migrate. That gap is
-    asserted deliberately in `tests/test_channel_inbound_chokepoint.py`, not here: this test
+    asserted deliberately in `checks/runtime/test_channel_inbound_chokepoint.py`, not here: this test
     is about the underscore-alias clean break, and a name whose export is on its way out
     would make the parametrize mean two different things at once.
     """
     from gideon.sdk import channel
 
-    assert callable(getattr(channel, name)), f"{name} is not importable from the sdk facade"
-    assert not hasattr(channel, f"_{name}"), f"_{name} is still exported alongside {name}"
+    assert callable(
+        getattr(channel, name)
+    ), f"{name} is not importable from the sdk facade"
+    assert not hasattr(
+        channel, f"_{name}"
+    ), f"_{name} is still exported alongside {name}"

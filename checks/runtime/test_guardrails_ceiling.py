@@ -18,8 +18,9 @@ import json
 
 import pytest
 
-from gideon.guardrails import ceiling as C
-from gideon.guardrails.policy import (
+from gideon.engine.trigger_dispatch import TriggerDispatch
+from gideon.security.guardrails import ceiling as C
+from gideon.security.guardrails.policy import (
     HEADLESS,
     INTERACTIVE,
     SafetyProfile,
@@ -39,31 +40,32 @@ def _write_ceiling(tmp_path, scopes: dict) -> None:
 @pytest.fixture()
 def home(tmp_path, monkeypatch):
     """An isolated Gideon home for every ceiling read (never the real one)."""
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     monkeypatch.delenv(C.CEILING_PATH_ENV, raising=False)
     C.reset_ceiling()
     return tmp_path
 
 
-# ── 1. a profile cannot widen the ceiling — one test per archetype ────────────
-
-
 def test_ordinal_archetype_cannot_be_widened():
     """OrdinalControl composes strictest-of, in BOTH directions."""
     ceiling = C.parse_ceiling({"scopes": {"approval": {"value": "ask"}}})
-    # A profile asking for the loosest value on the scale gets the ceiling's value.
     widest = SafetyProfile(name="w", approval="auto")
     assert C.resolve(ceiling, widest).approval == "ask"
-    # A profile that is ALREADY stricter keeps its own value (the profile may narrow).
     loose_ceiling = C.parse_ceiling({"scopes": {"approval": {"value": "auto"}}})
-    assert C.resolve(loose_ceiling, SafetyProfile(name="s", approval="ask")).approval == "ask"
-    # And the same holds for every other ordinal scope, so this is a property of the
-    # ARCHETYPE and not of one field.
+    assert (
+        C.resolve(loose_ceiling, SafetyProfile(name="s", approval="ask")).approval
+        == "ask"
+    )
     egress = C.parse_ceiling({"scopes": {"egress": {"value": "off"}}})
-    assert C.resolve(egress, SafetyProfile(name="w", egress_tier="all")).egress_tier == "off"
+    assert (
+        C.resolve(egress, SafetyProfile(name="w", egress_tier="all")).egress_tier
+        == "off"
+    )
     scan = C.parse_ceiling({"scopes": {"scan": {"value": "block"}}})
-    assert C.resolve(scan, SafetyProfile(name="w", scan_mode="warn")).scan_mode == "block"
+    assert (
+        C.resolve(scan, SafetyProfile(name="w", scan_mode="warn")).scan_mode == "block"
+    )
 
 
 def test_ruleset_archetype_cannot_be_widened():
@@ -82,20 +84,19 @@ def test_ruleset_archetype_cannot_be_widened():
     )
     attempt = SafetyProfile(
         name="w",
-        # A profile trying to escape confinement AND to drop the ceiling's deny by
-        # simply not mentioning it.
         path_allowlist=("/etc/**", "~/ws/src/**"),
         denylist_extra=(),
     )
     out = C.resolve(ceiling, attempt)
     assert "/etc/**" not in out.path_allowlist, "a profile widened the confinement"
-    assert out.path_allowlist == ("~/ws/src/**",), "a NARROWER profile entry must survive"
+    assert out.path_allowlist == (
+        "~/ws/src/**",
+    ), "a NARROWER profile entry must survive"
     assert "**/.env*" in out.denylist_extra, "a profile dropped a ceiling deny"
-    # An empty profile allow-list means "no restriction from me" — it must not empty the
-    # intersection, which would silently brick every path.
     assert C.resolve(ceiling, SafetyProfile(name="p")).path_allowlist == ("~/ws/**",)
-    # A profile deny the ceiling never mentioned is KEPT (narrowing is always allowed).
-    extra = C.resolve(ceiling, SafetyProfile(name="p", denylist_extra=("**/secret.txt",)))
+    extra = C.resolve(
+        ceiling, SafetyProfile(name="p", denylist_extra=("**/secret.txt",))
+    )
     assert set(extra.denylist_extra) == {"**/.env*", "**/secret.txt"}
 
 
@@ -104,31 +105,37 @@ def test_gate_archetype_cannot_be_widened():
     ceiling = C.parse_ceiling({"scopes": {"tools": {"enabled": False}}})
     attempt = SafetyProfile(name="w", tool_grants="read_write")
     assert C.resolve(ceiling, attempt).tool_grants == "read"
-    # An enabled ceiling does not GRANT write to a read-only profile either — AND, not OR.
     open_ceiling = C.parse_ceiling({"scopes": {"tools": {"enabled": True}}})
     assert (
-        C.resolve(open_ceiling, SafetyProfile(name="r", tool_grants="read")).tool_grants == "read"
+        C.resolve(open_ceiling, SafetyProfile(name="r", tool_grants="read")).tool_grants
+        == "read"
     )
-    # The nested ruleset intersects: a tool the ceiling never allowed cannot be added.
     scoped = C.parse_ceiling({"scopes": {"tools": {"allow": ["read_*"]}}})
-    out = C.resolve(scoped, SafetyProfile(name="w", tool_allowlist=("read_file", "bash")))
+    out = C.resolve(
+        scoped, SafetyProfile(name="w", tool_allowlist=("read_file", "bash"))
+    )
     assert out.tool_allowlist == ("read_file",) and out.tool_grants == "custom"
 
 
 def test_map_archetype_cannot_be_widened():
     """ScopedMap: per-key tightest-wins, with 0 meaning unlimited (so 0 never wins)."""
-    from gideon.guardrails.budgets import Budget
+    from gideon.security.guardrails.budgets import Budget
 
-    ceiling = C.parse_ceiling({"scopes": {"budget": {"max_tokens": 1000, "max_dollars": 1.0}}})
-    attempt = SafetyProfile(name="w", budget=Budget(max_tokens=10_000_000, max_dollars=0.0))
+    ceiling = C.parse_ceiling(
+        {"scopes": {"budget": {"max_tokens": 1000, "max_dollars": 1.0}}}
+    )
+    attempt = SafetyProfile(
+        name="w", budget=Budget(max_tokens=10_000_000, max_dollars=0.0)
+    )
     out = C.resolve(ceiling, attempt)
     assert out.budget.max_tokens == 1000, "a profile raised a token cap"
     assert out.budget.max_dollars == 1.0, "unlimited (0) must lose to a real cap"
-    # A tighter profile cap survives.
     tighter = SafetyProfile(name="t", budget=Budget(max_tokens=10, max_dollars=0.5))
     tight_out = C.resolve(ceiling, tighter)
     assert tight_out.budget.max_tokens == 10 and tight_out.budget.max_dollars == 0.5
-    assert isinstance(tight_out.budget.max_tokens, int), "the meter compares against int tokens"
+    assert isinstance(
+        tight_out.budget.max_tokens, int
+    ), "the meter compares against int tokens"
 
 
 def test_every_archetype_has_a_compose_function_and_a_scope():
@@ -155,12 +162,11 @@ def test_resolution_dispatches_on_archetype_not_scope_name():
         value_field="scan_mode",
     )
     control = C._PARSE[spec.archetype](spec, {"value": "block"})
-    from_profile = C._FROM_PROFILE[spec.archetype](spec, SafetyProfile(name="p", scan_mode="warn"))
+    from_profile = C._FROM_PROFILE[spec.archetype](
+        spec, SafetyProfile(name="p", scan_mode="warn")
+    )
     composed = C._COMPOSE[spec.archetype](control, from_profile)
     assert C._TO_OVERRIDES[spec.archetype](spec, composed) == {"scan_mode": "block"}
-
-
-# ── 2. fail-closed boot ───────────────────────────────────────────────────────
 
 
 def _assert_what_why_fix(exc: pytest.ExceptionInfo) -> None:
@@ -171,7 +177,9 @@ def _assert_what_why_fix(exc: pytest.ExceptionInfo) -> None:
 
 def test_unknown_matcher_aborts_governance_boot(home):
     """done_when: an unknown matcher aborts boot with a WHAT/WHY/FIX error."""
-    _write_ceiling(home, {"paths": {"deny": ["/etc/**"], "matcher": "regex_i_invented"}})
+    _write_ceiling(
+        home, {"paths": {"deny": ["/etc/**"], "matcher": "regex_i_invented"}}
+    )
     with pytest.raises(C.GovernanceBootError) as exc:
         C.ensure_governance_boot()
     _assert_what_why_fix(exc)
@@ -273,18 +281,16 @@ def test_ceiling_is_read_once_so_a_mid_run_edit_cannot_widen(home):
     _write_ceiling(home, {"approval": {"value": "ask"}})
     assert C.ensure_governance_boot().control("approval").value == "ask"
     path = home / "governance" / "ceiling.json"
-    path.write_text(json.dumps({"version": 1, "scopes": {"approval": {"value": "auto"}}}))
-    # No reset — this is what a running gateway sees.
+    path.write_text(
+        json.dumps({"version": 1, "scopes": {"approval": {"value": "auto"}}})
+    )
     assert C.active_ceiling().control("approval").value == "ask"
     assert profile_for_session("cron:x").approval == "ask"
 
 
-# ── 3. the ceiling is operator-owned, not agent-owned ────────────────────────
-
-
 def test_ceiling_has_no_config_patch_surface():
     """It is not config: nothing in the dashboard's PATCH allowlist can reach it."""
-    from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+    from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
     flat = json.dumps(_EDITABLE_CONFIG, default=str)
     assert "ceiling" not in flat and "governance" not in flat
@@ -293,14 +299,14 @@ def test_ceiling_has_no_config_patch_surface():
 def test_ceiling_path_is_refused_by_the_agent_path_checks():
     """``governance/`` is in the built-in sensitive-path denylist, so every agent-reachable
     path check (action denylist, files area, bash hooks) refuses it."""
-    from gideon.security import is_sensitive_path
+    from gideon.security.security import is_sensitive_path
 
     assert is_sensitive_path("~/.gideon/governance/ceiling.json")
     assert is_sensitive_path("~/.gideon/governance")
 
 
 def test_action_denylist_refuses_to_write_the_ceiling():
-    from gideon.guardrails.denylist import check_action
+    from gideon.security.guardrails.denylist import check_action
 
     d = check_action("bash", {"path": "~/.gideon/governance/ceiling.json"})
     assert d.blocked and d.matched == "builtin:sensitive_path"
@@ -324,24 +330,20 @@ def test_ceiling_path_is_not_frozen_at_import_time(home):
     assert C.ceiling_path() == home / "governance" / "ceiling.json"
 
 
-# ── 4. live readers: the seams resolve through the ceiling ────────────────────
-
-
 def test_profile_for_session_composes_the_ceiling(home):
     """One composition site, every seam: ``profile_for_session`` is what the rung router,
     the denylist, the approval pick and the egress plane all call."""
-    assert profile_for_session("cron:x").approval == "hook_based"  # HEADLESS, unbounded
+    assert profile_for_session("cron:x").approval == "hook_based"
     _write_ceiling(home, {"approval": {"value": "ask"}, "scan": {"value": "block"}})
     bounded = profile_for_session("cron:x")
     assert bounded.approval == "ask" and bounded.scan_mode == "block"
-    # ...and an interactive session is bounded by the same machine-wide ceiling.
     assert profile_for_session("chat-1").approval == "ask"
 
 
 def test_unattended_dispatch_key_resolves_headless():
     """A sessionless dispatch (a trigger/hook fire) is unattended by construction — the
     seams passed "" before, which classified as ATTENDED and resolved INTERACTIVE."""
-    from gideon.guardrails.policy import is_unattended_session
+    from gideon.security.guardrails.policy import is_unattended_session
 
     key = unattended_dispatch_key("trigger:t1")
     assert is_unattended_session(key)
@@ -352,7 +354,7 @@ def test_unattended_dispatch_key_resolves_headless():
 def test_denylist_confinement_is_a_live_reader(home):
     """The ceiling's ``paths`` allow plane bites at the action denylist — the seam a hook
     and an event trigger both dispatch through."""
-    from gideon.guardrails.denylist import check_action
+    from gideon.security.guardrails.denylist import check_action
 
     _write_ceiling(home, {"paths": {"mode": "closed", "allow": ["/srv/allowed/**"]}})
     key = unattended_dispatch_key("trigger:t1")
@@ -365,8 +367,8 @@ def test_denylist_confinement_is_a_live_reader(home):
 def test_rung_router_narrows_under_the_ceiling(home):
     """The rung route reads the composed profile, so a ceiling of ``ask`` pulls an
     autonomous action type down to a route that keeps a human in the loop."""
-    from gideon.guardrails.autonomy import ActionTypeSpec, register_action_type
-    from gideon.guardrails.rungs import route_provider_action
+    from gideon.security.guardrails.autonomy import ActionTypeSpec, register_action_type
+    from gideon.security.guardrails.rungs import route_provider_action
 
     register_action_type(
         ActionTypeSpec(
@@ -377,15 +379,17 @@ def test_rung_router_narrows_under_the_ceiling(home):
         )
     )
     key = unattended_dispatch_key("trigger:t1")
-    assert route_provider_action("ceiling-probe", session_key=key).rung == "auto_with_undo"
+    assert (
+        route_provider_action("ceiling-probe", session_key=key).rung == "auto_with_undo"
+    )
     _write_ceiling(home, {"approval": {"value": "ask"}})
     route = route_provider_action("ceiling-probe", session_key=key)
     assert route.rung == "autonomous", "an 'ask' ceiling leaves the type's own ceiling"
 
 
 def test_approval_pick_reads_the_ceiling(home):
-    from gideon.guardrails.policy import approval_policy_for_session
-    from gideon.llm_helpers import ToolApprovalPolicy
+    from gideon.integrations.llm_helpers import ToolApprovalPolicy
+    from gideon.security.guardrails.policy import approval_policy_for_session
 
     _write_ceiling(home, {"approval": {"value": "ask"}})
     assert approval_policy_for_session("cron:x") is ToolApprovalPolicy.HOOK_BASED
@@ -394,7 +398,7 @@ def test_approval_pick_reads_the_ceiling(home):
 def test_spawn_grant_is_refused_by_the_ceiling(home):
     """The five widening branches in ``subagent._run_inner`` can only set "auto"; the
     ceiling is what can refuse it."""
-    from gideon.guardrails.policy import ceiling_permits_approval
+    from gideon.security.guardrails.policy import ceiling_permits_approval
 
     assert ceiling_permits_approval("auto") is True
     _write_ceiling(home, {"approval": {"value": "ask"}})
@@ -408,18 +412,17 @@ def test_spawn_call_site_consults_the_ceiling():
     import inspect
     import textwrap
 
-    import gideon.subagent as subagent
+    import gideon.engine.subagent as subagent
 
-    tree = ast.parse(textwrap.dedent(inspect.getsource(subagent.SubagentManager._run_inner)))
+    tree = ast.parse(
+        textwrap.dedent(inspect.getsource(subagent.DelegationSupervisor._run_inner))
+    )
     called = {
         node.func.id
         for node in ast.walk(tree)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
     }
     assert "ceiling_permits_approval" in called
-
-
-# ── done_when 4/5: drive a REAL unattended trigger, not a constructed object ──
 
 
 def _fire_a_real_event_trigger(tmp_path, monkeypatch, action_config: dict):
@@ -431,7 +434,7 @@ def _fire_a_real_event_trigger(tmp_path, monkeypatch, action_config: dict):
     """
     import asyncio
 
-    from gideon.event_triggers import (
+    from gideon.automation.event_triggers import (
         MEMORY_KEY_PATTERN,
         SOURCE_MEMORY,
         EventTrigger,
@@ -445,7 +448,10 @@ def _fire_a_real_event_trigger(tmp_path, monkeypatch, action_config: dict):
         async def execute(self, cfg, ctx, timeout=30):
             executed.append(dict(cfg))
 
-    monkeypatch.setattr("gideon.action_providers.get_action_provider", lambda n: _Provider())
+    monkeypatch.setattr(
+        "gideon.integrations.action_providers.get_action_provider",
+        lambda n: _Provider(),
+    )
     store = EventTriggerStore(path=tmp_path / "event_triggers.json")
     store.upsert(
         EventTrigger(
@@ -460,7 +466,9 @@ def _fire_a_real_event_trigger(tmp_path, monkeypatch, action_config: dict):
     engine = EventTriggerEngine(store=store)
 
     async def go():
-        engine.on_event(source=SOURCE_MEMORY, event_type="create", key="x.y", value="v", now=10.0)
+        engine.on_event(
+            source=SOURCE_MEMORY, event_type="create", key="x.y", value="v", now=10.0
+        )
         await asyncio.sleep(0.05)
 
     asyncio.run(go())
@@ -471,7 +479,7 @@ def test_a_real_unattended_trigger_resolves_through_headless(home, monkeypatch):
     """done_when: "a real unattended trigger resolves through the headless profile with a
     live reader". The spy delegates to the real resolver, so this asserts WHAT THE SEAM
     ASKED — the defect was that it asked with "" and got INTERACTIVE."""
-    import gideon.guardrails.policy as policy_mod
+    import gideon.security.guardrails.policy as policy_mod
 
     asked: list[str] = []
     real = policy_mod.profile_for_session
@@ -498,11 +506,13 @@ def test_a_narrower_ceiling_bites_a_real_trigger_fire(home, monkeypatch):
         def log_api_access(self, **kw):
             rows.append(kw)
 
-    import gideon.sel as sel_mod
+    import gideon.security.sel as sel_mod
 
     monkeypatch.setattr(sel_mod, "sel", lambda: _Sel())
     _write_ceiling(home, {"paths": {"mode": "closed", "allow": ["/srv/allowed/**"]}})
-    executed = _fire_a_real_event_trigger(home, monkeypatch, {"path": "/srv/elsewhere/x.txt"})
+    executed = _fire_a_real_event_trigger(
+        home, monkeypatch, {"path": "/srv/elsewhere/x.txt"}
+    )
 
     assert executed == [], "the ceiling did not bite — the action ran anyway"
     denials = [r for r in rows if r.get("operation") == "guardrails.denylist"]
@@ -514,7 +524,9 @@ def test_the_same_fire_is_allowed_inside_the_confinement(home, monkeypatch):
     """The confinement is a bound, not a brick: an in-scope path still fires. Without this
     the test above would pass for an implementation that blocks everything."""
     _write_ceiling(home, {"paths": {"mode": "closed", "allow": ["/srv/allowed/**"]}})
-    executed = _fire_a_real_event_trigger(home, monkeypatch, {"path": "/srv/allowed/x.txt"})
+    executed = _fire_a_real_event_trigger(
+        home, monkeypatch, {"path": "/srv/allowed/x.txt"}
+    )
     assert executed and executed[0]["path"] == "/srv/allowed/x.txt"
 
 
@@ -526,11 +538,9 @@ def test_the_gateway_trigger_seam_passes_an_unattended_identity():
     import inspect
     import textwrap
 
-    from gideon.gateway import GatewayOrchestrator
+    from gideon.engine.gateway import RuntimeCoordinator
 
-    # Parsed, not grepped: the comment above the call QUOTES the old `session_key=""` it
-    # replaced, so a substring check trips on the code's own prose.
-    tree = ast.parse(textwrap.dedent(inspect.getsource(GatewayOrchestrator._fire_store_trigger)))
+    tree = ast.parse(textwrap.dedent(inspect.getsource(TriggerDispatch.authorize)))
     session_kwargs = [
         kw.value
         for node in ast.walk(tree)
@@ -550,35 +560,34 @@ def test_the_gateway_trigger_seam_passes_an_unattended_identity():
     }
 
 
-# ── egress: the tier finally has a production reader ─────────────────────────
-
-
 def test_egress_policy_for_profile_narrows_and_never_widens():
-    from gideon.net.policy import CONNECTOR, STRICT, egress_policy_for_profile
+    from gideon.security.net.policy import CONNECTOR, STRICT, egress_policy_for_profile
 
     assert egress_policy_for_profile(STRICT, "off") is None
     assert egress_policy_for_profile(STRICT, "all") is STRICT
     registry = egress_policy_for_profile(CONNECTOR, "registry")
     assert registry.allow_only and "pypi.org" in registry.allow_hosts
-    # The tier must not RAISE the surface's caps: CONNECTOR's 10MB survives REGISTRY's 100MB.
     assert registry.max_bytes == CONNECTOR.max_bytes
     assert registry.timeout_s == min(CONNECTOR.timeout_s, 60.0)
-    # A surface's own allow-listed host survives the narrowing.
     homelab = STRICT.with_overrides(allow_hosts=("lab.local",))
     listed = egress_policy_for_profile(homelab, "listed")
     assert listed.allow_only and listed.allow_hosts == ("lab.local",)
 
 
 def test_guard_enforces_the_exclusive_allow_list():
-    from gideon.net.guard import evaluate
-    from gideon.net.policy import egress_policy_for_profile
+    from gideon.security.net.guard import evaluate
+    from gideon.security.net.policy import egress_policy_for_profile
 
     policy = egress_policy_for_profile(
-        __import__("gideon.net.policy", fromlist=["STRICT"]).STRICT, "registry"
+        __import__("gideon.security.net.policy", fromlist=["STRICT"]).STRICT, "registry"
     )
-    denied = evaluate("https://example.com/x", policy, resolver=lambda h: ["93.184.216.34"])
+    denied = evaluate(
+        "https://example.com/x", policy, resolver=lambda h: ["93.184.216.34"]
+    )
     assert not denied.allow and "allow-list" in denied.reason
-    allowed = evaluate("https://pypi.org/simple", policy, resolver=lambda h: ["151.101.0.223"])
+    allowed = evaluate(
+        "https://pypi.org/simple", policy, resolver=lambda h: ["151.101.0.223"]
+    )
     assert allowed.allow
 
 
@@ -586,7 +595,7 @@ def test_guard_enforces_the_exclusive_allow_list():
 async def test_web_fetch_refuses_when_the_ceiling_turns_egress_off(home):
     """The agent's primary fetch surface reads the tier — ``egress_tier`` had NO reader at
     all before this, so "headless by construction" held only in tests."""
-    from gideon.web.fetch import web_fetch
+    from gideon.integrations.web.fetch import web_fetch
 
     _write_ceiling(home, {"egress": {"value": "off"}})
     outcome = await web_fetch(
@@ -597,7 +606,7 @@ async def test_web_fetch_refuses_when_the_ceiling_turns_egress_off(home):
 
 @pytest.mark.asyncio
 async def test_web_fetch_narrows_to_the_ceilings_allow_list(home, monkeypatch):
-    from gideon.web import fetch as fetch_mod
+    from gideon.integrations.web import fetch as fetch_mod
 
     _write_ceiling(home, {"egress": {"value": "listed"}})
     seen: dict[str, object] = {}
@@ -606,20 +615,21 @@ async def test_web_fetch_narrows_to_the_ceilings_allow_list(home, monkeypatch):
         seen["policy"] = policy
         raise RuntimeError("stop here — the policy is the assertion")
 
-    # `net_fetch` is bound at import in web/fetch.py, so that name is the seam.
     monkeypatch.setattr(fetch_mod, "net_fetch", _fake_fetch)
     await fetch_mod.web_fetch(
         "https://example.com/x", session_key="cron:x", require_provenance=False
     )
     policy = seen.get("policy")
     assert policy is not None and policy.allow_only is True
-    assert policy.allow_hosts == (), "an empty operator allow-list means nothing is reachable"
+    assert (
+        policy.allow_hosts == ()
+    ), "an empty operator allow-list means nothing is reachable"
 
 
 def test_web_poll_resolves_its_egress_through_the_profile(home):
     """The watched-source poll hardcoded ``STRICT``, so an operator's ``deny_hosts`` never
     reached the headless tier and the run's tier reached nothing."""
-    from gideon.triggers import web_poll
+    from gideon.automation.triggers import web_poll
 
     assert web_poll._poll_egress_policy("t1").name == "source"
     _write_ceiling(home, {"egress": {"value": "off"}})
@@ -631,7 +641,7 @@ def test_web_poll_resolves_its_egress_through_the_profile(home):
 
 def test_poll_refuses_visibly_when_egress_is_off(home, tmp_path):
     """A refusal must be a REASON on the ledger row, not a silent skip."""
-    from gideon.triggers import web_poll
+    from gideon.automation.triggers import web_poll
 
     _write_ceiling(home, {"egress": {"value": "off"}})
 
@@ -642,9 +652,6 @@ def test_poll_refuses_visibly_when_egress_is_off(home, tmp_path):
     out = web_poll.poll_one(_T(), now=1_000_000.0, base_dir=tmp_path / "state")
     assert out.payload is None and "denies all network egress" in out.reason
     assert not out.fetched, "the refusal happens BEFORE a request is spent"
-
-
-# ── observability: a clamp is never silent ───────────────────────────────────
 
 
 def test_a_clamp_is_logged_and_sel_audited(home, caplog):
@@ -658,7 +665,7 @@ def test_a_clamp_is_logged_and_sel_audited(home, caplog):
         def log_api_access(self, **kw):
             rows.append(kw)
 
-    import gideon.sel as sel_mod
+    import gideon.security.sel as sel_mod
 
     original = sel_mod.sel
     sel_mod.sel = lambda: _Sel()
@@ -683,7 +690,7 @@ def test_boot_sel_audits_the_resolved_source(home):
         def log_api_access(self, **kw):
             rows.append(kw)
 
-    import gideon.sel as sel_mod
+    import gideon.security.sel as sel_mod
 
     original = sel_mod.sel
     sel_mod.sel = lambda: _Sel()
@@ -702,17 +709,16 @@ def test_gateway_boot_calls_governance_first():
     import ast
     import inspect
 
-    from gideon.gateway import GatewayOrchestrator
+    from gideon.engine.gateway import RuntimeCoordinator
 
-    src = inspect.getsource(GatewayOrchestrator.run)
+    src = inspect.getsource(RuntimeCoordinator.run)
     tree = ast.parse(src.lstrip())
-    body = tree.body[0].body  # the function's statements, docstring first
+    body = tree.body[0].body
     called_names: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
             called_names.append(node.func.id)
     assert "ensure_governance_boot" in called_names
-    # It is the first executable statement group: the import + call precede _init_services.
     first_calls = [
         n.func.id
         for stmt in body[:4]

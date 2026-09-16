@@ -34,10 +34,10 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import make_mocked_request
 
-from gideon.dashboard.handlers import knowledge as H
-from gideon.knowledge.artifact_ingest import ARTIFACT_ITEM_TYPE
-from gideon.knowledge.semantics import DEFAULT_LIST_EXCLUDED_KINDS
-from gideon.knowledge.store import KnowledgeStore
+from gideon.cognition.knowledge.artifact_ingest import ARTIFACT_ITEM_TYPE
+from gideon.cognition.knowledge.semantics import DEFAULT_LIST_EXCLUDED_KINDS
+from gideon.cognition.knowledge.store import KnowledgeStore
+from gideon.interfaces.dashboard.handlers import knowledge as H
 
 
 @pytest.fixture()
@@ -58,7 +58,9 @@ def _home(store, query: str = ""):
 
 
 def _item(store, title: str, **fields) -> str:
-    iid = store.create_typed_item(item_type="note", title=title, content=f"body of {title}")
+    iid = store.create_typed_item(
+        item_type="note", title=title, content=f"body of {title}"
+    )
     if fields:
         store.update_item(iid, touch=False, **fields)
     return iid
@@ -68,23 +70,19 @@ def _titles(rows) -> list[str]:
     return [r["title"] for r in rows]
 
 
-# ── The call site: is the route reachable at all? ─────────────────────────────
-
-
 def test_the_library_home_route_is_registered_on_the_real_route_table():
     """A handler nothing routes to is a handler nobody can call. The bogus path is the
-    vacuity guard: without it a broken `canonical` read would pass this test trivially."""
+    vacuity guard: without it a broken `canonical` read would pass this test trivially.
+    """
     app = web.Application()
     H.setup_knowledge_routes(app)
     routes = {(r.method, str(r.resource.canonical)) for r in app.router.routes()}
     assert ("GET", "/api/knowledge/library-home") in routes
     assert ("GET", "/api/knowledge/library-home-nope") not in routes
-    # It is a READ. `add_get` also registers HEAD; any WRITE verb here would be a different
-    # review, so the rail names the two allowed methods rather than counting them.
-    assert {m for (m, p) in routes if p == "/api/knowledge/library-home"} <= {"GET", "HEAD"}
-
-
-# ── The three item shelves ───────────────────────────────────────────────────
+    assert {m for (m, p) in routes if p == "/api/knowledge/library-home"} <= {
+        "GET",
+        "HEAD",
+    }
 
 
 def test_each_shelf_selects_on_its_own_column(store):
@@ -102,7 +100,7 @@ def test_each_shelf_selects_on_its_own_column(store):
     }
     assert set(_titles(body["continue_reading"])) == {"Half read", "Kept and half read"}
     assert set(_titles(body["favorites"])) == {"Kept", "Kept and half read"}
-    assert {plain, reading, starred, both}  # ids used; keeps the fixture honest
+    assert {plain, reading, starred, both}
 
 
 def test_recently_added_is_ordered_by_created_at_newest_first(store):
@@ -121,7 +119,8 @@ def test_recently_added_is_ordered_by_created_at_newest_first(store):
 
 def test_a_shelf_hides_exactly_what_the_library_list_hides(store):
     """Archived rows, mirrored artifacts and the indexed-not-listed kinds. A home shelf that
-    disagreed with the list it links into would show rows that disappear on click-through."""
+    disagreed with the list it links into would show rows that disappear on click-through.
+    """
     _item(store, "Live")
     _item(store, "Archived", is_archived=1, favorited=1, read_state="reading")
     artifact = store.create_typed_item(
@@ -130,14 +129,15 @@ def test_a_shelf_hides_exactly_what_the_library_list_hides(store):
     store.update_item(artifact, touch=False, favorited=1, read_state="reading")
     excluded_kind = sorted(DEFAULT_LIST_EXCLUDED_KINDS)[0]
     hidden = _item(store, "Scheduled report", favorited=1, read_state="reading")
-    # `kind` is written directly: it is a taxonomy axis, not one of `update_item`'s fields.
     store.db.execute("UPDATE items SET kind = ? WHERE id = ?", (excluded_kind, hidden))
     store.db.commit()
-    assert store.get_item(hidden)["kind"] == excluded_kind  # the row IS the excluded kind
+    assert store.get_item(hidden)["kind"] == excluded_kind
 
     _, body = _home(store)
     for shelf in ("recently_added", "continue_reading", "favorites"):
-        assert _titles(body[shelf]) == (["Live"] if shelf == "recently_added" else []), shelf
+        assert _titles(body[shelf]) == (
+            ["Live"] if shelf == "recently_added" else []
+        ), shelf
 
 
 def test_the_shelf_limit_is_honoured_and_clamped(store):
@@ -150,15 +150,11 @@ def test_the_shelf_limit_is_honoured_and_clamped(store):
     _, asked = _home(store, "?limit=3")
     assert len(asked["recently_added"]) == 3
 
-    # A caller asking for the whole library gets the cap, not the library.
     _, capped = _home(store, "?limit=9999")
     assert len(capped["recently_added"]) == H._HOME_SHELF_MAX
 
     resp, _ = _home(store, "?limit=abc")
     assert resp.status == 400
-
-
-# ── Per-collection counts ────────────────────────────────────────────────────
 
 
 def test_a_manual_shelfs_count_equals_what_opening_the_shelf_shows(store):
@@ -178,7 +174,6 @@ def test_a_manual_shelfs_count_equals_what_opening_the_shelf_shows(store):
     shelf = next(c for c in body["collections"] if c["id"] == cid)
     assert shelf["count"] == len(store.resolve_collection(cid, limit=500)) == 1
     assert shelf["count_capped"] is False
-    # And the divergence this route deliberately does not repeat:
     rail = next(c for c in store.list_collections() if c["id"] == cid)
     assert rail["item_count"] == 2
 
@@ -190,7 +185,9 @@ def test_a_smart_shelfs_count_is_the_resolve_itself(store):
     _, body = _home(store)
     shelf = next(c for c in body["collections"] if c["id"] == cid)
     assert shelf["kind"] == "smart"
-    assert shelf["count"] == len(store.resolve_collection(cid, limit=H._HOME_SMART_COUNT_CAP))
+    assert shelf["count"] == len(
+        store.resolve_collection(cid, limit=H._HOME_SMART_COUNT_CAP)
+    )
     assert shelf["count_capped"] is False
 
 
@@ -199,9 +196,6 @@ def test_a_shelf_with_no_members_reports_zero_rather_than_being_dropped(store):
     _, body = _home(store)
     assert [(c["name"], c["count"]) for c in body["collections"]] == [("Someday", 0)]
     assert cid
-
-
-# ── Empty is an answer ───────────────────────────────────────────────────────
 
 
 def test_a_fresh_library_returns_four_empty_shelves_and_a_200(store):

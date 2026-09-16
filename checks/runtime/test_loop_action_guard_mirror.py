@@ -45,45 +45,30 @@ from pathlib import Path
 
 import pytest
 
-from gideon.loop.loop import ACTION_SOURCE_STATES
+from gideon.automation.loop.loop import ACTION_SOURCE_STATES
 
-_REPO = Path(__file__).resolve().parent.parent
-_WEB = _REPO / "web" / "src"
+_REPO = Path(__file__).resolve().parent.parent.parent
+_WEB = _REPO / "apps/console" / "src"
 _REGISTRY = _WEB / "lib" / "loopStatus.ts"
 
-# web is optional in some checkouts (backend-only installs); skip cleanly then.
 pytestmark = pytest.mark.skipif(not _WEB.exists(), reason="web sources not present")
 
-#: The declaration this rail parses. Split on the name rather than pattern-matching the whole
-#: literal: a rename must red loudly here, not silently stop matching somewhere downstream.
 _DECL = "export const LOOP_ACTION_SOURCE_STATUSES"
 
-#: One row of the map: an action keyed to either an inline ``new Set([...])`` or a reference to an
-#: already-exported set (``stop``). A reference that cannot be resolved is an error, never an empty
-#: set — an unresolved row must not read as "this action allows nothing".
 _ROW = re.compile(
     r"^ {2}(\w+):\s*(?:new Set\(\[(?P<lit>[^\]]*)\]\)|(?P<ref>[A-Za-z_]\w*))\s*,\s*$",
     re.MULTILINE,
 )
 
-#: An exported status-set mirror, so a row written as a reference resolves to real members.
 _NAMED_SET = re.compile(
-    r"^export const (\w+): ReadonlySet<string> = new Set\(\[(.*?)\]\)", re.MULTILINE | re.DOTALL
+    r"^export const (\w+): ReadonlySet<string> = new Set\(\[(.*?)\]\)",
+    re.MULTILINE | re.DOTALL,
 )
 
-#: A single-quoted member inside a parsed set literal.
 _MEMBER = re.compile(r"'([a-z_]+)'")
 
-#: A `...OTHER_SET` spread inside a set literal. A composed set (`new Set([...ACTIVE, 'x'])`) is how
-#: this file avoids restating members, so the parser has to expand one — reading only the quoted
-#: members would silently under-count and make the equality assertion pass on a subset.
 _SPREAD = re.compile(r"\.\.\.([A-Za-z_]\w*)")
 
-#: An action-guard MAP declaring a `resume` row, in either shape the map could take. Scoped to what
-#: it can actually see: this catches a second action→states TABLE reappearing, which is the
-#: unification this slice performs. It deliberately does NOT catch a bare inline guard (an
-#: ``includes`` literal, or the chained ``===`` form ``CodeCockpitPage`` used) — those live on the
-#: call sites and are censused by the surfaces that own them, not from here.
 _ACTION_MAP_ROW = re.compile(r"\bresume:\s*(?:new Set\(|\[)")
 
 _LINE_COMMENT = re.compile(r"//[^\n]*")
@@ -129,8 +114,6 @@ def _parse_action_sources(text: str) -> tuple[dict[str, set[str]], dict[str, str
 
     raw = {name: members for name, members in _NAMED_SET.findall(text)}
     named = {name: set(_MEMBER.findall(members)) for name, members in raw.items()}
-    # Expand `...OTHER_SET` spreads, innermost first. Bounded by the number of sets so a cyclic
-    # spread cannot hang the suite, and asserted rather than silently left partial.
     for _ in range(len(raw) + 1):
         changed = False
         for name, members in raw.items():
@@ -221,7 +204,7 @@ def test_no_non_terminal_status_is_actionless():
     "intake and planning are in stop", because the next status added to the enum should fail
     this too rather than quietly inheriting the same hole.
     """
-    from gideon.loop.loop import TERMINAL_STATUSES, LoopStatus
+    from gideon.automation.loop.loop import TERMINAL_STATUSES, LoopStatus
 
     union: set[LoopStatus] = set().union(*ACTION_SOURCE_STATES.values())
     assert union, "ACTION_SOURCE_STATES is empty — import drift?"
@@ -231,7 +214,7 @@ def test_no_non_terminal_status_is_actionless():
     assert not stranded, (
         f"these non-terminal statuses have NO available lifecycle action: {stranded}. A loop "
         "that reaches one can only be DELETED, losing its record. Give it a home in "
-        "ACTION_SOURCE_STATES (and mirror it in web/src/lib/loopStatus.ts) rather than "
+        "ACTION_SOURCE_STATES (and mirror it in apps/console/src/lib/loopStatus.ts) rather than "
         "leaving the state actionless."
     )
 
@@ -252,41 +235,37 @@ def test_the_parse_floors_fire():
         ),
     }
     for label, stub in stubs.items():
-        assert stub != real, f"the {label!r} stub did not change the source — stub drift?"
+        assert (
+            stub != real
+        ), f"the {label!r} stub did not change the source — stub drift?"
         with pytest.raises(AssertionError):
             _parse_action_sources(stub)
 
 
 def test_there_is_exactly_one_loop_action_guard_map():
-    # Vacuity floor first: the positive control must still match, or "nothing else matches" is a
-    # statement about the regex rather than about the codebase.
     assert _ACTION_MAP_ROW.search(
         _registry_text()
     ), f"the action-guard map pattern no longer matches {_REGISTRY} — this census is vacuous"
     others = [
         p.relative_to(_REPO)
         for p in _web_sources()
-        if p != _REGISTRY and _ACTION_MAP_ROW.search(_strip_comments(p.read_text(encoding="utf-8")))
+        if p != _REGISTRY
+        and _ACTION_MAP_ROW.search(_strip_comments(p.read_text(encoding="utf-8")))
     ]
     assert not others, (
         f"a second loop action-guard map reappeared: {[str(p) for p in others]}. The source states "
-        "for every action live in web/src/lib/loopStatus.ts only — one table per question is what "
+        "for every action live in apps/console/src/lib/loopStatus.ts only — one table per question is what "
         "keeps a blocked loop resumable on every surface at once."
     )
 
 
-#: A hand-written lifecycle guard, in EITHER shape found in the wild. The array form
-#: (`[...].includes(status)`) is what five of the six guards used; the chained form
-#: (`status === 'a' || status === 'b'`) is what the sixth used — which is why a census written
-#: only for the array shape reported the app clean while a guard carrying its own third
-#: vocabulary sat in `pages/code/`.
 _ARRAY_GUARD = re.compile(
     r"\[[^\]]*'(?:paused|stagnant|blocked|needs_input)'[^\]]*\]\s*\.includes\s*\("
 )
 _CHAINED_GUARD = re.compile(
-    r"status\s*===\s*'(?:paused|stagnant|blocked|needs_input)'\s*\|\|" r"[^\n]*status\s*===\s*'"
+    r"status\s*===\s*'(?:paused|stagnant|blocked|needs_input)'\s*\|\|"
+    r"[^\n]*status\s*===\s*'"
 )
-#: How far past a candidate to look for the dispatch that makes it an ACTION guard.
 _DISPATCH_WINDOW = 240
 _DISPATCH = re.compile(r"act\(\s*'(?:start|pause|resume|stop)'|act\(\s*e\s*,")
 
@@ -315,14 +294,8 @@ def test_no_surface_hand_writes_a_lifecycle_action_guard():
     states); five omitted `blocked`, which the backend has always accepted a `resume` from, so a
     blocked loop was unresumable everywhere. One mirror is the fix — this rail is what stops the
     seventh from being written, in either shape."""
-    # Vacuity floors: both shapes and the dispatch window must still match their own samples,
-    # or every "no offenders" assertion below passes without measuring anything.
-    sample_array = (
-        "['paused', 'stagnant'].includes(c.status) && <B onClick={() => act('resume')} />"
-    )
-    sample_chain = (
-        "s.status === 'paused' || s.status === 'blocked' ? <B onClick={() => act('resume')} />"
-    )
+    sample_array = "['paused', 'stagnant'].includes(c.status) && <B onClick={() => act('resume')} />"
+    sample_chain = "s.status === 'paused' || s.status === 'blocked' ? <B onClick={() => act('resume')} />"
     assert _hand_written_action_guards(sample_array) == [
         "array"
     ], "the array shape stopped matching"
@@ -338,7 +311,11 @@ def test_no_surface_hand_writes_a_lifecycle_action_guard():
     offenders = {
         str(p.relative_to(_REPO)): shapes
         for p in sources
-        if (shapes := _hand_written_action_guards(_strip_comments(p.read_text(encoding="utf-8"))))
+        if (
+            shapes := _hand_written_action_guards(
+                _strip_comments(p.read_text(encoding="utf-8"))
+            )
+        )
     }
     assert not offenders, (
         f"a hand-written lifecycle-action guard reappeared: {offenders}. Import "
@@ -348,9 +325,6 @@ def test_no_surface_hand_writes_a_lifecycle_action_guard():
     )
 
 
-#: The surfaces that host a loop lifecycle control today. Named rather than derived, following
-#: `pages/surfaceEntranceAdoption.test.ts`'s reasoning: the property is about construction, and a
-#: derived list would silently shrink to nothing the day someone renames a directory.
 _LIFECYCLE_SURFACES = (
     "pages/loops/LoopsListPage.tsx",
     "pages/loops/LoopCockpitPage.tsx",
@@ -369,7 +343,9 @@ def test_every_lifecycle_surface_actually_reaches_the_mirror():
     missing = []
     for rel in _LIFECYCLE_SURFACES:
         path = _WEB / rel
-        assert path.exists(), f"{rel} is gone — update this list rather than letting it rot"
+        assert (
+            path.exists()
+        ), f"{rel} is gone — update this list rather than letting it rot"
         text = _strip_comments(path.read_text(encoding="utf-8"))
         if "LOOP_ACTION_SOURCE_STATUSES" not in text:
             missing.append(rel)

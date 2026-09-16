@@ -32,8 +32,8 @@ from pathlib import Path
 import pytest
 
 import gideon
-from gideon.apps.manifest import AppManifest
-from gideon.apps.quality import (
+from gideon.extensions.apps.manifest import AppManifest
+from gideon.extensions.apps.quality import (
     AXE_REPORT_RELPATH,
     QualityViolation,
     bundle_test_files,
@@ -45,10 +45,6 @@ from gideon.apps.quality import (
     verify_app,
     verify_tree,
 )
-
-# --------------------------------------------------------------------------- #
-# Bundle builders
-# --------------------------------------------------------------------------- #
 
 _CLEAN_TSX = """\
 import React from 'react'
@@ -62,9 +58,6 @@ export function Panel() {
 }
 """
 
-# Two violations the SHARED token-lint rule flags: a raw hex and an inline-style px
-# where a spacing token applies. Kept in one place so the "designSystem" lie and its
-# honest floor differ ONLY in this file's content.
 _DIRTY_TSX = """\
 import React from 'react'
 
@@ -104,7 +97,9 @@ def make_bundle(
     if quality is not None:
         manifest["quality"] = quality
     if ui_pages:
-        manifest["ui"] = {"pages": [{"route": "/demo", "label": "Demo", "icon": "Blocks"}]}
+        manifest["ui"] = {
+            "pages": [{"route": "/demo", "label": "Demo", "icon": "Blocks"}]
+        }
     (d / "app.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     if frontend is not None:
         (d / "ui" / "src").mkdir(parents=True, exist_ok=True)
@@ -114,8 +109,6 @@ def make_bundle(
     if axe is not None:
         (d / "a11y").mkdir(parents=True, exist_ok=True)
         (d / "a11y" / "axe-report.json").write_text(json.dumps(axe), encoding="utf-8")
-    # Every bundle must be a manifest core would accept — a lie has to be a valid
-    # manifest, or the red would be "bad app.json", not "dishonest declaration".
     assert AppManifest.from_json_file(d / "app.json").validate() == []
     return d
 
@@ -135,11 +128,6 @@ def fake_tests(passed: bool):
         return passed, "1 failed" if not passed else "1 passed"
 
     return runner
-
-
-# --------------------------------------------------------------------------- #
-# Lie 1 — tested: true
-# --------------------------------------------------------------------------- #
 
 
 class TestTestedAxis:
@@ -191,15 +179,12 @@ class TestTestedAxis:
         """The apps-repo CI discovers `<app>/tests/test_*.py` too (slack-channel has
         that shape), so the presence check must not miss it and mint a false lie."""
         d = make_bundle(tmp_path, quality={"tested": True})
-        (d / "tests").mkdir()
-        (d / "tests" / "test_nested.py").write_text(_PASSING_TEST, encoding="utf-8")
+        (d / "checks/runtime").mkdir()
+        (d / "checks/runtime" / "test_nested.py").write_text(
+            _PASSING_TEST, encoding="utf-8"
+        )
         assert [p.name for p in bundle_test_files(d)] == ["test_nested.py"]
         assert verify_app(d, run_tests=fake_tests(True)) == []
-
-
-# --------------------------------------------------------------------------- #
-# Lie 2 — designSystem: "v2"
-# --------------------------------------------------------------------------- #
 
 
 class TestDesignSystemAxis:
@@ -219,10 +204,14 @@ class TestDesignSystemAxis:
     def test_the_floor_declaring_legacy_is_an_honest_miss(self, tmp_path):
         """`"legacy"` claims nothing, so the SAME dirty frontend is not a violation.
         This is what keeps the rule from punishing apps that admit they predate v2."""
-        d = make_bundle(tmp_path, quality={"designSystem": "legacy"}, frontend=_DIRTY_TSX)
+        d = make_bundle(
+            tmp_path, quality={"designSystem": "legacy"}, frontend=_DIRTY_TSX
+        )
         assert verify_app(d, run_tests=never_runs) == []
 
-    def test_a_claim_with_nothing_to_lint_is_a_violation_not_a_free_pass(self, tmp_path):
+    def test_a_claim_with_nothing_to_lint_is_a_violation_not_a_free_pass(
+        self, tmp_path
+    ):
         """The vacuity trap on the OTHER side: a backend-only bundle declaring `"v2"`
         would otherwise earn the badge because the lint found no files to fail.
         Nothing was checked, so nothing was proven — that is a violation, and the
@@ -237,7 +226,9 @@ class TestDesignSystemAxis:
         """A bundle's vite.config.ts / *.test.tsx carry no app chrome. If they were
         linted, every app would be a liar and the rule would be worthless."""
         d = make_bundle(tmp_path, quality={"designSystem": "v2"}, frontend=_CLEAN_TSX)
-        (d / "ui" / "vite.config.ts").write_text("export default { base: '#nope' }\n", "utf-8")
+        (d / "ui" / "vite.config.ts").write_text(
+            "export default { base: '#nope' }\n", "utf-8"
+        )
         (d / "ui" / "src" / "index.test.tsx").write_text(_DIRTY_TSX, encoding="utf-8")
         (d / "ui" / "node_modules").mkdir()
         (d / "ui" / "node_modules" / "dep.ts").write_text(_DIRTY_TSX, encoding="utf-8")
@@ -247,7 +238,7 @@ class TestDesignSystemAxis:
 
     def test_the_lint_uses_the_shared_rule_not_a_second_dialect(self, tmp_path):
         """The rule is DATA (apps/token_lint_rules.json), shared with
-        web/src/design/tokenLintRule.ts. Assert the app-side lint really consumes it
+        apps/console/src/design/tokenLintRule.ts. Assert the app-side lint really consumes it
         and reproduces the host rule's exemptions — a re-implementation that drifted
         would be the same declared-vs-actual defect one layer down.
         """
@@ -255,7 +246,6 @@ class TestDesignSystemAxis:
         assert set(rules) == {"hex", "raw_px", "px_ok_context", "calc_with_token"}
         d = make_bundle(tmp_path, quality={"designSystem": "v2"})
         (d / "ui" / "src").mkdir(parents=True)
-        # Each line is a documented host-rule EXEMPTION. All must stay clean.
         (d / "ui" / "src" / "index.tsx").write_text(
             "// a comment may cite #ff00ff and 12px freely\n"
             "const a = <div style={{ width: 'calc(var(--w) + 160px)' }} />\n"
@@ -265,14 +255,8 @@ class TestDesignSystemAxis:
             encoding="utf-8",
         )
         assert token_lint_bundle(d) == {}
-        # …and the rule is not vacuous: the dirty file still fails.
         (d / "ui" / "src" / "index.tsx").write_text(_DIRTY_TSX, encoding="utf-8")
         assert list(token_lint_bundle(d)) == ["ui/src/index.tsx"]
-
-
-# --------------------------------------------------------------------------- #
-# Lie 3 — a11y: true
-# --------------------------------------------------------------------------- #
 
 
 def _clean_axe(version: str = "1.0.0") -> dict:
@@ -298,7 +282,9 @@ class TestA11yAxis:
 
     def test_the_floor_a_clean_scan_stays_green(self, tmp_path):
         """Vacuity floor: identical bundle, identical claim, zero violations."""
-        d = make_bundle(tmp_path, quality={"a11y": True}, ui_pages=True, axe=_clean_axe())
+        d = make_bundle(
+            tmp_path, quality={"a11y": True}, ui_pages=True, axe=_clean_axe()
+        )
         assert verify_app(d, run_tests=never_runs) == []
 
     def test_the_lie_no_evidence_at_all(self, tmp_path):
@@ -323,8 +309,9 @@ class TestA11yAxis:
         v = verify_app(d, run_tests=never_runs)
         assert axes(v) == ["a11y"]
         assert "stale scan" in v[0].reason
-        # Floor: the same report, produced against the version actually shipping.
-        (d / "a11y" / "axe-report.json").write_text(json.dumps(_clean_axe("2.0.0")), "utf-8")
+        (d / "a11y" / "axe-report.json").write_text(
+            json.dumps(_clean_axe("2.0.0")), "utf-8"
+        )
         assert verify_app(d, run_tests=never_runs) == []
 
     def test_the_lie_an_envelope_that_cannot_say_zero(self, tmp_path):
@@ -338,18 +325,15 @@ class TestA11yAxis:
         assert "cannot say 'zero'" in v[0].reason
 
     def test_unparseable_evidence_is_not_evidence(self, tmp_path):
-        d = make_bundle(tmp_path, quality={"a11y": True}, ui_pages=True, axe=_clean_axe())
+        d = make_bundle(
+            tmp_path, quality={"a11y": True}, ui_pages=True, axe=_clean_axe()
+        )
         (d / "a11y" / "axe-report.json").write_text("{not json", encoding="utf-8")
         assert axes(verify_app(d, run_tests=never_runs)) == ["a11y"]
 
     def test_the_floor_declaring_false_demands_no_evidence(self, tmp_path):
         d = make_bundle(tmp_path, quality={"a11y": False}, ui_pages=True)
         assert verify_app(d, run_tests=never_runs) == []
-
-
-# --------------------------------------------------------------------------- #
-# Declaring NOTHING — absent is neither a pass nor a false
-# --------------------------------------------------------------------------- #
 
 
 class TestAbsentDeclaration:
@@ -364,16 +348,18 @@ class TestAbsentDeclaration:
         """The parse boundary keeps the tri-state: absent stays ``None``, and a
         declared-false stays ``False``. Collapsing them would make the Store unable
         to tell "said nothing" from "said no" — a lie in the other direction."""
-        absent = AppManifest.from_json_file(make_bundle(tmp_path / "a", "no-block") / "app.json")
+        absent = AppManifest.from_json_file(
+            make_bundle(tmp_path / "a", "no-block") / "app.json"
+        )
         declared = AppManifest.from_json_file(
-            make_bundle(tmp_path / "b", "false-block", quality={"tested": False, "a11y": False})
+            make_bundle(
+                tmp_path / "b", "false-block", quality={"tested": False, "a11y": False}
+            )
             / "app.json"
         )
         assert absent.quality is None
         assert declared.quality is not None
         assert declared.quality.tested is False
-        # …and the two do not serialise the same. This is the wire-level statement of
-        # "absent ≠ false": one omits the key, the other carries it as false.
         assert "quality" not in absent.to_dict()
         assert declared.to_dict()["quality"] == {"tested": False, "a11y": False}
 
@@ -388,17 +374,16 @@ class TestAbsentDeclaration:
         assert m.quality.declared("a11y") is False
 
 
-# --------------------------------------------------------------------------- #
-# The CALL SITE — the CLI the apps-repo CI runs
-# --------------------------------------------------------------------------- #
-
-
 class TestTheCiCallSite:
     def test_a_tree_with_one_liar_exits_nonzero(self, tmp_path, capsys):
-        """The thing that actually turns CI red: `python -m gideon.apps.quality
+        """The thing that actually turns CI red: `python -m gideon.extensions.apps.quality
         <tree>` exits 1 and names the app, the axis and the claim."""
-        make_bundle(tmp_path, "honest-app", quality={"designSystem": "v2"}, frontend=_CLEAN_TSX)
-        make_bundle(tmp_path, "lying-app", quality={"designSystem": "v2"}, frontend=_DIRTY_TSX)
+        make_bundle(
+            tmp_path, "honest-app", quality={"designSystem": "v2"}, frontend=_CLEAN_TSX
+        )
+        make_bundle(
+            tmp_path, "lying-app", quality={"designSystem": "v2"}, frontend=_DIRTY_TSX
+        )
         assert main([str(tmp_path)]) == 1
         out = capsys.readouterr().out
         assert "lying-app" in out
@@ -408,9 +393,15 @@ class TestTheCiCallSite:
     def test_an_all_honest_tree_exits_zero(self, tmp_path, capsys):
         """The floor for the call site itself: without it, "exit 1" could be the only
         thing this CLI is capable of."""
-        make_bundle(tmp_path, "honest-app", quality={"designSystem": "v2"}, frontend=_CLEAN_TSX)
+        make_bundle(
+            tmp_path, "honest-app", quality={"designSystem": "v2"}, frontend=_CLEAN_TSX
+        )
         make_bundle(tmp_path, "quiet-app", quality=None, frontend=_DIRTY_TSX)
-        make_bundle(tmp_path, "honest-miss-app", quality={"designSystem": "legacy", "a11y": False})
+        make_bundle(
+            tmp_path,
+            "honest-miss-app",
+            quality={"designSystem": "legacy", "a11y": False},
+        )
         assert main([str(tmp_path)]) == 0
         assert "every declared claim is backed" in capsys.readouterr().out
 
@@ -437,7 +428,7 @@ class TestTheCiCallSite:
         assert axes(violations) == ["manifest"]
 
     def test_the_module_is_executable_as_the_ci_step_invokes_it(self, tmp_path):
-        """`python -m gideon.apps.quality` — the literal command the apps-repo CI
+        """`python -m gideon.extensions.apps.quality` — the literal command the apps-repo CI
         step runs. Pinning it here means a renamed module or a missing `__main__`
         guard fails in core, not silently in the other repo's workflow.
 
@@ -447,11 +438,13 @@ class TestTheCiCallSite:
         for "no such module" while the test read it as "caught the liar": a green that
         proves the opposite of what it claims.
         """
-        make_bundle(tmp_path, "lying-app", quality={"designSystem": "v2"}, frontend=_DIRTY_TSX)
+        make_bundle(
+            tmp_path, "lying-app", quality={"designSystem": "v2"}, frontend=_DIRTY_TSX
+        )
         src_root = Path(gideon.__file__).resolve().parent.parent
         env = {**os.environ, "PYTHONPATH": str(src_root)}
         proc = subprocess.run(
-            [sys.executable, "-m", "gideon.apps.quality", str(tmp_path)],
+            [sys.executable, "-m", "gideon.extensions.apps.quality", str(tmp_path)],
             capture_output=True,
             text=True,
             timeout=180,
@@ -460,11 +453,6 @@ class TestTheCiCallSite:
         assert proc.returncode == 1, proc.stdout + proc.stderr
         assert "lying-app" in proc.stdout, proc.stdout + proc.stderr
         assert "quality.designSystem" in proc.stdout
-
-
-# --------------------------------------------------------------------------- #
-# Multi-axis + real-tree sanity
-# --------------------------------------------------------------------------- #
 
 
 def test_every_axis_can_be_caught_in_one_pass(tmp_path):
@@ -476,7 +464,11 @@ def test_every_axis_can_be_caught_in_one_pass(tmp_path):
         frontend=_DIRTY_TSX,
         ui_pages=True,
     )
-    assert axes(verify_app(d, run_tests=fake_tests(False))) == ["a11y", "designSystem", "tested"]
+    assert axes(verify_app(d, run_tests=fake_tests(False))) == [
+        "a11y",
+        "designSystem",
+        "tested",
+    ]
 
 
 def test_all_three_axes_honest_at_once_stays_green(tmp_path):
@@ -495,7 +487,7 @@ def test_all_three_axes_honest_at_once_stays_green(tmp_path):
 def test_the_verifier_has_no_gateway_call_site():
     """The verifier spawns pytest, and it is allowed to do so UNCEILINGED because it is a
     CI/CLI tool no request path can reach. That exemption is recorded in
-    ``tests/test_spawn_ceiling_audit.py::_OPERATOR_EXEMPT``, and an exemption whose
+    ``checks/runtime/test_spawn_ceiling_audit.py::_OPERATOR_EXEMPT``, and an exemption whose
     premise nobody checks is exactly this atom's defect class. So pin the premise: if
     ``apps.quality`` ever gains a runtime importer, this reds and the classification has
     to be re-argued instead of quietly inherited.
@@ -523,16 +515,18 @@ def test_the_verifier_has_no_gateway_call_site():
             elif isinstance(node, ast.ImportFrom):
                 base = node.module or ""
                 mods = [base] + [f"{base}.{a.name}" for a in node.names]
-            if any(m.endswith("apps.quality") or m == "gideon.apps.quality" for m in mods):
+            if any(
+                m.endswith("apps.quality") or m == "gideon.extensions.apps.quality"
+                for m in mods
+            ):
                 importers.append(f"{path.relative_to(src).as_posix()}:{node.lineno}")
     assert importers == [], (
         "apps.quality is now imported by runtime code, so its uncapped `subprocess.run` "
         "is reachable from the gateway. Re-argue the spawn classification (ceiling-wrap "
         f"it or justify the exemption anew) — importers: {importers}"
     )
-    # Vacuity floor: the scan really walks the package and really detects an import.
     assert len(list(src.rglob("*.py"))) > 100
-    probe = ast.parse("from gideon.apps.quality import verify_app\n")
+    probe = ast.parse("from gideon.extensions.apps.quality import verify_app\n")
     assert any(isinstance(n, ast.ImportFrom) for n in ast.walk(probe))
 
 
@@ -543,7 +537,7 @@ def test_the_shipped_native_bundles_pass_the_verifier(tmp_path):
     there. Recorded as such deliberately: an all-absent tree is a vacuous pass, and
     calling it evidence of enforcement is the mistake this file is about.
     """
-    import gideon.apps as apps_pkg
+    import gideon.extensions.apps as apps_pkg
 
     native = Path(apps_pkg.__file__).parent / "native"
     violations, seen = verify_tree(native, run_tests=never_runs)

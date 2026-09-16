@@ -18,9 +18,9 @@ import sys
 
 import pytest
 
-from gideon import _installer
-from gideon import self_update as su
-from gideon.dashboard.handlers import updates as upd
+from gideon.interfaces.dashboard.handlers import updates as upd
+from gideon.operations import _installer
+from gideon.operations import self_update as su
 
 
 class _StateStub:
@@ -72,7 +72,9 @@ async def _run_apply(state, monkeypatch, *, latest="0.1.2"):
     async def _fake_status(_cur):
         return {"latest": latest}
 
-    monkeypatch.setattr("gideon.self_update.build_update_status", _fake_status)
+    monkeypatch.setattr(
+        "gideon.operations.self_update.build_update_status", _fake_status
+    )
 
     async def _fake_reexec(_state, **kw):
         state.progress.append(("reexec", ""))
@@ -91,7 +93,6 @@ async def _run_apply(state, monkeypatch, *, latest="0.1.2"):
     req = make_mocked_request("POST", "/api/update")
     req.app["state"] = state
     await upd._apply_pip_update(req, state)
-    # The apply runs as a background task; let it finish.
     for _ in range(50):
         await asyncio.sleep(0)
         if state.progress:
@@ -114,7 +115,7 @@ async def test_uses_uv_when_the_venv_has_no_pip(monkeypatch, spawn):
     argv = seen[0]
     assert argv[:3] == ["uv", "pip", "install"]
     assert "--python" in argv and argv[argv.index("--python") + 1] == sys.executable
-    assert "gideon==0.1.2" in argv
+    assert "gideon-agent-harness==0.1.2" in argv
     steps = [s for s, _ in state.progress]
     assert "error" not in steps
 
@@ -134,9 +135,6 @@ async def test_failure_detail_reaches_the_ui(monkeypatch, spawn):
     assert errors, f"no error progress pushed: {state.progress}"
     assert "Could not find a version" in errors[0]
     assert errors[0] != "pip upgrade failed"
-
-
-# ── the UI-facing error summary ────────────────────────────────────────────────
 
 
 def test_summary_strips_ansi_and_leads_with_uvs_headline():

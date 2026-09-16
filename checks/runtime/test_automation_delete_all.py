@@ -25,9 +25,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from gideon.triggers import tools as T
-from gideon.triggers.models import Trigger
-from gideon.triggers.store import TriggerStore
+from gideon.automation.triggers import tools as T
+from gideon.automation.triggers.models import Trigger
+from gideon.automation.triggers.store import TriggerStore
 
 
 @pytest.fixture
@@ -49,9 +49,6 @@ def _make(store, trigger_id, *, created_by):
 
 def _ids(store):
     return {row.trigger.id for row in store.load()}
-
-
-# ── the access control ──
 
 
 def test_it_deletes_only_the_rows_the_caller_created(store):
@@ -79,8 +76,8 @@ def test_the_mcp_dispatcher_hard_codes_the_scope(store):
     """
     import inspect
 
-    from gideon import mcp_automation
-    from gideon.validation import MCP_AUTOMATION_SCHEMAS
+    from gideon.assurance.validation import MCP_AUTOMATION_SCHEMAS
+    from gideon.integrations import mcp_automation
 
     src = inspect.getsource(mcp_automation._call_tool_inner)
     assert 'T.delete_all(store, created_by="agent"' in src
@@ -99,9 +96,6 @@ def test_a_different_scope_leaves_the_agents_rows_alone(store):
     assert _ids(store) == {"clock:agent-one"}
 
 
-# ── the confirm gate ──
-
-
 def test_it_refuses_without_confirm(store):
     """Ported in spirit from single `delete`'s gate, and it matters more here: this is the most
     destructive tool in the namespace."""
@@ -116,16 +110,13 @@ def test_it_refuses_without_confirm(store):
 
 def test_the_mcp_schema_requires_confirm():
     """A required flag the tool schema does not mark required is a gate a model will skip."""
-    from gideon import mcp_automation
+    from gideon.integrations import mcp_automation
 
-    tool = next(t for t in mcp_automation._list_tools() if t["name"] == "automation_delete_all")
+    tool = next(
+        t for t in mcp_automation._list_tools() if t["name"] == "automation_delete_all"
+    )
     assert tool["inputSchema"]["required"] == ["confirm"]
-    # And the description must state the blast radius: a bulk-delete tool whose scope is only
-    # discoverable by reading the implementation is one an agent will misuse.
     assert "YOU created" in tool["description"]
-
-
-# ── empty + partial outcomes ──
 
 
 def test_an_empty_scope_reports_that_it_deleted_nothing(store):
@@ -172,13 +163,10 @@ def test_a_partial_failure_is_reported_not_swallowed(tmp_path):
 
     result = T.delete_all(flaky, created_by="agent", confirm=True)
 
-    assert result.ok  # the half that worked DID work
+    assert result.ok
     assert result.data["deleted"] == ["clock:agent-one"]
     assert "1 could not be deleted" in result.text
     assert len(calls) == 2, "a failure must not strand the remaining rows"
-
-
-# ── the retirement itself ──
 
 
 def test_the_legacy_alias_surface_is_gone():
@@ -196,17 +184,17 @@ def test_the_legacy_alias_surface_is_gone():
     with pytest.raises(ModuleNotFoundError):
         __import__("gideon.mcp_schedule")
 
-    import gideon.mcp_core as mc
+    import gideon.integrations.mcp_core as mc
 
     names = [t["name"] for t in mc._aggregated_list_tools()]
     assert not [n for n in names if n.startswith("schedule_")]
 
-    import gideon.validation as v
+    import gideon.assurance.validation as v
 
     assert not hasattr(v, "MCP_SCHEDULE_SCHEMAS")
 
-    from gideon.agent import _MANAGED_MCP_SERVERS
-    from gideon.mcp_discovery import _MANAGED_SERVER_NAMES
+    from gideon.engine.agent import _MANAGED_MCP_SERVERS
+    from gideon.integrations.mcp_discovery import _MANAGED_SERVER_NAMES
 
     assert "gideon-schedule" not in _MANAGED_MCP_SERVERS
     assert "gideon-schedule" not in _MANAGED_SERVER_NAMES

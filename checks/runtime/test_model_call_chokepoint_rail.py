@@ -1,6 +1,6 @@
 """`PHF-7` clause 4 — a model-call path that skips the enforced helper must RED the gate.
 
-Every model call is supposed to pass through :func:`gideon.guardrails.wrap_model_call_guard`,
+Every model call is supposed to pass through :func:`gideon.security.guardrails.wrap_model_call_guard`,
 which writes the ``model_calls.jsonl`` attempt audit, charges the spend meter and applies
 the budget/breaker policy. A provider that reaches a caller UNWRAPPED still works perfectly —
 it just spends money and takes actions with no audit row and no budget. That is the failure shape
@@ -37,29 +37,17 @@ import pathlib
 
 import pytest
 
-SRC = pathlib.Path(__file__).resolve().parents[1] / "src" / "gideon"
+SRC = pathlib.Path(__file__).resolve().parents[2] / "runtime" / "gideon"
 BRIDGE = SRC / "providers" / "provider_bridge.py"
 
-#: The enforced helper. Renaming it must break this rail loudly rather than silently widen it.
 CHOKEPOINT = "wrap_model_call_guard"
 
-#: The public resolver every caller uses to obtain a model provider.
 RESOLVER = "resolve_provider_for_use_case"
 
-#: Functions allowed to produce the resolver's return value, each verified to funnel into the
-#: chokepoint. Adding an entry here is the explicit, reviewable act of declaring a new path
-#: guarded — which is the point: it cannot happen by accident.
 ALLOWED_BUILDERS = {
-    # wraps directly, at the single point where the entry name + model are known
     "_resolve_from_config_registry",
-    # native-agent runtime: its INNER inference provider resolves through the same path
     "_build_native_runtime",
-    # ACP agent runtime (``acp:<cli>``): an EXTERNAL CLI owns the model call, out of
-    # process and on its own vendor account. There is no host-side inference to meter, so
-    # there is nothing for ModelCallGuard to wrap — the same reason the pooled ACP claim
-    # in SessionManager has never gone through the chokepoint either. The spend it does
-    # incur is the CLI's, and it is unobservable to us by construction (documented in
-    # docs/agents/acp-parity.md as a protocol boundary, not an audit hole we opened).
+    # in ConversationDirectory has never gone through the chokepoint either. The spend it does
     "_build_acp_runtime",
 }
 
@@ -70,7 +58,10 @@ def _module() -> ast.Module:
 
 def _find_func(tree: ast.Module, name: str) -> ast.FunctionDef | ast.AsyncFunctionDef:
     for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == name
+        ):
             return node
     raise AssertionError(
         f"{name}() is gone from {BRIDGE.name}. This rail is pinned to it by name; re-derive the "
@@ -118,13 +109,10 @@ def _unguarded_returns(func: ast.AST) -> list[tuple[int, str]]:
         if not isinstance(node, ast.Return) or node.value is None:
             continue
         v = node.value
-        # `return None` / `return ""` — not a provider.
         if isinstance(v, ast.Constant):
             continue
-        # `return _resolve_from_config_registry(...)`
         if _call_name(v) in ALLOWED_BUILDERS:
             continue
-        # `x = _resolve_from_config_registry(...); … ; return x`
         if isinstance(v, ast.Name) and v.id in guarded_names:
             continue
         bad.append((node.lineno, ast.dump(v)[:120]))
@@ -146,7 +134,9 @@ class TestTheChokepointStaysSingle:
         for path in sorted(SRC.rglob("*.py")):
             try:
                 tree = ast.parse(path.read_text(), filename=str(path))
-            except SyntaxError:  # pragma: no cover - a syntax error is the lint job's failure
+            except (
+                SyntaxError
+            ):  # pragma: no cover - a syntax error is the lint job's failure
                 continue
             for node in ast.walk(tree):
                 if _call_name(node) == CHOKEPOINT:
@@ -185,7 +175,9 @@ class TestEveryResolverPathIsGuarded:
         """Vacuity floor. A resolver with no returns to inspect would make the assertion below
         pass over an empty list, which reads exactly like a clean result."""
         fn = _find_func(_module(), RESOLVER)
-        returns = [n for n in ast.walk(fn) if isinstance(n, ast.Return) and n.value is not None]
+        returns = [
+            n for n in ast.walk(fn) if isinstance(n, ast.Return) and n.value is not None
+        ]
         assert len(returns) >= 3, (
             f"{RESOLVER}() has only {len(returns)} value-returning path(s). Measured on main: 5. "
             f"The function was restructured — re-derive this rail rather than trusting it."
@@ -216,9 +208,12 @@ class TestTheRailItselfDetectsABypass:
 
     def test_a_raw_provider_construction_is_caught(self):
         bad = self._analyze(
-            "def resolve_provider_for_use_case(u):\n" "    return SomeVendorProvider(model='x')\n"
+            "def resolve_provider_for_use_case(u):\n"
+            "    return SomeVendorProvider(model='x')\n"
         )
-        assert len(bad) == 1, f"a raw `return SomeVendorProvider(...)` slipped past: {bad}"
+        assert (
+            len(bad) == 1
+        ), f"a raw `return SomeVendorProvider(...)` slipped past: {bad}"
 
     def test_a_raw_provider_via_a_local_name_is_caught(self):
         bad = self._analyze(
@@ -226,7 +221,9 @@ class TestTheRailItselfDetectsABypass:
             "    p = SomeVendorProvider(model='x')\n"
             "    return p\n"
         )
-        assert len(bad) == 1, f"a raw provider bound to a local name slipped past: {bad}"
+        assert (
+            len(bad) == 1
+        ), f"a raw provider bound to a local name slipped past: {bad}"
 
     def test_the_two_guarded_shapes_are_NOT_caught(self):
         """The other direction. A detector that flagged the correct forms would be reverted within

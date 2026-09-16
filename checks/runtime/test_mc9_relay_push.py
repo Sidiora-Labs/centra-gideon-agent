@@ -21,10 +21,8 @@ from pathlib import Path
 
 import pytest
 
-from gideon import push
-from gideon.config.loader import config_dir
-
-# ── Fixtures (MC-5's, verbatim in shape) ─────────────────────────────────────
+from gideon.core.config.loader import config_dir
+from gideon.workspace import push
 
 
 @pytest.fixture()
@@ -58,13 +56,9 @@ def _configure_relay(home: Path, url: str = "https://relay.example/ping") -> Non
     )
 
 
-# ── The token store ──────────────────────────────────────────────────────────
-
-
 def test_register_round_trips_and_reregistering_replaces_the_row(home: Path) -> None:
     push.register_relay_token("phone-1", "ios", "tok-A")
     assert push.load_relay_tokens()["phone-1"]["token"] == "tok-A"
-    # Platforms rotate tokens; keeping both rows would ping the phone twice.
     push.register_relay_token("phone-1", "ios", "tok-B")
     rows = push.load_relay_tokens()
     assert len(rows) == 1
@@ -82,7 +76,6 @@ def test_the_platform_vocabulary_is_closed(home: Path) -> None:
         push.register_relay_token("phone-1", "", "tok")
     with pytest.raises(ValueError):
         push.register_relay_token("phone-1", "ios", "")
-    # Case is normalized, not refused: the shell reports Capacitor's platform string.
     push.register_relay_token("phone-1", "Android", "tok")
     assert push.load_relay_tokens()["phone-1"]["platform"] == "android"
 
@@ -93,15 +86,14 @@ def test_only_the_sender_fields_are_stored(home: Path) -> None:
     assert set(row) == {"platform", "token", "created_at"}
 
 
-# ── The wire body ────────────────────────────────────────────────────────────
-
-
 def test_the_relay_body_is_the_envelope_and_nothing_else(
     home: Path, sent: list[dict[str, object]]
 ) -> None:
     """Pinned as a SET at the HTTP boundary: platform, token, and the two-id payload."""
     payload = push.content_free_payload("approval", "apr-1")
-    assert push.send_relay(payload, "https://relay.example/ping", "ios", "tok-A") is True
+    assert (
+        push.send_relay(payload, "https://relay.example/ping", "ios", "tok-A") is True
+    )
     assert len(sent) == 1
     body = json.loads(sent[0]["body"])
     assert set(body) == {"platform", "token", "payload"}
@@ -124,14 +116,13 @@ def test_a_content_laden_payload_never_reaches_the_wire(
     assert sent == []
 
 
-def test_the_relay_refuses_a_plaintext_url(home: Path, sent: list[dict[str, object]]) -> None:
+def test_the_relay_refuses_a_plaintext_url(
+    home: Path, sent: list[dict[str, object]]
+) -> None:
     """Config keeps the URL verbatim, which makes the sender the fail-closed point."""
     payload = push.content_free_payload("approval", "apr-1")
     assert push.send_relay(payload, "http://relay.example/ping", "ios", "tok") is False
     assert sent == []
-
-
-# ── The plan-42 fan-out ──────────────────────────────────────────────────────
 
 
 def test_deliver_fans_out_over_every_registered_device(
@@ -181,16 +172,13 @@ def test_the_backend_switch_keeps_the_transports_apart(
     assert sent[0]["url"] == "https://ntfy.example/pc"
 
 
-# ── The routes ───────────────────────────────────────────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_the_relay_routes_round_trip(home: Path) -> None:
     import aiohttp
     from aiohttp import web
     from aiohttp.test_utils import TestClient, TestServer
 
-    from gideon.dashboard.handlers.push import register_push_routes
+    from gideon.interfaces.dashboard.handlers.push import register_push_routes
 
     _configure_relay(home)
     app = web.Application()
@@ -208,7 +196,6 @@ async def test_the_relay_routes_round_trip(home: Path) -> None:
             json={"device_id": "phone-1", "platform": "ios", "token": "tok-A"},
         )
         assert first.status == 200
-        # The same one-switch statement as subscribe: registering IS "wake me".
         assert (await first.json())["approval_rule_written"] is True
         after = await (await client.get("/api/push")).json()
         assert after["relay_devices"] == ["phone-1"]
@@ -230,9 +217,13 @@ async def test_the_relay_routes_round_trip(home: Path) -> None:
         )
         assert missing_token.status == 400
 
-        gone = await client.post("/api/push/relay-unregister", json={"device_id": "phone-1"})
+        gone = await client.post(
+            "/api/push/relay-unregister", json={"device_id": "phone-1"}
+        )
         assert gone.status == 200
-        not_there = await client.post("/api/push/relay-unregister", json={"device_id": "phone-1"})
+        not_there = await client.post(
+            "/api/push/relay-unregister", json={"device_id": "phone-1"}
+        )
         assert not_there.status == 404
         assert (await not_there.json())["error"]["code"] == "push_relay_not_registered"
     finally:
@@ -243,12 +234,13 @@ def test_the_relay_routes_are_not_exempt_from_auth() -> None:
     """MC-5's rail, extended to the two new routes: a registration endpoint reachable
     without a session would let anyone who can reach the gateway point pings at their
     own device token."""
-    from gideon.dashboard import token_auth
+    from gideon.interfaces.dashboard import token_auth
 
     for path in ("/api/push/relay-register", "/api/push/relay-unregister"):
         assert path not in getattr(token_auth, "_BYPASS_EXACT", ())
         assert not any(
-            path.startswith(prefix) for prefix in getattr(token_auth, "_BYPASS_PREFIXES", ())
+            path.startswith(prefix)
+            for prefix in getattr(token_auth, "_BYPASS_PREFIXES", ())
         )
 
 
@@ -263,7 +255,7 @@ def test_the_audit_line_never_carries_the_token(
         def log_api_access(self, **kw: object) -> None:
             lines.append(json.dumps({k: str(v) for k, v in kw.items()}))
 
-    import gideon.sel as sel_mod
+    import gideon.security.sel as sel_mod
 
     monkeypatch.setattr(sel_mod, "sel", lambda: _Sel())
 
@@ -273,7 +265,7 @@ def test_the_audit_line_never_carries_the_token(
     from aiohttp import web
     from aiohttp.test_utils import TestClient, TestServer
 
-    from gideon.dashboard.handlers.push import register_push_routes
+    from gideon.interfaces.dashboard.handlers.push import register_push_routes
 
     async def go() -> None:
         app = web.Application()
@@ -284,7 +276,11 @@ def test_the_audit_line_never_carries_the_token(
         try:
             await client.post(
                 "/api/push/relay-register",
-                json={"device_id": "phone-1", "platform": "ios", "token": "SECRET-TOKEN"},
+                json={
+                    "device_id": "phone-1",
+                    "platform": "ios",
+                    "token": "SECRET-TOKEN",
+                },
             )
         finally:
             await client.close()

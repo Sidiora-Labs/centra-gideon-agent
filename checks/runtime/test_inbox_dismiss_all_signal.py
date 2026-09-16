@@ -10,7 +10,7 @@ nothing. These rails pin the parity:
 - per-item dismiss and dismiss-all produce identical signals for identical items, so the
   two paths cannot drift apart again.
 
-Harness matches tests/test_inbox_draft_gate.py: a MagicMock request over a SimpleNamespace
+Harness matches checks/runtime/test_inbox_draft_gate.py: a MagicMock request over a SimpleNamespace
 state; real InboxStore/InboxState on tmp paths; the engagement store is a spy injected at
 state._engagement_store (the lazy getter returns a cached instance), with the config gate
 patched at _inbox_config.
@@ -23,8 +23,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from gideon.dashboard.handlers_inbox import api_inbox_dismiss_all
-from gideon.inbox import InboxItem, InboxState, InboxStore, ItemStatus
+from gideon.integrations.inbox import InboxItem, InboxState, InboxStore, ItemStatus
+from gideon.interfaces.dashboard.handlers_inbox import api_inbox_dismiss_all
 
 
 class _SpyStore:
@@ -74,20 +74,24 @@ def _request(state):
 
 @pytest.mark.asyncio
 async def test_dismiss_all_records_a_dismiss_signal_per_open_item(tmp_path):
-    # Two open items (one PENDING, one SEEN — dismiss-all sweeps both), one already dismissed.
-    items = [_item(1), _item(2, status=ItemStatus.SEEN), _item(3, status=ItemStatus.DISMISSED)]
+    items = [
+        _item(1),
+        _item(2, status=ItemStatus.SEEN),
+        _item(3, status=ItemStatus.DISMISSED),
+    ]
     state, inbox = _state(tmp_path, items)
     spy = _SpyStore()
     state._engagement_store = spy
 
     with patch(
-        "gideon.dashboard.handlers_inbox._inbox_config",
-        return_value=SimpleNamespace(engagement_ranking_enabled=True, engagement_half_life_days=0),
+        "gideon.interfaces.dashboard.handlers_inbox._inbox_config",
+        return_value=SimpleNamespace(
+            engagement_ranking_enabled=True, engagement_half_life_days=0
+        ),
     ):
         resp = await api_inbox_dismiss_all(_request(state))
 
     assert resp.status == 200
-    # Every swept item contributed all three of its topic keys; the pre-dismissed one did not.
     expect = {
         ("ch:chan1", "dismiss"),
         ("snd:sender1", "dismiss"),
@@ -97,23 +101,21 @@ async def test_dismiss_all_records_a_dismiss_signal_per_open_item(tmp_path):
     }
     assert expect.issubset(set(spy.records))
     assert not any("chan3" in tk for tk, _ in spy.records)
-    # The sweep is ONE store write, however many items it covered.
     assert spy.saves == 1
-    # And the state transition itself still happened.
     assert inbox.items["chan1_1.000"].status == ItemStatus.DISMISSED
 
 
 @pytest.mark.asyncio
 async def test_dismiss_all_records_nothing_when_ranking_disabled(tmp_path):
-    # The default-off gate holds for the bulk path exactly as it does per-item: no opt-in,
-    # no accrued state.
     state, _ = _state(tmp_path, [_item(1)])
     spy = _SpyStore()
     state._engagement_store = spy
 
     with patch(
-        "gideon.dashboard.handlers_inbox._inbox_config",
-        return_value=SimpleNamespace(engagement_ranking_enabled=False, engagement_half_life_days=0),
+        "gideon.interfaces.dashboard.handlers_inbox._inbox_config",
+        return_value=SimpleNamespace(
+            engagement_ranking_enabled=False, engagement_half_life_days=0
+        ),
     ):
         resp = await api_inbox_dismiss_all(_request(state))
 
@@ -124,15 +126,20 @@ async def test_dismiss_all_records_nothing_when_ranking_disabled(tmp_path):
 
 @pytest.mark.asyncio
 async def test_bulk_and_per_item_dismiss_record_identical_signals(tmp_path):
-    # Parity pin: the same item dismissed through either path trains the ranker identically,
-    # so the two call sites cannot drift apart again.
-    from gideon.dashboard.handlers_inbox import _record_signal, _record_signals
+    from gideon.interfaces.dashboard.handlers_inbox import (
+        _record_signal,
+        _record_signals,
+    )
 
     item = _item(7)
     state = SimpleNamespace()
-    enabled = SimpleNamespace(engagement_ranking_enabled=True, engagement_half_life_days=0)
+    enabled = SimpleNamespace(
+        engagement_ranking_enabled=True, engagement_half_life_days=0
+    )
 
-    with patch("gideon.dashboard.handlers_inbox._inbox_config", return_value=enabled):
+    with patch(
+        "gideon.interfaces.dashboard.handlers_inbox._inbox_config", return_value=enabled
+    ):
         spy_single = _SpyStore()
         state._engagement_store = spy_single
         _record_signal(state, item, "dismiss")

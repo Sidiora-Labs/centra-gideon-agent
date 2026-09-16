@@ -24,7 +24,7 @@ import time
 
 import pytest
 
-from gideon.loop import worktree as wt
+from gideon.automation.loop import worktree as wt
 
 pytestmark = pytest.mark.skipif(not wt.git_available(), reason="git not installed")
 
@@ -37,7 +37,9 @@ def _wt_root(tmp_path, monkeypatch):
     entry behind would hand the next test a file count from a repo that no longer exists — the
     stale-process-global-state hazard, not a hypothetical one.
     """
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path / "pclaw")
+    monkeypatch.setattr(
+        "gideon.core.config.loader.config_dir", lambda: tmp_path / "gideon"
+    )
     wt._FILE_COUNT_CACHE.clear()
     yield tmp_path
     wt._FILE_COUNT_CACHE.clear()
@@ -90,8 +92,6 @@ class TestSizeClass:
             (999, "small"),
             (1_000, "medium"),
             (9_999, "medium"),
-            # §1.1's benchmark case is a 10K-file repo: it must land ON a class floor, not
-            # straddle a boundary, or two benchmark runs could report different classes.
             (10_000, "large"),
             (99_999, "large"),
             (100_000, "huge"),
@@ -141,7 +141,9 @@ class TestFileCountCache:
         plain.mkdir()
         assert wt.repo_file_count(str(plain)) == wt.FILE_COUNT_UNKNOWN
         assert wt.repo_size_class(str(plain)) == wt.SIZE_CLASS_UNKNOWN
-        assert wt._FILE_COUNT_CACHE[os.path.abspath(str(plain))] == wt.FILE_COUNT_UNKNOWN
+        assert (
+            wt._FILE_COUNT_CACHE[os.path.abspath(str(plain))] == wt.FILE_COUNT_UNKNOWN
+        )
 
 
 class TestTimingLine:
@@ -154,8 +156,6 @@ class TestTimingLine:
         row = rows[0]
         assert row["outcome"] == wt.OUTCOME_CREATED
         assert row["task"] == "t-one"
-        # The size tag is not decoration: it is what says which numbers may be compared with
-        # which. Assert the REAL count, so dropping the tag or hard-coding it reds.
         assert int(row["files"]) == 5
         assert row["size_class"] == wt.size_class(5) == "tiny"
 
@@ -188,14 +188,13 @@ class TestTimingLine:
         assert (
             logged_ms >= sleep_secs * 1000 * 0.9
         ), f"logged {logged_ms}ms ignores the injected sleep"
-        # The logged window is a SUBSET of the observed one, plus rounding and the log call
-        # itself. A generous slack keeps this robust under load while still killing any
-        # hard-coded constant, which would have to be under the real duration to pass the floor.
         assert (
             logged_ms <= observed_ms + 250
         ), f"logged {logged_ms}ms exceeds observed {observed_ms}ms"
 
-    def test_the_reused_path_is_tagged_and_not_counted_as_hydration(self, tmp_path, caplog):
+    def test_the_reused_path_is_tagged_and_not_counted_as_hydration(
+        self, tmp_path, caplog
+    ):
         """`add_worktree` is idempotent; its early return must not read as a fast checkout.
 
         Untagged, a resume would drop near-zero rows into the same population as real creations
@@ -277,4 +276,6 @@ class TestTimingLine:
         assert events == ["git-worktree-add-returned", "size-probe"], events
         rows = _rows(caplog)
         assert len(rows) == 1
-        assert int(rows[0]["files"]) == 2, "the probe must still run — just not on the clock"
+        assert (
+            int(rows[0]["files"]) == 2
+        ), "the probe must still run — just not on the clock"

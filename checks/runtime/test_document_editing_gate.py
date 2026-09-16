@@ -29,16 +29,16 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.artifacts import registry
-from gideon.artifacts.handlers import register_artifact_routes
-from gideon.artifacts.models import mime_for_ext
-from gideon.artifacts.native import NativeArtifactProvider
-from gideon.config.loader import AppConfig
-from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
-from gideon.documents.docx_parser import parse_docx
-from gideon.documents.model import Block, DocumentModel, Run
-from gideon.documents.model_json import document_to_dict
-from gideon.documents.writers.docx_writer import render_docx
+from gideon.core.config.loader import AppConfig
+from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
+from gideon.workspace.artifacts import registry
+from gideon.workspace.artifacts.handlers import register_artifact_routes
+from gideon.workspace.artifacts.models import mime_for_ext
+from gideon.workspace.artifacts.native import NativeArtifactProvider
+from gideon.workspace.documents.docx_parser import parse_docx
+from gideon.workspace.documents.model import Block, DocumentModel, Run
+from gideon.workspace.documents.model_json import document_to_dict
+from gideon.workspace.documents.writers.docx_writer import render_docx
 
 DOCX_MIME = mime_for_ext("docx")
 
@@ -80,7 +80,9 @@ def _config(*, document_editing: bool) -> AppConfig:
 def _editing(enabled: bool):
     """Patch ``AppConfig.load`` with a REAL default config carrying one flipped flag —
     not a mock, so the route reads the same object shape it reads in production."""
-    return patch.object(AppConfig, "load", staticmethod(lambda: _config(document_editing=enabled)))
+    return patch.object(
+        AppConfig, "load", staticmethod(lambda: _config(document_editing=enabled))
+    )
 
 
 def _state() -> MagicMock:
@@ -101,7 +103,11 @@ async def _client() -> TestClient:
 
 def _docx_artifact(provider):
     return provider.create_binary(
-        name="Report", data=_settled_docx_bytes(), mime=DOCX_MIME, kind="docx", actor="agent"
+        name="Report",
+        data=_settled_docx_bytes(),
+        mime=DOCX_MIME,
+        kind="docx",
+        actor="agent",
     )
 
 
@@ -112,11 +118,8 @@ def _bolded(model: DocumentModel) -> DocumentModel:
     text = para.runs[0].text if para.runs else para.text
     head, word, tail = text.partition("plain")
     para.runs = [Run(text=head), Run(text=word, bold=True), Run(text=tail)]
-    para.text = ""  # let __post_init__ re-derive the plain view from the runs
+    para.text = ""
     return DocumentModel(title=model.title, blocks=model.blocks, page=model.page)
-
-
-# ── the gate ─────────────────────────────────────────────────────────────────
 
 
 def test_the_flag_is_off_by_default() -> None:
@@ -125,7 +128,9 @@ def test_the_flag_is_off_by_default() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_model_write_is_refused_while_document_editing_is_off(patched_native) -> None:
+async def test_a_model_write_is_refused_while_document_editing_is_off(
+    patched_native,
+) -> None:
     art = _docx_artifact(patched_native)
     before = patched_native.raw_bytes(art.slug)
     with _editing(False):
@@ -141,8 +146,6 @@ async def test_a_model_write_is_refused_while_document_editing_is_off(patched_na
             await client.close()
     assert resp.status == 403
     assert body["error"]["code"] == "document_editing_off"
-    # Not just refused — nothing moved. A refusal that still bumped a version would be
-    # the silent-loss failure this gate exists to prevent.
     after = patched_native.get(art.slug)
     assert after is not None and after.version == art.version
     assert patched_native.raw_bytes(art.slug) == before
@@ -168,14 +171,11 @@ async def test_the_same_write_is_accepted_once_the_flag_is_on(patched_native) ->
     assert after is not None and after.version == art.version + 1
 
 
-# ── the bold word reaches the FILE ───────────────────────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_a_bolded_word_is_bold_in_the_stored_document(patched_native) -> None:
     """The end of the user's sentence: bold a word, save, open the download in Word.
     Read back through python-docx — the run's own ``bold``, not our model's."""
-    from docx import Document  # local: the read-back oracle, not a production import
+    from docx import Document
 
     art = _docx_artifact(patched_native)
     with _editing(True):
@@ -194,12 +194,12 @@ async def test_a_bolded_word_is_bold_in_the_stored_document(patched_native) -> N
     data, _ = patched_native.raw_bytes(art.slug)
     doc = Document(BytesIO(data))
     bolded = [
-        run.text for para in doc.paragraphs for run in para.runs if run.bold and run.text.strip()
+        run.text
+        for para in doc.paragraphs
+        for run in para.runs
+        if run.bold and run.text.strip()
     ]
     assert bolded == ["plain"], f"expected only 'plain' bold, got {bolded}"
-
-
-# ── a lossy edit is recoverable EXACTLY ──────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -229,9 +229,6 @@ async def test_revert_restores_the_pre_edit_bytes_exactly(patched_native) -> Non
     assert restored == original
 
 
-# ── the two config points test_config_roundtrip.py does not cover ────────────
-
-
 def test_the_flag_is_in_the_patch_allowlist() -> None:
     """Point 4 of the round trip: without this entry the PATCH handler drops the key and
     the Settings toggle appears to work while reverting on reload."""
@@ -243,23 +240,27 @@ def test_the_flag_survives_load_and_to_dict(tmp_path) -> None:
     missing from ``load()``'s mapping silently reverts, which reads as "the toggle
     didn't stick"."""
     path = tmp_path / "config.json"
-    path.write_text(json.dumps({"dashboard": {"document_editing": True}}), encoding="utf-8")
-    with patch("gideon.config.loader.config_path", return_value=path):
+    path.write_text(
+        json.dumps({"dashboard": {"document_editing": True}}), encoding="utf-8"
+    )
+    with patch("gideon.core.config.loader.config_path", return_value=path):
         cfg = AppConfig.load()
         assert cfg.dashboard.document_editing is True
         assert cfg.to_dict()["dashboard"]["document_editing"] is True
 
 
 @pytest.mark.asyncio
-async def test_the_settings_panel_write_path_accepts_the_flag(tmp_path, monkeypatch) -> None:
+async def test_the_settings_panel_write_path_accepts_the_flag(
+    tmp_path, monkeypatch
+) -> None:
     """Point 4's other half — the panel the Settings toggle actually drives
     (``PUT /api/dashboard/config``), which has its OWN allowlist. A field missing there
     is a 400 "Unknown fields", i.e. a toggle that cannot be turned on at all."""
-    from gideon.dashboard.handlers import files as files_mod
+    from gideon.interfaces.dashboard.handlers import files as files_mod
 
     path = tmp_path / "config.json"
     path.write_text("{}", encoding="utf-8")
-    monkeypatch.setattr("gideon.config.loader.config_path", lambda: path)
+    monkeypatch.setattr("gideon.core.config.loader.config_path", lambda: path)
 
     app = web.Application()
     app["state"] = _state()
@@ -267,16 +268,23 @@ async def test_the_settings_panel_write_path_accepts_the_flag(tmp_path, monkeypa
     client = TestClient(TestServer(app))
     await client.start_server()
     try:
-        assert (await (await client.get("/api/dashboard/config")).json())["document_editing"] is (
-            False
+        assert (await (await client.get("/api/dashboard/config")).json())[
+            "document_editing"
+        ] is (False)
+        resp = await client.put(
+            "/api/dashboard/config", json={"document_editing": True}
         )
-        resp = await client.put("/api/dashboard/config", json={"document_editing": True})
         assert resp.status == 200, await resp.text()
-        assert (await (await client.get("/api/dashboard/config")).json())["document_editing"] is (
-            True
+        assert (await (await client.get("/api/dashboard/config")).json())[
+            "document_editing"
+        ] is (True)
+        bad = await client.put(
+            "/api/dashboard/config", json={"document_editing": "yes"}
         )
-        bad = await client.put("/api/dashboard/config", json={"document_editing": "yes"})
         assert bad.status == 400
     finally:
         await client.close()
-    assert json.loads(path.read_text(encoding="utf-8"))["dashboard"]["document_editing"] is True
+    assert (
+        json.loads(path.read_text(encoding="utf-8"))["dashboard"]["document_editing"]
+        is True
+    )

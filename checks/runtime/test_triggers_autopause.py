@@ -2,7 +2,7 @@
 
 The plan says autopause-after-5 ALREADY EXISTS for the cron action path and that the substrate
 generalizes it. So this suite starts from what the shipped one does, measured by driving it:
-`GatewayOrchestrator._maybe_autopause` increments one counter at all four of its call sites with no
+`RuntimeCoordinator._maybe_autopause` increments one counter at all four of its call sites with no
 notion of WHY the fire failed, so **five consecutive denylist blocks disable the trigger** — a
 policy the operator configured on purpose, read as five failures.
 
@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.triggers.autopause import (
+from gideon.automation.triggers.autopause import (
     EXIT_TYPES,
     FAILURE_BUDGET,
     IMMEDIATE_PAUSE_EXITS,
@@ -34,7 +34,7 @@ from gideon.triggers.autopause import (
     resume_state,
     unpark_due,
 )
-from gideon.triggers.models import (
+from gideon.automation.triggers.models import (
     FIRE_OUTCOMES,
     TRUE_FAILURE_OUTCOMES,
     Outcome,
@@ -42,11 +42,9 @@ from gideon.triggers.models import (
     TriggerState,
 )
 
-# ── the shipped behaviour this session generalizes ──
-
 
 def test_the_shipped_budget_is_preserved_exactly():
-    """5, matching `GatewayOrchestrator._maybe_autopause`.
+    """5, matching `RuntimeCoordinator._maybe_autopause`.
 
     Pinned because changing it during a port would be a behaviour change disguised as a migration:
     every existing cron author tuned their expectations against this number.
@@ -102,9 +100,6 @@ def test_skipped_outcomes_do_not_count():
         assert counts_toward_autopause(outcome) is False, outcome
 
 
-# ── typed exits ──
-
-
 @pytest.mark.parametrize("exit_type", EXIT_TYPES)
 def test_every_exit_type_maps_to_a_real_outcome(exit_type):
     assert outcome_for_exit(exit_type) in FIRE_OUTCOMES
@@ -132,9 +127,6 @@ def test_partial_is_a_success_not_a_failure():
     assert decision.consecutive_failures == 0
 
 
-# ── parking ──
-
-
 def test_an_outage_parks_and_leaves_the_counter_untouched():
     """Untouched, not reset: an outage is neither progress nor failure.
 
@@ -155,7 +147,9 @@ def test_parking_never_autopauses_no_matter_how_long_the_outage():
     count = 0
     for _ in range(FAILURE_BUDGET * 3):
         decision = evaluate(
-            exit_type=ExitType.TRANSPORT_UNAVAILABLE.value, consecutive_failures=count, now=0.0
+            exit_type=ExitType.TRANSPORT_UNAVAILABLE.value,
+            consecutive_failures=count,
+            now=0.0,
         )
         count = decision.consecutive_failures
         assert decision.state == TriggerState.PARKED.value
@@ -181,15 +175,9 @@ def test_a_success_clears_a_park():
 
 
 def test_unpark_is_clock_driven_and_a_missing_deadline_reads_as_due():
-    # Clock-driven because a parked trigger produces no fires to evaluate — nothing would ever
-    # bring it back if the transition lived in the outcome path.
     assert unpark_due(retry_after=500.0, now=499.0) is False
     assert unpark_due(retry_after=500.0, now=500.0) is True
-    # A park written before `retry_after` existed must not strand the trigger forever.
     assert unpark_due(retry_after=0.0, now=0.0) is True
-
-
-# ── config errors + quarantine ──
 
 
 def test_a_config_error_pauses_on_the_first_fire():
@@ -207,7 +195,9 @@ def test_a_config_error_pauses_on_the_first_fire():
 def test_quarantine_wins_over_every_other_branch():
     """Ordered first so nothing below can put an injection-screened trigger back into firing."""
     for exit_type in EXIT_TYPES:
-        decision = evaluate(exit_type=exit_type, consecutive_failures=0, quarantined=True)
+        decision = evaluate(
+            exit_type=exit_type, consecutive_failures=0, quarantined=True
+        )
         assert decision.state == TriggerState.QUARANTINED.value, exit_type
         assert decision.fires_automatically is False
 
@@ -235,18 +225,22 @@ def test_a_retired_trigger_is_not_resumable():
 def test_only_active_fires_automatically():
     """Read through `fires_automatically`, never by checking `enabled` — that is how an autopaused
     trigger keeps firing."""
-    assert evaluate(exit_type=ExitType.OK.value, consecutive_failures=0).fires_automatically is True
+    assert (
+        evaluate(
+            exit_type=ExitType.OK.value, consecutive_failures=0
+        ).fires_automatically
+        is True
+    )
     for exit_type in (ExitType.FAILED.value, ExitType.CONFIG_ERROR.value):
         decision = evaluate(exit_type=exit_type, consecutive_failures=FAILURE_BUDGET)
         assert decision.fires_automatically is False
 
 
-# ── Runs-inbox surfacing ──
-
-
 def test_a_park_gets_no_inbox_card():
     """A park self-heals. A card the user cannot act on trains them to dismiss the surface."""
-    decision = evaluate(exit_type=ExitType.AUTH_UNAVAILABLE.value, consecutive_failures=0, now=0.0)
+    decision = evaluate(
+        exit_type=ExitType.AUTH_UNAVAILABLE.value, consecutive_failures=0, now=0.0
+    )
     assert needs_attention(decision.state) is False
     assert attention_card(trigger_id="t", trigger_name="T", decision=decision) is None
 
@@ -258,9 +252,14 @@ def test_a_healthy_fire_gets_no_inbox_card():
 
 def test_an_autopause_surfaces_with_the_error_and_a_resume_action():
     """A pause reason with no error text is an alert the user must go digging to act on."""
-    decision = evaluate(exit_type=ExitType.FAILED.value, consecutive_failures=FAILURE_BUDGET - 1)
+    decision = evaluate(
+        exit_type=ExitType.FAILED.value, consecutive_failures=FAILURE_BUDGET - 1
+    )
     card = attention_card(
-        trigger_id="t1", trigger_name="Nightly backup", decision=decision, last_error="conn reset"
+        trigger_id="t1",
+        trigger_name="Nightly backup",
+        decision=decision,
+        last_error="conn reset",
     )
     assert card is not None
     assert "Nightly backup" in card.title
@@ -270,7 +269,9 @@ def test_an_autopause_surfaces_with_the_error_and_a_resume_action():
 
 def test_a_quarantine_card_offers_no_resume():
     """`resume_state` refuses it, and a button that returns a refusal is worse than no button."""
-    decision = evaluate(exit_type=ExitType.FAILED.value, consecutive_failures=0, quarantined=True)
+    decision = evaluate(
+        exit_type=ExitType.FAILED.value, consecutive_failures=0, quarantined=True
+    )
     card = attention_card(trigger_id="t1", trigger_name="Scraper", decision=decision)
     assert card is not None
     assert "quarantined" in card.title
@@ -290,7 +291,9 @@ def test_one_card_per_episode_but_a_new_one_on_re_entry():
     Per-fire keying yields exactly one card ever, because an autopaused trigger stops firing — so a
     trigger that pauses, gets resumed, and pauses again would never surface the second time.
     """
-    decision = evaluate(exit_type=ExitType.FAILED.value, consecutive_failures=FAILURE_BUDGET - 1)
+    decision = evaluate(
+        exit_type=ExitType.FAILED.value, consecutive_failures=FAILURE_BUDGET - 1
+    )
     first = attention_card(trigger_id="t1", trigger_name="N", decision=decision)
     assert first is not None
     seen = {first.fingerprint}
@@ -341,9 +344,6 @@ def test_decision_round_trips_for_persistence():
     assert d["reason"]
 
 
-# ── the exception classifier ──
-
-
 @pytest.mark.parametrize(
     "exc,expected",
     [
@@ -384,27 +384,17 @@ def test_an_unclassified_exception_is_a_failure_not_an_outage():
 
 def test_an_unknown_exit_type_still_fails_closed():
     """A caller's typo must not become a benign skip."""
-    decision = evaluate(exit_type="cnofig_error", consecutive_failures=FAILURE_BUDGET - 1)
+    decision = evaluate(
+        exit_type="cnofig_error", consecutive_failures=FAILURE_BUDGET - 1
+    )
     assert decision.state == TriggerState.AUTOPAUSED.value
 
 
-# 🔴 The legacy-parity block retired with `ScheduleService` (S112). It drove
-# `GatewayOrchestrator._maybe_autopause` directly, as a reference the substrate had to match —
-# and both that method and the dispatcher that called it are gone. Every contract it pinned is
-# covered above against `autopause.evaluate`: the 5-failure budget
-# (`test_the_shipped_budget_is_preserved_exactly`), config-error-on-first-fire
-# (`test_a_config_error_pauses_on_the_first_fire`), outage parking that never touches `enabled`
-# (`test_parking_never_autopauses_no_matter_how_long_the_outage`), and a policy refusal never
-# spending the budget (`test_a_policy_refusal_never_spends_the_budget`) — which is the DEFECT the
-# legacy pair carried: one counter incremented at four call sites with no way to tell a policy
-# block from a real failure.
-
-
-# ── 🔴 the per-trigger failure budget was declared and never read (S160) ──
+# `RuntimeCoordinator._maybe_autopause` directly, as a reference the substrate had to match —
 
 
 def _with_policy(policy):
-    from gideon.triggers.models import Trigger
+    from gideon.automation.triggers.models import Trigger
 
     t = Trigger(id="t", name="t", kind="clock")
     t.failure_policy = policy
@@ -421,19 +411,25 @@ def test_a_DECLARED_autopause_after_is_HONOURED():
     what makes it invisible: it silently WIDENS a tolerance its author narrowed, and a
     trigger that keeps running looks exactly like a healthy one.
     """
-    from gideon.triggers.autopause import budget_for, evaluate
+    from gideon.automation.triggers.autopause import budget_for, evaluate
 
     trigger = _with_policy({"autopause_after": 2})
     assert budget_for(trigger) == 2
     budget = budget_for(trigger)
-    assert evaluate(exit_type="failed", consecutive_failures=0, budget=budget).state == "active"
-    assert evaluate(exit_type="failed", consecutive_failures=1, budget=budget).state == "autopaused"
+    assert (
+        evaluate(exit_type="failed", consecutive_failures=0, budget=budget).state
+        == "active"
+    )
+    assert (
+        evaluate(exit_type="failed", consecutive_failures=1, budget=budget).state
+        == "autopaused"
+    )
 
 
 def test_NO_policy_keeps_the_shipped_default():
     """The control case, and the compatibility guarantee: every trigger authored before this session
     behaves exactly as it did."""
-    from gideon.triggers.autopause import FAILURE_BUDGET, budget_for
+    from gideon.automation.triggers.autopause import FAILURE_BUDGET, budget_for
 
     assert budget_for(_with_policy({})) == FAILURE_BUDGET
     assert budget_for(_with_policy(None)) == FAILURE_BUDGET
@@ -445,11 +441,12 @@ def test_a_MALFORMED_budget_falls_back_to_the_DEFAULT_not_to_ONE():
     to 0 would mean "pause on the FIRST failure" — turning a typo into an automation that stops the
     first time anything goes wrong. Falling back to the shipped tolerance is the only reading that
     cannot surprise."""
-    from gideon.triggers.autopause import FAILURE_BUDGET, budget_for
+    from gideon.automation.triggers.autopause import FAILURE_BUDGET, budget_for
 
     for junk in ("two", None, [], {}, 0, -3, 0.0):
-        assert budget_for(_with_policy({"autopause_after": junk})) == FAILURE_BUDGET, junk
-    # …and a well-formed narrow value still binds, so failing back is not a blanket excuse.
+        assert (
+            budget_for(_with_policy({"autopause_after": junk})) == FAILURE_BUDGET
+        ), junk
     assert budget_for(_with_policy({"autopause_after": 1})) == 1
 
 
@@ -457,7 +454,7 @@ def test_the_fire_path_PASSES_the_per_trigger_budget():
     """The wiring — the defect was a missing argument, which source inspection sees exactly."""
     import inspect
 
-    from gideon import gateway
+    from gideon.engine import gateway
 
     assert "budget=autopause.budget_for(trigger)" in inspect.getsource(gateway)
 
@@ -466,7 +463,7 @@ def test_the_reason_string_reports_the_REAL_budget():
     """`evaluate`'s reasons already interpolate the budget (`failure 1 of 5`), so before the wiring
     they confidently quoted a number the trigger had not asked for. The user is being told why their
     automation stopped; that sentence has to be true."""
-    from gideon.triggers.autopause import evaluate
+    from gideon.automation.triggers.autopause import evaluate
 
     degraded = evaluate(exit_type="failed", consecutive_failures=0, budget=3)
     assert "of 3" in degraded.reason

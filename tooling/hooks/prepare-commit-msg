@@ -1,0 +1,39 @@
+#!/bin/sh
+                                                                            
+#
+                                                                                 
+                                                                           
+                                                                                 
+                                                                                
+                                                                              
+#
+                                                                                  
+                                                                                  
+                                                                                  
+                                        
+#
+                                                                               
+                                                                            
+                                                                             
+set -eu
+
+commit_msg_file=$1
+commit_source=${2:-}
+
+                                                                            
+                                                                         
+case "$commit_source" in
+  merge|squash|commit) exit 0 ;;
+esac
+
+sob="Signed-off-by: $(git config user.name) <$(git config user.email)>"
+
+                                                                           
+if grep -qxF "$sob" "$commit_msg_file"; then
+  exit 0
+fi
+
+                                                                              
+                                                                                
+git interpret-trailers --if-exists doNothing --trailer "$sob" \
+  --in-place "$commit_msg_file"

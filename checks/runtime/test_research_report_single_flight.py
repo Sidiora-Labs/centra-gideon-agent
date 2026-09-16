@@ -22,11 +22,13 @@ import asyncio
 
 import pytest
 
-from gideon.action_providers import ActionContext, ActionResult
-from gideon.action_providers.knowledge_report_provider import KnowledgeReportActionProvider
-from gideon.dashboard.handlers import research_reports as handlers
-from gideon.knowledge import research_reports as rr
-from gideon.triggers import claims
+from gideon.automation.triggers import claims
+from gideon.cognition.knowledge import research_reports as rr
+from gideon.integrations.action_providers import ActionContext, ActionResult
+from gideon.integrations.action_providers.knowledge_report_provider import (
+    KnowledgeReportActionProvider,
+)
+from gideon.interfaces.dashboard.handlers import research_reports as handlers
 
 
 @pytest.fixture
@@ -35,7 +37,7 @@ def home(tmp_path, monkeypatch):
     h = tmp_path / "home"
     h.mkdir(parents=True)
     monkeypatch.setenv("GIDEON_HOME", str(h))
-    import gideon.config as cfg
+    import gideon.core.config as cfg
 
     monkeypatch.setattr(cfg, "config_dir", lambda: h, raising=False)
     return h
@@ -58,7 +60,6 @@ async def test_the_claim_is_held_INSIDE_the_run_and_released_after(home, monkeyp
     seen: list[bool] = []
 
     async def fake_locked(action_config, ctx, timeout=30):
-        # The whole point: while the body runs, the route's own check must say "running".
         seen.append(claims.is_running(claim_id))
         return ActionResult(success=True)
 
@@ -123,12 +124,16 @@ async def test_a_second_run_is_skipped_rather_than_doubled(home, monkeypatch):
 @pytest.mark.asyncio
 async def test_the_manual_route_refuses_while_the_runner_holds_it(home):
     """The two halves meet: a claim written the way the RUNNER writes it blocks the route."""
-    from gideon.triggers.scheduling import Claim
+    from gideon.automation.triggers.scheduling import Claim
 
     claim_id = rr.report_claim_id("rep-4")
-    claims.write_claim(Claim(trigger_id=claim_id, holder="knowledge-report", claimed_at=1.0e9))
+    claims.write_claim(
+        Claim(trigger_id=claim_id, holder="knowledge-report", claimed_at=1.0e9)
+    )
     try:
-        assert claims.is_running(handlers.report_claim_id("rep-4"), now=1.0e9 + 1) is True
+        assert (
+            claims.is_running(handlers.report_claim_id("rep-4"), now=1.0e9 + 1) is True
+        )
     finally:
         claims.release_claim(claim_id)
     assert claims.is_running(claim_id) is False

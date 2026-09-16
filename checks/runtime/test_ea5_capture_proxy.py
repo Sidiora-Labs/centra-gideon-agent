@@ -26,8 +26,8 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.inbound import auth
-from gideon.inbound import capture_proxy as proxy
+from gideon.integrations.inbound import auth
+from gideon.integrations.inbound import capture_proxy as proxy
 
 _SURFACES = ("OPENAI", "MCP", "A2A", "CAPTURE", "BRIDGE")
 
@@ -46,7 +46,7 @@ def _isolate(tmp_path, monkeypatch):
     yield
     for surface in _SURFACES:
         os.environ.pop(f"GIDEON_INBOUND_{surface}_TOKEN", None)
-    from gideon.llm.registry import reset_default_registry
+    from gideon.integrations.llm.registry import reset_default_registry
 
     reset_default_registry()
 
@@ -68,9 +68,13 @@ def _enable(
     Both are exercised because this module reads whichever exists and neither field is
     owned here.
     """
-    from gideon.config.external_access import ExternalAccessConfig
-    from gideon.config.external_access import ExternalAccessSurfaceConfig as Surface
-    from gideon.config.loader import AppConfig
+    from gideon.core.config.external_access import (
+        ExternalAccessConfig,
+    )
+    from gideon.core.config.external_access import (
+        ExternalAccessSurfaceConfig as Surface,
+    )
+    from gideon.core.config.loader import AppConfig
 
     cfg = AppConfig()
     surface = Surface(enabled=enabled, allow_remote=allow_remote)
@@ -127,9 +131,6 @@ def _token() -> str:
     return auth.create_surface_token(proxy.CAPTURE_SURFACE)
 
 
-# ── 1. A disabled surface is 404, and refuses before the body is read ─────────
-
-
 @pytest.mark.asyncio
 async def test_disabled_surface_is_404_without_reading_the_body(monkeypatch):
     """404 rather than 403 so an off surface does not confirm its own existence, and the
@@ -152,8 +153,6 @@ async def test_disabled_surface_is_404_without_reading_the_body(monkeypatch):
         assert resp.status == 404
         assert (await resp.json())["error"]["code"] == "service_unavailable"
 
-        # Vacuity floor for the patch above: an ADMITTED request does reach the read, so
-        # the 404 genuinely skipped it rather than the patch being inert.
         _enable(monkeypatch, enabled=True, allowlist=("example.invalid",))
         admitted = await client.post(
             proxy.ROUTE_OPENAI,
@@ -165,9 +164,6 @@ async def test_disabled_surface_is_404_without_reading_the_body(monkeypatch):
         await client.close()
 
 
-# ── 2. Loopback forever — allow_remote is never consulted ────────────────────
-
-
 @pytest.mark.asyncio
 async def test_non_loopback_is_refused_even_with_a_correct_token(monkeypatch):
     """A correct bearer AND ``allow_remote=True`` must still be refused.
@@ -176,7 +172,9 @@ async def test_non_loopback_is_refused_even_with_a_correct_token(monkeypatch):
     is "capture has no remote mode for a setting to turn on". If a future edit routed
     this through `auth.peer_allowed`'s remote branch, this test is what goes red.
     """
-    _enable(monkeypatch, enabled=True, allow_remote=True, allowlist=("example.invalid",))
+    _enable(
+        monkeypatch, enabled=True, allow_remote=True, allowlist=("example.invalid",)
+    )
     token = _token()
     monkeypatch.setattr(auth, "_peer_host", lambda request: "203.0.113.9")
     client = await _proxy_client()
@@ -193,9 +191,6 @@ async def test_non_loopback_is_refused_even_with_a_correct_token(monkeypatch):
         await client.close()
 
 
-# ── 3. Loopback + bad/absent bearer → 401 ────────────────────────────────────
-
-
 @pytest.mark.parametrize(
     "headers",
     [{}, {"Authorization": "Bearer not-the-token"}, {"Authorization": "Bearer "}],
@@ -204,7 +199,7 @@ async def test_non_loopback_is_refused_even_with_a_correct_token(monkeypatch):
 @pytest.mark.asyncio
 async def test_loopback_with_a_bad_or_absent_bearer_is_401(monkeypatch, headers):
     _enable(monkeypatch, enabled=True, allowlist=("example.invalid",))
-    _token()  # a valid token EXISTS; the caller just isn't presenting it
+    _token()
     client = await _proxy_client()
     try:
         resp = await client.post(
@@ -214,9 +209,6 @@ async def test_loopback_with_a_bad_or_absent_bearer_is_401(monkeypatch, headers)
         assert (await resp.json())["error"]["code"] == "unauthorized"
     finally:
         await client.close()
-
-
-# ── 4. A fully-admitted request forwards VERBATIM ────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -232,7 +224,6 @@ async def test_admitted_request_forwards_the_body_verbatim(monkeypatch):
     try:
         _enable(monkeypatch, enabled=True, allowlist=("127.0.0.1",))
         token = _token()
-        # Deliberately odd formatting: whitespace and key order a re-serialiser would lose.
         raw = b'{"model":"gpt-4o",  "messages":[{"role":"user","content":"hi"}],"stream":false}'
         resp = await client.post(
             proxy.ROUTE_OPENAI,
@@ -272,16 +263,12 @@ async def test_anthropic_dialect_forwards_to_messages(monkeypatch):
         assert resp.status == 200
         assert seen["raw"] == raw
         assert seen["path"] == "/v1/messages"
-        # Anthropic's dialect authenticates with x-api-key, not a bearer.
         assert seen["headers"]["x-api-key"] == "client-key"
         assert "Authorization" not in seen["headers"]
         assert seen["headers"]["anthropic-version"]
     finally:
         await client.close()
         await upstream.close()
-
-
-# ── 5. The guard pre-flight runs BEFORE any connection ───────────────────────
 
 
 @pytest.mark.asyncio
@@ -330,9 +317,6 @@ async def test_guard_preflight_runs_before_any_connection(monkeypatch):
         assert contacted == []
     finally:
         await client.close()
-
-
-# ── 6. An empty allow-list refuses — with a vacuity floor beside it ──────────
 
 
 @pytest.mark.parametrize("nested", [False, True], ids=["flat-field", "nested-field"])
@@ -395,9 +379,6 @@ async def test_allowlisted_host_is_permitted(monkeypatch, nested):
         await upstream.close()
 
 
-# ── 7. Streaming: bytes first, recording after ───────────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_sse_reaches_the_caller_before_recording_completes(monkeypatch):
     """Stream-first, and a deliberately slow recorder proves it.
@@ -433,7 +414,6 @@ async def test_sse_reaches_the_caller_before_recording_completes(monkeypatch):
         body = await resp.read()
         assert b'data: {"delta":"a"}' in body
         assert b"data: [DONE]" in body
-        # The caller has EVERY byte while the recorder is still blocked.
         assert recorded == []
 
         release.set()
@@ -488,9 +468,6 @@ async def test_non_stream_turn_is_recorded_with_both_bodies(monkeypatch):
         await upstream.close()
 
 
-# ── 8. Passthrough uses the client's key; the operator's never leaves ────────
-
-
 def _register_operator_provider(monkeypatch, base: str, secret: str) -> str:
     """A ProviderEntry whose credential resolves through the SHARED ladder.
 
@@ -498,12 +475,8 @@ def _register_operator_provider(monkeypatch, base: str, secret: str) -> str:
     key the Add-Provider flow persists — so this exercises the real resolver rather than
     a shortcut the proxy invented.
     """
-    from gideon.llm.branded_specs import _REGISTERED_SPECS
-    from gideon.llm.registry import ProviderEntry, get_default_registry
-
-    # Via `sdk.model`, the stable re-export apps use. Importing `BrandedProviderSpec`
-    # straight from `provider_helpers` trips the circular import that module's own
-    # "imported LAST" comment describes.
+    from gideon.integrations.llm.branded_specs import _REGISTERED_SPECS
+    from gideon.integrations.llm.registry import ProviderEntry, get_default_registry
     from gideon.sdk.model import BrandedProviderSpec
 
     spec = BrandedProviderSpec(type="stubprov", default_base_url=base)
@@ -540,8 +513,12 @@ async def test_provider_mode_uses_the_operators_key(monkeypatch):
     try:
         _enable(monkeypatch, enabled=True, allowlist=("127.0.0.1",))
         token = _token()
-        name = _register_operator_provider(monkeypatch, _base_of(upstream), "OPERATOR-SECRET")
-        monkeypatch.setattr(proxy, "_lookup_client", lambda presented: (_FakeClient(name), ""))
+        name = _register_operator_provider(
+            monkeypatch, _base_of(upstream), "OPERATOR-SECRET"
+        )
+        monkeypatch.setattr(
+            proxy, "_lookup_client", lambda presented: (_FakeClient(name), "")
+        )
         resp = await client.post(
             proxy.ROUTE_OPENAI,
             data=json.dumps({"model": "m"}),
@@ -564,8 +541,12 @@ async def test_passthrough_uses_the_client_key_and_never_the_operators(monkeypat
     try:
         _enable(monkeypatch, enabled=True, allowlist=("127.0.0.1",))
         token = _token()
-        name = _register_operator_provider(monkeypatch, _base_of(upstream), "OPERATOR-SECRET")
-        monkeypatch.setattr(proxy, "_lookup_client", lambda presented: (_FakeClient(name), ""))
+        name = _register_operator_provider(
+            monkeypatch, _base_of(upstream), "OPERATOR-SECRET"
+        )
+        monkeypatch.setattr(
+            proxy, "_lookup_client", lambda presented: (_FakeClient(name), "")
+        )
         resp = await client.post(
             proxy.ROUTE_OPENAI,
             data=json.dumps({"model": "m"}),
@@ -579,7 +560,6 @@ async def test_passthrough_uses_the_client_key_and_never_the_operators(monkeypat
         assert seen["headers"]["Authorization"] == "Bearer CLIENT-OWN-KEY"
         blob = json.dumps(seen["headers"]) + seen["raw"].decode("utf-8")
         assert "OPERATOR-SECRET" not in blob
-        # Nor does the capture surface token itself ever travel upstream.
         assert token not in blob
     finally:
         await client.close()
@@ -607,9 +587,6 @@ async def test_no_bound_upstream_and_no_passthrough_refuses(monkeypatch):
         await client.close()
 
 
-# ── 9. A failing recorder cannot cost the caller its response ────────────────
-
-
 @pytest.mark.asyncio
 async def test_a_raising_recorder_does_not_break_the_response(monkeypatch):
     upstream, _seen = await _stub_upstream()
@@ -633,7 +610,7 @@ async def test_a_raising_recorder_does_not_break_the_response(monkeypatch):
         )
         assert resp.status == 200
         assert (await resp.json()) == {"ok": True, "id": "resp-1"}
-        await proxy.drain_recordings()  # must not propagate the RuntimeError
+        await proxy.drain_recordings()
     finally:
         await client.close()
         await upstream.close()
@@ -664,9 +641,6 @@ async def test_a_missing_capture_store_still_forwards(monkeypatch):
     finally:
         await client.close()
         await upstream.close()
-
-
-# ── Routes are registered, and both are literal ──────────────────────────────
 
 
 def test_both_routes_register_as_literal_posts():

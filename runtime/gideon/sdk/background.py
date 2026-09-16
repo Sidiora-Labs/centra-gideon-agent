@@ -1,11 +1,11 @@
 """SDK: the supervised background-worker ABC + its cooperative control protocol.
 
-Stable re-export of ``gideon.apps.background`` — an app imports these, not the core
+Stable re-export of ``gideon.extensions.apps.background`` — an app imports these, not the core
 module directly, so the core path can move without breaking installed apps. Gated by the
 app's ``backgroundTasks`` permission, verified host-side before the worker is spawned.
 """
 
-from gideon.apps.background import (  # noqa: F401
+from gideon.extensions.apps.background import (
     BACKGROUND_TASKS_PERMISSION,
     DEFAULT_POLL_INTERVAL,
     WORKER_APP_ENV,

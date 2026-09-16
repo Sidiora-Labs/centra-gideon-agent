@@ -3,7 +3,7 @@
 Criterion 10: "A completed-run notification deep-links (statusUrl) to the exact run journal row; a
 retried delivery does not double-ping."
 
-**Measured before writing.** A grep for `statusUrl` or `status_url` across `src/gideon`
+**Measured before writing.** A grep for `statusUrl` or `status_url` across `runtime/gideon`
 returned nothing — the deep link the criterion names did not exist anywhere in the package. A
 completed-run notification carried a title and a body, so a user reading "Nightly digest
 finished" had no route to the run that produced it. R18 calls that "the notification→journal
@@ -17,12 +17,12 @@ from __future__ import annotations
 
 import pytest
 
-from gideon import notification_kinds
-from gideon.triggers import delivery as D
+from gideon.automation.triggers import delivery as D
+from gideon.workspace import notification_kinds
 
 
 class _State:
-    """A `DashboardState` stand-in that records what reached `notify`.
+    """A `ConsoleState` stand-in that records what reached `notify`.
 
     Deliberately a recorder rather than a mock of `deliver`: R18 forbids a second notification
     path, so the property under test is "the arguments arrive at `notify`", and mocking the
@@ -33,7 +33,9 @@ class _State:
         self.sent: list[dict] = []
 
     def notify(self, kind, title, body, *, meta=None):
-        self.sent.append({"kind": kind, "title": title, "body": body, "meta": meta or {}})
+        self.sent.append(
+            {"kind": kind, "title": title, "body": body, "meta": meta or {}}
+        )
 
 
 def _ok(**over):
@@ -46,9 +48,6 @@ def _ok(**over):
     )
     kwargs.update(over)
     return D.build_delivery(**kwargs)
-
-
-# ── clause 1: the statusUrl deep link ──
 
 
 def test_the_status_url_points_at_the_exact_run():
@@ -67,7 +66,8 @@ def test_a_run_id_wins_over_a_trigger_id():
 def test_a_fire_with_no_run_links_to_the_trigger():
     """A `LEDGER`-weight fire (suppressed, noop) produces no run directory, and a notification
     about one
-    still needs somewhere to go. `#/triggers?open=<id>` is the panel `TriggersListPage` opens."""
+    still needs somewhere to go. `#/triggers?open=<id>` is the panel `TriggersListPage` opens.
+    """
     assert D.status_url(trigger_id="schedule:j1") == "#/triggers?open=schedule:j1"
 
 
@@ -79,7 +79,8 @@ def test_no_ids_yields_an_empty_url_not_a_dashboard_root_link():
 def test_the_status_url_reaches_notify_in_meta():
     """`meta` is the dict `notify` already merges into the note, so `statusUrl` reaches every
     surface
-    without `InboxItem` or the note schema gaining a field — the seam S51's card also rides."""
+    without `InboxItem` or the note schema gaining a field — the seam S51's card also rides.
+    """
     state = _State()
     assert D.deliver(state, _ok()) is True
     assert state.sent[0]["meta"]["statusUrl"] == "#/workflows/runs/r1"
@@ -94,13 +95,11 @@ def test_the_wire_key_is_camelCase_as_R18_names_it():
     assert "status_url" not in kwargs["meta"]
 
 
-# ── clause 2: a retried delivery does not double-ping ──
-
-
 def test_the_event_id_is_stable_across_retries():
     """🔴 DERIVED, never random. A `uuid4()` or a timestamp would produce a NEW id on the
     retry, and the
-    consumer would show the notification twice — the exact failure the criterion names."""
+    consumer would show the notification twice — the exact failure the criterion names.
+    """
     first = D.event_id(trigger_id="schedule:j1", run_id="r1")
     retry = D.event_id(trigger_id="schedule:j1", run_id="r1")
     assert first == retry
@@ -157,9 +156,6 @@ def test_two_distinct_events_both_deliver():
     assert len(state.sent) == 2
 
 
-# ── the event types ──
-
-
 def test_success_and_failure_are_distinct_event_types():
     """🔴 Two names, not one with a boolean: a channel consumer routes on the event name, and
     `automation.run` + `{"ok": false}` would make "only tell me about failures" a body inspection.
@@ -179,9 +175,6 @@ def test_ok_reflects_the_event_type():
     assert _ok(ok=False).ok is False
 
 
-# ── the notification kind ──
-
-
 def test_a_failure_uses_the_error_kind_so_it_can_escalate():
     """A failure has to be able to escalate past a "digest" rule while a success should not —
     that is a
@@ -196,9 +189,6 @@ def test_both_kinds_are_registered_names():
     for kind in (_ok().kind, _ok(ok=False).kind):
         assert isinstance(kind, str) and kind
         assert hasattr(notification_kinds, kind.upper())
-
-
-# ── destination-aware formatting ──
 
 
 @pytest.mark.parametrize(
@@ -233,9 +223,6 @@ def test_the_flat_text_survives_an_empty_body():
     assert text.splitlines()[-1] == "#/workflows/runs/r1"
 
 
-# ── redaction before any surface ──
-
-
 def test_a_credential_in_the_summary_is_redacted():
     """R18 requires `redact_exfiltration_urls` + `redact_credentials` before any surface, as
     heartbeat
@@ -259,9 +246,6 @@ def test_the_body_is_capped():
     link this session exists to add."""
     delivery = _ok(summary="x" * 5000)
     assert len(delivery.body) <= D.BODY_CAP
-
-
-# ── it routes through the EXISTING gate, and never breaks the run ──
 
 
 def test_delivery_goes_through_state_notify_not_a_second_path():
@@ -303,9 +287,6 @@ def test_a_failed_send_is_not_recorded_as_delivered():
     assert delivery.event_id not in seen
 
 
-# ── the wire shape ──
-
-
 def test_the_dict_form_carries_every_field_a_consumer_needs():
     payload = _ok(duration_secs=12.5).to_dict()
     assert payload["status_url"] == "#/workflows/runs/r1"
@@ -332,9 +313,6 @@ def test_the_module_imports_without_a_syntax_warning():
         importlib.reload(D)
 
 
-# ── 🔴 the failure route was declared and never read (S158) ──
-
-
 def test_a_MUTED_automation_still_reports_a_FAILURE():
     """🔴 THE DEFECT. `Trigger.failure_delivery` states its own contract: *"A SEPARATE route for
     failures (R12). Failures reach the inbox even when `delivery` is none: an automation the user
@@ -347,7 +325,7 @@ def test_a_MUTED_automation_still_reports_a_FAILURE():
     """
     import types
 
-    from gideon.triggers.delivery import route_for
+    from gideon.automation.triggers.delivery import route_for
 
     trigger = types.SimpleNamespace(
         id="t", name="nightly", delivery="none", failure_delivery="inbox"
@@ -358,12 +336,15 @@ def test_a_MUTED_automation_still_reports_a_FAILURE():
 
 def test_a_SUCCESS_never_inherits_the_failure_route():
     """The asymmetry is the point: falling back the other way would make a quiet automation start
-    announcing its ordinary runs, which is the setting the user explicitly turned off."""
+    announcing its ordinary runs, which is the setting the user explicitly turned off.
+    """
     import types
 
-    from gideon.triggers.delivery import route_for
+    from gideon.automation.triggers.delivery import route_for
 
-    trigger = types.SimpleNamespace(id="t", name="n", delivery="none", failure_delivery="notify")
+    trigger = types.SimpleNamespace(
+        id="t", name="n", delivery="none", failure_delivery="notify"
+    )
     assert route_for(trigger, ok=True) == "none"
 
 
@@ -372,17 +353,20 @@ def test_an_EMPTY_failure_route_falls_back_to_delivery():
     rather than acquiring a channel nobody asked for."""
     import types
 
-    from gideon.triggers.delivery import route_for
+    from gideon.automation.triggers.delivery import route_for
 
-    trigger = types.SimpleNamespace(id="t", name="n", delivery="none", failure_delivery="")
+    trigger = types.SimpleNamespace(
+        id="t", name="n", delivery="none", failure_delivery=""
+    )
     assert route_for(trigger, ok=False) == "none"
 
 
 def test_DESTINATION_none_actually_SILENCES():
     """🔴 THE SECOND HALF. `Delivery` carried `destination` and `to_notify_kwargs` **dropped it**, so
     `delivery: "none"` silenced nothing — measured, a `none` trigger notified exactly like an
-    `inbox` one. The field round-tripped and was inert at the one point that could honour it."""
-    from gideon.triggers.delivery import build_delivery, deliver
+    `inbox` one. The field round-tripped and was inert at the one point that could honour it.
+    """
+    from gideon.automation.triggers.delivery import build_delivery, deliver
 
     class _State:
         def __init__(self):
@@ -397,7 +381,9 @@ def test_DESTINATION_none_actually_SILENCES():
     assert state.sent == [], "a muted destination must not reach state.notify at all"
 
     state2 = _State()
-    note2 = build_delivery(trigger_id="t", trigger_name="n", ok=True, destination="inbox")
+    note2 = build_delivery(
+        trigger_id="t", trigger_name="n", ok=True, destination="inbox"
+    )
     assert deliver(state2, note2, delivered_ids=set()) is True
     assert len(state2.sent) == 1
 
@@ -406,7 +392,7 @@ def test_an_EMPTY_destination_is_not_treated_as_MUTED():
     """`from_dict` defaults `delivery` to `"none"` explicitly, so a BLANK value means a caller built
     a Delivery without one. Defaulting that to silence would let a bug become missing alerts — the
     fail-quiet direction, which is exactly what this session fixed."""
-    from gideon.triggers.delivery import is_muted
+    from gideon.automation.triggers.delivery import is_muted
 
     assert is_muted("none") and is_muted("NONE") and is_muted(" none ")
     assert not is_muted("") and not is_muted("inbox") and not is_muted("channel:slack")
@@ -414,19 +400,29 @@ def test_an_EMPTY_destination_is_not_treated_as_MUTED():
 
 def test_the_mute_is_enforced_in_DELIVER_not_at_each_caller():
     """Enforced at the boundary so a future emitter inherits it — the same reason redaction lives
-    here. A per-caller check is a control that works until someone adds the next caller."""
+    here. A per-caller check is a control that works until someone adds the next caller.
+    """
     import inspect
 
-    from gideon.triggers import delivery
+    from gideon.automation.triggers import delivery
 
-    assert "is_muted(delivery.destination)" in inspect.getsource(delivery.deliver)
+    assert (
+        "NotificationAttempt(state, delivery, delivered_ids).send()"
+        in inspect.getsource(delivery.deliver)
+    )
+    assert "if not self.permitted():" in inspect.getsource(
+        delivery.NotificationAttempt.send
+    )
+    assert "is_muted(self.delivery.destination)" in inspect.getsource(
+        delivery.NotificationAttempt.permitted
+    )
 
 
 def test_the_fire_path_routes_by_OUTCOME():
     """The wiring: the defect was `destination=trigger.delivery` regardless of `ok`."""
     import inspect
 
-    from gideon import gateway
+    from gideon.engine import gateway
 
     source = inspect.getsource(gateway)
     assert "_delivery.route_for(trigger, ok=ok)" in source

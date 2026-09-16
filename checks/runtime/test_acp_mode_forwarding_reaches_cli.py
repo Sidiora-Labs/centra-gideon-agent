@@ -23,27 +23,22 @@ import logging
 
 import pytest
 
-from gideon.acp.client import AcpClient
-from gideon.acp.dialect import (
+from gideon.integrations.acp.client import AcpClient
+from gideon.integrations.acp.dialect import (
     ClaudeCodeDialect,
     CodexDialect,
     DefaultDialect,
     get_dialect,
 )
-from gideon.acp.permission_authority import (
+from gideon.integrations.acp.permission_authority import (
     AUTO_APPROVE_MODES,
     HOST_AUTHORITY_MODE,
     PASSTHROUGH_MODES,
     sanitize_mode,
 )
 
-#: codex-acp's declared ``configId="mode"`` option values, verbatim from a live
-#: ``session/new`` snapshot. The whole point of the fix is that the host may only
-#: ever put one of THESE on the wire for codex.
 CODEX_NATIVE_MODES = {"read-only", "agent", "agent-full-access"}
 
-#: claude-code's, from the same measurement. ``auto`` is real and is NOT in AAP-5's
-#: canonical five — recorded so a future widening has the true option set to check.
 CLAUDE_NATIVE_MODES = {
     "auto",
     "default",
@@ -60,9 +55,6 @@ def _sent_mode(dialect, mode: str) -> str | None:
     return None if req is None else req.params["value"]
 
 
-# ── 1. the vocabulary the host puts on the wire ──────────────────────────────
-
-
 def test_codex_never_receives_the_canonical_mode_verbatim():
     """The exact regression: ``default`` on codex was answered ``-32602`` and ignored."""
     sent = _sent_mode(CodexDialect(), HOST_AUTHORITY_MODE)
@@ -70,14 +62,14 @@ def test_codex_never_receives_the_canonical_mode_verbatim():
         "codex-acp does not define a 'default' mode; forwarding it verbatim is the "
         "-32602 that left every codex session self-approving"
     )
-    assert sent == "read-only", "codex's most restrictive mode is the host-authority one"
+    assert (
+        sent == "read-only"
+    ), "codex's most restrictive mode is the host-authority one"
 
 
 def test_codex_host_authority_mode_is_its_most_restrictive():
     """``read-only`` is the only codex mode under which the host gates file edits."""
     assert _sent_mode(CodexDialect(), HOST_AUTHORITY_MODE) == "read-only"
-    # `agent` is codex's OWN default and the state the bug left sessions in — it must
-    # never be what the restrictive mode resolves to.
     assert _sent_mode(CodexDialect(), HOST_AUTHORITY_MODE) != "agent"
 
 
@@ -112,7 +104,10 @@ def test_default_dialect_sends_no_mode_frame():
     """kiro-cli speaks the default dialect and exposes NO permission-mode axis (its
     ``availableModes`` are agent personas). No frame is the correct outcome — §2.6's
     "kiro plans by host enforcement" — and it must not become a fabricated one."""
-    assert DefaultDialect().set_mode_request(session_id="s1", mode=HOST_AUTHORITY_MODE) is None
+    assert (
+        DefaultDialect().set_mode_request(session_id="s1", mode=HOST_AUTHORITY_MODE)
+        is None
+    )
 
 
 def test_empty_mode_sends_no_frame_on_any_dialect():
@@ -137,13 +132,9 @@ def test_the_authority_still_clamps_before_the_dialect_translates():
     decision = sanitize_mode("bypassPermissions", unattended=False)
     assert decision.downgraded
     assert _sent_mode(CodexDialect(), decision.mode) == "read-only"
-    # §2.3's explicit exception is the only route to a widened codex mode.
     unattended = sanitize_mode("bypassPermissions", unattended=True)
     assert not unattended.downgraded
     assert _sent_mode(CodexDialect(), unattended.mode) == "agent-full-access"
-
-
-# ── 2. a refusal is never silent ─────────────────────────────────────────────
 
 
 class _ImmediateFuture:
@@ -177,8 +168,10 @@ def test_adapter_rejection_is_logged(tmp_path, caplog):
     nothing, so a refused mode reads exactly like an applied one."""
     client = _client(tmp_path)
     params = {"sessionId": "s1", "configId": "mode", "value": "read-only"}
-    fut = _ImmediateFuture(result=_Reply(error={"code": -32602, "message": "Invalid params"}))
-    with caplog.at_level(logging.WARNING, logger="gideon.acp.client"):
+    fut = _ImmediateFuture(
+        result=_Reply(error={"code": -32602, "message": "Invalid params"})
+    )
+    with caplog.at_level(logging.WARNING, logger="gideon.integrations.acp.client"):
         client._watch_dialect_reply("session/set_config_option", params, 3, fut)
     assert "REJECTED" in caplog.text
     assert "-32602" in caplog.text
@@ -190,7 +183,7 @@ def test_accepted_reply_is_not_logged(tmp_path, caplog):
     client = _client(tmp_path)
     params = {"sessionId": "s1", "configId": "mode", "value": "read-only"}
     fut = _ImmediateFuture(result=_Reply(result={"configOptions": []}))
-    with caplog.at_level(logging.WARNING, logger="gideon.acp.client"):
+    with caplog.at_level(logging.WARNING, logger="gideon.integrations.acp.client"):
         client._watch_dialect_reply("session/set_config_option", params, 3, fut)
     assert "REJECTED" not in caplog.text
 
@@ -201,6 +194,6 @@ def test_unanswered_send_stays_best_effort(tmp_path, caplog):
     client = _client(tmp_path)
     params = {"sessionId": "s1", "configId": "mode", "value": "read-only"}
     fut = _ImmediateFuture(exc=RuntimeError("process gone"))
-    with caplog.at_level(logging.WARNING, logger="gideon.acp.client"):
+    with caplog.at_level(logging.WARNING, logger="gideon.integrations.acp.client"):
         client._watch_dialect_reply("session/set_config_option", params, 3, fut)
     assert "REJECTED" not in caplog.text

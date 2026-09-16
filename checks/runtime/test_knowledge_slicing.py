@@ -31,12 +31,12 @@ import json
 
 import pytest
 
-from gideon.knowledge import slicing as sl
-from gideon.knowledge.pipeline import ensure_nodes_registered
-from gideon.knowledge.pipeline.graphs import graph_for
-from gideon.knowledge.pipeline.runner import ingest_item
-from gideon.knowledge.readers import PdfLine, PdfStructure
-from gideon.knowledge.store import KnowledgeStore
+from gideon.cognition.knowledge import slicing as sl
+from gideon.cognition.knowledge.pipeline import ensure_nodes_registered
+from gideon.cognition.knowledge.pipeline.graphs import graph_for
+from gideon.cognition.knowledge.pipeline.runner import ingest_item
+from gideon.cognition.knowledge.readers import PdfLine, PdfStructure
+from gideon.cognition.knowledge.store import KnowledgeStore
 
 
 def _run(coro):
@@ -53,7 +53,7 @@ def _isolated_home(tmp_path, monkeypatch):
     knowledge files dir, so an un-isolated run would leave cached PDFs in ~/.gideon."""
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(
-        "gideon.config.loader.config_dir", lambda: tmp_path / "home", raising=False
+        "gideon.core.config.loader.config_dir", lambda: tmp_path / "home", raising=False
     )
     yield
 
@@ -63,20 +63,10 @@ def store(tmp_path):
     return KnowledgeStore(str(tmp_path / "knowledge.db"))
 
 
-# ── fixtures: a real, multi-page, arXiv-shaped PDF ────────────────────────────
-
-
 def _filler(word: str, count: int) -> str:
     return " ".join(f"{word}{i}" for i in range(count))
 
 
-# Each reference is ONE markdown line: `document_from_markdown` treats a wrapped
-# continuation line as its own paragraph, and the writer can then lay it out away from
-# its marker — which garbles the fixture, not the splitter. (`_split_entries` splits on
-# marker POSITION precisely so a real PDF's wrapped entries still parse.)
-#: The five bibliography entries. Each is one markdown PARAGRAPH built by implicit string
-#: concatenation, because it has to reach the writer unwrapped (see above) while this file
-#: stays inside the 100-column lint.
 REFERENCE_ENTRIES = (
     "[1] Radford, A. et al. Learning Transferable Visual Models From Natural"
     " Language Supervision. arXiv:2103.00020, 2021.",
@@ -87,8 +77,6 @@ REFERENCE_ENTRIES = (
     "[4] Okonkwo, C. Structural Cues For Section Detection Without Any Models At"
     " All. Proceedings of Things, 2022.",
     "[5] Alvarez, M. Untitled. 2018.",
-    # Carries BOTH an arXiv id and a DOI — the only entry shape that makes the cascade's
-    # ORDER observable. Without it, "arxiv before doi" is a claim no test can falsify.
     "[6] Vaswani, A. et al. Attention Is All You Need Again. arXiv:1706.03762,"
     " 2017. doi:10.5555/3295222.3295349",
 )
@@ -126,8 +114,8 @@ PAPER_MARKDOWN = f"""# Deterministic Slicing of Scientific PDFs
 
 
 def _paper_bytes() -> bytes:
-    from gideon.documents import get_writer
-    from gideon.documents.from_markup import document_from_markdown
+    from gideon.workspace.documents import get_writer
+    from gideon.workspace.documents.from_markup import document_from_markdown
 
     return get_writer("pdf")(document_from_markdown(PAPER_MARKDOWN))
 
@@ -146,9 +134,6 @@ def paper_pdf(tmp_path, paper_pdf_bytes):
     return path
 
 
-# ── §5 source sniffing ────────────────────────────────────────────────────────
-
-
 @pytest.mark.parametrize(
     "raw,kind,identifier",
     [
@@ -158,7 +143,11 @@ def paper_pdf(tmp_path, paper_pdf_bytes):
         ("https://arxiv.org/pdf/2103.00020", sl.SOURCE_ARXIV, "2103.00020"),
         ("2103.00020", sl.SOURCE_ARXIV, "2103.00020"),
         ("doi:10.1145/3292500.3330701", sl.SOURCE_DOI, "10.1145/3292500.3330701"),
-        ("https://doi.org/10.1038/s41586-021-03819-2", sl.SOURCE_DOI, "10.1038/s41586-021-03819-2"),
+        (
+            "https://doi.org/10.1038/s41586-021-03819-2",
+            sl.SOURCE_DOI,
+            "10.1038/s41586-021-03819-2",
+        ),
         ("https://example.test/report.pdf", sl.SOURCE_PDF, ""),
         ("https://example.test/blog/post", sl.SOURCE_URL, ""),
     ],
@@ -176,21 +165,17 @@ def test_an_arxiv_id_is_version_insensitive_and_resolves_to_one_url():
     assert a is not None and b is not None and a.url == b.url
 
 
-@pytest.mark.parametrize("raw", ["", "   ", "not a reference", "ftp://x.test/a.pdf", "1234.56789"])
+@pytest.mark.parametrize(
+    "raw", ["", "   ", "not a reference", "ftp://x.test/a.pdf", "1234.56789"]
+)
 def test_a_non_reference_sniffs_to_none_rather_than_raising(raw):
     """A malformed paste must be a 'no', not a traceback in an ingest node. `1234.56789`
     is the important row: a bare arXiv-SHAPED number with no arXiv context is a page range
     or a version string far more often than it is a paper."""
     if raw == "1234.56789":
-        # The bare-id form IS accepted when the whole string is nothing but an id (that is
-        # the documented affordance) — this row pins the shape that must NOT be inferred
-        # from a number appearing inside other text.
         assert sl.sniff_source("see figure 1234.56789 for detail") is None
         return
     assert sl.sniff_source(raw) is None
-
-
-# ── §5 cascaded section detection ─────────────────────────────────────────────
 
 
 def test_the_font_tier_detects_a_generated_papers_sections(paper_pdf):
@@ -210,8 +195,6 @@ def test_the_font_tier_detects_a_generated_papers_sections(paper_pdf):
     assert result.page_count > KEEP_SPAN, "fixture must exceed the kept-pages floor"
 
 
-#: The fixture has to be longer than first-3 + last-2 or the floor covers every page and
-#: `meta`/`body` become indistinguishable from `full` — a fixture that cannot fail.
 KEEP_SPAN = sl.KEEP_FIRST_PAGES + sl.KEEP_LAST_PAGES
 
 
@@ -226,12 +209,9 @@ def test_detection_is_deterministic_across_runs(paper_pdf):
     assert [s.start for s in first.sections] == sorted(s.start for s in first.sections)
 
 
-#: A tiny self-contained detection run, printed as a stable digest. Executed in a CHILD
-#: process so the parent's PYTHONHASHSEED can be varied — an in-process double run cannot
-#: catch hash-order dependence, because string hashing is fixed for a process's lifetime.
 _HASH_SEED_PROBE = """
 import hashlib, sys
-from gideon.knowledge import slicing as sl
+from gideon.cognition.knowledge import slicing as sl
 text = (
     "Abstract\\nclaim\\n1 Introduction\\nprior\\n2 Method\\nhow\\n3 Results\\nwhat\\n"
     "4 Discussion\\nso\\n5 Conclusion\\ndone\\nReferences\\n"
@@ -244,7 +224,9 @@ sys.stdout.write(hashlib.sha256(blob).hexdigest())
 """
 
 
-def test_detection_is_deterministic_across_processes_with_different_hash_seeds(tmp_path):
+def test_detection_is_deterministic_across_processes_with_different_hash_seeds(
+    tmp_path,
+):
     """The determinism claim with real teeth.
 
     Two runs inside ONE process share a string-hash seed, so a detector that iterated a
@@ -277,7 +259,7 @@ def test_detection_is_deterministic_across_processes_with_different_hash_seeds(t
     assert digests[0], "the probe produced no digest — it did not run"
 
 
-_SRC_ROOT = __import__("pathlib").Path(__file__).resolve().parent.parent / "src"
+_SRC_ROOT = __import__("pathlib").Path(__file__).resolve().parent.parent.parent / "src"
 
 
 def test_the_outline_tier_outranks_the_font_tier_at_the_same_offset():
@@ -329,8 +311,6 @@ def test_the_unioned_tiers_are_ordered_by_offset_not_by_tier():
     ]
     starts = [s.start for s in sections]
     assert starts == sorted(starts) and len(set(starts)) == 3
-    # Every span must hand off to the next heading — an out-of-order candidate list makes
-    # these ends point at the wrong neighbour.
     assert [s.end for s in sections[:-1]] == starts[1:]
 
 
@@ -360,7 +340,9 @@ def test_the_body_font_size_is_char_weighted_not_line_counted():
         PdfLine(page=0, text="H1", size=14.0, char_count=2),
         PdfLine(page=0, text="H2", size=14.0, char_count=2),
         PdfLine(page=0, text="H3", size=14.0, char_count=2),
-        PdfLine(page=0, text="a long paragraph of body text " * 4, size=10.0, char_count=480),
+        PdfLine(
+            page=0, text="a long paragraph of body text " * 4, size=10.0, char_count=480
+        ),
     )
     assert sl.body_font_size(lines) == 10.0
 
@@ -387,7 +369,6 @@ def test_the_heading_size_ratio_is_the_constant_the_code_reads(monkeypatch):
     )
     assert [s.title for s in sl.detect_sections(structure)] == ["Abstract"]
     monkeypatch.setattr(sl, "HEADING_SIZE_RATIO", 3.0)
-    # No font heading survives; the header tier then names the one line it recognizes.
     assert {s.strategy for s in sl.detect_sections(structure)} == {sl.STRATEGY_HEADER}
 
 
@@ -397,15 +378,15 @@ def test_a_long_large_font_run_is_not_a_heading(monkeypatch):
         pages=("A Very Long Pull Quote Set In Display Type\nbody body\n",),
         lines=(
             PdfLine(
-                page=0, text="A Very Long Pull Quote Set In Display Type", size=18.0, char_count=41
+                page=0,
+                text="A Very Long Pull Quote Set In Display Type",
+                size=18.0,
+                char_count=41,
             ),
             PdfLine(page=0, text="body body", size=10.0, char_count=9),
         ),
     )
     assert sl.detect_sections(structure) == ()
-
-
-# ── §5 purpose-cut slices ─────────────────────────────────────────────────────
 
 
 def test_brief_body_and_meta_are_cut_to_their_roles(paper_pdf):
@@ -415,13 +396,10 @@ def test_brief_body_and_meta_are_cut_to_their_roles(paper_pdf):
     meta = result.slice_for(sl.SLICE_META)
     assert brief and body and meta
 
-    # brief: the claim, not the machinery.
     assert "abs0" in brief.text
     assert "method0" not in brief.text and "results0" not in brief.text
-    # body: the machinery, and never the bibliography.
     assert "method0" in body.text and "results0" in body.text
     assert "arXiv:2103.00020" not in body.text, "references must be stripped from body"
-    # meta: the front matter only.
     assert "Deterministic Slicing" in meta.text
     assert len(meta.text) < len(result.full_text)
 
@@ -430,7 +408,9 @@ def test_brief_is_clamped_into_the_fraction_band(paper_pdf):
     result = sl.slice_document(file_path=str(paper_pdf))
     brief = result.slice_for(sl.SLICE_BRIEF)
     assert brief is not None
-    assert sl.BRIEF_MIN_FRACTION <= brief.fraction <= sl.BRIEF_MAX_FRACTION, brief.fraction
+    assert (
+        sl.BRIEF_MIN_FRACTION <= brief.fraction <= sl.BRIEF_MAX_FRACTION
+    ), brief.fraction
 
 
 def test_the_brief_ceiling_is_the_constant_the_code_reads(monkeypatch, paper_pdf):
@@ -496,9 +476,6 @@ def test_slices_never_emit_a_byte_of_the_document_twice(paper_pdf):
     assert body.text.count("results0 ") == 1
 
 
-# ── §5 deterministic reference extraction ─────────────────────────────────────
-
-
 def test_the_reference_cascade_keys_each_entry_by_its_strongest_tier(paper_pdf):
     result = sl.slice_document(file_path=str(paper_pdf))
     keys = {r.key for r in result.references}
@@ -528,7 +505,9 @@ def test_the_title_tier_merges_one_work_cited_twice_in_two_formats(paper_pdf):
     The fuzzy sliding window is the deterministic replacement for asking a model "same
     paper?"."""
     result = sl.slice_document(file_path=str(paper_pdf))
-    matching = [r for r in result.references if "determinism in extraction" in r.title.lower()]
+    matching = [
+        r for r in result.references if "determinism in extraction" in r.title.lower()
+    ]
     assert len(matching) == 1, [r.key for r in result.references]
     assert matching[0].tier == sl.TIER_DOI, "the identified form must win the merge"
 
@@ -544,7 +523,9 @@ def test_the_title_match_ratio_is_the_constant_the_code_reads(monkeypatch, paper
 def test_an_unidentifiable_entry_is_counted_not_given_an_invented_key():
     """A fabricated citation key is worse than an admitted gap: a later linking pass
     (KNOWLEDGE-SYNTHESIS) would treat it as a real work."""
-    refs, unkeyed = sl.extract_references("References\n[1] " + ("x" * 40) + "\n", len(""))
+    refs, unkeyed = sl.extract_references(
+        "References\n[1] " + ("x" * 40) + "\n", len("")
+    )
     assert refs == () and unkeyed == 1
 
 
@@ -563,9 +544,6 @@ def test_a_document_with_no_bibliography_extracts_nothing_and_strips_nothing():
     assert result.bibliography_start == len(result.full_text)
 
 
-# ── §5 sha256 source cache (SC#9's zero-network clause) ───────────────────────
-
-
 class _Fetcher:
     """A scripted byte seam. Records every URL it is asked for, so 'no network' can be
     asserted as 'not reached' rather than inferred from a count."""
@@ -580,11 +558,13 @@ class _Fetcher:
 
 
 async def _exploding_fetch(url: str) -> bytes:
-    raise AssertionError(f"network reached for {url} — the sha256 cache did not serve it")
+    raise AssertionError(
+        f"network reached for {url} — the sha256 cache did not serve it"
+    )
 
 
 def test_a_fetched_source_is_cached_under_the_knowledge_files_dir(paper_pdf_bytes):
-    from gideon.knowledge import knowledge_files_dir
+    from gideon.cognition.knowledge import knowledge_files_dir
 
     ref = sl.sniff_source("arXiv:2103.00020")
     assert ref is not None
@@ -606,7 +586,9 @@ def test_a_re_ingest_is_served_from_the_cache_with_zero_network(paper_pdf_bytes)
     assert second.sha256 == first.sha256 and second.path == first.path
 
 
-def test_the_cache_is_reachable_from_the_reference_not_only_the_content(paper_pdf_bytes):
+def test_the_cache_is_reachable_from_the_reference_not_only_the_content(
+    paper_pdf_bytes,
+):
     """Content-addressing alone cannot serve a re-ingest — the hash needs the bytes we are
     trying not to fetch. The ref→content pointer is what makes the zero-network path
     possible, so it must exist on disk beside the original."""
@@ -616,7 +598,11 @@ def test_the_cache_is_reachable_from_the_reference_not_only_the_content(paper_pd
     pointers = list(sl.source_cache_dir().glob("ref-*.json"))
     assert len(pointers) == 1
     record = json.loads(pointers[0].read_text())
-    assert record["sha256"] and record["suffix"] == ".pdf" and record["kind"] == sl.SOURCE_ARXIV
+    assert (
+        record["sha256"]
+        and record["suffix"] == ".pdf"
+        and record["kind"] == sl.SOURCE_ARXIV
+    )
 
 
 def test_two_references_to_identical_bytes_share_one_original(paper_pdf_bytes):
@@ -630,7 +616,9 @@ def test_two_references_to_identical_bytes_share_one_original(paper_pdf_bytes):
     assert len(list(sl.source_cache_dir().glob("sha256-*"))) == 1
 
 
-def test_a_pointer_whose_original_vanished_is_a_miss_not_a_dangling_path(paper_pdf_bytes):
+def test_a_pointer_whose_original_vanished_is_a_miss_not_a_dangling_path(
+    paper_pdf_bytes,
+):
     ref = sl.sniff_source("arXiv:2103.00020")
     assert ref is not None
     fetched = _run(sl.fetch_source(ref, fetch_fn=_Fetcher(paper_pdf_bytes)))
@@ -645,9 +633,13 @@ def test_a_non_pdf_body_is_cached_without_claiming_to_be_a_pdf():
     must not be stored as `.pdf` and then handed to the PDF reader."""
     ref = sl.sniff_source("doi:10.1145/3292500.3330701")
     assert ref is not None
-    fetched = _run(sl.fetch_source(ref, fetch_fn=_Fetcher(b"<html><body>paywall</body></html>")))
+    fetched = _run(
+        sl.fetch_source(ref, fetch_fn=_Fetcher(b"<html><body>paywall</body></html>"))
+    )
     assert fetched.path.suffix == ".bin"
-    assert sl.is_pdf_bytes(b"<html>") is False and sl.is_pdf_bytes(b"%PDF-1.7 ...") is True
+    assert (
+        sl.is_pdf_bytes(b"<html>") is False and sl.is_pdf_bytes(b"%PDF-1.7 ...") is True
+    )
 
 
 def test_an_empty_response_is_refused_rather_than_cached_as_a_document():
@@ -673,15 +665,12 @@ def test_the_default_fetch_seam_is_net_fetch_under_the_source_policy(monkeypatch
 
         return _R()
 
-    monkeypatch.setattr("gideon.net.client.fetch", _fake_fetch)
+    monkeypatch.setattr("gideon.security.net.client.fetch", _fake_fetch)
     ref = sl.sniff_source("arXiv:2103.00020")
     assert ref is not None
     _run(sl.fetch_source(ref))
     assert seen["url"] == "https://arxiv.org/pdf/2103.00020"
     assert seen["policy"].name == "source"
-
-
-# ── SC#9 end to end: an arXiv PDF ingests ────────────────────────────────────
 
 
 def test_an_arxiv_pdf_ingests_into_slice_rows_on_the_one_item(store, paper_pdf_bytes):
@@ -690,7 +679,9 @@ def test_an_arxiv_pdf_ingests_into_slice_rows_on_the_one_item(store, paper_pdf_b
     ensure_nodes_registered()
     fetcher = _Fetcher(paper_pdf_bytes)
     monkey = pytest.MonkeyPatch()
-    monkey.setattr("gideon.knowledge.slicing._default_fetch", fetcher, raising=True)
+    monkey.setattr(
+        "gideon.cognition.knowledge.slicing._default_fetch", fetcher, raising=True
+    )
     try:
         item_id = store.create_typed_item(
             item_type="bookmark", title="", url="https://arxiv.org/abs/2103.00020"
@@ -704,19 +695,28 @@ def test_an_arxiv_pdf_ingests_into_slice_rows_on_the_one_item(store, paper_pdf_b
     pool = store.get_extracted_contents(item_id)
     kinds = [row["node_type"] for row in pool]
     assert "slice:brief" in kinds and "slice:body" in kinds and "slice:meta" in kinds
-    # ONE item — the slices are rows on it, not chunk-items beside it.
     assert _count_items(store) == before == 1
     assert all(row["item_id"] == item_id for row in pool)
     assert store.db.execute("SELECT COUNT(*) FROM chunks").fetchone()[0] == 0
 
-    references = (store.get_item(item_id).get("file_metadata") or {}).get("references") or []
+    references = (store.get_item(item_id).get("file_metadata") or {}).get(
+        "references"
+    ) or []
     assert {r["tier"] for r in references} >= {sl.TIER_ARXIV, sl.TIER_DOI}
-    sections = (store.get_item(item_id).get("file_metadata") or {}).get("sections") or []
-    assert {s["role"] for s in sections} >= {sl.ROLE_ABSTRACT, sl.ROLE_METHOD, sl.ROLE_REFERENCES}
+    sections = (store.get_item(item_id).get("file_metadata") or {}).get(
+        "sections"
+    ) or []
+    assert {s["role"] for s in sections} >= {
+        sl.ROLE_ABSTRACT,
+        sl.ROLE_METHOD,
+        sl.ROLE_REFERENCES,
+    }
     assert fetcher.urls == ["https://arxiv.org/pdf/2103.00020"]
 
 
-def test_saving_the_same_paper_twice_opens_no_socket_the_second_time(store, paper_pdf_bytes):
+def test_saving_the_same_paper_twice_opens_no_socket_the_second_time(
+    store, paper_pdf_bytes
+):
     """The re-ingest half of SC#9 through the real pipeline: a SECOND item pointing at the
     same paper reaches the fetch path with an empty content column, so it can only reach
     `done` from the sha256 cache — and the seam it would otherwise use raises.
@@ -729,12 +729,17 @@ def test_saving_the_same_paper_twice_opens_no_socket_the_second_time(store, pape
     url = "https://arxiv.org/abs/2103.00020"
     first = store.create_typed_item(item_type="bookmark", title="", url=url)
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr("gideon.knowledge.slicing._default_fetch", _Fetcher(paper_pdf_bytes))
+        mp.setattr(
+            "gideon.cognition.knowledge.slicing._default_fetch",
+            _Fetcher(paper_pdf_bytes),
+        )
         assert _run(ingest_item(store, first)) == "done"
 
     second = store.create_typed_item(item_type="bookmark", title="", url=url)
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr("gideon.knowledge.slicing._default_fetch", _exploding_fetch)
+        mp.setattr(
+            "gideon.cognition.knowledge.slicing._default_fetch", _exploding_fetch
+        )
         assert _run(ingest_item(store, second)) == "done", store.get_item(second).get(
             "processing_error"
         )
@@ -760,10 +765,15 @@ def test_re_ingesting_one_fetched_paper_reuses_its_stored_text_and_re_slices_it(
         item_type="bookmark", title="", url="https://arxiv.org/abs/2103.00020"
     )
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr("gideon.knowledge.slicing._default_fetch", _Fetcher(paper_pdf_bytes))
+        mp.setattr(
+            "gideon.cognition.knowledge.slicing._default_fetch",
+            _Fetcher(paper_pdf_bytes),
+        )
         assert _run(ingest_item(store, item_id)) == "done"
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr("gideon.knowledge.slicing._default_fetch", _exploding_fetch)
+        mp.setattr(
+            "gideon.cognition.knowledge.slicing._default_fetch", _exploding_fetch
+        )
         assert _run(ingest_item(store, item_id)) == "done"
     kinds = [row["node_type"] for row in store.get_extracted_contents(item_id)]
     assert kinds.count("slice:brief") == 1, "a re-ingest must replace rows, not append"
@@ -783,7 +793,8 @@ def test_an_uploaded_pdf_gets_the_same_slices_as_a_fetched_one(store, paper_pdf)
 
 def test_a_plain_document_yields_no_slices_and_still_completes(store, tmp_path):
     """A .txt is not a paper. 'No canonical sections' is a true answer, so the item must
-    finish `done` — marking it partial would downgrade every non-paper in the library."""
+    finish `done` — marking it partial would downgrade every non-paper in the library.
+    """
     ensure_nodes_registered()
     path = tmp_path / "notes.txt"
     path.write_text("just some notes about nothing in particular")
@@ -799,7 +810,7 @@ def test_a_plain_web_bookmark_still_takes_the_html_scraper(store, monkeypatch):
     """The document branch is a ROUTING decision on the URL — a blog post must be
     unaffected, or WS-6 would have broken every existing bookmark."""
     ensure_nodes_registered()
-    from gideon.knowledge.connectors import web_url as web_url_mod
+    from gideon.cognition.knowledge.connectors import web_url as web_url_mod
 
     async def _fake(self, spec):
         return "the blog post body", {"page_title": "A Blog Post"}
@@ -809,15 +820,12 @@ def test_a_plain_web_bookmark_still_takes_the_html_scraper(store, monkeypatch):
     async def _no_fetch(url):
         raise AssertionError("a plain page must not reach the source fetcher")
 
-    monkeypatch.setattr("gideon.knowledge.slicing._default_fetch", _no_fetch)
+    monkeypatch.setattr("gideon.cognition.knowledge.slicing._default_fetch", _no_fetch)
     item_id = store.create_typed_item(
         item_type="bookmark", title="", url="https://example.test/blog/post"
     )
     assert _run(ingest_item(store, item_id)) == "done"
     assert "the blog post body" in (store.get_item(item_id).get("content") or "")
-
-
-# ── the engine's multi-row mechanism + its consumers ─────────────────────────
 
 
 def test_the_slicer_is_a_graph_leaf_so_slices_never_reach_consolidate():
@@ -832,7 +840,7 @@ def test_the_slicer_is_a_graph_leaf_so_slices_never_reach_consolidate():
 def test_a_pool_concatenating_consumer_excludes_slice_rows(store, paper_pdf):
     """A slice is a VIEW of text already in the pool. Any consumer that concatenates the
     whole pool must skip them or it sends the document two or three times."""
-    from gideon.dashboard.handlers.knowledge import _consolidated_text
+    from gideon.interfaces.dashboard.handlers.knowledge import _consolidated_text
 
     ensure_nodes_registered()
     item_id = store.create_typed_item(item_type="pdf", title="Paper", content="")
@@ -842,5 +850,7 @@ def test_a_pool_concatenating_consumer_excludes_slice_rows(store, paper_pdf):
     item = store.get_item(item_id)
     text = _consolidated_text(store, item)
     assert "method0 " in text
-    assert text.count("method0 ") == 1, "the document must appear once, not once per slice"
+    assert (
+        text.count("method0 ") == 1
+    ), "the document must appear once, not once per slice"
     assert sl.is_slice_row("slice:brief") and not sl.is_slice_row("document_read")

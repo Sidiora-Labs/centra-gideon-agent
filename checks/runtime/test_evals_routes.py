@@ -18,7 +18,7 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import make_mocked_request
 
-from gideon.dashboard.handlers import evals as E
+from gideon.interfaces.dashboard.handlers import evals as E
 
 
 def _req(method="GET", path="/api/evals/judge-bench", *, user="owner"):
@@ -52,7 +52,7 @@ def test_disabled_is_a_404_with_its_own_code(monkeypatch):
 def test_no_benchmark_yet_is_a_different_404_than_disabled(evals_on, monkeypatch):
     """The panel renders guidance for one of these and a load failure for the other, so a
     shared code would collapse two different user situations into one."""
-    from gideon.evals import judge_bench as jb
+    from gideon.assurance.evals import judge_bench as jb
 
     monkeypatch.setattr(jb, "latest_bench_view", lambda: None)
     resp = _run(E.api_evals_judge_bench(_req()))
@@ -63,7 +63,7 @@ def test_no_benchmark_yet_is_a_different_404_than_disabled(evals_on, monkeypatch
 def test_a_read_failure_is_a_500_not_an_empty_table(evals_on, monkeypatch):
     """An unreadable artifact tree rendered as an empty table would say "the benchmark found
     nothing", which is the opposite of what happened."""
-    from gideon.evals import judge_bench as jb
+    from gideon.assurance.evals import judge_bench as jb
 
     def boom():
         raise OSError("disk gone")
@@ -77,14 +77,16 @@ def test_a_read_failure_is_a_500_not_an_empty_table(evals_on, monkeypatch):
 def test_the_table_is_served_as_the_harness_computed_it(evals_on, monkeypatch):
     """Adequacy and the floors it was judged against travel WITH the rows. A frontend that
     re-derived them would eventually disagree with the harness."""
-    from gideon.evals import judge_bench as jb
+    from gideon.assurance.evals import judge_bench as jb
 
     payload = {
         "bench_id": "judge-bench-x",
         "columns": list(jb.TABLE_COLUMNS),
         "rows": [{"tier": "fast", "adequate": False, "inadequate_reasons": ["nope"]}],
         "floors": {"agreement": jb.AGREEMENT_FLOOR, "separation": jb.MIN_SEPARATION},
-        "recommendations": [{"rubric_class": "convergence", "verdict": "no_adequate_tier"}],
+        "recommendations": [
+            {"rubric_class": "convergence", "verdict": "no_adequate_tier"}
+        ],
         "pin": None,
         "runs": ["judge-bench-x"],
     }
@@ -97,9 +99,6 @@ def test_the_table_is_served_as_the_harness_computed_it(evals_on, monkeypatch):
     assert body["recommendations"][0]["verdict"] == "no_adequate_tier"
 
 
-#: Every route on this surface whose subject is a RUN. A mutating verb on any of these would
-#: let a click start a matrix — hundreds of judge calls for the bench, a multi-cell replay for
-#: the ablation — which is the thing the read-only posture exists to prevent.
 _RUN_ROUTES = (
     "/api/evals/judge-bench",
     "/api/evals/ablation",
@@ -109,11 +108,6 @@ _RUN_ROUTES = (
     "/api/evals/retrieval/card",
 )
 
-#: The ONLY write this surface has (ES-3 §5.2's hand-label card). It saves one JSON file under
-#: ``evals/``: it calls no model, spends nothing, and writes to neither knowledge.db nor
-#: memory.db. Enumerated rather than counted, because a bare "no POST verbs" rail forbids
-#: every future write on its own — and, more importantly, would not notice a POST added to a
-#: RUN route as long as some other write already existed.
 _ALLOWED_WRITES = {("POST", "/api/evals/retrieval/labels")}
 
 
@@ -125,22 +119,19 @@ def test_the_route_table_offers_no_way_to_START_a_run():
     routes = [(r.method, str(r.resource.canonical)) for r in app.router.routes()]
     assert ("GET", "/api/evals/judge-bench") in routes
     assert ("GET", "/api/evals/ablation") in routes
-    # aiohttp registers HEAD alongside GET. Every OTHER verb must be an enumerated write.
     writes = {(m, path) for m, path in routes if m not in {"GET", "HEAD"}}
     assert writes == _ALLOWED_WRITES
-    # ...and no run-subject route accepts one, whatever the allowlist grows to hold.
     for path in _RUN_ROUTES:
         assert path in {p for _, p in routes}, f"{path} is not registered"
         assert {m for m, p in routes if p == path} == {"GET", "HEAD"}, path
 
 
-# ── ES-5: the study surface ──────────────────────────────────────────────────
-
-
 def _study_req(path: str, **match):
     request = make_mocked_request("GET", path, app=web.Application())
     request["user"] = "owner"
-    request._match_info = dict(match)  # noqa: SLF001 - make_mocked_request has no match_info arg
+    request._match_info = dict(
+        match
+    )  # noqa: SLF001 - make_mocked_request has no match_info arg
     return request
 
 
@@ -155,16 +146,18 @@ def test_the_study_routes_are_disabled_with_the_substrate(monkeypatch):
 
 
 def test_an_unregistered_study_is_its_own_404_code(evals_on, monkeypatch):
-    from gideon.evals import studies
+    from gideon.assurance.evals import studies
 
     monkeypatch.setattr(studies, "study_view", lambda _sid: None)
-    resp = _run(E.api_evals_study(_study_req("/api/evals/studies/st-x", study_id="st-x")))
+    resp = _run(
+        E.api_evals_study(_study_req("/api/evals/studies/st-x", study_id="st-x"))
+    )
     assert resp.status == 404
     assert _body(resp)["error"]["code"] == "study_absent"
 
 
 def test_an_unreadable_study_tree_is_a_500_not_an_empty_list(evals_on, monkeypatch):
-    from gideon.evals import studies
+    from gideon.assurance.evals import studies
 
     def boom(*_a, **_k):
         raise OSError("disk gone")
@@ -175,8 +168,10 @@ def test_an_unreadable_study_tree_is_a_500_not_an_empty_list(evals_on, monkeypat
     assert _body(resp)["error"]["code"] == "studies_unreadable"
 
 
-def test_the_study_view_route_serves_the_verdict_agreement_and_per_run_rows(evals_on, monkeypatch):
-    from gideon.evals import studies
+def test_the_study_view_route_serves_the_verdict_agreement_and_per_run_rows(
+    evals_on, monkeypatch
+):
+    from gideon.assurance.evals import studies
 
     payload = {
         "study_id": "st-1",
@@ -186,7 +181,9 @@ def test_the_study_view_route_serves_the_verdict_agreement_and_per_run_rows(eval
         "runs": [{"case_id": "c1", "pairs": [{"slot_a_arm": "old"}]}],
     }
     monkeypatch.setattr(studies, "study_view", lambda _sid: payload)
-    resp = _run(E.api_evals_study(_study_req("/api/evals/studies/st-1", study_id="st-1")))
+    resp = _run(
+        E.api_evals_study(_study_req("/api/evals/studies/st-1", study_id="st-1"))
+    )
     assert resp.status == 200
     body = _body(resp)
     assert body["verdict"]["agreement"] == 1.0
@@ -195,7 +192,8 @@ def test_the_study_view_route_serves_the_verdict_agreement_and_per_run_rows(eval
 
 def test_the_study_routes_offer_no_way_to_START_or_REGISTER_a_study():
     """§2.1: the human registers, the substrate runs. A POST here would let a click both
-    register and run, which is the one ordering the pre-registration exists to prevent."""
+    register and run, which is the one ordering the pre-registration exists to prevent.
+    """
     app = web.Application()
     E.register_evals_routes(app)
     routes = [(r.method, str(r.resource.canonical)) for r in app.router.routes()]
@@ -215,7 +213,7 @@ def test_the_study_route_never_publishes_the_locked_checks_or_the_rubric_text(
     tokens — the dashboard is one `curl` from an agent's context.
     """
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.evals import studies
+    from gideon.assurance.evals import studies
 
     rubric = "correctness (target 2)\n"
     reg = studies.register_study(
@@ -224,12 +222,18 @@ def test_the_study_route_never_publishes_the_locked_checks_or_the_rubric_text(
         inputs=["case-1"],
         rubric_text=rubric,
         locked_checks=[
-            {"id": "cites_the_source", "path": "out.txt", "required_phrases": ["Source: 4711"]},
+            {
+                "id": "cites_the_source",
+                "path": "out.txt",
+                "required_phrases": ["Source: 4711"],
+            },
             {"id": "reply_exists", "command": "test -f out.txt"},
         ],
     )
     resp = _run(
-        E.api_evals_study(_study_req(f"/api/evals/studies/{reg.study_id}", study_id=reg.study_id))
+        E.api_evals_study(
+            _study_req(f"/api/evals/studies/{reg.study_id}", study_id=reg.study_id)
+        )
     )
     assert resp.status == 200
     blob = resp.body.decode()
@@ -239,9 +243,6 @@ def test_the_study_route_never_publishes_the_locked_checks_or_the_rubric_text(
         assert token not in blob, f"{token!r} is published over HTTP"
     assert rubric.strip() not in blob
     assert _body(resp)["rubric_sha256"] == reg.rubric_sha256
-
-
-# ── ES-7 §3.1: the ablation report's read surface ────────────────────────────
 
 
 def _abl_req(**kw):
@@ -257,8 +258,11 @@ def test_ablation_disabled_is_a_404_with_its_own_code(monkeypatch):
 
 def test_no_ablation_yet_is_a_distinct_404_code(evals_on, monkeypatch):
     """Three states send a user to three different places — the switch, the registry, and
-    waiting for the cadence — so "nothing has run" cannot share a code with "evals off"."""
-    monkeypatch.setattr("gideon.evals.ablation.latest_ablation_view", lambda: None)
+    waiting for the cadence — so "nothing has run" cannot share a code with "evals off".
+    """
+    monkeypatch.setattr(
+        "gideon.assurance.evals.ablation.latest_ablation_view", lambda: None
+    )
     resp = _run(E.api_evals_ablation(_abl_req()))
     assert resp.status == 404
     code = _body(resp)["error"]["code"]
@@ -271,7 +275,7 @@ def test_an_unreadable_artifact_is_a_500_not_an_empty_table(evals_on, monkeypatc
     def boom():
         raise OSError("bad json")
 
-    monkeypatch.setattr("gideon.evals.ablation.latest_ablation_view", boom)
+    monkeypatch.setattr("gideon.assurance.evals.ablation.latest_ablation_view", boom)
     resp = _run(E.api_evals_ablation(_abl_req()))
     assert resp.status == 500
     assert _body(resp)["error"]["code"] == "ablation_unreadable"
@@ -290,7 +294,9 @@ def test_the_ablation_view_arrives_decided(evals_on, monkeypatch):
         "cadence_days": 30,
         "due": False,
     }
-    monkeypatch.setattr("gideon.evals.ablation.latest_ablation_view", lambda: view)
+    monkeypatch.setattr(
+        "gideon.assurance.evals.ablation.latest_ablation_view", lambda: view
+    )
     resp = _run(E.api_evals_ablation(_abl_req()))
     assert resp.status == 200
     body = _body(resp)
@@ -302,16 +308,13 @@ def test_the_ablation_view_arrives_decided(evals_on, monkeypatch):
 def test_the_enabled_check_fails_closed_on_an_unreadable_config(monkeypatch):
     """This surface publishes artifacts read off a home directory, so "we could not read the
     switch" must not resolve to "serve it"."""
-    import gideon.config.loader as loader
+    import gideon.core.config.loader as loader
 
     def boom():
         raise OSError("no config")
 
     monkeypatch.setattr(loader.AppConfig, "load", staticmethod(boom))
     assert E._enabled() is False
-
-
-# ── ES-3: the per-arm retrieval ablation + its hand-label card ────────────────
 
 
 def _ret_req(method="GET", path="/api/evals/retrieval", **kw):
@@ -322,7 +325,9 @@ def test_retrieval_disabled_is_a_404_with_its_own_code(monkeypatch):
     monkeypatch.setattr(E, "_enabled", lambda: False)
     for coro in (
         E.api_evals_retrieval(_ret_req()),
-        E.api_evals_retrieval_card(_ret_req(path="/api/evals/retrieval/card?store=knowledge")),
+        E.api_evals_retrieval_card(
+            _ret_req(path="/api/evals/retrieval/card?store=knowledge")
+        ),
         E.api_evals_retrieval_labels(_ret_req("POST", "/api/evals/retrieval/labels")),
     ):
         resp = _run(coro)
@@ -333,7 +338,7 @@ def test_retrieval_disabled_is_a_404_with_its_own_code(monkeypatch):
 def test_no_retrieval_run_yet_is_a_different_404_than_disabled(evals_on, monkeypatch):
     """The panel renders guidance + the label card for one of these and a load failure for the
     other, so a shared code would collapse two different user situations into one."""
-    from gideon.evals import retrieval_bench as rb
+    from gideon.assurance.evals import retrieval_bench as rb
 
     monkeypatch.setattr(
         rb,
@@ -352,11 +357,14 @@ def test_one_benchmarked_store_is_enough_to_publish(evals_on, monkeypatch):
     instead of "any store has a run", a half-measured home would 404 forever and the panel
     would tell the user to run a command they already ran.
     """
-    from gideon.evals import retrieval_bench as rb
+    from gideon.assurance.evals import retrieval_bench as rb
 
     view = {
         "stores": {
-            "knowledge": {"run": "retrieval-knowledge-20260825T000000Z", "table": {"rows": []}},
+            "knowledge": {
+                "run": "retrieval-knowledge-20260825T000000Z",
+                "table": {"rows": []},
+            },
             "memory": {"run": "", "table": None},
         },
         "k": 5,
@@ -368,7 +376,7 @@ def test_one_benchmarked_store_is_enough_to_publish(evals_on, monkeypatch):
 
 
 def test_a_retrieval_read_failure_is_a_500_not_an_empty_table(evals_on, monkeypatch):
-    from gideon.evals import retrieval_bench as rb
+    from gideon.assurance.evals import retrieval_bench as rb
 
     def boom():
         raise OSError("disk gone")
@@ -393,24 +401,34 @@ def test_the_card_refuses_a_missing_or_unknown_store(evals_on):
 
 
 def test_the_card_route_serves_a_known_store(evals_on, monkeypatch):
-    from gideon.evals import retrieval_bench as rb
+    from gideon.assurance.evals import retrieval_bench as rb
 
     card = {"store": "memory", "queries": [], "labelled": 0, "mined": 0}
     monkeypatch.setattr(rb, "card_for_store", lambda kind: dict(card, store=kind))
-    resp = _run(E.api_evals_retrieval_card(_ret_req(path="/api/evals/retrieval/card?store=memory")))
+    resp = _run(
+        E.api_evals_retrieval_card(
+            _ret_req(path="/api/evals/retrieval/card?store=memory")
+        )
+    )
     assert resp.status == 200
     assert _body(resp)["store"] == "memory"
 
 
-def test_a_card_read_that_wrote_to_a_store_is_reported_not_swallowed(evals_on, monkeypatch):
+def test_a_card_read_that_wrote_to_a_store_is_reported_not_swallowed(
+    evals_on, monkeypatch
+):
     """§5.1's read-only clause is the whole reason the card is a separate route from the run."""
-    from gideon.evals import retrieval_bench as rb
+    from gideon.assurance.evals import retrieval_bench as rb
 
     def boom(kind):
         raise rb.StoreMutatedError("retrieval bench wrote to a store")
 
     monkeypatch.setattr(rb, "card_for_store", boom)
-    resp = _run(E.api_evals_retrieval_card(_ret_req(path="/api/evals/retrieval/card?store=memory")))
+    resp = _run(
+        E.api_evals_retrieval_card(
+            _ret_req(path="/api/evals/retrieval/card?store=memory")
+        )
+    )
     assert resp.status == 500
     assert _body(resp)["error"]["code"] == "store_mutated"
 
@@ -449,10 +467,12 @@ def test_saving_labels_refuses_a_bad_body(evals_on):
         assert _body(resp)["error"]["code"] == code
 
 
-def test_saving_an_empty_selection_is_accepted_as_a_real_judgement(evals_on, monkeypatch):
+def test_saving_an_empty_selection_is_accepted_as_a_real_judgement(
+    evals_on, monkeypatch
+):
     """ "None of these answer it" is a label. If the route treated an empty list as "nothing
     submitted", the mined weak label the human just overruled would quietly survive."""
-    from gideon.evals import retrieval_bench as rb
+    from gideon.assurance.evals import retrieval_bench as rb
 
     seen: dict = {}
 
@@ -462,12 +482,16 @@ def test_saving_an_empty_selection_is_accepted_as_a_real_judgement(evals_on, mon
         return rb.RetrievalBenchmark(
             name="retrieval-memory",
             store="memory",
-            queries=(rb.QrelsQuery(query="q", relevant_ids=(), source=rb.SOURCE_HAND_LABEL),),
+            queries=(
+                rb.QrelsQuery(query="q", relevant_ids=(), source=rb.SOURCE_HAND_LABEL),
+            ),
         )
 
     monkeypatch.setattr(rb, "apply_labels_for_store", fake_apply)
     resp = _run(
-        E.api_evals_retrieval_labels(_JsonRequest({"store": "memory", "labels": {"q": []}}))
+        E.api_evals_retrieval_labels(
+            _JsonRequest({"store": "memory", "labels": {"q": []}})
+        )
     )
     assert resp.status == 200
     assert seen["labels"] == {"q": []}
@@ -478,12 +502,13 @@ def test_saving_an_empty_selection_is_accepted_as_a_real_judgement(evals_on, mon
 
 def test_a_card_that_marked_nothing_at_all_is_refused(evals_on):
     """An accepted card that changed nothing would report success while the qrels stayed weak."""
-    resp = _run(E.api_evals_retrieval_labels(_JsonRequest({"store": "memory", "labels": {"": []}})))
+    resp = _run(
+        E.api_evals_retrieval_labels(
+            _JsonRequest({"store": "memory", "labels": {"": []}})
+        )
+    )
     assert resp.status == 400
     assert _body(resp)["error"]["code"] == "labels_rejected"
-
-
-# ── LV-7: the skill-impact benchmark route ───────────────────────────────────
 
 
 def _bench_req(**kw):
@@ -501,30 +526,35 @@ def test_no_benchmark_run_yet_is_a_distinct_404_code(evals_on, monkeypatch):
     """This panel's ORDINARY state, permanently so for most users — the paired design is 100
     real model calls. It is therefore the state that must be distinguishable from a failure, and
     the message names the command rather than leaving a user to guess."""
-    monkeypatch.setattr("gideon.evals.learning_bench.latest_report", lambda: None)
+    monkeypatch.setattr(
+        "gideon.assurance.evals.learning_bench.latest_report", lambda: None
+    )
     resp = _run(E.api_evals_learning_benchmark(_bench_req()))
     assert resp.status == 404
     code = _body(resp)["error"]["code"]
     assert code == "learning_benchmark_absent"
     assert code != "evals_disabled"
-    assert "scripts/learning_benchmark.py" in _body(resp)["error"]["message"]
+    assert "tooling/scripts/learning_benchmark.py" in _body(resp)["error"]["message"]
 
 
-def test_an_unreadable_benchmark_report_is_a_500_not_an_empty_table(evals_on, monkeypatch):
+def test_an_unreadable_benchmark_report_is_a_500_not_an_empty_table(
+    evals_on, monkeypatch
+):
     def boom():
         raise OSError("bad json")
 
-    monkeypatch.setattr("gideon.evals.learning_bench.latest_report", boom)
+    monkeypatch.setattr("gideon.assurance.evals.learning_bench.latest_report", boom)
     resp = _run(E.api_evals_learning_benchmark(_bench_req()))
     assert resp.status == 500
     assert _body(resp)["error"]["code"] == "learning_benchmark_unreadable"
 
 
 def test_an_unmeasured_task_reaches_the_wire_as_null_not_as_zero(evals_on, monkeypatch):
-    """The route is a pass-through by design: the §5 thresholds live in `harness/`, outside the
+    """The route is a pass-through by design: the §5 thresholds live in `checks/harness/`, outside the
     wheel, so nothing here CAN synthesise a verdict or a score. A `null` verdict must survive
     serialization untouched — a 0.0 substituted anywhere would read as "the skill scored
-    nothing", which is the benchmark's negative answer asserted from a run that never happened."""
+    nothing", which is the benchmark's negative answer asserted from a run that never happened.
+    """
     report = {
         "run_id": "learnbench-x",
         "measured_tasks": 0,
@@ -540,7 +570,9 @@ def test_an_unmeasured_task_reaches_the_wire_as_null_not_as_zero(evals_on, monke
         ],
         "skipped": [],
     }
-    monkeypatch.setattr("gideon.evals.learning_bench.latest_report", lambda: report)
+    monkeypatch.setattr(
+        "gideon.assurance.evals.learning_bench.latest_report", lambda: report
+    )
     resp = _run(E.api_evals_learning_benchmark(_bench_req()))
     assert resp.status == 200
     body = _body(resp)
@@ -553,18 +585,21 @@ def test_an_unmeasured_task_reaches_the_wire_as_null_not_as_zero(evals_on, monke
 
 def test_the_whole_frozen_register_travels_with_the_report(evals_on, monkeypatch):
     """A report carrying two rows must not make a ten-task register look like a two-task one."""
-    from gideon.evals import learning_bench as lb
+    from gideon.assurance.evals import learning_bench as lb
 
-    monkeypatch.setattr(lb, "latest_report", lambda: {"run_id": "x", "tasks": [], "skipped": []})
+    monkeypatch.setattr(
+        lb, "latest_report", lambda: {"run_id": "x", "tasks": [], "skipped": []}
+    )
     body = _body(_run(E.api_evals_learning_benchmark(_bench_req())))
     assert len(body["register"]) == len(lb.BENCH_TASKS) == 10
     assert body["task_set_version"] == lb.TASK_SET_VERSION
     assert body["protocol_doc"] == lb.PROTOCOL_DOC
-    # The variance a reproduction is judged against is SHIPPED to the reader, not implied.
     assert body["stated_variance"] == list(lb.REPRODUCTION_CONDITIONS)
 
 
-def test_the_runs_provenance_survives_the_wire_in_all_THREE_states(evals_on, monkeypatch):
+def test_the_runs_provenance_survives_the_wire_in_all_THREE_states(
+    evals_on, monkeypatch
+):
     """WHICH MODEL produced the table is the one thing the table cannot show, and the two run
     kinds serialize identically apart from this field.
 
@@ -579,7 +614,7 @@ def test_the_runs_provenance_survives_the_wire_in_all_THREE_states(evals_on, mon
       here: an added ``null`` would turn "we never recorded it" into "we recorded that no model
       ran", which is the absent-versus-declared-false collapse.
     """
-    from gideon.evals import learning_bench as lb
+    from gideon.assurance.evals import learning_bench as lb
 
     binding = {
         "use_case": "chat",
@@ -592,11 +627,11 @@ def test_the_runs_provenance_survives_the_wire_in_all_THREE_states(evals_on, mon
     }
     base = {"run_id": "learnbench-x", "tasks": [], "skipped": []}
 
-    monkeypatch.setattr(lb, "latest_report", lambda: {**base, "provider_binding": binding})
+    monkeypatch.setattr(
+        lb, "latest_report", lambda: {**base, "provider_binding": binding}
+    )
     bound = _body(_run(E.api_evals_learning_benchmark(_bench_req())))["report"]
     assert bound["provider_binding"] == binding
-    # The NAME of a key variable may cross; a value never may. Asserted over the whole payload
-    # rather than the binding alone, so a secret smuggled into any sibling field fails this too.
     assert "GIDEON_EVAL_PROVIDER_KEY" not in json.dumps(bound)
 
     monkeypatch.setattr(lb, "latest_report", lambda: {**base, "provider_binding": None})
@@ -609,7 +644,9 @@ def test_the_runs_provenance_survives_the_wire_in_all_THREE_states(evals_on, mon
     assert "provider_binding" not in legacy
 
 
-def test_the_pin_reaches_the_reader_spelled_out_not_only_as_a_digest(evals_on, monkeypatch):
+def test_the_pin_reaches_the_reader_spelled_out_not_only_as_a_digest(
+    evals_on, monkeypatch
+):
     """``model_fp`` is a 12-char digest and cannot be read; ``model_fingerprint`` is the
     per-use-case refs behind it. Both must cross: the digest is what the ledger row carries, and
     the spelled-out map is the only form a reader of a published table can check.
@@ -619,7 +656,7 @@ def test_the_pin_reaches_the_reader_spelled_out_not_only_as_a_digest(evals_on, m
     describes what the operator configured rather than what any cell reached. That is exactly why
     the pin must arrive BESIDE ``provider_binding`` and never instead of it.
     """
-    from gideon.evals import learning_bench as lb
+    from gideon.assurance.evals import learning_bench as lb
 
     pin = {
         "model_fp": "5970c589da34",

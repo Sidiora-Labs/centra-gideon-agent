@@ -8,6 +8,7 @@ backend's own synthesis (e.g. a piper subprocess) lives in the app, sandboxed vi
 ``gideon.sdk.util.sandbox_wrap_argv``.
 """
 
-from gideon.tts.provider import LocalTtsProvider, TtsProvider, TtsVoice  # noqa: F401
+from gideon.integrations.tts.provider import TtsVoice  # noqa: F401
+from gideon.integrations.tts.provider import LocalTtsProvider, TtsProvider
 
 __all__ = ["TtsProvider", "LocalTtsProvider", "TtsVoice"]

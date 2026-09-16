@@ -8,8 +8,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from gideon.cli_commands import _cron
-from gideon.cli_doctor import _doctor
+from gideon.interfaces.cli.commands import _cron
+from gideon.interfaces.cli.doctor import _doctor
 
 
 class TestDoctor:
@@ -19,20 +19,27 @@ class TestDoctor:
         mock_run = MagicMock(returncode=0, stdout="gideon-cli 1.0.0", stderr="")
         with (
             patch(
-                "gideon.cli_doctor.shutil.which", side_effect=lambda b: f"/usr/local/bin/{b}"
+                "gideon.interfaces.cli.doctor.shutil.which",
+                side_effect=lambda b: f"/usr/local/bin/{b}",
             ),
-            patch("gideon.cli_doctor.AGENTS_DIR", tmp_path),
+            patch("gideon.interfaces.cli.doctor.AGENTS_DIR", tmp_path),
             patch("subprocess.run", return_value=mock_run),
-            patch("urllib.request.urlopen", side_effect=urllib.error.URLError("no gateway")),
-            patch("gideon.cli_doctor.is_local_bind", return_value=True),
+            patch(
+                "urllib.request.urlopen",
+                side_effect=urllib.error.URLError("no gateway"),
+            ),
+            patch("gideon.interfaces.cli.doctor.is_local_bind", return_value=True),
         ):
             _doctor()
 
     def test_doctor_without_agent(self):
         with (
-            patch("gideon.cli_doctor.shutil.which", return_value=None),
-            patch("urllib.request.urlopen", side_effect=urllib.error.URLError("no gateway")),
-            patch("gideon.cli_doctor.is_local_bind", return_value=True),
+            patch("gideon.interfaces.cli.doctor.shutil.which", return_value=None),
+            patch(
+                "urllib.request.urlopen",
+                side_effect=urllib.error.URLError("no gateway"),
+            ),
+            patch("gideon.interfaces.cli.doctor.is_local_bind", return_value=True),
         ):
             try:
                 _doctor()
@@ -58,13 +65,15 @@ class TestSetupWorkspaceDir:
     """Tests for _setup_workspace_dir prompt default and label logic."""
 
     def test_uses_saved_path_as_default(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.cli_setup.sys.stdin", _TtyStdin())
+        monkeypatch.setattr("gideon.interfaces.cli.setup.sys.stdin", _TtyStdin())
         ws_file = tmp_path / "workspace_dir"
         ws_file.write_text("/custom/workspace\n")
         custom_dir = tmp_path / "custom"
-        monkeypatch.setattr("gideon.cli_setup._workspace_dir_file", lambda: ws_file)
+        monkeypatch.setattr(
+            "gideon.interfaces.cli.setup._workspace_dir_file", lambda: ws_file
+        )
         with patch("builtins.input", return_value=str(custom_dir)) as mock_input:
-            from gideon.cli_setup import _setup_workspace_dir
+            from gideon.interfaces.cli.setup import _setup_workspace_dir
 
             _setup_workspace_dir()
         prompt = mock_input.call_args[0][0]
@@ -74,9 +83,11 @@ class TestSetupWorkspaceDir:
         ws_file = tmp_path / "workspace_dir"
         ws_file.write_text("/custom/workspace\n")
         custom_dir = tmp_path / "custom"
-        monkeypatch.setattr("gideon.cli_setup._workspace_dir_file", lambda: ws_file)
+        monkeypatch.setattr(
+            "gideon.interfaces.cli.setup._workspace_dir_file", lambda: ws_file
+        )
         with patch("builtins.input", return_value=str(custom_dir)):
-            from gideon.cli_setup import _setup_workspace_dir
+            from gideon.interfaces.cli.setup import _setup_workspace_dir
 
             _setup_workspace_dir()
         output = capsys.readouterr().out
@@ -85,9 +96,11 @@ class TestSetupWorkspaceDir:
     def test_shows_default_label_when_no_saved(self, tmp_path, monkeypatch, capsys):
         ws_file = tmp_path / "no_such_file"
         custom_dir = tmp_path / "ws"
-        monkeypatch.setattr("gideon.cli_setup._workspace_dir_file", lambda: ws_file)
+        monkeypatch.setattr(
+            "gideon.interfaces.cli.setup._workspace_dir_file", lambda: ws_file
+        )
         with patch("builtins.input", return_value=str(custom_dir)):
-            from gideon.cli_setup import _setup_workspace_dir
+            from gideon.interfaces.cli.setup import _setup_workspace_dir
 
             _setup_workspace_dir()
         output = capsys.readouterr().out
@@ -97,7 +110,7 @@ class TestSetupWorkspaceDir:
 class TestCronCli:
     """The `cron` CLI writes the unified TRIGGER STORE (S108).
 
-    🔴 Every test here used to `patch("gideon.cli_commands.ScheduleService")` and assert the
+    🔴 Every test here used to `patch("gideon.interfaces.cli.commands.ScheduleService")` and assert the
     `add_job(...)` CALL SHAPE. They passed the whole time a CLI-created cron DID NOT FIRE: the write
     went to `crons.json`, which the clock engine never reads, so the job stayed inert until the user
     restarted the gateway. A mock-shape assertion cannot see that — it proves only which
@@ -109,12 +122,14 @@ class TestCronCli:
 
     @pytest.fixture(autouse=True)
     def _home(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.cli_commands.config_dir", lambda: tmp_path)
-        monkeypatch.setattr("gideon.cli_commands.sel", MagicMock())
+        monkeypatch.setattr(
+            "gideon.interfaces.cli.commands.config_dir", lambda: tmp_path
+        )
+        monkeypatch.setattr("gideon.interfaces.cli.commands.sel", MagicMock())
         return tmp_path
 
     def _store(self, tmp_path):
-        from gideon.triggers.store import TriggerStore
+        from gideon.automation.triggers.store import TriggerStore
 
         return TriggerStore(base_dir=tmp_path)
 
@@ -142,7 +157,9 @@ class TestCronCli:
         assert row.trigger.enabled
         assert row.trigger.next_fire_at
         assert row.trigger.spec == {"kind": "interval", "interval_secs": 300}
-        assert not (tmp_path / "crons.json").exists(), "nothing may be written to the legacy file"
+        assert not (
+            tmp_path / "crons.json"
+        ).exists(), "nothing may be written to the legacy file"
 
     def test_cron_add_with_channel(self, tmp_path):
         _cron(
@@ -156,7 +173,6 @@ class TestCronCli:
                 approval_mode="",
             )
         )
-        # `delivery` is the store's spelling of the legacy `channel=` kwarg.
         assert self._only(tmp_path).trigger.delivery == "channel:C0AP77JJSN6"
 
     def test_cron_add_with_cron_expr(self, tmp_path):
@@ -191,7 +207,6 @@ class TestCronCli:
         inline = (self._only(tmp_path).trigger.workflow or {}).get("inline") or {}
         config = inline.get("config") or {}
         assert config.get("approval_mode") == "auto"
-        # `task_template`, NOT `message` — the key `invoke-agent` actually reads.
         assert config.get("task_template") == "check"
 
     def test_cron_add_is_a_user_creation_not_an_agent_one(self, tmp_path):
@@ -227,7 +242,7 @@ class TestCronCli:
         assert self._store(tmp_path).load() == []
 
     def _seed(self, tmp_path, **over):
-        from gideon.triggers.models import Trigger
+        from gideon.automation.triggers.models import Trigger
 
         store = self._store(tmp_path)
         trigger = Trigger(
@@ -238,7 +253,11 @@ class TestCronCli:
             workflow={
                 "inline": {
                     "provider": "invoke-agent",
-                    "config": {"task_template": "check", "agent": "helper", "model": "gpt"},
+                    "config": {
+                        "task_template": "check",
+                        "agent": "helper",
+                        "model": "gpt",
+                    },
                 }
             },
         )
@@ -261,10 +280,10 @@ class TestCronCli:
                 approval_mode="auto",
             )
         )
-        config = ((self._only(tmp_path).trigger.workflow or {})["inline"]).get("config") or {}
+        config = ((self._only(tmp_path).trigger.workflow or {})["inline"]).get(
+            "config"
+        ) or {}
         assert config.get("approval_mode") == "auto"
-        # 🔴 The agent + model the user set at creation must SURVIVE an unrelated edit — the action
-        # is read-modify-written, not replaced.
         assert config.get("agent") == "helper"
         assert config.get("model") == "gpt"
 
@@ -282,7 +301,9 @@ class TestCronCli:
                 approval_mode="default",
             )
         )
-        config = ((self._only(tmp_path).trigger.workflow or {})["inline"]).get("config") or {}
+        config = ((self._only(tmp_path).trigger.workflow or {})["inline"]).get(
+            "config"
+        ) or {}
         assert config.get("approval_mode") == ""
 
     def test_cron_update_cadence_re_arms(self, tmp_path, monkeypatch):
@@ -290,9 +311,6 @@ class TestCronCli:
         `next_fire_at` still held the OLD one — so the job would fire on the schedule the user had
         just replaced. `next_fire_at` is engine state the patch allowlist refuses, so the re-arm
         is a separate clear-then-arm."""
-        # Host zone pinned: the assertion reads the re-armed instant as UTC (`07:30:00+00:00` for
-        # `30 7 * * *`), and an absent `spec.timezone` resolves the machine's zone now (#2520).
-        # This test is about the RE-ARM happening at all.
         monkeypatch.setenv("TZ", "UTC")
         store = self._seed(tmp_path, next_fire_at="2026-01-01T09:00:00+00:00")
         _cron(
@@ -370,8 +388,10 @@ class TestCronCli:
             )
         )
         assert "Provide --every or --cron, not both" in capsys.readouterr().out
-        # And nothing may have been written on the way to that refusal.
-        assert self._only(tmp_path).trigger.spec == {"kind": "interval", "interval_secs": 300}
+        assert self._only(tmp_path).trigger.spec == {
+            "kind": "interval",
+            "interval_secs": 300,
+        }
 
     def test_cron_update_not_found(self, tmp_path, capsys):
         _cron(
@@ -399,7 +419,7 @@ class TestCronCli:
         """`set_paused` REFUSES to enable a row that failed to parse and says why, which beats the
         legacy "Job not found" — the row does exist, so that message was wrong as well as unhelpful.
         """
-        self._seed(tmp_path, spec={}, enabled=False)  # no spec.kind → invalid clock row
+        self._seed(tmp_path, spec={}, enabled=False)
         _cron(argparse.Namespace(cron_action="resume", job_id="clock:ops"))
         out = capsys.readouterr().out
         assert "parse error" in out
@@ -419,8 +439,6 @@ class TestCronCli:
         _cron(argparse.Namespace(cron_action="list"))
         out = capsys.readouterr().out
         assert "clock:ops" in out
-        # 🔴 The message came out BLANK first: read via the shared projection, because
-        # `invoke-agent`'s key is `task_template` and `run-prompt`/`notify` differ again.
         assert "check" in out
 
     def test_cron_list_shows_a_broken_row_rather_than_hiding_it(self, tmp_path, capsys):
@@ -442,7 +460,7 @@ class TestCronCli:
         exactly the one that took this long to notice."""
         import inspect
 
-        from gideon import cli_commands
+        from gideon.interfaces.cli import commands as cli_commands
 
         assert "ScheduleService" not in inspect.getsource(cli_commands._cron)
 
@@ -450,30 +468,30 @@ class TestCronCli:
 class TestSetupTimezone:
     def test_auto_detect_from_tz_env(self, monkeypatch):
         """TZ env var is checked before /etc/localtime."""
-        from gideon.cli_setup import _detect_system_timezone
+        from gideon.interfaces.cli.setup import _detect_system_timezone
 
         monkeypatch.setenv("TZ", "Europe/London")
         assert _detect_system_timezone() == "Europe/London"
 
     def test_auto_detect_tz_env_with_colon(self, monkeypatch):
         """TZ env var with glibc colon prefix is handled."""
-        from gideon.cli_setup import _detect_system_timezone
+        from gideon.interfaces.cli.setup import _detect_system_timezone
 
         monkeypatch.setenv("TZ", ":America/Chicago")
         assert _detect_system_timezone() == "America/Chicago"
 
     def test_auto_detect_from_symlink(self, tmp_path, monkeypatch):
         """When /etc/localtime is a symlink, timezone is auto-detected."""
-        monkeypatch.setattr("gideon.cli_setup.sys.stdin", _TtyStdin())
+        monkeypatch.setattr("gideon.interfaces.cli.setup.sys.stdin", _TtyStdin())
         cfg_file = tmp_path / "config.json"
         cfg_file.write_text("{}")
-        monkeypatch.setattr("gideon.cli_setup.config_path", lambda: cfg_file)
+        monkeypatch.setattr("gideon.interfaces.cli.setup.config_path", lambda: cfg_file)
 
-        from gideon.cli_setup import _setup_timezone
+        from gideon.interfaces.cli.setup import _setup_timezone
 
         with patch("builtins.input", return_value="") as mock_input:
             with patch(
-                "gideon.cli_setup._detect_system_timezone",
+                "gideon.interfaces.cli.setup._detect_system_timezone",
                 return_value="America/Los_Angeles",
             ):
                 _setup_timezone()
@@ -485,15 +503,17 @@ class TestSetupTimezone:
 
     def test_manual_entry(self, tmp_path, monkeypatch):
         """When no auto-detect, user types timezone manually."""
-        monkeypatch.setattr("gideon.cli_setup.sys.stdin", _TtyStdin())
+        monkeypatch.setattr("gideon.interfaces.cli.setup.sys.stdin", _TtyStdin())
         cfg_file = tmp_path / "config.json"
         cfg_file.write_text("{}")
-        monkeypatch.setattr("gideon.cli_setup.config_path", lambda: cfg_file)
+        monkeypatch.setattr("gideon.interfaces.cli.setup.config_path", lambda: cfg_file)
 
-        from gideon.cli_setup import _setup_timezone
+        from gideon.interfaces.cli.setup import _setup_timezone
 
         with patch("builtins.input", return_value="America/New_York"):
-            with patch("gideon.cli_setup._detect_system_timezone", return_value=""):
+            with patch(
+                "gideon.interfaces.cli.setup._detect_system_timezone", return_value=""
+            ):
                 _setup_timezone()
 
         data = json.loads(cfg_file.read_text())
@@ -503,12 +523,14 @@ class TestSetupTimezone:
         """Empty input skips timezone setup."""
         cfg_file = tmp_path / "config.json"
         cfg_file.write_text("{}")
-        monkeypatch.setattr("gideon.cli_setup.config_path", lambda: cfg_file)
+        monkeypatch.setattr("gideon.interfaces.cli.setup.config_path", lambda: cfg_file)
 
-        from gideon.cli_setup import _setup_timezone
+        from gideon.interfaces.cli.setup import _setup_timezone
 
         with patch("builtins.input", return_value=""):
-            with patch("gideon.cli_setup._detect_system_timezone", return_value=""):
+            with patch(
+                "gideon.interfaces.cli.setup._detect_system_timezone", return_value=""
+            ):
                 _setup_timezone()
 
         data = json.loads(cfg_file.read_text())
@@ -516,15 +538,17 @@ class TestSetupTimezone:
 
     def test_invalid_timezone_rejected(self, tmp_path, monkeypatch, capsys):
         """Invalid timezone is rejected, not saved."""
-        monkeypatch.setattr("gideon.cli_setup.sys.stdin", _TtyStdin())
+        monkeypatch.setattr("gideon.interfaces.cli.setup.sys.stdin", _TtyStdin())
         cfg_file = tmp_path / "config.json"
         cfg_file.write_text("{}")
-        monkeypatch.setattr("gideon.cli_setup.config_path", lambda: cfg_file)
+        monkeypatch.setattr("gideon.interfaces.cli.setup.config_path", lambda: cfg_file)
 
-        from gideon.cli_setup import _setup_timezone
+        from gideon.interfaces.cli.setup import _setup_timezone
 
         with patch("builtins.input", return_value="Invalid/Timezone"):
-            with patch("gideon.cli_setup._detect_system_timezone", return_value=""):
+            with patch(
+                "gideon.interfaces.cli.setup._detect_system_timezone", return_value=""
+            ):
                 _setup_timezone()
 
         data = json.loads(cfg_file.read_text())
@@ -536,9 +560,9 @@ class TestSetupTimezone:
         """Re-running setup with existing timezone keeps it on Enter."""
         cfg_file = tmp_path / "config.json"
         cfg_file.write_text(json.dumps({"timezone": "America/Chicago"}))
-        monkeypatch.setattr("gideon.cli_setup.config_path", lambda: cfg_file)
+        monkeypatch.setattr("gideon.interfaces.cli.setup.config_path", lambda: cfg_file)
 
-        from gideon.cli_setup import _setup_timezone
+        from gideon.interfaces.cli.setup import _setup_timezone
 
         with patch("builtins.input", return_value=""):
             _setup_timezone()
@@ -550,13 +574,12 @@ class TestSetupTimezone:
         """Corrupted config file is not overwritten."""
         cfg_file = tmp_path / "config.json"
         cfg_file.write_text("not json {{{")
-        monkeypatch.setattr("gideon.cli_setup.config_path", lambda: cfg_file)
+        monkeypatch.setattr("gideon.interfaces.cli.setup.config_path", lambda: cfg_file)
 
-        from gideon.cli_setup import _setup_timezone
+        from gideon.interfaces.cli.setup import _setup_timezone
 
         _setup_timezone()
 
-        # File should be unchanged
         assert cfg_file.read_text() == "not json {{{"
         output = capsys.readouterr().out
         assert "Could not read" in output
@@ -569,9 +592,9 @@ class TestLogout:
         """Successful logout prints success message."""
         secret_file = tmp_path / ".local_secret"
         secret_file.write_text("test-secret")
-        monkeypatch.setattr("gideon.cli_server.config_dir", lambda: tmp_path)
+        monkeypatch.setattr("gideon.interfaces.cli.server.config_dir", lambda: tmp_path)
 
-        from gideon.cli_server import _logout
+        from gideon.interfaces.cli.server import _logout
 
         mock_resp = MagicMock()
         mock_resp.read.return_value = b'{"ok": true}'
@@ -579,13 +602,13 @@ class TestLogout:
         mock_resp.__exit__ = MagicMock(return_value=False)
 
         with patch("urllib.request.urlopen", return_value=mock_resp):
-            _logout(7777)  # Should not raise
+            _logout(7777)
 
     def test_logout_gateway_not_running(self, tmp_path, monkeypatch):
         """Missing secret file means gateway not running."""
-        monkeypatch.setattr("gideon.cli_server.config_dir", lambda: tmp_path)
+        monkeypatch.setattr("gideon.interfaces.cli.server.config_dir", lambda: tmp_path)
 
-        from gideon.cli_server import _logout
+        from gideon.interfaces.cli.server import _logout
 
         try:
             _logout(7777)
@@ -597,9 +620,9 @@ class TestLogout:
         """HTTP error from gateway is handled."""
         secret_file = tmp_path / ".local_secret"
         secret_file.write_text("test-secret")
-        monkeypatch.setattr("gideon.cli_server.config_dir", lambda: tmp_path)
+        monkeypatch.setattr("gideon.interfaces.cli.server.config_dir", lambda: tmp_path)
 
-        from gideon.cli_server import _logout
+        from gideon.interfaces.cli.server import _logout
 
         with patch(
             "urllib.request.urlopen",
@@ -618,7 +641,7 @@ class TestLogout:
         secret_file.write_text("test-secret")
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
 
-        from gideon.cli_server import _logout
+        from gideon.interfaces.cli.server import _logout
 
         with patch(
             "urllib.request.urlopen",
@@ -637,7 +660,7 @@ class TestLogout:
         secret_file.write_text("test-secret")
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
 
-        from gideon.cli_server import _logout
+        from gideon.interfaces.cli.server import _logout
 
         mock_resp = MagicMock()
         mock_resp.read.return_value = b'{"ok": false, "error": "test error"}'
@@ -660,7 +683,7 @@ class TestStatus:
 
     def test_status_auth_required(self, capsys):
         """401/403 should report gateway as running with token auth."""
-        from gideon.cli_server import _status
+        from gideon.interfaces.cli.server import _status
 
         with patch(
             "urllib.request.urlopen",
@@ -675,12 +698,16 @@ class TestStatus:
 
     def test_status_other_http_error(self, capsys):
         """Non-auth HTTP errors should report gateway as running with code."""
-        from gideon.cli_server import _status
+        from gideon.interfaces.cli.server import _status
 
         with patch(
             "urllib.request.urlopen",
             side_effect=urllib.error.HTTPError(
-                "http://127.0.0.1:7777/api/status", 500, "Internal Server Error", {}, None
+                "http://127.0.0.1:7777/api/status",
+                500,
+                "Internal Server Error",
+                {},
+                None,
             ),
         ):
             _status(self._make_args())
@@ -690,7 +717,7 @@ class TestStatus:
 
     def test_status_connection_refused(self, capsys):
         """Connection refused should report gateway as not running."""
-        from gideon.cli_server import _status
+        from gideon.interfaces.cli.server import _status
 
         with patch(
             "urllib.request.urlopen",
@@ -702,7 +729,7 @@ class TestStatus:
 
     def test_status_success(self, capsys):
         """200 OK should display stats."""
-        from gideon.cli_server import _status
+        from gideon.interfaces.cli.server import _status
 
         mock_resp = MagicMock()
         mock_resp.read.return_value = json.dumps(
@@ -727,7 +754,7 @@ class TestStatus:
 
     def test_status_unexpected_exception(self, capsys):
         """Non-network exceptions should report gateway as running with unexpected response."""
-        from gideon.cli_server import _status
+        from gideon.interfaces.cli.server import _status
 
         with patch("urllib.request.urlopen", side_effect=RuntimeError("unexpected")):
             _status(self._make_args())
@@ -736,42 +763,50 @@ class TestStatus:
         assert "unexpected response" in out
 
 
-class TestIsPersonalclawProcess:
+class TestIsGideonProcess:
     """Tests for _is_gideon_process helper."""
 
     def test_returns_true_for_gideon(self):
-        from gideon.cli_server import _is_gideon_process
+        from gideon.interfaces.cli.server import _is_gideon_process
 
-        with patch("subprocess.check_output", return_value="python3 -m gideon.dashboard\n"):
+        with patch(
+            "subprocess.check_output",
+            return_value="python3 -m gideon.interfaces.dashboard\n",
+        ):
             assert _is_gideon_process(1234) is True
 
     def test_returns_true_for_gideon_binary(self):
-        from gideon.cli_server import _is_gideon_process
+        from gideon.interfaces.cli.server import _is_gideon_process
 
         with patch("subprocess.check_output", return_value="/usr/bin/gideon start\n"):
             assert _is_gideon_process(1234) is True
 
     def test_returns_false_for_unrelated(self):
-        from gideon.cli_server import _is_gideon_process
+        from gideon.interfaces.cli.server import _is_gideon_process
 
         with patch("subprocess.check_output", return_value="nginx: worker process\n"):
             assert _is_gideon_process(1234) is False
 
     def test_returns_false_for_broad_match(self):
         """Editing a gideon file should NOT match — only gateway entry points."""
-        from gideon.cli_server import _is_gideon_process
+        from gideon.interfaces.cli.server import _is_gideon_process
 
-        with patch("subprocess.check_output", return_value="vim /tmp/gideon-notes.txt\n"):
+        with patch(
+            "subprocess.check_output", return_value="vim /tmp/gideon-notes.txt\n"
+        ):
             assert _is_gideon_process(1234) is False
 
     def test_returns_false_on_process_exit(self):
-        from gideon.cli_server import _is_gideon_process
+        from gideon.interfaces.cli.server import _is_gideon_process
 
-        with patch("subprocess.check_output", side_effect=subprocess.CalledProcessError(1, "ps")):
+        with patch(
+            "subprocess.check_output",
+            side_effect=subprocess.CalledProcessError(1, "ps"),
+        ):
             assert _is_gideon_process(1234) is False
 
     def test_raises_on_missing_ps(self):
-        from gideon.cli_server import _is_gideon_process
+        from gideon.interfaces.cli.server import _is_gideon_process
 
         with patch("subprocess.check_output", side_effect=FileNotFoundError):
             with pytest.raises(FileNotFoundError):
@@ -783,32 +818,37 @@ class TestStop:
 
     def _mock_sel(self):
         mock = MagicMock()
-        return patch("gideon.cli_commands.sel", return_value=mock)
+        return patch("gideon.interfaces.cli.commands.sel", return_value=mock)
 
     @pytest.fixture(autouse=True)
     def _no_service(self):
-        # ``_stop`` short-circuits via ``service_controller.stop_service()``
-        # when a systemd/launchd service is active on the host. Force the
-        # SIGTERM-by-port path so tests don't flake based on whether the
-        # test host happens to have ``gideon.service`` installed.
-        with patch("gideon.cli_server.service_controller.stop_service", return_value=False):
+        with patch(
+            "gideon.interfaces.cli.server.service_controller.stop_service",
+            return_value=False,
+        ):
             yield
 
     def test_lsof_not_found(self, capsys):
-        from gideon.cli_server import _stop
+        from gideon.interfaces.cli.server import _stop
 
-        with self._mock_sel(), patch("subprocess.check_output", side_effect=FileNotFoundError):
+        with (
+            self._mock_sel(),
+            patch("subprocess.check_output", side_effect=FileNotFoundError),
+        ):
             with pytest.raises(SystemExit) as exc:
                 _stop(7777)
             assert exc.value.code == 1
         assert "lsof" in capsys.readouterr().out
 
     def test_no_process_on_port(self, capsys):
-        from gideon.cli_server import _stop
+        from gideon.interfaces.cli.server import _stop
 
         with (
             self._mock_sel(),
-            patch("subprocess.check_output", side_effect=subprocess.CalledProcessError(1, "lsof")),
+            patch(
+                "subprocess.check_output",
+                side_effect=subprocess.CalledProcessError(1, "lsof"),
+            ),
         ):
             with pytest.raises(SystemExit) as exc:
                 _stop(7777)
@@ -816,15 +856,15 @@ class TestStop:
         assert "No Gideon gateway" in capsys.readouterr().out
 
     def test_no_gideon_process(self, capsys):
-        from gideon.cli_server import _stop
+        from gideon.interfaces.cli.server import _stop
 
         with (
             self._mock_sel(),
             patch(
                 "subprocess.check_output",
                 side_effect=[
-                    "1234\n",  # lsof returns a PID
-                    "nginx: worker\n",  # ps shows non-gideon
+                    "1234\n",
+                    "nginx: worker\n",
                 ],
             ),
         ):
@@ -834,15 +874,15 @@ class TestStop:
         assert "No Gideon gateway" in capsys.readouterr().out
 
     def test_ps_not_found(self, capsys):
-        from gideon.cli_server import _stop
+        from gideon.interfaces.cli.server import _stop
 
         with (
             self._mock_sel(),
             patch(
                 "subprocess.check_output",
                 side_effect=[
-                    "1234\n",  # lsof returns a PID
-                    FileNotFoundError,  # ps not found
+                    "1234\n",
+                    FileNotFoundError,
                 ],
             ),
         ):
@@ -852,15 +892,15 @@ class TestStop:
         assert "ps" in capsys.readouterr().out
 
     def test_successful_stop(self, capsys):
-        from gideon.cli_server import _stop
+        from gideon.interfaces.cli.server import _stop
 
         with (
             self._mock_sel(),
             patch(
                 "subprocess.check_output",
                 side_effect=[
-                    "1234\n",  # lsof
-                    "python3 -m gideon.dashboard\n",  # ps
+                    "1234\n",
+                    "python3 -m gideon.interfaces.dashboard\n",
                 ],
             ),
             patch("os.kill"),
@@ -870,7 +910,7 @@ class TestStop:
         assert "SIGTERM" in capsys.readouterr().out
 
     def test_permission_denied(self, capsys):
-        from gideon.cli_server import _stop
+        from gideon.interfaces.cli.server import _stop
 
         with (
             self._mock_sel(),
@@ -878,7 +918,7 @@ class TestStop:
                 "subprocess.check_output",
                 side_effect=[
                     "1234\n",
-                    "python3 -m gideon.dashboard\n",
+                    "python3 -m gideon.interfaces.dashboard\n",
                 ],
             ),
             patch("os.kill", side_effect=PermissionError),
@@ -889,7 +929,7 @@ class TestStop:
         assert "No permission" in capsys.readouterr().out
 
     def test_process_already_exited(self, capsys):
-        from gideon.cli_server import _stop
+        from gideon.interfaces.cli.server import _stop
 
         with (
             self._mock_sel(),
@@ -897,7 +937,7 @@ class TestStop:
                 "subprocess.check_output",
                 side_effect=[
                     "1234\n",
-                    "python3 -m gideon.dashboard\n",
+                    "python3 -m gideon.interfaces.dashboard\n",
                 ],
             ),
             patch("os.kill", side_effect=ProcessLookupError),
@@ -909,7 +949,7 @@ class TestStop:
 
     def test_partial_permission_denied(self, capsys):
         """One PID succeeds, another is denied — reports both."""
-        from gideon.cli_server import _stop
+        from gideon.interfaces.cli.server import _stop
 
         def kill_side_effect(pid, sig):
             if pid == 5678:
@@ -921,8 +961,8 @@ class TestStop:
                 "subprocess.check_output",
                 side_effect=[
                     "1234\n5678\n",
-                    "python3 -m gideon.dashboard\n",  # ps for 1234
-                    "python3 -m gideon.dashboard\n",  # ps for 5678
+                    "python3 -m gideon.interfaces.dashboard\n",
+                    "python3 -m gideon.interfaces.dashboard\n",
                 ],
             ),
             patch("os.kill", side_effect=kill_side_effect),
@@ -937,7 +977,7 @@ class TestStop:
 
     def test_lsof_with_warnings(self, capsys):
         """lsof sometimes emits warnings mixed with PIDs — non-digit lines are filtered."""
-        from gideon.cli_server import _stop
+        from gideon.interfaces.cli.server import _stop
 
         with (
             self._mock_sel(),
@@ -945,7 +985,7 @@ class TestStop:
                 "subprocess.check_output",
                 side_effect=[
                     "1234\nlsof: WARNING: can't stat() ...\n",
-                    "python3 -m gideon.dashboard\n",
+                    "python3 -m gideon.interfaces.dashboard\n",
                 ],
             ),
             patch("os.kill"),
@@ -968,80 +1008,92 @@ class TestResolveClientPort:
 
     def test_cli_flag_wins(self, monkeypatch, tmp_path):
         """An explicit --port flag must override env and config."""
-        from gideon.cli_server import resolve_client_port
+        from gideon.interfaces.cli.server import resolve_client_port
 
         monkeypatch.setenv("GIDEON_PORT", "9999")
         mock_cfg = MagicMock()
         mock_cfg.dashboard.url = "http://localhost:8888"
-        with patch("gideon.cli_server.AppConfig.load", return_value=mock_cfg):
+        with patch(
+            "gideon.interfaces.cli.server.AppConfig.load", return_value=mock_cfg
+        ):
             assert resolve_client_port(12345) == 12345
 
     def test_env_var_used_when_no_cli(self, monkeypatch):
         """GIDEON_PORT env var wins over config when no --port passed."""
-        from gideon.cli_server import resolve_client_port
+        from gideon.interfaces.cli.server import resolve_client_port
 
         monkeypatch.setenv("GIDEON_PORT", "6777")
         mock_cfg = MagicMock()
         mock_cfg.dashboard.url = "http://localhost:8888"
-        with patch("gideon.cli_server.AppConfig.load", return_value=mock_cfg):
+        with patch(
+            "gideon.interfaces.cli.server.AppConfig.load", return_value=mock_cfg
+        ):
             assert resolve_client_port(None) == 6777
 
     def test_invalid_env_var_falls_through_to_config(self, monkeypatch):
         """A garbage GIDEON_PORT must not crash; the helper falls through."""
-        from gideon.cli_server import resolve_client_port
+        from gideon.interfaces.cli.server import resolve_client_port
 
         monkeypatch.setenv("GIDEON_PORT", "not-a-number")
         mock_cfg = MagicMock()
         mock_cfg.dashboard.url = "http://localhost:7778"
-        with patch("gideon.cli_server.AppConfig.load", return_value=mock_cfg):
+        with patch(
+            "gideon.interfaces.cli.server.AppConfig.load", return_value=mock_cfg
+        ):
             assert resolve_client_port(None) == 7778
 
     def test_config_url_used_when_no_cli_no_env(self, monkeypatch):
         """The port in dashboard.url must be honoured when env is unset."""
-        from gideon.cli_server import resolve_client_port
+        from gideon.interfaces.cli.server import resolve_client_port
 
         monkeypatch.delenv("GIDEON_PORT", raising=False)
         mock_cfg = MagicMock()
         mock_cfg.dashboard.url = "http://localhost:7778"
-        with patch("gideon.cli_server.AppConfig.load", return_value=mock_cfg):
+        with patch(
+            "gideon.interfaces.cli.server.AppConfig.load", return_value=mock_cfg
+        ):
             assert resolve_client_port(None) == 7778
 
     def test_config_url_hostname_only_falls_through_to_default(self, monkeypatch):
         """A dashboard.url without an explicit port must fall through to 10000."""
-        from gideon.cli_server import resolve_client_port
+        from gideon.interfaces.cli.server import resolve_client_port
 
         monkeypatch.delenv("GIDEON_PORT", raising=False)
         mock_cfg = MagicMock()
         mock_cfg.dashboard.url = "http://my.host.example"
-        with patch("gideon.cli_server.AppConfig.load", return_value=mock_cfg):
-            # parse_dashboard_url returns _DEFAULT_PORT when no port in URL,
-            # which is the same as the final fallback — either way we land on 10000.
+        with patch(
+            "gideon.interfaces.cli.server.AppConfig.load", return_value=mock_cfg
+        ):
             assert resolve_client_port(None) == 10000
 
     def test_empty_config_falls_through_to_default(self, monkeypatch):
         """No env, empty dashboard.url → 10000."""
-        from gideon.cli_server import resolve_client_port
+        from gideon.interfaces.cli.server import resolve_client_port
 
         monkeypatch.delenv("GIDEON_PORT", raising=False)
         mock_cfg = MagicMock()
         mock_cfg.dashboard.url = ""
-        with patch("gideon.cli_server.AppConfig.load", return_value=mock_cfg):
+        with patch(
+            "gideon.interfaces.cli.server.AppConfig.load", return_value=mock_cfg
+        ):
             assert resolve_client_port(None) == 10000
 
     def test_config_load_failure_falls_through_to_default(self, monkeypatch):
         """If config loading raises, the helper must still return a usable port."""
-        from gideon.cli_server import resolve_client_port
+        from gideon.interfaces.cli.server import resolve_client_port
 
         monkeypatch.delenv("GIDEON_PORT", raising=False)
-        with patch("gideon.cli_server.AppConfig.load", side_effect=RuntimeError("boom")):
+        with patch(
+            "gideon.interfaces.cli.server.AppConfig.load",
+            side_effect=RuntimeError("boom"),
+        ):
             assert resolve_client_port(None) == 10000
 
     def test_cli_flag_zero_is_respected(self, monkeypatch):
         """Port 0 is weird but valid; it must not be coerced to None/default."""
-        from gideon.cli_server import resolve_client_port
+        from gideon.interfaces.cli.server import resolve_client_port
 
         monkeypatch.setenv("GIDEON_PORT", "9999")
-        # cli_port=0 is explicit; the helper uses 'is not None' not truthiness.
         assert resolve_client_port(0) == 0
 
 
@@ -1070,20 +1122,21 @@ class TestDoctorStaleProjectDir:
         mock_run = MagicMock(returncode=0, stdout="gideon-cli 1.0.0", stderr="")
         with (
             patch(
-                "gideon.cli_doctor.shutil.which", side_effect=lambda b: f"/usr/local/bin/{b}"
+                "gideon.interfaces.cli.doctor.shutil.which",
+                side_effect=lambda b: f"/usr/local/bin/{b}",
             ),
-            patch("gideon.cli_doctor.AGENTS_DIR", tmp_path),
+            patch("gideon.interfaces.cli.doctor.AGENTS_DIR", tmp_path),
             patch("subprocess.run", return_value=mock_run),
             patch("urllib.request.urlopen"),
-            patch("gideon.cli_doctor.is_local_bind", return_value=True),
-            patch("gideon.cli_doctor.config_dir", return_value=tmp_path),
+            patch("gideon.interfaces.cli.doctor.is_local_bind", return_value=True),
+            patch("gideon.interfaces.cli.doctor.config_dir", return_value=tmp_path),
             patch.dict("os.environ", {"GIDEON_PROJECT_DIR": ""}, clear=False),
         ):
             with pytest.raises(SystemExit):
                 _doctor()
         out = capsys.readouterr().out
         assert "stale" in out
-        assert "project dir: ⚠️  not set" not in out  # should NOT show fallback message
+        assert "project dir: ⚠️  not set" not in out
 
 
 class TestDoctorMcpCmdFixed:
@@ -1091,7 +1144,6 @@ class TestDoctorMcpCmdFixed:
 
     def test_doctor_fixes_stale_mcp_path(self, tmp_path, capsys):
         agent_file = tmp_path / "gideon.json"
-        # gideon-schedule has valid path, gideon-core has stale path
         valid_bin = tmp_path / "gideon"
         valid_bin.write_text("#!/bin/sh")
         valid_bin.chmod(0o755)
@@ -1100,7 +1152,10 @@ class TestDoctorMcpCmdFixed:
             "allowedTools": ["@gideon-core", "@gideon-schedule"],
             "mcpServers": {
                 "gideon-core": {"command": "/nonexistent/gideon", "args": ["mcp-core"]},
-                "gideon-schedule": {"command": str(valid_bin), "args": ["mcp-schedule"]},
+                "gideon-schedule": {
+                    "command": str(valid_bin),
+                    "args": ["mcp-schedule"],
+                },
             },
         }
         agent_file.write_text(json.dumps(agent_data))
@@ -1112,27 +1167,28 @@ class TestDoctorMcpCmdFixed:
             return f"/usr/local/bin/{b}"
 
         with (
-            patch("gideon.cli_doctor.shutil.which", side_effect=which_side_effect),
-            patch("gideon.cli_doctor.AGENTS_DIR", tmp_path),
+            patch(
+                "gideon.interfaces.cli.doctor.shutil.which",
+                side_effect=which_side_effect,
+            ),
+            patch("gideon.interfaces.cli.doctor.AGENTS_DIR", tmp_path),
             patch("subprocess.run", return_value=mock_run),
             patch("urllib.request.urlopen"),
-            patch("gideon.cli_doctor.is_local_bind", return_value=True),
+            patch("gideon.interfaces.cli.doctor.is_local_bind", return_value=True),
             patch("pathlib.Path.home", return_value=tmp_path),
             patch.dict("os.environ", {"GIDEON_PROJECT_DIR": ""}, clear=False),
-            # STT defaults to enabled; keep it disabled here so the unrelated
-            # "no STT model selected" issue doesn't trigger a non-zero exit.
             patch(
-                "gideon.providers.use_cases.load_use_case_settings",
+                "gideon.extensions.providers.use_cases.load_use_case_settings",
                 return_value={"enabled": False},
             ),
-            patch("gideon.stt.registry.active_stt", return_value=None),
+            patch("gideon.integrations.stt.registry.active_stt", return_value=None),
         ):
             _doctor()
         out = capsys.readouterr().out
         assert "fixed stale path" in out
         assert "Auto-fixed stale binary" in out
-        # Verify it did NOT print the tools/allowedTools message
-        assert "Auto-fixed tools/allowedTools" not in out
+        # Verify it did NOT print the tooling/allowedTools message
+        assert "Auto-fixed tooling/allowedTools" not in out
 
 
 class TestDoctorStt:
@@ -1168,19 +1224,23 @@ class TestDoctorStt:
         provider.name = "faster_whisper"
         with (
             patch(
-                "gideon.cli_doctor.shutil.which", side_effect=lambda b: f"/usr/local/bin/{b}"
+                "gideon.interfaces.cli.doctor.shutil.which",
+                side_effect=lambda b: f"/usr/local/bin/{b}",
             ),
-            patch("gideon.cli_doctor.AGENTS_DIR", tmp_path),
+            patch("gideon.interfaces.cli.doctor.AGENTS_DIR", tmp_path),
             patch("subprocess.run", return_value=mock_run),
-            patch("urllib.request.urlopen", side_effect=urllib.error.URLError("no gateway")),
-            patch("gideon.cli_doctor.is_local_bind", return_value=True),
-            patch("gideon.cli_doctor.ensure_ffmpeg_in_path"),
             patch(
-                "gideon.providers.use_cases.load_use_case_settings",
+                "urllib.request.urlopen",
+                side_effect=urllib.error.URLError("no gateway"),
+            ),
+            patch("gideon.interfaces.cli.doctor.is_local_bind", return_value=True),
+            patch("gideon.interfaces.cli.doctor.ensure_ffmpeg_in_path"),
+            patch(
+                "gideon.extensions.providers.use_cases.load_use_case_settings",
                 return_value={"enabled": True},
             ),
             patch(
-                "gideon.stt.registry.active_stt",
+                "gideon.integrations.stt.registry.active_stt",
                 return_value=(provider, "turbo"),
             ),
         ):
@@ -1196,25 +1256,26 @@ class TestDoctorStt:
         mock_run = MagicMock(returncode=0, stdout="gideon-cli 1.0.0", stderr="")
         with (
             patch(
-                "gideon.cli_doctor.shutil.which", side_effect=lambda b: f"/usr/local/bin/{b}"
+                "gideon.interfaces.cli.doctor.shutil.which",
+                side_effect=lambda b: f"/usr/local/bin/{b}",
             ),
-            patch("gideon.cli_doctor.AGENTS_DIR", tmp_path),
+            patch("gideon.interfaces.cli.doctor.AGENTS_DIR", tmp_path),
             patch("subprocess.run", return_value=mock_run),
-            patch("urllib.request.urlopen", side_effect=urllib.error.URLError("no gateway")),
-            patch("gideon.cli_doctor.is_local_bind", return_value=True),
-            patch("gideon.cli_doctor.ensure_ffmpeg_in_path"),
             patch(
-                "gideon.providers.use_cases.load_use_case_settings",
+                "urllib.request.urlopen",
+                side_effect=urllib.error.URLError("no gateway"),
+            ),
+            patch("gideon.interfaces.cli.doctor.is_local_bind", return_value=True),
+            patch("gideon.interfaces.cli.doctor.ensure_ffmpeg_in_path"),
+            patch(
+                "gideon.extensions.providers.use_cases.load_use_case_settings",
                 return_value={"enabled": True},
             ),
             patch(
-                "gideon.stt.registry.active_stt",
+                "gideon.integrations.stt.registry.active_stt",
                 return_value=None,
             ),
         ):
-            # STT enabled but no model bound is NOT a failure now: media backends
-            # (faster-whisper app, remote providers) are opt-in, so an unconfigured
-            # STT is an informational state — the doctor reports it and exits 0.
             _doctor()
         out = capsys.readouterr().out
         assert "Speech-to-Text" in out
@@ -1225,19 +1286,23 @@ class TestDoctorStt:
         mock_run = MagicMock(returncode=0, stdout="gideon-cli 1.0.0", stderr="")
         with (
             patch(
-                "gideon.cli_doctor.shutil.which", side_effect=lambda b: f"/usr/local/bin/{b}"
+                "gideon.interfaces.cli.doctor.shutil.which",
+                side_effect=lambda b: f"/usr/local/bin/{b}",
             ),
-            patch("gideon.cli_doctor.AGENTS_DIR", tmp_path),
+            patch("gideon.interfaces.cli.doctor.AGENTS_DIR", tmp_path),
             patch("subprocess.run", return_value=mock_run),
-            patch("urllib.request.urlopen", side_effect=urllib.error.URLError("no gateway")),
-            patch("gideon.cli_doctor.is_local_bind", return_value=True),
-            patch("gideon.cli_doctor.ensure_ffmpeg_in_path"),
             patch(
-                "gideon.providers.use_cases.load_use_case_settings",
+                "urllib.request.urlopen",
+                side_effect=urllib.error.URLError("no gateway"),
+            ),
+            patch("gideon.interfaces.cli.doctor.is_local_bind", return_value=True),
+            patch("gideon.interfaces.cli.doctor.ensure_ffmpeg_in_path"),
+            patch(
+                "gideon.extensions.providers.use_cases.load_use_case_settings",
                 return_value={"enabled": False},
             ),
             patch(
-                "gideon.stt.registry.active_stt",
+                "gideon.integrations.stt.registry.active_stt",
                 return_value=None,
             ),
         ):
@@ -1252,45 +1317,51 @@ class TestConfigDirOverride:
 
     def test_project_dir_file_uses_config_dir(self, tmp_path, monkeypatch):
         """_project_dir_file() returns path under config_dir(), not hardcoded home."""
-        monkeypatch.setattr("gideon.cli.config_dir", lambda: tmp_path)
+        monkeypatch.setattr("gideon.interfaces.cli.main.config_dir", lambda: tmp_path)
 
-        from gideon.cli import _project_dir_file
+        from gideon.interfaces.cli.main import _project_dir_file
 
         assert _project_dir_file() == tmp_path / "project_dir"
 
     @staticmethod
     def _make_checkout(root):
         """Materialize the markers of a real Gideon source checkout."""
-        (root / "src" / "gideon").mkdir(parents=True)
+        (root / "runtime" / "gideon").mkdir(parents=True)
         (root / "pyproject.toml").write_text('[project]\nname = "gideon"\n')
         return root
 
-    def test_detect_project_dir_matches_published_repo_layout(self, tmp_path, monkeypatch):
+    def test_detect_project_dir_matches_published_repo_layout(
+        self, tmp_path, monkeypatch
+    ):
         """The published layout (repo root IS the package root) is detected.
 
         PUBL-8 drive: the previous markers were top-level ``agents/`` + ``skills/``,
         which the published repository has never had (they live at
-        ``src/gideon/{agents,skills}``). Nothing matched, so
+        ``runtime/gideon/{agents,skills}``). Nothing matched, so
         GIDEON_PROJECT_DIR stayed unset and a git checkout was classified as
         a ``pip`` install — routing "Update & Restart" into a PyPI wheel upgrade.
         """
         proj = self._make_checkout(tmp_path / "Gideon")
-        sub = proj / "src" / "gideon"
-        monkeypatch.chdir(sub)  # detection walks UP from CWD
+        sub = proj / "runtime" / "gideon"
+        monkeypatch.chdir(sub)
 
-        from gideon.cli import _detect_project_dir
+        from gideon.interfaces.cli.main import _detect_project_dir
 
         assert _detect_project_dir() == str(proj)
 
-    def test_detect_project_dir_rejects_agents_skills_only_tree(self, tmp_path, monkeypatch):
+    def test_detect_project_dir_rejects_agents_skills_only_tree(
+        self, tmp_path, monkeypatch
+    ):
         """A bare agents/+skills/ tree is NOT a checkout — it carries no package."""
         proj = tmp_path / "not_a_checkout"
         (proj / "agents").mkdir(parents=True)
         (proj / "skills").mkdir()
         monkeypatch.chdir(proj)
-        monkeypatch.setattr("gideon.cli.config_dir", lambda: tmp_path / "cfg")
+        monkeypatch.setattr(
+            "gideon.interfaces.cli.main.config_dir", lambda: tmp_path / "cfg"
+        )
 
-        from gideon.cli import _detect_project_dir
+        from gideon.interfaces.cli.main import _detect_project_dir
 
         assert _detect_project_dir() is None
 
@@ -1302,10 +1373,12 @@ class TestConfigDirOverride:
         config_home.mkdir()
         (config_home / "project_dir").write_text(str(proj) + "\n")
 
-        monkeypatch.setattr("gideon.cli.config_dir", lambda: config_home)
-        monkeypatch.chdir(tmp_path)  # CWD has no project markers
+        monkeypatch.setattr(
+            "gideon.interfaces.cli.main.config_dir", lambda: config_home
+        )
+        monkeypatch.chdir(tmp_path)
 
-        from gideon.cli import _detect_project_dir
+        from gideon.interfaces.cli.main import _detect_project_dir
 
         assert _detect_project_dir() == str(proj)
 
@@ -1313,9 +1386,9 @@ class TestConfigDirOverride:
         """_logout reads .local_secret from config_dir(), not ~/.gideon."""
         secret_file = tmp_path / ".local_secret"
         secret_file.write_text("test-secret")
-        monkeypatch.setattr("gideon.cli_server.config_dir", lambda: tmp_path)
+        monkeypatch.setattr("gideon.interfaces.cli.server.config_dir", lambda: tmp_path)
 
-        from gideon.cli_server import _logout
+        from gideon.interfaces.cli.server import _logout
 
         mock_resp = MagicMock()
         mock_resp.read.return_value = b'{"ok": true}'
@@ -1324,8 +1397,3 @@ class TestConfigDirOverride:
 
         with patch("urllib.request.urlopen", return_value=mock_resp):
             _logout(7777)
-
-    # (removed) test_setup_slack_tokens_writes_to_config_dir — plan 32 moved
-    # _setup_slack_tokens out of core into the slack-channel app's cli_setup.py
-    # (behind the cli.setup manifest seam). The config-dir/.env write path is now
-    # exercised app-side and by tests/test_app_cli.py's setup-runner tests.

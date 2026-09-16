@@ -1,6 +1,6 @@
 """Tests for the cross-chunk streaming tag splitter."""
 
-from gideon.llm.stream_tags import KIND_OUTSIDE, StreamingTagSplitter
+from gideon.integrations.llm.stream_tags import KIND_OUTSIDE, StreamingTagSplitter
 
 _DEFAULT_TAGS = {"think": "thinking"}
 
@@ -55,7 +55,6 @@ def test_text_before_and_after_think():
 
 
 def test_open_tag_split_across_chunks():
-    # '<thi' at a chunk boundary must not leak as visible text.
     assert _split(["a<thi", "nk>r</think>b"]) == [
         (KIND_OUTSIDE, "a"),
         ("thinking", "r"),
@@ -71,21 +70,17 @@ def test_close_tag_split_across_chunks():
 
 
 def test_tag_char_by_char():
-    # Pathological: one character per chunk. Per-char emission is fine; the
-    # contiguous kind-runs must still be exactly reasoning then answer.
     stream = list("<think>hi</think>yo")
     assert _runs(stream) == [("thinking", "hi"), (KIND_OUTSIDE, "yo")]
 
 
 def test_unterminated_tag_flushes_as_text():
-    # An opened-but-never-closed tag degrades to visible text at flush (safe).
     assert _split(["<think>oops never closes"]) == [
         ("thinking", "oops never closes"),
     ]
 
 
 def test_dangling_open_prefix_flushes_as_text():
-    # A bare '<thi' at end of stream is surfaced, not swallowed.
     assert _split(["answer<thi"]) == [
         (KIND_OUTSIDE, "answer"),
         (KIND_OUTSIDE, "<thi"),
@@ -110,13 +105,11 @@ def test_multiple_think_blocks():
 
 
 def test_same_kind_runs_concatenate():
-    # Two plain chunks with no tag → two streamed segments, one logical run.
     assert _split(["foo", "bar"]) == [(KIND_OUTSIDE, "foo"), (KIND_OUTSIDE, "bar")]
     assert _runs(["foo", "bar"]) == [(KIND_OUTSIDE, "foobar")]
 
 
 def test_generalizes_to_other_tags():
-    # The same splitter handles memory/widget tags via a different map.
     tags = {"memory": "memory", "widget": "widget"}
     assert _split(["a<memory>m</memory>b<widget>w</widget>c"], tags) == [
         (KIND_OUTSIDE, "a"),
@@ -135,3 +128,42 @@ def test_empty_feed_is_noop():
     sp = StreamingTagSplitter({"think": "thinking"})
     assert sp.feed("") == []
     assert sp.flush() == []
+
+
+def test_every_two_chunk_boundary_has_the_same_semantic_runs():
+    text = "lead<THINK>reason<unknown>x</unknown></ThInK>tail<memory>fact</memory>end"
+    tags = {"think": "thinking", "memory": "memory"}
+    expected = [
+        ("text", "lead"),
+        ("thinking", "reason<unknown>x</unknown>"),
+        ("text", "tail"),
+        ("memory", "fact"),
+        ("text", "end"),
+    ]
+    for boundary in range(len(text) + 1):
+        assert _runs([text[:boundary], text[boundary:]], tags) == expected
+
+
+def test_partial_closing_delimiter_is_visible_on_flush_and_state_resets():
+    splitter = StreamingTagSplitter({"think": "thinking"})
+    assert [(item.kind, item.text) for item in splitter.feed("<think>reason</thi")] == [
+        ("thinking", "reason")
+    ]
+    assert [(item.kind, item.text) for item in splitter.flush()] == [("text", "</thi")]
+    assert [(item.kind, item.text) for item in splitter.feed("next")] == [
+        ("text", "next")
+    ]
+    assert splitter.flush() == []
+
+
+def test_overlapping_candidate_prefixes_and_literal_angles_are_not_lost():
+    assert _runs(
+        list("a<<think>b</think>c<thing>d</thing>e"),
+        {"think": "thinking", "thing": "memory"},
+    ) == [
+        ("text", "a<"),
+        ("thinking", "b"),
+        ("text", "c"),
+        ("memory", "d"),
+        ("text", "e"),
+    ]

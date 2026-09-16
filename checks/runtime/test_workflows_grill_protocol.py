@@ -11,7 +11,7 @@ looks fully specified.
 
 import pytest
 
-from gideon.workflows.grill_protocol import (
+from gideon.automation.workflows.grill_protocol import (
     BOUNDARY_QUESTION,
     MAX_BATCH,
     OTHER,
@@ -30,15 +30,12 @@ from gideon.workflows.grill_protocol import (
     split_facts_and_decisions,
     stress_probes,
 )
-from gideon.workflows.human_input import AskKind
-from gideon.workflows.intent import Intent, Rigor
+from gideon.automation.workflows.human_input import AskKind
+from gideon.automation.workflows.intent import Intent, Rigor
 
 
 def q(key: str, text: str = "", **kw) -> Question:
     return Question(key=key, text=text or f"question {key}?", **kw)
-
-
-# ── facts are looked up, not asked ──
 
 
 @pytest.mark.parametrize(
@@ -58,7 +55,8 @@ def test_a_discoverable_question_routes_to_a_lookup(text, channel):
 
 def test_the_memory_and_knowledge_channels_are_never_merged():
     """Two subsystems with two lifecycles. A merged "context fetch" would make it impossible to say
-    which one answered, and the plan states the boundary normatively for exactly that reason."""
+    which one answered, and the plan states the boundary normatively for exactly that reason.
+    """
     _asked, lookups = split_facts_and_decisions(
         [
             q("a", "Did I decide on the format?"),
@@ -74,7 +72,10 @@ def test_a_looked_up_question_is_not_also_asked():
     """The whole point of the split. Asking it anyway would cost the user's attention for something
     already on disk — which is the most expensive thing a grill can do."""
     to_ask, lookups = split_facts_and_decisions(
-        [q("f", "Which file defines the schema?"), q("d", "How aggressive should the sweep be?")]
+        [
+            q("f", "Which file defines the schema?"),
+            q("d", "How aggressive should the sweep be?"),
+        ]
     )
     assert [x.key for x in to_ask] == ["d"]
     assert lookups[Channel.CODEBASE][0].key == "f"
@@ -103,22 +104,24 @@ def test_the_boundary_question_is_present_even_with_no_other_questions():
     assert [x.text for r in rounds for x in r.questions] == [BOUNDARY_QUESTION]
 
 
-# ── every question ships a recommendation ──
-
-
 def test_a_recommendation_arrives_as_the_field_DEFAULT():
     """Not as prose in the label: a recommendation the user has to retype is not one they can
     accept, and accepting is the entire speed story of a structured grill."""
-    round_ = pace([q("a", recommended="weekly"), q("b", recommended=3), q("c", recommended="yes")])[
-        0
-    ]
+    round_ = pace(
+        [q("a", recommended="weekly"), q("b", recommended=3), q("c", recommended="yes")]
+    )[0]
     ask = round_.to_ask()
-    assert {f.name: f.default for f in ask.fields} == {"a": "weekly", "b": 3, "c": "yes"}
+    assert {f.name: f.default for f in ask.fields} == {
+        "a": "weekly",
+        "b": 3,
+        "c": "yes",
+    }
 
 
 def test_a_choice_question_always_carries_an_escape_hatch():
     """A closed option set claims the planner enumerated the possibilities. It is wrong often
-    enough that removing the hatch silently forces a wrong answer instead of surfacing a gap."""
+    enough that removing the hatch silently forces a wrong answer instead of surfacing a gap.
+    """
     round_ = pace([q("a", choices=["daily", "weekly"])])[0]
     assert OTHER in round_.to_ask().choices
 
@@ -126,9 +129,6 @@ def test_a_choice_question_always_carries_an_escape_hatch():
 def test_the_escape_hatch_is_not_duplicated():
     round_ = pace([q("a", choices=["daily", OTHER])])[0]
     assert round_.to_ask().choices.count(OTHER) == 1
-
-
-# ── pacing ──
 
 
 def test_three_independent_decisions_earn_one_batched_round():
@@ -187,9 +187,6 @@ def test_the_round_carries_the_reason_it_was_paced_that_way():
     assert "independent" in pace([q("a"), q("b"), q("c")])[0].reason
 
 
-# ── the stress-test phase ──
-
-
 def test_probes_come_from_the_users_OWN_stated_constraints():
     """A probe about cost posed to someone who never mentioned cost is a question about nothing,
     and it is the fastest way to make a grill feel like a form."""
@@ -223,9 +220,6 @@ def test_the_contradiction_names_what_was_stated_and_what_was_chosen():
     assert "autonomy" in text and "stop and wait" in text
 
 
-# ── Step-0: never treat a guess as a requirement ──
-
-
 def test_an_answered_question_is_CONFIRMED():
     step = fold_answers([q("a", "How often?")], {"a": "weekly"})
     assert step.confirmed == ["How often? → weekly"]
@@ -234,7 +228,8 @@ def test_an_answered_question_is_CONFIRMED():
 
 def test_an_unanswered_question_with_a_recommendation_is_an_ASSUMPTION():
     """Marked assumed, never confirmed. A user re-reads what they said and skims what the system
-    filled in, so an assumption presented as a requirement is the one that ships wrong."""
+    filled in, so an assumption presented as a requirement is the one that ships wrong.
+    """
     step = fold_answers([q("a", "How often?", recommended="weekly")], {})
     assert step.assumptions == ["How often? → weekly (assumed)"]
     assert step.confirmed == []
@@ -242,13 +237,18 @@ def test_an_unanswered_question_with_a_recommendation_is_an_ASSUMPTION():
 
 def test_a_deferral_is_an_assumption_not_a_decision():
     """ "You decide" is the user declining to decide. Recording it as a confirmed requirement is
-    the guess-as-requirement failure, and it is silent — the plan looks fully specified."""
-    step = fold_answers([q("a", "How often?", recommended="weekly")], {"a": "you decide"})
+    the guess-as-requirement failure, and it is silent — the plan looks fully specified.
+    """
+    step = fold_answers(
+        [q("a", "How often?", recommended="weekly")], {"a": "you decide"}
+    )
     assert step.assumptions == ["How often? → weekly (assumed)"]
     assert step.confirmed == []
 
 
-@pytest.mark.parametrize("answer", ["no preference", "up to you", "idk", "not sure", "either"])
+@pytest.mark.parametrize(
+    "answer", ["no preference", "up to you", "idk", "not sure", "either"]
+)
 def test_every_deferral_phrasing_is_caught(answer):
     step = fold_answers([q("a", recommended="x")], {"a": answer})
     assert step.confirmed == []
@@ -284,12 +284,10 @@ def test_the_step_zero_payload_reports_readiness():
     assert payload["open_questions"] == ["Which env?"]
 
 
-# ── prohibitions are frozen ──
-
-
 def test_prohibitions_split_on_lines_and_semicolons():
     step = fold_answers(
-        [boundary_question()], {"prohibitions": "never touch prod\nno force pushes; no deletes"}
+        [boundary_question()],
+        {"prohibitions": "never touch prod\nno force pushes; no deletes"},
     )
     assert step.prohibitions == ["never touch prod", "no force pushes", "no deletes"]
 
@@ -297,12 +295,16 @@ def test_prohibitions_split_on_lines_and_semicolons():
 def test_a_prohibition_containing_a_comma_LIST_is_not_shredded():
     """Splitting on commas would turn one boundary ("don't touch prod, staging, or CI") into three
     partial ones, each of which reads as a different, weaker rule."""
-    step = fold_answers([boundary_question()], {"prohibitions": "don't touch prod, staging, or CI"})
+    step = fold_answers(
+        [boundary_question()], {"prohibitions": "don't touch prod, staging, or CI"}
+    )
     assert step.prohibitions == ["don't touch prod, staging, or CI"]
 
 
 def test_a_list_answer_is_accepted():
-    step = fold_answers([boundary_question()], {"prohibitions": ["no deletes", "no pushes"]})
+    step = fold_answers(
+        [boundary_question()], {"prohibitions": ["no deletes", "no pushes"]}
+    )
     assert step.prohibitions == ["no deletes", "no pushes"]
 
 
@@ -378,9 +380,6 @@ def test_the_original_spec_is_not_mutated_by_injection():
     assert "prohibitions" not in spec["root"]["config"]
 
 
-# ── what triggers the grill ──
-
-
 def test_a_risk_hit_triggers_the_grill_and_says_which_signal():
     class Hit:
         signal = "destructive_op"
@@ -391,7 +390,9 @@ def test_a_risk_hit_triggers_the_grill_and_says_which_signal():
 
 
 def test_the_classifiers_deep_routing_triggers_the_grill():
-    triggered, why = deep_triggered(Intent(rigor=Rigor.DEEP, reason="complex + uncertain"))
+    triggered, why = deep_triggered(
+        Intent(rigor=Rigor.DEEP, reason="complex + uncertain")
+    )
     assert triggered
     assert "complex" in why
 
@@ -409,20 +410,19 @@ def test_the_trigger_reason_is_returned_rather_than_only_logged():
     assert why
 
 
-# ── the wired plan tool ──
-
-
 def test_the_plan_tool_ships_the_grill_surface_when_deep():
     """The end-to-end claim: a deep-classified goal arrives with its trigger, its reason, the
     protocol's own vocabulary, and probes derived from the goal's stated constraints."""
     import json
 
-    from gideon.workflows import bundled_defs
+    from gideon.automation.workflows import bundled_defs
 
     bundled_defs.register_bundled_provider()
-    from gideon.mcp_workflows import _plan
+    from gideon.integrations.mcp_workflows import _plan
 
-    out = _plan({"goal": "figure out why the pipeline drops records across every region"})
+    out = _plan(
+        {"goal": "figure out why the pipeline drops records across every region"}
+    )
     body = json.loads(out[out.find("{") :])
     grill = body.get("grill") or {}
     assert grill.get("triggered") is True
@@ -437,10 +437,10 @@ def test_an_ordinary_goal_gets_no_grill_block():
     one, which is the over-machinery risk the plan names explicitly."""
     import json
 
-    from gideon.workflows import bundled_defs
+    from gideon.automation.workflows import bundled_defs
 
     bundled_defs.register_bundled_provider()
-    from gideon.mcp_workflows import _plan
+    from gideon.integrations.mcp_workflows import _plan
 
     out = _plan({"goal": "write a note about cold starts", "rigor": "minimal"})
     assert "grill" not in json.loads(out[out.find("{") :])
@@ -450,7 +450,7 @@ def test_a_RISK_hit_grills_a_plan_the_classifier_called_standard():
     """Measured: `deep_triggered` implemented the plan's "any risk hit forces deep" rule, but
     nothing was feeding it hits — so a destructive plan the classifier happened to call standard
     went ungrilled. The rule was present and inert."""
-    from gideon.workflows.autonomy import scan_risk
+    from gideon.automation.workflows.autonomy import scan_risk
 
     spec = {
         "root": {
@@ -465,9 +465,6 @@ def test_a_RISK_hit_grills_a_plan_the_classifier_called_standard():
     assert "destructive_op" in why
 
 
-# ── the SAVE seam (WF2LEA-7 clause D): a settled decision must persist ──
-
-
 def test_only_confirmed_answers_count_as_settled():
     """`grill.SaveFn` was declared and every caller passed None, so a grill could settle a question
     and forget the answer — the next pass re-asked what the user had already decided.
@@ -477,7 +474,7 @@ def test_only_confirmed_answers_count_as_settled():
     QUESTION is by definition unsettled. Only the user's own answers, plus prohibitions,
     may persist.
     """
-    from gideon.workflows.grill_protocol import settled_decisions
+    from gideon.automation.workflows.grill_protocol import settled_decisions
 
     questions = [
         Question(key="q1", text="Which database?"),
@@ -488,30 +485,33 @@ def test_only_confirmed_answers_count_as_settled():
     settled = settled_decisions(step)
 
     assert any("postgres" in s for s in settled), settled
-    # q2 fell to an ASSUMPTION (it had a recommendation) and q3 to an OPEN QUESTION.
     assert not any("Retry limit" in s for s in settled), settled
     assert not any("Deploy target" in s for s in settled), settled
 
 
 def test_a_deferral_is_never_settled():
     """ "You decide" is the guess-as-requirement failure. It must not persist as a decision."""
-    from gideon.workflows.grill_protocol import settled_decisions
+    from gideon.automation.workflows.grill_protocol import settled_decisions
 
-    step = fold_answers([Question(key="q1", text="Which region?")], {"q1": "you decide"})
+    step = fold_answers(
+        [Question(key="q1", text="Which region?")], {"q1": "you decide"}
+    )
     assert settled_decisions(step) == []
 
 
 def test_prohibitions_are_settled_and_labelled():
     """A stated boundary is the most durable decision a grill produces, and it must be
     distinguishable from a choice when a reviewer reads it back."""
-    from gideon.workflows.grill_protocol import settled_decisions
+    from gideon.automation.workflows.grill_protocol import settled_decisions
 
     step = fold_answers(
         [Question(key="prohibitions", text=BOUNDARY_QUESTION)],
         {"prohibitions": "never touch production"},
     )
     settled = settled_decisions(step)
-    assert any(s.startswith("Prohibition:") and "production" in s for s in settled), settled
+    assert any(
+        s.startswith("Prohibition:") and "production" in s for s in settled
+    ), settled
 
 
 def test_the_frontend_question_key_format_actually_folds():
@@ -519,9 +519,12 @@ def test_the_frontend_question_key_format_actually_folds():
     using `p<phase>s<step>` (LoopPlanReview.tsx:178). If that spelling drifts from the key the
     answers dict uses, `fold_answers` sees every question as UNANSWERED and settles nothing — the
     seam would be fully wired and silently persist zero decisions."""
-    from gideon.workflows.grill_protocol import settled_decisions
+    from gideon.automation.workflows.grill_protocol import settled_decisions
 
-    questions = [Question(key="p0s0", text="Which store?"), Question(key="p0s1", text="Which UI?")]
+    questions = [
+        Question(key="p0s0", text="Which store?"),
+        Question(key="p0s1", text="Which UI?"),
+    ]
     answers = {"p0s0": "sqlite", "p0s1": "the dashboard"}
     settled = settled_decisions(fold_answers(questions, answers))
     assert len(settled) == 2, settled

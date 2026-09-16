@@ -35,14 +35,13 @@ from pathlib import Path
 
 import pytest
 
-from gideon.loop import files as loop_files
-from gideon.loop import journal as loop_journal
-from gideon.loop import store
-from gideon.loop.loop import Loop, LoopStatus
+from gideon.automation.loop import files as loop_files
+from gideon.automation.loop import journal as loop_journal
+from gideon.automation.loop import store
+from gideon.automation.loop.loop import Loop, LoopStatus
 
-_SRC = Path(__file__).resolve().parents[1] / "src" / "gideon"
+_SRC = Path(__file__).resolve().parents[2] / "runtime" / "gideon"
 
-#: The retired column/field name. One spelling, used by every rail below.
 _RETIRED = "total_cycles"
 
 
@@ -54,18 +53,20 @@ def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _loop_with_cycles(n: int, *, loop_id: str = "abc12345") -> Loop:
     """A loop whose ledger carries `n` cycles, ingested through the production path."""
-    loop = store.create(Loop(id=loop_id, name="L", kind="goal", task="t", max_cycles=30))
+    loop = store.create(
+        Loop(id=loop_id, name="L", kind="goal", task="t", max_cycles=30)
+    )
     d = loop_files.loop_dir(loop.id)
     assert d is not None
     for i in range(1, n + 1):
         (d / "findings" / f"cycle_{i}.json").write_text(
-            json.dumps({"cycle": i, "summary": f"s{i}", "step": "survey"}), encoding="utf-8"
+            json.dumps({"cycle": i, "summary": f"s{i}", "step": "survey"}),
+            encoding="utf-8",
         )
-    assert loop_files.record_cycle_findings(loop.id) == n, "the ingest did not file every cycle"
+    assert (
+        loop_files.record_cycle_findings(loop.id) == n
+    ), "the ingest did not file every cycle"
     return loop
-
-
-# ── the field and the column are gone ───────────────────────────────────────
 
 
 def test_the_loop_dataclass_declares_no_cached_cycle_count() -> None:
@@ -87,7 +88,9 @@ def test_the_loops_table_declares_no_cached_cycle_count() -> None:
         conn.close()
     assert cols, "no `loops` columns — did the table stop being created?"
     assert _RETIRED not in cols, f"the `loops.{_RETIRED}` column is back: {cols}"
-    assert _RETIRED not in store._SCALAR_COLS, "the retired column is back in the INSERT list"
+    assert (
+        _RETIRED not in store._SCALAR_COLS
+    ), "the retired column is back in the INSERT list"
 
 
 def test_the_setter_is_gone() -> None:
@@ -95,9 +98,6 @@ def test_the_setter_is_gone() -> None:
         f"`store.set_{_RETIRED}` is back — a writer for a column that no longer exists is how the "
         "cache returns"
     )
-
-
-# ── the projection IS the source ────────────────────────────────────────────
 
 
 def test_the_count_moves_with_the_ledger() -> None:
@@ -108,8 +108,12 @@ def test_the_count_moves_with_the_ledger() -> None:
 
     loop_journal.LoopJournal.open(loop.id).cycle(4, {"cycle": 4, "summary": "s4"})
 
-    assert loop_files.cycles_completed(loop.id) == 4, "the accessor did not follow the ledger"
-    assert store.get_redacted(loop.id)["total_cycles"] == 4, "the detail view is not derived"
+    assert (
+        loop_files.cycles_completed(loop.id) == 4
+    ), "the accessor did not follow the ledger"
+    assert (
+        store.get_redacted(loop.id)["total_cycles"] == 4
+    ), "the detail view is not derived"
     rows = store.list_redacted()
     assert len(rows) == 1
     assert rows[0]["total_cycles"] == 4, "the list view is not derived"
@@ -125,7 +129,9 @@ def test_the_count_does_not_move_with_an_unrelated_ledger_kind() -> None:
     loop = _loop_with_cycles(3)
     before = loop_files.cycles_completed(loop.id)
 
-    loop_journal.LoopJournal.open(loop.id).verdict({"cycle": 3, "verdict": "pass", "done": False})
+    loop_journal.LoopJournal.open(loop.id).verdict(
+        {"cycle": 3, "verdict": "pass", "done": False}
+    )
 
     assert loop_files.cycles_completed(loop.id) == before, (
         "a `judge_verdict` changed the CYCLE count — the count is not defined over "
@@ -167,23 +173,20 @@ def test_the_orphan_reap_still_sees_a_backed_dir() -> None:
     root = loop_files._loops_root()
     (root / "beefcafe").mkdir(parents=True, exist_ok=True)
 
-    assert loop_files.reap_orphan_dirs() == 1, "the sweep stopped reaping an unbacked dir"
+    assert (
+        loop_files.reap_orphan_dirs() == 1
+    ), "the sweep stopped reaping an unbacked dir"
     assert (root / loop.id).is_dir(), "the sweep reaped a dir that HAS a row"
     assert not (root / "beefcafe").exists()
-    assert loop_files.cycles_completed(loop.id) == 2, "the surviving loop lost its ledger"
-
-
-# ── no writer survives ──────────────────────────────────────────────────────
+    assert (
+        loop_files.cycles_completed(loop.id) == 2
+    ), "the surviving loop lost its ledger"
 
 
 def _python_sources() -> list[Path]:
     return sorted(p for p in _SRC.rglob("*.py") if p.is_file())
 
 
-#: Callees that own a SAME-NAMED counter of their own: `tick.TickState` is a pure, never-persisted
-#: snapshot whose `total_cycles` field is FED from the projection each call. A keyword argument into
-#: one of these is not a write of the retired cache, and the shadowed name is exactly why this
-#: census resolves the callee instead of matching the keyword alone. Asserted to be live below.
 _TICK_STATE_CALLEES = frozenset({"TickState", "tick_state_from_snapshot"})
 
 
@@ -219,7 +222,8 @@ def _writes_of(tree: ast.AST) -> list[str]:
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             low = node.value.lower()
             if _RETIRED in low and any(
-                marker in low for marker in ("set ", "add column", "insert into", "update ")
+                marker in low
+                for marker in ("set ", "add column", "insert into", "update ")
             ):
                 out.append(f"line {node.lineno}: SQL string writes {_RETIRED!r}")
         elif isinstance(node, ast.Call):
@@ -249,16 +253,14 @@ def _writes_of(tree: ast.AST) -> list[str]:
     return out
 
 
-#: `loop/tick.py` DECLARES the shadow: `TickState.total_cycles` is its own dataclass field, so the
-#: annotated-assignment arm reds on it forever. Its CALLERS are covered precisely by
-#: `_TICK_STATE_CALLEES` instead of being exempted wholesale, which is the point — `sdlc.py` feeds
-#: that snapshot and is still fully censused for every other shape. Asserted live below.
 _TICK_STATE_OWNS_THE_NAME = "loop/tick.py"
 
 
 def test_no_module_writes_the_retired_column() -> None:
     files = _python_sources()
-    assert len(files) > 500, f"only {len(files)} sources walked — the census lost the tree"
+    assert (
+        len(files) > 500
+    ), f"only {len(files)} sources walked — the census lost the tree"
 
     scanned = 0
     offenders: dict[str, list[str]] = {}
@@ -274,7 +276,9 @@ def test_no_module_writes_the_retired_column() -> None:
     assert scanned > 500, f"only {scanned} files parsed"
     assert not offenders, (
         f"these modules WRITE the retired `{_RETIRED}`, which is how a deleted cache comes back:\n"
-        + "\n".join(f"  {rel}: {'; '.join(hits)}" for rel, hits in sorted(offenders.items()))
+        + "\n".join(
+            f"  {rel}: {'; '.join(hits)}" for rel, hits in sorted(offenders.items())
+        )
     )
 
 
@@ -287,39 +291,33 @@ def test_the_write_census_can_actually_fail() -> None:
     planted = (
         "x = 1\n"
         f'conn.execute("UPDATE loops SET {_RETIRED} = ? WHERE id = ?")\n'
-        # The deleted writer's EXACT shape. Found by planting it during falsification: the
-        # SQL-marker arm alone did not catch a bare column name handed to a generic setter, so the
-        # census reported clean against a resurrected `store.set_total_cycles`.
         f'_simple_set(loop_id, "{_RETIRED}", int(total))\n'
         f"store.set_it(loop_id, {_RETIRED}=4)\n"
         f"loop.{_RETIRED} = 7\n"
         f"{_RETIRED}: int = 0\n"
     )
     hits = _writes_of(ast.parse(planted))
-    assert len(hits) == 5, f"the detector found {len(hits)} of the 5 planted writes: {hits}"
+    assert (
+        len(hits) == 5
+    ), f"the detector found {len(hits)} of the 5 planted writes: {hits}"
     assert not _writes_of(
         ast.parse("y = 2  # total_cycles is retired\n")
     ), "the detector fires on a COMMENT — it would red on the retirement's own prose forever"
-    # The DERIVED payload key must NOT be flagged: the views publishing it is the fix, not a defect.
     assert not _writes_of(
         ast.parse(f'view["{_RETIRED}"] = len(view["findings"])\n')
     ), "the detector flags the derived API key — it would red on the retirement's own code"
 
-    # The callee exemption is NARROW: the same keyword into anything else is still a write.
     exempt = f"tick.tick_state_from_snapshot(step_index=0, {_RETIRED}=len(findings))\n"
     assert not _writes_of(ast.parse(exempt)), "the TickState exemption stopped applying"
     assert _writes_of(
         ast.parse(f"store.create_loop({_RETIRED}=len(findings))\n")
     ), "the exemption leaked: a keyword into a non-TickState callee must still be flagged"
 
-    # And neither exemption is a dead entry. `tick.py` really does declare the shadow field…
     tick = ast.parse((_SRC / _TICK_STATE_OWNS_THE_NAME).read_text(encoding="utf-8"))
     assert _writes_of(tick), (
         f"{_TICK_STATE_OWNS_THE_NAME} is exempted from the census but contains no write of "
         f"{_RETIRED!r} — the exemption is stale and should be deleted"
     )
-    # …and a censused module really does feed that snapshot by keyword, so the callee exemption is
-    # load-bearing rather than hypothetical.
     sdlc = (_SRC / "loop" / "kinds" / "sdlc.py").read_text(encoding="utf-8")
     feeders = [
         node
@@ -334,9 +332,6 @@ def test_the_write_census_can_actually_fail() -> None:
     )
 
 
-# ── a pre-change home keeps working (no migration, by decision) ─────────────
-
-
 def test_a_legacy_row_with_the_retired_column_still_writes() -> None:
     """The one real risk of adding no migration: an EXISTING `loops` table keeps the column.
 
@@ -347,22 +342,21 @@ def test_a_legacy_row_with_the_retired_column_still_writes() -> None:
     """
     import sqlite3
 
-    _loop_with_cycles(1, loop_id="aaaa1111")  # materializes the fresh schema
+    _loop_with_cycles(1, loop_id="aaaa1111")
     conn = sqlite3.connect(str(store._db_path()))
     try:
-        conn.execute(f"ALTER TABLE loops ADD COLUMN {_RETIRED} INTEGER NOT NULL DEFAULT 0")
+        conn.execute(
+            f"ALTER TABLE loops ADD COLUMN {_RETIRED} INTEGER NOT NULL DEFAULT 0"
+        )
         conn.execute(f"UPDATE loops SET {_RETIRED} = 99")
         conn.commit()
     finally:
         conn.close()
 
-    # A read tolerates the extra column and does NOT surface it.
     rows = store.list_all()
     assert len(rows) == 1 and not hasattr(rows[0], _RETIRED)
-    # …and the derived count is the ledger's, not the bogus 99 sitting in the row.
     assert store.get_redacted(rows[0].id)["total_cycles"] == 1
 
-    # A write against the legacy shape still lands.
     made = store.create(Loop(id="bbbb2222", name="L2", kind="goal", task="t2"))
     assert store.get(made.id) is not None
     store.update_status(made.id, LoopStatus.RUNNING)

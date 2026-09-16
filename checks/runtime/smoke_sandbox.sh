@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# Sandbox security smoke test — verify the standard sandbox mode hides
-# sensitive paths, scrubs credential env vars, blocks denied commands, and
-# redacts credential-shaped output.
+                                                                      
+                                                                          
+                                   
 #
-# Usage:
-#   bash tests/smoke_sandbox.sh
+        
+                                        
 #
-# Prerequisites:
-#   pip install -e ".[dev]"   (or run from inside the docker compose backend)
+                
+                                                                             
 
 set -uo pipefail
 
-export PYTHONPATH="${PYTHONPATH:-src}"
+export PYTHONPATH="${PYTHONPATH:-runtime}"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 PASS=0; FAIL=0; SKIP=0
@@ -20,7 +20,7 @@ pass() { echo -e "  ${GREEN}✓ PASS${NC}: $1"; ((PASS++)); }
 fail() { echo -e "  ${RED}✗ FAIL${NC}: $1"; ((FAIL++)); }
 skip() { echo -e "  ${YELLOW}⊘ SKIP${NC}: $1"; ((SKIP++)); }
 
-# Run a command inside gideon's sandbox
+                                       
 sandbox_run() {
     local sandbox_mode="${GIDEON_SANDBOX_MODE:-auto}"
     python3 -c "
@@ -38,11 +38,11 @@ finally:
 " "$@"
 }
 
-# Run a denied-commands check
+                             
 is_denied() {
     python3 -c "
 import json, re, sys
-with open('src/gideon/config/defaults.json') as f:
+with open('runtime/gideon/config/defaults.json') as f:
     cmds = json.load(f)['toolsSettings']['execute_bash']['deniedCommands']
 cmd = ' '.join(sys.argv[1:])
 for p in cmds:
@@ -54,7 +54,7 @@ sys.exit(1)
 " "$@"
 }
 
-# Run redact_credentials check
+                              
 check_redaction() {
     python3 -c "
 from gideon.security import redact_credentials
@@ -77,10 +77,10 @@ echo ""
 echo "Sandbox: ${GIDEON_SANDBOX_MODE:-auto} (standard)"
 echo ""
 
-# ─── Section 1: Sandbox filesystem isolation ───
+                                                 
 echo "━━━ 1. Sandbox Filesystem Isolation ━━━"
 
-# Standard mode: .aws/.ssh/.kube should be VISIBLE
+                                                  
 if sandbox_run ls ~/.aws/ >/dev/null 2>&1; then
     pass "~/.aws is accessible (standard mode)"
 else
@@ -103,7 +103,7 @@ else
     fi
 fi
 
-# Standard mode: .gnupg/.azure/.docker SHOULD be hidden
+                                                       
 for dir in .gnupg .config/gcloud .azure .docker; do
     real_path="$HOME/$dir"
     if [ -d "$real_path" ]; then
@@ -117,11 +117,11 @@ for dir in .gnupg .config/gcloud .azure .docker; do
     fi
 done
 
-# ─── Section 2: Env var scrubbing ───
+                                      
 echo ""
 echo "━━━ 2. Environment Variable Scrubbing ━━━"
 
-# Set test env vars, verify they're scrubbed inside sandbox
+                                                           
 export AWS_SECRET_ACCESS_KEY="test_secret_key_12345"
 export AWS_SESSION_TOKEN="test_session_token_12345"
 
@@ -141,7 +141,7 @@ else
     fail "SSH_AUTH_SOCK leaked into sandbox"
 fi
 
-# ─── Section 3: Denied commands ───
+                                    
 echo ""
 echo "━━━ 3. Denied Commands (should BLOCK) ━━━"
 
@@ -167,7 +167,7 @@ for cmd in "${blocked_cmds[@]}"; do
     fi
 done
 
-# ─── Section 4: Denied commands (should ALLOW) ───
+                                                   
 echo ""
 echo "━━━ 4. Denied Commands (should ALLOW) ━━━"
 echo "  Note: sensitive commands are blocked by the sandbox at runtime"
@@ -190,11 +190,11 @@ for cmd in "${allowed_cmds[@]}"; do
     fi
 done
 
-# ─── Section 5: Credential output redaction ───
+                                                
 echo ""
 echo "━━━ 5. Credential Output Redaction ━━━"
 
-# Should be redacted
+                    
 redact_cases=(
     "AKIAIOSFODNN7EXAMPLE"
     "SecretAccessKey=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
@@ -212,7 +212,7 @@ for text in "${redact_cases[@]}"; do
     fi
 done
 
-# Should NOT be redacted (normal output)
+                                        
 safe_cases=(
     "Successfully refreshed aws credentials for default"
     '{"Account": "123456789012", "Arn": "arn:aws:iam::123:user/dev"}'
@@ -228,7 +228,7 @@ for text in "${safe_cases[@]}"; do
     fi
 done
 
-# ─── Section 6: Base64 encoded credential detection ───
+                                                        
 echo ""
 echo "━━━ 6. Base64 Encoded Credential Detection ━━━"
 
@@ -253,7 +253,7 @@ else
     pass "Benign base64 NOT redacted (correct)"
 fi
 
-# ─── Summary ───
+                 
 echo ""
 echo "══════════════════════════════════════════════════════════════"
 echo -e "  ${GREEN}PASS: $PASS${NC}  ${RED}FAIL: $FAIL${NC}  ${YELLOW}SKIP: $SKIP${NC}"

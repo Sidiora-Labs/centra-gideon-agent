@@ -25,17 +25,11 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import make_mocked_request
 
-from gideon.config.loader import KnowledgeConfig
-from gideon.dashboard.handlers import knowledge as H
-from gideon.knowledge.store import KnowledgeStore
+from gideon.cognition.knowledge.store import KnowledgeStore
+from gideon.core.config.loader import KnowledgeConfig
+from gideon.interfaces.dashboard.handlers import knowledge as H
 
-# Read from the shipped config rather than hardcoded, so a taste change to the floor
-# (it moved 0.35 -> 0.55 during this atom's assembly, when the pass author's measured
-# value won over the config author's estimate) retunes these fixtures instead of
-# failing them. A hardcoded copy here is a second source of truth for the same number.
 DEFAULT_FLOOR = KnowledgeConfig().similarity_min_score
-#: Comfortably above / below the floor whatever it is, so the seeded fixtures below
-#: keep meaning "clears it" and "does not".
 WELL_ABOVE = min(0.99, DEFAULT_FLOOR + 0.30)
 JUST_ABOVE = min(0.98, DEFAULT_FLOOR + 0.05)
 WELL_BELOW = max(0.01, DEFAULT_FLOOR - 0.25)
@@ -79,7 +73,10 @@ class _EdgeStore(KnowledgeStore):
         ordering and normalises on read, so a caller gets an item's neighbours regardless of
         which side it is stored on -- and always sees its OWN chunk first.
         """
-        for src, dst, src_chunk, dst_chunk in ((a, b, a_chunk, b_chunk), (b, a, b_chunk, a_chunk)):
+        for src, dst, src_chunk, dst_chunk in (
+            (a, b, a_chunk, b_chunk),
+            (b, a, b_chunk, a_chunk),
+        ):
             self.edges.setdefault(src, []).append(
                 {
                     "item_id": dst,
@@ -89,9 +86,13 @@ class _EdgeStore(KnowledgeStore):
                 }
             )
 
-    def similar_items(self, item_id: str, *, limit: int, min_score: float) -> list[dict]:
+    def similar_items(
+        self, item_id: str, *, limit: int, min_score: float
+    ) -> list[dict]:
         self.calls.append({"item_id": item_id, "limit": limit, "min_score": min_score})
-        rows = [e for e in self.edges.get(item_id, []) if float(e["score"]) >= min_score]
+        rows = [
+            e for e in self.edges.get(item_id, []) if float(e["score"]) >= min_score
+        ]
         rows.sort(key=lambda e: -float(e["score"]))
         return rows[: max(0, int(limit))]
 
@@ -146,7 +147,7 @@ def _with_similarity_config(monkeypatch, *, min_score=None, top_k=None):
     without depending on that change having merged. Omitting a field leaves the handler's
     defensive ``getattr`` fallback on the same code path.
     """
-    from gideon.config import loader
+    from gideon.core.config import loader
 
     knowledge = SimpleNamespace()
     if min_score is not None:
@@ -154,22 +155,20 @@ def _with_similarity_config(monkeypatch, *, min_score=None, top_k=None):
     if top_k is not None:
         knowledge.similarity_top_k = top_k
     monkeypatch.setattr(
-        loader.AppConfig, "load", staticmethod(lambda: SimpleNamespace(knowledge=knowledge))
+        loader.AppConfig,
+        "load",
+        staticmethod(lambda: SimpleNamespace(knowledge=knowledge)),
     )
-
-
-# ── the threshold: the clause this atom exists for ──
 
 
 class TestScoreFloor:
     def test_above_floor_neighbours_returned_ordered_by_score(self, store):
         a = _note(store, "A")
         near, mid, far = _note(store, "near"), _note(store, "mid"), _note(store, "far")
-        # All three clear the floor — this test is about ORDERING, so a fixture that the floor
-        # excludes would silently turn it into a floor test with a shorter list. Derived from
-        # the shipped floor for that reason (they were literals until the floor moved).
         s_far, s_mid, s_near = JUST_ABOVE, min(0.97, JUST_ABOVE + 0.10), WELL_ABOVE
-        assert s_far < s_mid < s_near, "the fixture scores stopped being strictly ordered"
+        assert (
+            s_far < s_mid < s_near
+        ), "the fixture scores stopped being strictly ordered"
         store.seed_edge(a, mid, s_mid)
         store.seed_edge(a, near, s_near)
         store.seed_edge(a, far, s_far)
@@ -177,8 +176,6 @@ class TestScoreFloor:
         status, body = _get(store, a)
         assert status == 200
         assert [r["id"] for r in body] == [near, mid, far]
-        # approx: the fixture scores are derived by arithmetic on the floor, so exact
-        # equality would compare against float noise rather than against the ordering.
         assert [r["score"] for r in body] == pytest.approx([s_near, s_mid, s_far])
 
     def test_sub_threshold_neighbour_is_excluded(self, store):
@@ -186,16 +183,17 @@ class TestScoreFloor:
         neighbour was as returnable as a 0.90 one."""
         a = _note(store, "A")
         strong, weak = _note(store, "strong"), _note(store, "weak")
-        store.seed_edge(a, strong, 0.90)  # positive control / vacuity guard
-        store.seed_edge(a, weak, WELL_BELOW)  # below the shipped default floor
+        store.seed_edge(a, strong, 0.90)
+        store.seed_edge(a, weak, WELL_BELOW)
 
         status, body = _get(store, a)
         assert status == 200
         ids = [r["id"] for r in body]
-        assert strong in ids, "positive control missing -- the exclusion below is vacuous"
+        assert (
+            strong in ids
+        ), "positive control missing -- the exclusion below is vacuous"
         assert weak not in ids
         assert len(body) == 1
-        # And the floor came from config, not from the store deciding on its own.
         assert store.calls[-1]["min_score"] == DEFAULT_FLOOR
 
     def test_configured_floor_is_honoured(self, store, monkeypatch):
@@ -217,8 +215,6 @@ class TestScoreFloor:
         a = _note(store, "A")
         weak = _note(store, "weak")
         store.seed_edge(a, weak, 0.2)
-        # Vacuity guard: an unrelated pair in the SAME database does return a neighbour,
-        # so the empty answer below is the floor's doing and not a broken harness.
         c, d = _note(store, "C"), _note(store, "D")
         store.seed_edge(c, d, 0.9)
         assert [r["id"] for r in _get(store, c)[1]] == [d]
@@ -249,9 +245,6 @@ class TestScoreFloor:
         assert body[0]["shared_entities"] == 0 and body[1]["shared_entities"] == 3
 
 
-# ── provenance: a UI can explain *why* two items are related ──
-
-
 class TestProvenance:
     def test_chunk_provenance_survives_to_the_response(self, store):
         a, b = _note(store, "A"), _note(store, "B")
@@ -280,7 +273,7 @@ class TestProvenance:
     def test_shared_entities_still_reported_for_the_frontend_chip(self, store):
         """``shared_entities`` is kept in the payload deliberately.
 
-        ``web/src/pages/knowledge/KnowledgeDetailPage.tsx:319`` renders it as the
+        ``apps/console/src/pages/knowledge/KnowledgeDetailPage.tsx:319`` renders it as the
         "N shared" chip behind a ``typeof r.shared_entities === 'number'`` guard, so
         dropping the key would have silently emptied a live surface rather than failing
         loudly. It is now descriptive rather than the ranking key.
@@ -300,9 +293,6 @@ class TestProvenance:
         assert by_id[without_entity]["shared_entities"] == 0
 
 
-# ── preserved behaviour: lifecycle filtering, the limit clamp, the 400 ──
-
-
 class TestPreservedBehaviour:
     def test_archived_neighbour_is_filtered(self, store):
         """Filtering is the handler's own (the edge table carries no lifecycle column)."""
@@ -310,7 +300,9 @@ class TestPreservedBehaviour:
         kept, archived = _note(store, "kept"), _note(store, "archived")
         store.seed_edge(a, kept, 0.9)
         store.seed_edge(a, archived, 0.8)
-        assert len(_get(store, a)[1]) == 2, "both must start visible, else the drop is vacuous"
+        assert (
+            len(_get(store, a)[1]) == 2
+        ), "both must start visible, else the drop is vacuous"
 
         store.update_item(archived, is_archived=1)
         store.db.commit()
@@ -323,7 +315,9 @@ class TestPreservedBehaviour:
         kept, dropped = _note(store, "kept"), _note(store, "dropped")
         store.seed_edge(a, kept, 0.9)
         store.seed_edge(a, dropped, 0.8)
-        assert len(_get(store, a)[1]) == 2, "positive control -- both visible while active"
+        assert (
+            len(_get(store, a)[1]) == 2
+        ), "positive control -- both visible while active"
 
         store.db.execute("UPDATE items SET status = 'deleted' WHERE id = ?", (dropped,))
         store.db.commit()
@@ -362,28 +356,27 @@ class TestPreservedBehaviour:
 
         assert len(_get(store, a, "?limit=100")[1]) == 20
         assert len(_get(store, a, "?limit=5")[1]) == 5
-        assert len(_get(store, a, "?limit=0")[1]) == 1  # max(1, ...) floor preserved
+        assert len(_get(store, a, "?limit=0")[1]) == 1
 
     def test_default_limit_comes_from_config(self, store, monkeypatch):
         a = _note(store, "A")
         for i in range(12):
             store.seed_edge(a, _note(store, f"n{i}"), 0.9)
 
-        assert len(_get(store, a)[1]) == DEFAULT_TOP_K  # defensive fallback
+        assert len(_get(store, a)[1]) == DEFAULT_TOP_K
         _with_similarity_config(monkeypatch, top_k=3)
         assert len(_get(store, a)[1]) == 3
 
     def test_non_integer_limit_is_400(self, store):
         a = _note(store, "A")
         store.seed_edge(a, _note(store, "B"), 0.9)
-        assert _get(store, a)[0] == 200, "positive control -- the request works but for limit"
+        assert (
+            _get(store, a)[0] == 200
+        ), "positive control -- the request works but for limit"
 
         status, body = _get(store, a, "?limit=abc")
         assert status == 400
         assert body["error"] == "invalid limit"
-
-
-# ── "nothing is close enough" is not "no such item" ──
 
 
 class TestEmptyVersusMissing:
@@ -394,8 +387,6 @@ class TestEmptyVersusMissing:
         assert body == []
 
     def test_unknown_item_is_404(self, store):
-        # Vacuity guard: a real item on the same store answers 200, so the 404 below is
-        # about the missing id and not a handler that fails every request.
         assert _get(store, _note(store, "real"))[0] == 200
 
         status, body = _get(store, "no-such-item-id")

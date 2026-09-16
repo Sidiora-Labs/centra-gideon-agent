@@ -30,10 +30,13 @@ _ROW = re.compile(r"^ {2}([a-z][a-z ]*):", re.MULTILINE)
 
 def _runtime_block(capsys) -> str:
     """Run ``_doctor()`` with its probes stubbed and return just the Runtime section."""
-    from gideon.cli_doctor import _doctor
+    from gideon.interfaces.cli.doctor import _doctor
 
     with (
-        patch("gideon.cli_doctor.shutil.which", side_effect=lambda b: f"/usr/local/bin/{b}"),
+        patch(
+            "gideon.interfaces.cli.doctor.shutil.which",
+            side_effect=lambda b: f"/usr/local/bin/{b}",
+        ),
         patch(
             "subprocess.run",
             return_value=type(
@@ -47,8 +50,10 @@ def _runtime_block(capsys) -> str:
                 },
             )(),
         ),
-        patch("urllib.request.urlopen", side_effect=urllib.error.URLError("no gateway")),
-        patch("gideon.cli_doctor.is_local_bind", return_value=True),
+        patch(
+            "urllib.request.urlopen", side_effect=urllib.error.URLError("no gateway")
+        ),
+        patch("gideon.interfaces.cli.doctor.is_local_bind", return_value=True),
     ):
         try:
             _doctor()
@@ -57,7 +62,6 @@ def _runtime_block(capsys) -> str:
     out = capsys.readouterr().out
     assert "\nRuntime\n" in out, out
     block = out.split("\nRuntime\n", 1)[1]
-    # Up to the next section heading (a line with no leading indent).
     return block.split("\n\n", 1)[0]
 
 
@@ -79,6 +83,4 @@ def test_the_venv_interpreter_row_says_which_python_it_is(capsys):
 
 
 def test_the_version_is_not_prefixed_twice(capsys):
-    # `python3 --version` says "Python 3.13.14"; rendering it verbatim inside a row
-    # already labelled python produced "(Python 3.13.14)".
     assert "(Python " not in _runtime_block(capsys)

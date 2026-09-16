@@ -17,7 +17,7 @@ composition can get wrong:
 3. **The SEL row on the ALLOWED path, asserted separately from the refused one.** The `DCU-2`
    audit's sharpest finding: a test asserting "a SEL record exists" passes when only the
    refusal writes one. Two tests, and both drive a REAL
-   :class:`~gideon.sel.SecurityEventLog` at a tmp ``base_dir`` — the sibling gate suite
+   :class:`~gideon.security.sel.SecurityEventLog` at a tmp ``base_dir`` — the sibling gate suite
    substitutes a capturing fake, which proves ``log()`` was *called*, not that the row is
    writable.
 4. **The bounds hold from both sides.** A TTL that refuses *at* its documented value, or an
@@ -39,15 +39,28 @@ import pathlib
 
 import pytest
 
-from gideon.computer_use import driver_host, enable_state, gate, policy, service
-from gideon.computer_use import tools as ct
-from gideon.sel import SecurityEventLog
+from gideon.integrations.computer_use import (
+    driver_host,
+    enable_state,
+    gate,
+    policy,
+    service,
+)
+from gideon.integrations.computer_use import tools as ct
+from gideon.security.sel import SecurityEventLog
 
 ARMED_APP = "TextEdit"
 
-#: An ordinary text destination, the shape `DCU-2`'s policy suite uses as its safe case.
-ORDINARY_FIELD = {"role": "AXTextField", "label": "Subject", "value": "Lunch on Tuesday"}
-SECURE_FIELD = {"role": "AXTextField", "subrole": "AXSecureTextField", "label": "Password"}
+ORDINARY_FIELD = {
+    "role": "AXTextField",
+    "label": "Subject",
+    "value": "Lunch on Tuesday",
+}
+SECURE_FIELD = {
+    "role": "AXTextField",
+    "subrole": "AXSecureTextField",
+    "label": "Password",
+}
 
 FINGERPRINT = "fp-1"
 
@@ -77,12 +90,15 @@ def _arm(tmp_path, *apps: str) -> None:
     dispatch that consulted nothing.
     """
     (tmp_path / "enable.json").write_text(
-        json.dumps({"version": 1, "enabled": True, "apps": list(apps)}), encoding="utf-8"
+        json.dumps({"version": 1, "enabled": True, "apps": list(apps)}),
+        encoding="utf-8",
     )
     enable_state.reset_enable_state()
 
 
-def _fake_driver(monkeypatch, *, elements=None, fingerprint=FINGERPRINT, apps=None, log=None):
+def _fake_driver(
+    monkeypatch, *, elements=None, fingerprint=FINGERPRINT, apps=None, log=None
+):
     """Replace step 6 with an in-process double, recording the ops it was asked to run.
 
     Returns the recording list. Patching ``service._run_driver`` rather than injecting a driver
@@ -115,9 +131,6 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-# ── 1. ordering: the screens run BEFORE the acting driver call ────────────────
-
-
 def _trace(monkeypatch) -> list[str]:
     """Record every chain step in the order it actually executes.
 
@@ -143,7 +156,9 @@ def _trace(monkeypatch) -> list[str]:
     return order
 
 
-def test_the_chain_runs_every_screen_before_the_acting_driver_call(tmp_path, monkeypatch):
+def test_the_chain_runs_every_screen_before_the_acting_driver_call(
+    tmp_path, monkeypatch
+):
     """THE ordering proof, and the reason this atom is more than three added calls.
 
     Asserted as an exact sequence, not as "each of these happened": the keystone first (which
@@ -172,10 +187,10 @@ def test_the_chain_runs_every_screen_before_the_acting_driver_call(tmp_path, mon
     assert order == [
         "enable",
         "check_app",
-        "driver",  # step 3b — the read-only fingerprint re-walk
+        "driver",
         "check_input_target",
         "sel",
-        "driver",  # step 6 — the acting call, LAST
+        "driver",
     ]
 
 
@@ -188,13 +203,20 @@ def test_the_ordering_rail_detects_a_screen_moved_after_the_action():
 
     def mis_ordered():
         order.append("enable")
-        order.append("driver")  # the action
-        order.append("check_input_target")  # the "screen", too late to be one
+        order.append("driver")
+        order.append("check_input_target")
         order.append("sel")
 
     mis_ordered()
     assert order.index("driver") < order.index("check_input_target")
-    assert order != ["enable", "check_app", "driver", "check_input_target", "sel", "driver"]
+    assert order != [
+        "enable",
+        "check_app",
+        "driver",
+        "check_input_target",
+        "sel",
+        "driver",
+    ]
 
 
 def _dispatch_call_order() -> list[str]:
@@ -234,14 +256,9 @@ def test_the_dispatch_calls_the_screens_in_source_order():
         < order.index("check_input_target")
         < order.index("_run_driver")
     ), order
-    # Every _audit call precedes the acting driver call: the audit at step 5 is written BEFORE
-    # the desktop is touched, so a driver that wedges or is killed still leaves evidence.
     assert max(i for i, name in enumerate(order) if name == "_audit") < max(
         i for i, name in enumerate(order) if name == "_run_driver"
     ), order
-
-
-# ── 2. the screens refuse THROUGH the dispatch ────────────────────────────────
 
 
 @pytest.mark.parametrize("tool", sorted(ct.TOOL_NAMES))
@@ -266,7 +283,9 @@ def test_a_non_allowlisted_app_is_refused_through_the_dispatch(tmp_path, monkeyp
     assert calls == [], "the driver was reached despite the app refusal"
 
 
-def test_typing_into_a_secure_field_is_refused_through_the_dispatch(tmp_path, monkeypatch):
+def test_typing_into_a_secure_field_is_refused_through_the_dispatch(
+    tmp_path, monkeypatch
+):
     """`DCU-2` clause 2, from the driving path. The driver is asked for the re-walk (a read)
     and NOT for the type (the action) — asserted, because "refused" has to mean the keystrokes
     never happened, not that an exception was raised somewhere afterwards."""
@@ -277,7 +296,11 @@ def test_typing_into_a_secure_field_is_refused_through_the_dispatch(tmp_path, mo
         _run(
             service.computer_dispatch(
                 "computer_type",
-                {"snapshot_id": snap.snapshot_id, "element_index": 0, "text": "hunter2"},
+                {
+                    "snapshot_id": snap.snapshot_id,
+                    "element_index": 0,
+                    "text": "hunter2",
+                },
             )
         )
     assert excinfo.value.error.code == policy.ERR_SECURE_FIELD
@@ -289,8 +312,8 @@ def test_the_screen_sees_the_REWALKED_element_not_the_stored_one(tmp_path, monke
     snapshot whose element was an ordinary field refuses when the live window now has a secure
     field at that index. Screening the stored row would have typed the password."""
     _arm(tmp_path, ARMED_APP)
-    _fake_driver(monkeypatch, elements=[SECURE_FIELD])  # what the window looks like NOW
-    snap = _snapshot(elements=[ORDINARY_FIELD])  # what it looked like when walked
+    _fake_driver(monkeypatch, elements=[SECURE_FIELD])
+    snap = _snapshot(elements=[ORDINARY_FIELD])
     with pytest.raises(policy.ComputerUsePolicyRefusal) as excinfo:
         _run(
             service.computer_dispatch(
@@ -307,14 +330,11 @@ def test_an_armed_machine_with_an_empty_allowlist_refuses_gideon_itself(
     """`DCU-2`'s no-implicit-self deviation, held at the composition. The one target where
     computer use converts into raising the agent's own permissions is Gideon's own
     windows, and an armed-but-unscoped document grants it nothing."""
-    _arm(tmp_path)  # enabled: true, apps: []
+    _arm(tmp_path)
     _fake_driver(monkeypatch)
     for app in ("Gideon", ARMED_APP):
         with pytest.raises(policy.ComputerUsePolicyRefusal):
             _run(service.computer_dispatch("computer_snapshot", {"app": app}))
-
-
-# ── 3. the SEL row, on BOTH paths, against a REAL log ─────────────────────────
 
 
 @pytest.fixture
@@ -407,7 +427,8 @@ def test_a_keystone_refusal_is_audited_too(monkeypatch, sel_rows):
 def test_every_attempt_writes_exactly_one_row(tmp_path, monkeypatch, sel_rows):
     """One attempt, one row — the property that makes "every attempt is audited" countable.
     Three attempts of three different shapes (allowed, refused early, refused late) produce
-    exactly three rows, so neither a double-write nor a missed exit can hide in the total."""
+    exactly three rows, so neither a double-write nor a missed exit can hide in the total.
+    """
     _arm(tmp_path, ARMED_APP)
     _fake_driver(monkeypatch, elements=[ORDINARY_FIELD])
     snap = _snapshot()
@@ -433,7 +454,10 @@ def test_a_driver_refusal_after_the_audit_does_not_write_a_second_row(
 
     async def refusing(op, payload, *, tool):
         service._refuse(
-            service.ERR_DRIVER_UNAVAILABLE, what="no driver", why="none built", fix="wait"
+            service.ERR_DRIVER_UNAVAILABLE,
+            what="no driver",
+            why="none built",
+            fix="wait",
         )
 
     monkeypatch.setattr(service, "_run_driver", refusing)
@@ -469,8 +493,9 @@ def test_a_stale_index_refusal_records_WHICH_APP_it_was_about(
     if trigger == "past-ttl":
         clock[0] += service.SNAPSHOT_TTL_SECS + 0.001
     else:
-        # Inside the TTL, so age cannot be what refuses: only the re-walk's fingerprint differs.
-        _fake_driver(monkeypatch, elements=[ORDINARY_FIELD], fingerprint="fp-window-moved")
+        _fake_driver(
+            monkeypatch, elements=[ORDINARY_FIELD], fingerprint="fp-window-moved"
+        )
 
     with pytest.raises(service.ComputerUseRefusal) as caught:
         _run(
@@ -511,16 +536,14 @@ def test_an_unknown_snapshot_id_still_names_no_app(tmp_path, monkeypatch, sel_ro
     assert rows[0]["resources"] == "", rows[0]
 
 
-# ── 4. the bounds, from both sides, each with a floor ─────────────────────────
-
-
 def _freeze(monkeypatch, clock: list[float]):
     monkeypatch.setattr(service, "_now", lambda: clock[0])
 
 
 def test_an_index_at_the_ttl_boundary_still_acts(tmp_path, monkeypatch):
     """AT the bound it proceeds. A bound that refuses at its own documented value teaches
-    operators the documented value is a lie, and every later reader has to re-derive it."""
+    operators the documented value is a lie, and every later reader has to re-derive it.
+    """
     _arm(tmp_path, ARMED_APP)
     clock = [1000.0]
     _freeze(monkeypatch, clock)
@@ -559,7 +582,8 @@ def test_an_index_one_tick_past_the_ttl_refuses(tmp_path, monkeypatch):
 def test_the_ttl_bound_is_not_vacuous(tmp_path, monkeypatch):
     """The floor for the pair above: both would also pass if the TTL check were reading a
     constant instead of the snapshot's age. Forcing the clock far past the bound must refuse,
-    and forcing it *backwards* must not — so the comparison really reads elapsed time."""
+    and forcing it *backwards* must not — so the comparison really reads elapsed time.
+    """
     _arm(tmp_path, ARMED_APP)
     clock = [1000.0]
     _freeze(monkeypatch, clock)
@@ -593,7 +617,9 @@ def test_the_last_element_index_acts(tmp_path, monkeypatch):
     ).get("ok")
 
 
-def test_one_past_the_last_element_index_refuses_and_names_the_count(tmp_path, monkeypatch):
+def test_one_past_the_last_element_index_refuses_and_names_the_count(
+    tmp_path, monkeypatch
+):
     """ONE PAST it refuses, and the refusal says how many elements there are — an index bound
     whose message does not name the range costs a guessing loop."""
     _arm(tmp_path, ARMED_APP)
@@ -628,7 +654,8 @@ def test_a_negative_index_refuses(tmp_path, monkeypatch):
 
 def test_a_changed_fingerprint_refuses_even_within_the_ttl(tmp_path, monkeypatch):
     """The other half of freshness: time is not the only way an index goes stale. A window the
-    user has changed refuses inside the TTL, so the TTL is a backstop rather than the check."""
+    user has changed refuses inside the TTL, so the TTL is a backstop rather than the check.
+    """
     _arm(tmp_path, ARMED_APP)
     _fake_driver(monkeypatch, elements=[ORDINARY_FIELD], fingerprint="fp-CHANGED")
     snap = _snapshot(fingerprint="fp-1")
@@ -670,8 +697,8 @@ def test_the_snapshot_ceiling_evicts_the_oldest_and_the_evicted_id_refuses_visib
     for _ in range(service.MAX_LIVE_SNAPSHOTS - 1):
         _snapshot()
     assert len(service._SNAPSHOTS) == service.MAX_LIVE_SNAPSHOTS
-    assert first.snapshot_id in service._SNAPSHOTS  # at the ceiling it survives
-    _snapshot()  # one past
+    assert first.snapshot_id in service._SNAPSHOTS
+    _snapshot()
     assert len(service._SNAPSHOTS) == service.MAX_LIVE_SNAPSHOTS
     assert first.snapshot_id not in service._SNAPSHOTS
     with pytest.raises(service.ComputerUseRefusal) as excinfo:
@@ -700,13 +727,10 @@ def test_a_wedged_driver_is_refused_not_hung(tmp_path, monkeypatch):
     async def spawn(*argv, **kwargs):
         return _Wedged()
 
-    monkeypatch.setattr("gideon.sandbox.create_subprocess_limited", spawn)
+    monkeypatch.setattr("gideon.security.sandbox.create_subprocess_limited", spawn)
     with pytest.raises(service.ComputerUseRefusal) as excinfo:
         _run(service.computer_dispatch("computer_snapshot", {"app": ARMED_APP}))
     assert excinfo.value.error.code == service.ERR_DRIVER_FAILED
-
-
-# ── 5. the shim stayed thin ───────────────────────────────────────────────────
 
 
 def _module_source(module) -> str:
@@ -727,7 +751,11 @@ def _imported_names(source: str) -> set[str]:
 
 def _called_names(source: str) -> set[str]:
     return {
-        (node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", ""))
+        (
+            node.func.attr
+            if isinstance(node.func, ast.Attribute)
+            else getattr(node.func, "id", "")
+        )
         for node in ast.walk(ast.parse(source))
         if isinstance(node, ast.Call)
     }
@@ -736,12 +764,15 @@ def _called_names(source: str) -> set[str]:
 def test_the_shim_imports_no_driver_and_no_dispatch():
     """ "Thin" is a claim, so it is a shape. The shim runs in the ``mcp-core`` subprocess; an
     import of the dispatch or of a driver there would put the decision — or an OS handle — in a
-    process that must hold neither. AST, not a text scan: the module docstring names both."""
+    process that must hold neither. AST, not a text scan: the module docstring names both.
+    """
     imported = _imported_names(_module_source(ct))
     offenders = sorted(
         name
         for name in imported
-        if "driver" in name or name.endswith("computer_use.service") or name == "service"
+        if "driver" in name
+        or name.endswith("computer_use.service")
+        or name == "service"
     )
     assert offenders == [], f"the shim reaches into the gateway side: {offenders}"
 
@@ -752,7 +783,12 @@ def test_the_shim_makes_no_policy_decision():
     homes for one policy — the drift ``require_enabled``'s docstring records from
     measurement."""
     called = _called_names(_module_source(ct))
-    screens = {"check_app", "check_input_target", "require_computer_use", "require_enabled"}
+    screens = {
+        "check_app",
+        "check_input_target",
+        "require_computer_use",
+        "require_enabled",
+    }
     assert not (called & screens), f"the shim decides: {sorted(called & screens)}"
 
 
@@ -761,9 +797,18 @@ def test_the_driver_child_makes_no_policy_decision():
     own driver code will run inside; a keystone read there would be a second reader of the one
     decision, in the least trusted process of the three."""
     called = _called_names(_module_source(driver_host))
-    screens = {"check_app", "check_input_target", "require_computer_use", "require_enabled"}
-    assert not (called & screens), f"the driver child decides: {sorted(called & screens)}"
-    assert "gideon.computer_use.policy" not in _imported_names(_module_source(driver_host))
+    screens = {
+        "check_app",
+        "check_input_target",
+        "require_computer_use",
+        "require_enabled",
+    }
+    assert not (
+        called & screens
+    ), f"the driver child decides: {sorted(called & screens)}"
+    assert "gideon.integrations.computer_use.policy" not in _imported_names(
+        _module_source(driver_host)
+    )
 
 
 def test_the_thinness_rails_detect_a_shim_that_grew_a_decision():
@@ -771,15 +816,17 @@ def test_the_thinness_rails_detect_a_shim_that_grew_a_decision():
     imports nothing. Run the same two scanners over a synthetic fat shim and confirm both
     flag it."""
     fat = (
-        "from gideon.computer_use import policy, service\n"
-        "from gideon.computer_use.macos_driver import press\n"
+        "from gideon.integrations.computer_use import policy, service\n"
+        "from gideon.integrations.computer_use.macos_driver import press\n"
         "def call(app):\n"
         "    policy.check_app(app, tool='computer_click')\n"
         "    return press(app)\n"
     )
     imported = _imported_names(fat)
     assert any("driver" in name for name in imported)
-    assert "gideon.computer_use.service" in imported or "service" in imported
+    assert (
+        "gideon.integrations.computer_use.service" in imported or "service" in imported
+    )
     assert "check_app" in _called_names(fat)
 
 
@@ -788,7 +835,7 @@ def test_the_shim_forwards_every_tool_to_the_one_gateway_route(monkeypatch):
     the shim's job is transport: the tool name rides in the body."""
     posted: list[tuple[str, dict]] = []
     monkeypatch.setattr(
-        "gideon.mcp_core._post",
+        "gideon.integrations.mcp_core._post",
         lambda path, body=None: posted.append((path, body or {})) or {"result": "ok"},
     )
     for name in sorted(ct.TOOL_NAMES):
@@ -802,7 +849,7 @@ def test_the_shim_renders_the_refusal_the_dispatch_composed(monkeypatch):
     paraphrasing, because those three lines are what a model recovers from — and the agent-side
     code, not the wire code, is what it should branch on."""
     monkeypatch.setattr(
-        "gideon.mcp_core._post",
+        "gideon.integrations.mcp_core._post",
         lambda path, body=None: {
             "error": {
                 "code": "computer_use_refused",
@@ -835,19 +882,19 @@ def test_the_tool_surface_is_constant_whether_the_keystone_is_on_or_off(tmp_path
 def test_mcp_core_aggregates_the_computer_use_surface():
     """MCP registration, asserted at the seam that actually decides it: the aggregate an ACP
     CLI sees. Without this entry the seven tools exist and nothing offers them."""
-    from gideon import mcp_core
+    from gideon.integrations import mcp_core
 
-    assert "gideon.computer_use.tools" in mcp_core._AGGREGATED_CATEGORY_MODULES
+    assert (
+        "gideon.integrations.computer_use.tools"
+        in mcp_core._AGGREGATED_CATEGORY_MODULES
+    )
     assert ct.TOOL_NAMES <= {tool["name"] for tool in mcp_core._aggregated_list_tools()}
-
-
-# ── 6. the ceiling on the driver spawn ────────────────────────────────────────
 
 
 def test_the_driver_spawn_goes_through_the_ceiling_helper():
     """§3.5's clause. ``create_subprocess_limited`` is the repo's single seam that prepends the
     post-exec ceiling shim; a raw ``create_subprocess_exec`` here would spawn an unbounded
-    child. Asserted structurally AND censused: ``tests/test_spawn_ceiling_audit.py`` classifies
+    child. Asserted structurally AND censused: ``checks/runtime/test_spawn_ceiling_audit.py`` classifies
     this site, so dropping the ceiling later reds there too."""
     source = inspect.getsource(service._run_driver)
     called = _called_names(source)
@@ -881,7 +928,9 @@ def test_the_real_spawn_answers_in_the_typed_envelope(tmp_path):
     """
     _arm(tmp_path, ARMED_APP)
     try:
-        answer = _run(service.computer_dispatch("computer_snapshot", {"app": ARMED_APP}))
+        answer = _run(
+            service.computer_dispatch("computer_snapshot", {"app": ARMED_APP})
+        )
     except service.ComputerUseRefusal as refusal:
         assert refusal.error.code in service._CHILD_CODES, refusal.error.code
         assert refusal.error.what and refusal.error.why and refusal.error.fix
@@ -901,7 +950,7 @@ def test_the_driver_child_answers_every_operation_in_the_typed_envelope():
     asserting a bug. The envelope invariant is the durable one and it is what keeps a future
     driver from answering with a silent empty dict.
     """
-    from gideon.errors import ERROR_CODES
+    from gideon.core.errors import ERROR_CODES
 
     for spec in ct.TOOL_SURFACE:
         answer = driver_host.run_op({"op": service._driver_op(spec)})
@@ -916,16 +965,13 @@ def test_the_child_resolves_a_driver_when_one_is_importable(monkeypatch):
     """Floor for the two above: "every operation refuses" is worthless if ``resolve_driver``
     can never find anything. Point the map at a module that DOES import and confirm the child
     runs its handler instead of refusing."""
-    monkeypatch.setitem(driver_host.DRIVER_MODULES, "Darwin", "gideon.computer_use.gate")
+    monkeypatch.setitem(
+        driver_host.DRIVER_MODULES, "Darwin", "gideon.integrations.computer_use.gate"
+    )
     monkeypatch.setattr("platform.system", lambda: "Darwin")
     assert driver_host.resolve_driver() is gate
-    # `gate` has no ``op_snapshot``, so the child reports THAT rather than "no driver" — a
-    # different refusal, which is what proves resolution succeeded.
     answer = driver_host.run_op({"op": "snapshot"})
     assert "does not implement" in answer["error"]["message"]
-
-
-# ── 7. the tool declarations, pinned ─────────────────────────────────────────
 
 
 def test_every_acting_tool_declares_the_app_screen():
@@ -939,7 +985,8 @@ def test_every_acting_tool_declares_the_app_screen():
 def test_only_text_writing_tools_declare_the_input_target_screen():
     """§3 floor 3 scopes ``check_input_target`` to *"any type/set-value"*. Pinned so a future
     text-writing tool cannot ship without it, and so the screen is not quietly extended to
-    tools whose roles it would reject (a press on a button is not a write into a field)."""
+    tools whose roles it would reject (a press on a button is not a write into a field).
+    """
     screened = sorted(spec.name for spec in ct.TOOL_SURFACE if spec.screen_input_target)
     assert screened == ["computer_set_value", "computer_type"], screened
 
@@ -957,7 +1004,9 @@ def test_the_declared_surface_is_exactly_the_plans_seven_tools():
     ]
 
 
-def test_an_unknown_tool_is_refused_after_the_keystone_not_before(tmp_path, monkeypatch):
+def test_an_unknown_tool_is_refused_after_the_keystone_not_before(
+    tmp_path, monkeypatch
+):
     """Order again, in the small: nothing about this machine's desktop — including which tools
     it has — is knowable before the keystone. So an unknown tool on a disarmed machine reports
     the keystone, and only an armed one reports the tool name."""
@@ -971,19 +1020,23 @@ def test_an_unknown_tool_is_refused_after_the_keystone_not_before(tmp_path, monk
     assert "computer_click" in excinfo.value.error.suggestions
 
 
-# ── 8. the pointer paths §3 floor 2 reserves ─────────────────────────────────
-
-
 def test_auto_never_resolves_to_a_pointer_method():
     """§3 floor 2: ``auto`` resolves to an accessibility press whenever an element index is
     present, and the pointer methods must be named by the model. Asserted over every shape an
     absent method can arrive in, because "auto" is also what a missing value means."""
-    for params in ({}, {"click_method": ""}, {"click_method": "   "}, {"click_method": "auto"}):
+    for params in (
+        {},
+        {"click_method": ""},
+        {"click_method": "   "},
+        {"click_method": "auto"},
+    ):
         assert service._click_method(params) == "auto"
     assert "auto" not in service._POINTER_METHODS
 
 
-def test_an_unknown_click_method_refuses_rather_than_falling_back(tmp_path, monkeypatch):
+def test_an_unknown_click_method_refuses_rather_than_falling_back(
+    tmp_path, monkeypatch
+):
     """The direction a fallback would go is the dangerous one. An unresolvable method must not
     become ``auto`` (which would silently retarget the call) nor a coordinate click (which
     would move the operator's cursor); it refuses and lists the three that exist."""
@@ -994,14 +1047,20 @@ def test_an_unknown_click_method_refuses_rather_than_falling_back(tmp_path, monk
         _run(
             service.computer_dispatch(
                 "computer_click",
-                {"snapshot_id": snap.snapshot_id, "element_index": 0, "click_method": "warp"},
+                {
+                    "snapshot_id": snap.snapshot_id,
+                    "element_index": 0,
+                    "click_method": "warp",
+                },
             )
         )
     assert excinfo.value.error.code == service.ERR_BAD_ARGUMENT
     assert excinfo.value.error.suggestions == service._CLICK_METHODS
 
 
-def test_a_pointer_click_is_audited_under_its_own_operation(tmp_path, monkeypatch, sel_rows):
+def test_a_pointer_click_is_audited_under_its_own_operation(
+    tmp_path, monkeypatch, sel_rows
+):
     """§2 wants the pointer paths distinguishable in the audit. They are: the real-cursor warp
     records ``computer_click:global``, so it is one field filter away from every ordinary
     click — and it still passes the keystone and the app allowlist to get there."""
@@ -1025,10 +1084,9 @@ def test_a_pointer_click_is_audited_under_its_own_operation(tmp_path, monkeypatc
     assert sel_rows()[-1]["error"] == policy.ERR_APP_NOT_ALLOWED
 
 
-# ── 9. step 7 — what comes back ──────────────────────────────────────────────
-
-
-def test_list_apps_is_narrowed_to_the_allowlist_and_reports_what_it_withheld(tmp_path, monkeypatch):
+def test_list_apps_is_narrowed_to_the_allowlist_and_reports_what_it_withheld(
+    tmp_path, monkeypatch
+):
     """Step 7. An operator who granted "drive TextEdit" did not thereby grant "tell me every
     window I have open", so the list is narrowed — and the count keeps the narrowing honest
     instead of pretending nothing was hidden."""

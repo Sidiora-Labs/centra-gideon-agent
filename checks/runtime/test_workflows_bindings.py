@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.workflows.bindings import (
+from gideon.automation.workflows.bindings import (
     BindingContext,
     BindingError,
     node_deps,
@@ -74,7 +74,9 @@ class TestWholeValueVsInterpolation:
 
 class TestPipes:
     def test_filter_by_key_and_value(self, ctx) -> None:
-        got = resolve("{{nodes.find.output.findings | filter('verdict','CONFIRMED')}}", ctx)
+        got = resolve(
+            "{{nodes.find.output.findings | filter('verdict','CONFIRMED')}}", ctx
+        )
         assert [f["title"] for f in got] == ["N+1 query", "cold cache"]
 
     def test_bare_filter_is_filter_boolean(self, ctx) -> None:
@@ -82,9 +84,7 @@ class TestPipes:
         assert resolve("{{nodes.n.output.xs | filter}}", c) == [1, 2, 3]
 
     def test_chained_pipes(self, ctx) -> None:
-        expr = (
-            "{{nodes.find.output.findings | filter('verdict','CONFIRMED') | map('title') | count}}"
-        )
+        expr = "{{nodes.find.output.findings | filter('verdict','CONFIRMED') | map('title') | count}}"
         assert resolve(expr, ctx) == 2
 
     def test_flatten_slice_count(self, ctx) -> None:
@@ -95,7 +95,6 @@ class TestPipes:
 
     def test_default_substitutes_for_empty_values(self, ctx) -> None:
         assert resolve("{{inputs.empty | default('n/a')}}", ctx) == "n/a"
-        # A real value is NOT replaced.
         assert resolve("{{inputs.count | default(99)}}", ctx) == 3
 
     def test_null_output_flows_through_pipes_without_raising(self, ctx) -> None:
@@ -105,7 +104,9 @@ class TestPipes:
 
     def test_sanitization_pipes(self, ctx) -> None:
         c = BindingContext(inputs={"x": "<script>&\"'"})
-        assert resolve("{{inputs.x | xml_escape}}", c) == "&lt;script&gt;&amp;&quot;&apos;"
+        assert (
+            resolve("{{inputs.x | xml_escape}}", c) == "&lt;script&gt;&amp;&quot;&apos;"
+        )
         assert resolve("{{inputs.topic | truncate(8)}}", ctx) == "checkout…"
         assert resolve("{{inputs.topic | slugify}}", ctx) == "checkout-latency"
 
@@ -114,7 +115,11 @@ class TestPipes:
 
     def test_foreach_and_loop_variables(self) -> None:
         c = BindingContext(
-            item={"id": 7}, has_item=True, iter_index=2, last_output={"done": True}, has_last=True
+            item={"id": 7},
+            has_item=True,
+            iter_index=2,
+            last_output={"done": True},
+            has_last=True,
         )
         assert resolve("{{item.id}}", c) == 7
         assert resolve("{{iter}}", c) == 2
@@ -148,7 +153,7 @@ class TestTypedFailures:
 
     def test_pipe_type_misuse_raises(self, ctx) -> None:
         with pytest.raises(BindingError):
-            resolve("{{inputs.topic | flatten}}", ctx)  # a string is not a list
+            resolve("{{inputs.topic | flatten}}", ctx)
 
     def test_pipe_args_must_be_literals(self, ctx) -> None:
         """No identifiers in pipe args — an argument must never name a variable, or the
@@ -163,7 +168,9 @@ class TestTypedFailures:
 
 class TestSecrets:
     def test_secret_resolves_through_the_injected_resolver(self) -> None:
-        c = BindingContext(secret_resolver=lambda k: "s3cr3t" if k == "API_KEY" else None)
+        c = BindingContext(
+            secret_resolver=lambda k: "s3cr3t" if k == "API_KEY" else None
+        )
         assert resolve("{{secret:API_KEY}}", c) == "s3cr3t"
 
     def test_absent_secret_raises_rather_than_yielding_empty(self) -> None:

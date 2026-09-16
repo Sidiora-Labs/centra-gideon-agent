@@ -8,13 +8,13 @@ server-sourced answer instead of inventing a second vocabulary.
 
 from __future__ import annotations
 
-from gideon.hooks import HOOK_EVENTS
-from gideon.triggers.events import (
+from gideon.automation.triggers.events import (
     AGENT_SCOPED_EVENTS,
     DORMANT_EVENTS,
     verify_agent_scoping,
 )
-from gideon.triggers.lifecycle_fire import BUILDERS
+from gideon.automation.triggers.lifecycle_fire import BUILDERS
+from gideon.engine.hooks import HOOK_EVENTS
 
 
 def test_every_declared_event_is_classified_exactly_once():
@@ -24,8 +24,12 @@ def test_every_declared_event_is_classified_exactly_once():
     assert not (
         AGENT_SCOPED_EVENTS & globally_fired
     ), "an event cannot ride both fire paths — the badge would lie in one direction or the other"
-    unclassified = set(HOOK_EVENTS) - AGENT_SCOPED_EVENTS - globally_fired - DORMANT_EVENTS
-    assert not unclassified, f"declared but on no path and not dormant: {sorted(unclassified)}"
+    unclassified = (
+        set(HOOK_EVENTS) - AGENT_SCOPED_EVENTS - globally_fired - DORMANT_EVENTS
+    )
+    assert (
+        not unclassified
+    ), f"declared but on no path and not dormant: {sorted(unclassified)}"
 
 
 def test_verify_agent_scoping_reports_no_problems():
@@ -40,15 +44,13 @@ def test_the_issue_610_repro_event_is_global():
 
 def test_variables_endpoint_ships_agent_scoped_per_event():
     """The catalog row carries the flag, matching the constant, for every event."""
-    from gideon.hooks import LIFECYCLE_EVENT_CATALOG
+    from gideon.engine.hooks import LIFECYCLE_EVENT_CATALOG
 
     catalog_events = {e["event"] for e in LIFECYCLE_EVENT_CATALOG}
     assert AGENT_SCOPED_EVENTS <= catalog_events
-    # The handler computes the flag as `event in AGENT_SCOPED_EVENTS`; assert the source
-    # expression rather than spinning an aiohttp app for a pure set-membership stamp.
     import inspect
 
-    from gideon.dashboard.handlers import triggers as handler_mod
+    from gideon.interfaces.dashboard.handlers import triggers as handler_mod
 
     src = inspect.getsource(handler_mod)
     assert '"agent_scoped": e["event"] in AGENT_SCOPED_EVENTS' in src

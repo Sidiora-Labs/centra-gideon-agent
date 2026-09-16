@@ -2,12 +2,12 @@
 
 from unittest.mock import patch
 
-from gideon.mcp_subagents import _call_tool
+from gideon.integrations.mcp_subagents import _call_tool
 
 
 def test_spawn_run_single_task():
     """Test subagent_run with single task returns immediately."""
-    with patch("gideon.mcp_subagents._post") as mock_post:
+    with patch("gideon.integrations.mcp_subagents._post") as mock_post:
         mock_post.return_value = {"id": "abc123"}
 
         result = _call_tool("subagent_run", {"task": "test task"})
@@ -30,7 +30,7 @@ def test_spawn_run_batch_tasks():
         "output_format": "a markdown list of findings",
         "boundary": "do not modify any source file",
     }
-    with patch("gideon.mcp_subagents._post") as mock_post:
+    with patch("gideon.integrations.mcp_subagents._post") as mock_post:
         mock_post.side_effect = [{"ok": True}, {"ok": True, "run_id": "run-7"}]
 
         result = _call_tool(
@@ -53,7 +53,7 @@ def test_spawn_run_batch_tasks():
 
 def test_spawn_run_error():
     """Test subagent_run handles spawn API errors."""
-    with patch("gideon.mcp_subagents._post") as mock_post:
+    with patch("gideon.integrations.mcp_subagents._post") as mock_post:
         mock_post.return_value = {"error": "capacity reached"}
 
         result = _call_tool("subagent_run", {"task": "failing task"})
@@ -76,8 +76,11 @@ def test_spawn_run_empty_tasks():
 def test_spawn_run_passes_parent_session():
     """subagent_run resolves the parent session key and includes it in the spawn body."""
     with (
-        patch("gideon.mcp_subagents._post") as mock_post,
-        patch("gideon.mcp_subagents._resolve_session_key", return_value="dashboard:chat-1"),
+        patch("gideon.integrations.mcp_subagents._post") as mock_post,
+        patch(
+            "gideon.integrations.mcp_subagents._resolve_session_key",
+            return_value="dashboard:chat-1",
+        ),
     ):
         mock_post.return_value = {"id": "x1"}
         result = _call_tool("subagent_run", {"task": "test"})
@@ -104,7 +107,7 @@ def test_spawn_run_batch_partial_failure():
         "output_format": "a markdown list of findings",
         "boundary": "do not modify any source file",
     }
-    with patch("gideon.mcp_subagents._post") as mock_post:
+    with patch("gideon.integrations.mcp_subagents._post") as mock_post:
         mock_post.side_effect = [{"error": "capacity reached"}]
 
         result = _call_tool(

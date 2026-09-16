@@ -3,8 +3,8 @@
 ``BROWSE-AUTOMATION`` `BA-2` has two ``done_when`` clauses that only a running browser can
 satisfy — the injected safety script making ``fetch()`` / ``media.play()`` /
 ``navigator.bluetooth`` throw or return blocked, and client-side redirects being re-evaluated per
-``Page.frameNavigated``. Both are proven by ``tests/test_browse_safety_script.py`` (layer 2) and
-``tests/test_browse_cdp_live.py``, and both files ``pytest.skip`` when no browser is found.
+``Page.frameNavigated``. Both are proven by ``checks/runtime/test_browse_safety_script.py`` (layer 2) and
+``checks/runtime/test_browse_cdp_live.py``, and both files ``pytest.skip`` when no browser is found.
 
 **A skip is counted as a pass.** So those two files can stop proving anything at all without a
 single red appearing anywhere — which is exactly what their previous browser lookup arranged. It
@@ -39,7 +39,6 @@ import pytest
 
 _TESTS = pathlib.Path(__file__).resolve().parent
 
-#: The two modules whose whole behavioural value depends on the lookup this file rails.
 _PROOF_MODULES = (
     _TESTS / "test_browse_safety_script.py",
     _TESTS / "test_browse_cdp_live.py",
@@ -56,9 +55,6 @@ def _install(root: pathlib.Path, revision_dir: str, binary: str) -> pathlib.Path
     return target
 
 
-# ── the load-bearing case: installed must mean discoverable ───────────────────
-
-
 def test_an_installed_chromium_is_discoverable() -> None:
     """THE rail. If Playwright says a Chromium is installed, we must be able to launch it.
 
@@ -70,10 +66,6 @@ def test_an_installed_chromium_is_discoverable() -> None:
     """
     installed = browse_chrome.installed_revision_dirs()
     if not installed:
-        # Through browse_chrome.missing(), NOT a bare pytest.skip: this case is the one that
-        # answers "installed, but invisible", so on the leg that installs a browser and sets
-        # GIDEON_REQUIRE_BROWSE_PROOF its silence is the failure — a marker-less install
-        # would otherwise leave the rail itself inert while the job went green.
         browse_chrome.missing(
             "THE installed-is-discoverable RAIL",
             "no Playwright Chromium installed here, so there is nothing for the lookup to be "
@@ -88,9 +80,6 @@ def test_an_installed_chromium_is_discoverable() -> None:
         "behavioural proof is skipping on a machine that CAN run it, and a skip reads as a pass."
     )
     assert pathlib.Path(found).is_file()
-
-
-# ── the vacuity floor: the lookup discriminates, and on the axes that broke ───
 
 
 def test_discovery_is_revision_agnostic(tmp_path: pathlib.Path) -> None:
@@ -118,20 +107,28 @@ def test_discovery_reaches_the_linux_layout(tmp_path: pathlib.Path) -> None:
 def test_discovery_reaches_a_full_chromium_app_bundle(tmp_path: pathlib.Path) -> None:
     """The headless shell is preferred, but a full Chromium is still a usable browser."""
     binary = _install(
-        tmp_path, "chromium-1181", "chrome-mac-arm64/Chromium.app/Contents/MacOS/Chromium"
+        tmp_path,
+        "chromium-1181",
+        "chrome-mac-arm64/Chromium.app/Contents/MacOS/Chromium",
     )
 
     assert browse_chrome.find_chrome((tmp_path,)) == str(binary)
 
 
-def test_the_headless_shell_is_preferred_over_the_full_browser(tmp_path: pathlib.Path) -> None:
+def test_the_headless_shell_is_preferred_over_the_full_browser(
+    tmp_path: pathlib.Path,
+) -> None:
     """Ordering, asserted — otherwise "prefer the shell" is a comment, not a behaviour."""
     shell = _install(
         tmp_path,
         "chromium_headless_shell-1181",
         "chrome-headless-shell-mac-arm64/chrome-headless-shell",
     )
-    _install(tmp_path, "chromium-1181", "chrome-mac-arm64/Chromium.app/Contents/MacOS/Chromium")
+    _install(
+        tmp_path,
+        "chromium-1181",
+        "chrome-mac-arm64/Chromium.app/Contents/MacOS/Chromium",
+    )
 
     assert browse_chrome.find_chrome((tmp_path,)) == str(shell)
 
@@ -151,7 +148,12 @@ def test_an_empty_root_is_not_a_false_positive(tmp_path: pathlib.Path) -> None:
 
 def test_a_non_executable_candidate_is_rejected(tmp_path: pathlib.Path) -> None:
     """A same-named plain file is not a browser. ``exists()`` would have accepted it."""
-    target = tmp_path / "chromium_headless_shell-1181" / "chrome-linux" / "chrome-headless-shell"
+    target = (
+        tmp_path
+        / "chromium_headless_shell-1181"
+        / "chrome-linux"
+        / "chrome-headless-shell"
+    )
     target.parent.mkdir(parents=True)
     target.write_bytes(b"not a browser")
     target.chmod(0o644)
@@ -161,9 +163,12 @@ def test_a_non_executable_candidate_is_rejected(tmp_path: pathlib.Path) -> None:
 
 def test_a_directory_named_like_the_binary_is_rejected(tmp_path: pathlib.Path) -> None:
     """Directories are executable-by-default, so ``X_OK`` alone would let one through."""
-    (tmp_path / "chromium_headless_shell-1181" / "chrome-linux" / "chrome-headless-shell").mkdir(
-        parents=True
-    )
+    (
+        tmp_path
+        / "chromium_headless_shell-1181"
+        / "chrome-linux"
+        / "chrome-headless-shell"
+    ).mkdir(parents=True)
 
     assert browse_chrome.find_chrome((tmp_path,)) is None
 
@@ -190,10 +195,9 @@ def test_a_bogus_override_does_not_shadow_a_real_install(
     assert browse_chrome.find_chrome((tmp_path,)) == str(binary)
 
 
-# ── the skip is allowed, but it must be *declarable* as a failure ─────────────
-
-
-def test_a_missing_browser_skips_by_default(tmp_path: pathlib.Path, monkeypatch) -> None:
+def test_a_missing_browser_skips_by_default(
+    tmp_path: pathlib.Path, monkeypatch
+) -> None:
     """Absence skips: a developer with no browser must still be able to run the suite.
 
     Also the counterpart the next test needs — without it, "REQUIRE_ENV makes it fail" could be
@@ -248,16 +252,15 @@ def test_the_require_lever_also_covers_the_cdp_transport(monkeypatch) -> None:
 
 
 @pytest.mark.parametrize("value", ["", "0", "false", "no", "off", "  "])
-def test_falsey_require_values_still_skip(value: str, tmp_path: pathlib.Path, monkeypatch) -> None:
+def test_falsey_require_values_still_skip(
+    value: str, tmp_path: pathlib.Path, monkeypatch
+) -> None:
     """``REQUIRE=0`` must mean off. An env var read as "set at all" is a trap for CI matrices."""
     monkeypatch.delenv(browse_chrome.CHROME_ENV, raising=False)
     monkeypatch.setenv(browse_chrome.REQUIRE_ENV, value)
 
     with pytest.raises(pytest.skip.Exception):
         browse_chrome.chrome_or_skip("PROBE", (tmp_path,))
-
-
-# ── the fix must stay un-forked ───────────────────────────────────────────────
 
 
 def test_neither_proof_module_carries_its_own_browser_lookup() -> None:
@@ -270,7 +273,7 @@ def test_neither_proof_module_carries_its_own_browser_lookup() -> None:
         source = module.read_text()
         assert "ms-playwright" not in source, (
             f"{module.name} spells a Playwright path itself again. That lookup belongs in "
-            "tests/browse_chrome.py, where one rail covers it."
+            "checks/runtime/browse_chrome.py, where one rail covers it."
         )
         assert (
             "browse_chrome" in source
@@ -282,4 +285,6 @@ def test_the_roots_are_platform_appropriate() -> None:
     roots = browse_chrome.browsers_roots()
 
     assert roots, "no candidate root at all means the lookup cannot succeed anywhere"
-    assert any(root.name == "ms-playwright" for root in roots), [str(root) for root in roots]
+    assert any(root.name == "ms-playwright" for root in roots), [
+        str(root) for root in roots
+    ]

@@ -19,16 +19,16 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.local_models import registry as lm_registry
-from gideon.local_models.budgets import (
+from gideon.integrations.local_models import registry as lm_registry
+from gideon.integrations.local_models.budgets import (
     DEFAULT_OUTPUT_TOKENS,
     MAX_OUTPUT_FRACTION,
     catalog_window,
     model_budget,
     output_budget,
 )
-from gideon.local_models.provider import LocalModel, LocalModelProvider
-from gideon.model_windows import DEFAULT_CONTEXT_WINDOW
+from gideon.integrations.local_models.provider import LocalModel, LocalModelProvider
+from gideon.integrations.model_windows import DEFAULT_CONTEXT_WINDOW
 
 
 class _FakeLocalProvider(LocalModelProvider):
@@ -69,10 +69,9 @@ def clean_registry():
 
 
 def _register(clean_registry, provider: _FakeLocalProvider) -> None:
-    clean_registry.register_provider(provider, capabilities=["chat"], name=provider.name)
-
-
-# ── The helper: a declared window derives from the catalog ─────────────────────
+    clean_registry.register_provider(
+        provider, capabilities=["chat"], name=provider.name
+    )
 
 
 @pytest.mark.asyncio
@@ -92,7 +91,6 @@ async def test_declared_context_tokens_derives_from_the_catalog(clean_registry):
     assert budget.context_tokens == 8192
     assert budget.output_tokens == 1024
     assert budget.input_tokens == 8192 - 1024
-    # And the catalog reader itself agrees, so a failure localizes.
     assert await catalog_window("FakeLocal:tiny-chat") == (8192, 1024)
 
 
@@ -101,13 +99,17 @@ async def test_unqualified_id_resolves_across_registered_providers(clean_registr
     """A bare model id (no ``Provider:`` qualifier) still finds its catalog entry."""
     _register(
         clean_registry,
-        _FakeLocalProvider("FakeLocal", [LocalModel(name="tiny-chat", context_tokens=8192)]),
+        _FakeLocalProvider(
+            "FakeLocal", [LocalModel(name="tiny-chat", context_tokens=8192)]
+        ),
     )
     assert (await model_budget("tiny-chat")).source == "catalog"
 
 
 @pytest.mark.asyncio
-async def test_colon_bearing_ollama_style_id_is_not_split_on_the_wrong_colon(clean_registry):
+async def test_colon_bearing_ollama_style_id_is_not_split_on_the_wrong_colon(
+    clean_registry,
+):
     """``FakeLocal:qwen3:4b`` must ask the catalog for ``qwen3:4b``, not for ``4b``.
 
     Splitting on the first colon unconditionally would look up a model called ``4b``,
@@ -116,13 +118,12 @@ async def test_colon_bearing_ollama_style_id_is_not_split_on_the_wrong_colon(cle
     """
     _register(
         clean_registry,
-        _FakeLocalProvider("FakeLocal", [LocalModel(name="qwen3:4b", context_tokens=32768)]),
+        _FakeLocalProvider(
+            "FakeLocal", [LocalModel(name="qwen3:4b", context_tokens=32768)]
+        ),
     )
     budget = await model_budget("FakeLocal:qwen3:4b")
     assert (budget.source, budget.context_tokens) == ("catalog", 32768)
-
-
-# ── The helper: context_tokens = 0 is a NORMAL card, both directions ───────────
 
 
 @pytest.mark.asyncio
@@ -149,7 +150,6 @@ async def test_context_tokens_zero_falls_back_to_the_window_table(clean_registry
     assert budget.context_tokens == DEFAULT_CONTEXT_WINDOW
     assert budget.output_tokens == DEFAULT_OUTPUT_TOKENS
     assert budget.input_tokens == DEFAULT_CONTEXT_WINDOW - DEFAULT_OUTPUT_TOKENS
-    # The two directions differ — the declared case must not collapse onto the fallback.
     assert budget.output_tokens != 1024
 
 
@@ -158,7 +158,9 @@ async def test_zero_window_never_divides_by_zero_or_goes_negative(clean_registry
     """A pathological card (window of 1) still yields strictly positive budgets."""
     _register(
         clean_registry,
-        _FakeLocalProvider("FakeLocal", [LocalModel(name="degenerate", context_tokens=1)]),
+        _FakeLocalProvider(
+            "FakeLocal", [LocalModel(name="degenerate", context_tokens=1)]
+        ),
     )
     budget = await model_budget("FakeLocal:degenerate")
     assert budget.context_tokens >= 1
@@ -183,15 +185,14 @@ async def test_empty_ref_is_the_conservative_default():
     assert budget.context_tokens == DEFAULT_CONTEXT_WINDOW
 
 
-# ── The helper: the output cap can never eat the whole window ──────────────────
-
-
 @pytest.mark.asyncio
 async def test_default_output_cap_is_clamped_to_half_a_small_window(clean_registry):
     """A 4k local model must not be handed the 4096-token cap: it would leave no prompt."""
     _register(
         clean_registry,
-        _FakeLocalProvider("FakeLocal", [LocalModel(name="small", context_tokens=4096)]),
+        _FakeLocalProvider(
+            "FakeLocal", [LocalModel(name="small", context_tokens=4096)]
+        ),
     )
     budget = await model_budget("FakeLocal:small")
     assert budget.output_tokens == int(4096 * MAX_OUTPUT_FRACTION)
@@ -231,13 +232,11 @@ async def test_output_budget_accessor_matches_the_dataclass(clean_registry):
     _register(
         clean_registry,
         _FakeLocalProvider(
-            "FakeLocal", [LocalModel(name="tiny-chat", context_tokens=8192, output_tokens=777)]
+            "FakeLocal",
+            [LocalModel(name="tiny-chat", context_tokens=8192, output_tokens=777)],
         ),
     )
     assert await output_budget("FakeLocal:tiny-chat") == 777
-
-
-# ── The CONSUMER: the budget that reaches the call moves with the catalog ──────
 
 
 class _StubProvider:
@@ -250,7 +249,11 @@ class _StubProvider:
         return None
 
     async def stream(self, message: str):
-        from gideon.llm.base import EVENT_COMPLETE, EVENT_TEXT_CHUNK, LLMEvent
+        from gideon.integrations.llm.base import (
+            EVENT_COMPLETE,
+            EVENT_TEXT_CHUNK,
+            LLMEvent,
+        )
 
         yield LLMEvent(kind=EVENT_TEXT_CHUNK, text="ok")
         yield LLMEvent(kind=EVENT_COMPLETE)
@@ -266,7 +269,7 @@ def captured_resolve(monkeypatch):
         return _StubProvider()
 
     monkeypatch.setattr(
-        "gideon.providers.provider_bridge.resolve_provider_for_use_case",
+        "gideon.extensions.providers.provider_bridge.resolve_provider_for_use_case",
         _fake_resolve,
     )
     return calls
@@ -276,9 +279,9 @@ def captured_resolve(monkeypatch):
 @pytest.mark.parametrize(
     ("declared_context", "declared_output", "expected_max_tokens"),
     [
-        (8192, 1024, 1024),  # both declared → the card's own cap
-        (8192, 0, DEFAULT_OUTPUT_TOKENS),  # window declared, cap not → the named floor
-        (4096, 0, 2048),  # small window → the floor is clamped to half
+        (8192, 1024, 1024),
+        (8192, 0, DEFAULT_OUTPUT_TOKENS),
+        (4096, 0, 2048),
     ],
 )
 async def test_catalog_context_tokens_moves_the_budget_that_reaches_the_call(
@@ -293,7 +296,7 @@ async def test_catalog_context_tokens_moves_the_budget_that_reaches_the_call(
     Driven through the pinned-model path (``model=``), which is the one resolution branch
     that needs no ``active_models.json`` state — the derivation is identical in all three.
     """
-    from gideon.llm_helpers import one_shot_completion
+    from gideon.integrations.llm_helpers import one_shot_completion
 
     _register(
         clean_registry,
@@ -309,7 +312,9 @@ async def test_catalog_context_tokens_moves_the_budget_that_reaches_the_call(
         ),
     )
 
-    text = await one_shot_completion("hello", use_case="reasoning", model="FakeLocal:tiny-chat")
+    text = await one_shot_completion(
+        "hello", use_case="reasoning", model="FakeLocal:tiny-chat"
+    )
 
     assert text == "ok"
     assert len(captured_resolve) == 1
@@ -324,19 +329,18 @@ async def test_an_unknown_model_still_carries_the_fallback_budget(captured_resol
     model takes today. The value equals the constant the adapters hardcoded, so hosted
     behaviour is unchanged in value while the number is now derived in one place.
     """
-    from gideon.llm_helpers import one_shot_completion
+    from gideon.integrations.llm_helpers import one_shot_completion
 
-    await one_shot_completion("hello", use_case="reasoning", model="Anthropic:claude-opus-4-1")
+    await one_shot_completion(
+        "hello", use_case="reasoning", model="Anthropic:claude-opus-4-1"
+    )
 
     assert captured_resolve[0]["max_tokens"] == DEFAULT_OUTPUT_TOKENS
 
 
-# ── The FOURTH resolution path: the last-resort registry build ─────────────────
-
-
 def _fake_local_type():
     """The minimal ``ProviderCapability`` ``register_type`` needs for the fake type."""
-    from gideon.llm.capabilities import Capability, ProviderCapability
+    from gideon.integrations.llm.capabilities import Capability, ProviderCapability
 
     return ProviderCapability(
         type="fakelocal",
@@ -362,7 +366,7 @@ def last_resort_build(monkeypatch):
     assertion has to live: the bridge is not on this path, so ``captured_resolve`` cannot
     see it.
     """
-    from gideon.llm.registry import ProviderEntry, ProviderRegistry
+    from gideon.integrations.llm.registry import ProviderEntry, ProviderRegistry
 
     seen: list[dict] = []
 
@@ -372,18 +376,23 @@ def last_resort_build(monkeypatch):
 
     reg = ProviderRegistry()
     reg.register_type(_fake_local_type(), _factory)
-    reg.register_entry(ProviderEntry(name="FakeLocal", type="fakelocal", model="tiny-chat"))
-    monkeypatch.setattr("gideon.llm.registry.get_default_registry", lambda: reg)
+    reg.register_entry(
+        ProviderEntry(name="FakeLocal", type="fakelocal", model="tiny-chat")
+    )
+    monkeypatch.setattr(
+        "gideon.integrations.llm.registry.get_default_registry", lambda: reg
+    )
 
-    # An empty chain keeps the walk off the multi-entry branch, and a raising bridge is
-    # what actually drops the call through to the last-resort build.
-    monkeypatch.setattr("gideon.providers.use_cases.resolution_chain", lambda uc: [])
+    monkeypatch.setattr(
+        "gideon.extensions.providers.use_cases.resolution_chain", lambda uc: []
+    )
 
     def _raise(use_case, **kwargs):
         raise RuntimeError("pretend the bridge cannot resolve anything")
 
     monkeypatch.setattr(
-        "gideon.providers.provider_bridge.resolve_provider_for_use_case", _raise
+        "gideon.extensions.providers.provider_bridge.resolve_provider_for_use_case",
+        _raise,
     )
     return seen
 
@@ -400,13 +409,17 @@ async def test_the_last_resort_build_carries_the_catalog_budget(
     values differ from ``DEFAULT_OUTPUT_TOKENS`` so a regression back to the hardcoded
     constant cannot satisfy either case.
     """
-    from gideon.llm_helpers import one_shot_completion
+    from gideon.integrations.llm_helpers import one_shot_completion
 
     _register(
         clean_registry,
         _FakeLocalProvider(
             "FakeLocal",
-            [LocalModel(name="tiny-chat", context_tokens=8192, output_tokens=declared_output)],
+            [
+                LocalModel(
+                    name="tiny-chat", context_tokens=8192, output_tokens=declared_output
+                )
+            ],
         ),
     )
 
@@ -415,7 +428,6 @@ async def test_the_last_resort_build_carries_the_catalog_budget(
     assert text == "ok"
     assert len(last_resort_build) == 1
     assert last_resort_build[0]["max_tokens"] == declared_output
-    # Vacuity: the whole point is that this is NOT the constant the adapters hardcoded.
     assert declared_output != DEFAULT_OUTPUT_TOKENS
 
 
@@ -430,8 +442,8 @@ async def test_the_last_resort_build_still_works_when_the_factory_rejects_kwargs
     unconditionally would turn today's working degraded build into a hard failure for
     exactly that provider, so the strict factory is the case that pins the retry.
     """
-    from gideon.llm.registry import ProviderEntry, ProviderRegistry
-    from gideon.llm_helpers import one_shot_completion
+    from gideon.integrations.llm.registry import ProviderEntry, ProviderRegistry
+    from gideon.integrations.llm_helpers import one_shot_completion
 
     calls: list[dict] = []
 
@@ -441,15 +453,22 @@ async def test_the_last_resort_build_still_works_when_the_factory_rejects_kwargs
 
     reg = ProviderRegistry()
     reg.register_type(_fake_local_type(), _strict_factory)
-    reg.register_entry(ProviderEntry(name="Strict", type="fakelocal", model="tiny-chat"))
-    monkeypatch.setattr("gideon.llm.registry.get_default_registry", lambda: reg)
-    monkeypatch.setattr("gideon.providers.use_cases.resolution_chain", lambda uc: [])
+    reg.register_entry(
+        ProviderEntry(name="Strict", type="fakelocal", model="tiny-chat")
+    )
+    monkeypatch.setattr(
+        "gideon.integrations.llm.registry.get_default_registry", lambda: reg
+    )
+    monkeypatch.setattr(
+        "gideon.extensions.providers.use_cases.resolution_chain", lambda uc: []
+    )
 
     def _raise(use_case, **kwargs):
         raise RuntimeError("pretend the bridge cannot resolve anything")
 
     monkeypatch.setattr(
-        "gideon.providers.provider_bridge.resolve_provider_for_use_case", _raise
+        "gideon.extensions.providers.provider_bridge.resolve_provider_for_use_case",
+        _raise,
     )
 
     assert await one_shot_completion("hello", use_case="reasoning") == "ok"
@@ -457,14 +476,17 @@ async def test_the_last_resort_build_still_works_when_the_factory_rejects_kwargs
 
 
 @pytest.mark.asyncio
-async def test_the_budget_rides_alongside_a_pinned_temperature(clean_registry, captured_resolve):
+async def test_the_budget_rides_alongside_a_pinned_temperature(
+    clean_registry, captured_resolve
+):
     """The budget must not displace the existing ``temperature`` build kwarg."""
-    from gideon.llm_helpers import one_shot_completion
+    from gideon.integrations.llm_helpers import one_shot_completion
 
     _register(
         clean_registry,
         _FakeLocalProvider(
-            "FakeLocal", [LocalModel(name="tiny-chat", context_tokens=8192, output_tokens=512)]
+            "FakeLocal",
+            [LocalModel(name="tiny-chat", context_tokens=8192, output_tokens=512)],
         ),
     )
 

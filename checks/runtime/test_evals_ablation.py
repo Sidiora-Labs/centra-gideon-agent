@@ -24,9 +24,9 @@ from pathlib import Path
 
 import pytest
 
-from gideon.evals import ablation
-from gideon.evals import overlay as overlay_lib
-from gideon.evals.matrix import (
+from gideon.assurance.evals import ablation
+from gideon.assurance.evals import overlay as overlay_lib
+from gideon.assurance.evals.matrix import (
     FAILED,
     PASSED,
     VERIFIER_ABSENT,
@@ -52,10 +52,6 @@ def _component(**over) -> ablation.AblationComponent:
     base = {
         "component_id": "correction-heuristic",
         "kind": overlay_lib.KIND_CONFIG_FLAG,
-        # A REAL boolean field on the loaded AppConfig. Deliberately not a plausible-looking
-        # invented name: `validate_component` refuses those (see
-        # `test_a_config_target_that_does_not_exist_is_refused`), so a fixture on a fictional
-        # field would make every test below assert the refusal instead of the behaviour.
         "target": "learning.correction_heuristic",
         "subject": "triage-scenario",
     }
@@ -69,7 +65,11 @@ def _cells(scores: dict[str, list[float | None]]) -> list[CellResult]:
     for arm, values in scores.items():
         for value in values:
             if value is None:
-                out.append(CellResult(coords={overlay_lib.ARM_AXIS: arm}, outcome=VERIFIER_ABSENT))
+                out.append(
+                    CellResult(
+                        coords={overlay_lib.ARM_AXIS: arm}, outcome=VERIFIER_ABSENT
+                    )
+                )
             else:
                 out.append(
                     CellResult(
@@ -92,9 +92,6 @@ def _fake_matrix(scores, *, seen=None, side_effect=None):
     return _run
 
 
-# ── 1. the overlay cannot escape its cell ─────────────────────────────────────
-
-
 def test_spawn_env_for_never_mutates_the_parent_env(eval_home, monkeypatch):
     monkeypatch.delenv(overlay_lib.OVERLAY_ENV, raising=False)
     import os
@@ -104,7 +101,9 @@ def test_spawn_env_for_never_mutates_the_parent_env(eval_home, monkeypatch):
     env = overlay_lib.spawn_env_for(base, overlay)
     assert overlay_lib.OVERLAY_ENV in env
     assert overlay_lib.OVERLAY_ENV not in base, "the caller's dict must not be widened"
-    assert overlay_lib.OVERLAY_ENV not in os.environ, "the PARENT process env must be untouched"
+    assert (
+        overlay_lib.OVERLAY_ENV not in os.environ
+    ), "the PARENT process env must be untouched"
 
 
 def _tiered_component(**over) -> ablation.AblationComponent:
@@ -115,7 +114,11 @@ def _tiered_component(**over) -> ablation.AblationComponent:
     values are real ``VALID_USE_CASES``, so none of them is silently normalized away — a
     cheap arm that normalized back to ON would be reported as "the cheap variant matches".
     """
-    base = {"target": "loops.judge_use_case", "off_value": "loops", "cheap_value": "background"}
+    base = {
+        "target": "loops.judge_use_case",
+        "off_value": "loops",
+        "cheap_value": "background",
+    }
     base.update(over)
     return _component(**base)
 
@@ -125,8 +128,6 @@ def test_overlay_round_trips_through_the_env_string():
     assert overlay_lib.decode(overlay_lib.encode(overlay)) == overlay
     assert overlay_lib.decode("") is None
     assert overlay_lib.decode("{not json") is None
-    # An invalid overlay decodes to None (cell runs unmodified) rather than raising into the
-    # child's crash path, where it would become a VERIFIER_ABSENT nobody could explain.
     assert overlay_lib.decode(json.dumps({"kind": "nope", "target": "x"})) is None
 
 
@@ -136,8 +137,7 @@ def test_apply_in_child_refuses_the_operators_real_home(monkeypatch):
     overlay = _component().overlay().for_arm(overlay_lib.ARM_OFF)
     with pytest.raises(overlay_lib.OverlayRefusedError):
         overlay_lib.apply_in_child(overlay)
-    # Not "it raised" alone: the refusal has to happen BEFORE any write.
-    assert not (default_home / "config.json").is_file() or True  # never asserted as created
+    assert not (default_home / "config.json").is_file() or True
     monkeypatch.delenv("GIDEON_HOME", raising=False)
     with pytest.raises(overlay_lib.OverlayRefusedError):
         overlay_lib.apply_in_child(overlay)
@@ -153,12 +153,16 @@ def test_apply_in_child_writes_only_into_the_cell_home(tmp_path, monkeypatch):
 
     cell = tmp_path / "cell"
     monkeypatch.setenv("GIDEON_HOME", str(cell))
-    applied = overlay_lib.apply_in_child(_component().overlay().for_arm(overlay_lib.ARM_OFF))
+    applied = overlay_lib.apply_in_child(
+        _component().overlay().for_arm(overlay_lib.ARM_OFF)
+    )
 
     assert applied and "config.json" in applied[0]
     patched = json.loads((cell / "config.json").read_text(encoding="utf-8"))
     assert patched["learning"]["correction_heuristic"] is False
-    assert (live / "config.json").read_bytes() == live_before, "the live config must be byte-equal"
+    assert (
+        live / "config.json"
+    ).read_bytes() == live_before, "the live config must be byte-equal"
 
 
 def test_the_on_arm_applies_nothing(tmp_path, monkeypatch):
@@ -171,11 +175,10 @@ def test_the_on_arm_applies_nothing(tmp_path, monkeypatch):
 
 def test_a_cheap_arm_with_no_cheap_form_refuses(tmp_path, monkeypatch):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path / "cell"))
-    # config_flag with no cheap_value: a silent no-op here would score identically to ON and
-    # be reported as "the cheap variant matches" — a fabricated `lighten`.
     with pytest.raises(ValueError, match="cheap_value"):
-        overlay_lib.apply_in_child(_component().overlay().for_arm(overlay_lib.ARM_CHEAP))
-    # A skill has no cheap form at all.
+        overlay_lib.apply_in_child(
+            _component().overlay().for_arm(overlay_lib.ARM_CHEAP)
+        )
     skill = _component(kind=overlay_lib.KIND_SKILL, target="code/foo").overlay()
     with pytest.raises(ValueError, match="no cheap arm"):
         overlay_lib.apply_in_child(skill.for_arm(overlay_lib.ARM_CHEAP))
@@ -189,7 +192,6 @@ def test_a_config_target_that_does_not_exist_is_refused(eval_home):
     ran with the component fully ON, scored identically to the baseline, and would have been
     reported as a no-delta ``remove``: a fabricated retirement recommendation.
     """
-    # Vacuity floor: a REAL field validates, so the check is not rejecting everything.
     assert overlay_lib.config_field_exists("evals.ablation_cadence_days") is True
     assert overlay_lib.config_field_exists("workflows.enabled") is True
     assert overlay_lib.config_field_exists("workflows.judge_enabled") is False
@@ -198,10 +200,8 @@ def test_a_config_target_that_does_not_exist_is_refused(eval_home):
     bad = _component(target="workflows.judge_enabled")
     with pytest.raises(ValueError, match="does not exist"):
         ablation.validate_component(bad)
-    # And in the parent, BEFORE a cell is spawned — paying for the matrix first is too late.
     with pytest.raises(ValueError, match="does not exist"):
         ablation.run_ablation(bad, trials=1, now=NOW, run_matrix=_fake_matrix({}))
-    # The child re-checks, so a hand-built overlay cannot bypass the parent's guard.
     with pytest.raises(ValueError, match="does not exist"):
         overlay_lib.apply_in_child(bad.overlay().for_arm(overlay_lib.ARM_OFF))
     ablation.validate_component(_component(target="workflows.enabled"))
@@ -212,7 +212,9 @@ def test_validate_component_rejects_an_unknown_surfacing_heuristic(eval_home):
         ablation.validate_component(
             _component(kind=overlay_lib.KIND_SURFACING, target="not_a_heuristic")
         )
-    ablation.validate_component(_component(kind=overlay_lib.KIND_SURFACING, target="intent"))
+    ablation.validate_component(
+        _component(kind=overlay_lib.KIND_SURFACING, target="intent")
+    )
 
 
 def test_unknown_kinds_and_arms_are_rejected_on_construction():
@@ -223,12 +225,16 @@ def test_unknown_kinds_and_arms_are_rejected_on_construction():
             component_id="c", kind=overlay_lib.KIND_SKILL, target="t", arm="sideways"
         )
     with pytest.raises(ValueError, match="target"):
-        overlay_lib.ComponentOverlay(component_id="c", kind=overlay_lib.KIND_SKILL, target="")
+        overlay_lib.ComponentOverlay(
+            component_id="c", kind=overlay_lib.KIND_SKILL, target=""
+        )
 
 
 def test_an_unknown_surfacing_heuristic_refuses(tmp_path, monkeypatch):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path / "cell"))
-    bad = _component(kind=overlay_lib.KIND_SURFACING, target="not_a_heuristic").overlay()
+    bad = _component(
+        kind=overlay_lib.KIND_SURFACING, target="not_a_heuristic"
+    ).overlay()
     with pytest.raises(ValueError, match="unknown surfacing heuristic"):
         overlay_lib.apply_in_child(bad.for_arm(overlay_lib.ARM_OFF))
     good = _component(kind=overlay_lib.KIND_SURFACING, target="intent").overlay()
@@ -244,7 +250,7 @@ def test_the_surfacing_env_overlay_actually_reaches_the_allocator(monkeypatch):
     executor — the overlay would apply, the scores would be identical, and the runner would
     conclude the heuristic does nothing.
     """
-    from gideon.learning import surfacing
+    from gideon.cognition.learning import surfacing
 
     monkeypatch.delenv(overlay_lib.ABLATE_SURFACING_ENV, raising=False)
     assert surfacing.env_ablate() == ""
@@ -267,11 +273,12 @@ def test_the_surfacing_env_overlay_actually_reaches_the_allocator(monkeypatch):
     monkeypatch.setattr(surfacing, "score_candidate", _spy)
     cand = surfacing.Candidate(kind="lessons", key="k1", score=0.7, l0="hello world")
     surfacing.allocate({"lessons": [cand]}, query="hello")
-    assert seen and set(seen) == {"intent"}, "the env ablation must reach score_candidate"
-    assert calls, "the allocator ran (a vacuous spy would pass the line above trivially)"
-
-
-# ── 2. the live-state byte-identity guard ─────────────────────────────────────
+    assert seen and set(seen) == {
+        "intent"
+    }, "the env ablation must reach score_candidate"
+    assert (
+        calls
+    ), "the allocator ran (a vacuous spy would pass the line above trivially)"
 
 
 def test_live_state_guard_passes_when_nothing_moves(eval_home):
@@ -335,22 +342,23 @@ def test_loading_config_inside_the_block_is_not_reported_as_a_mutation(eval_home
     was deleted rather than kept as a no-op — and this is the rail that says the deletion
     was safe. If ``load()`` ever writes again, this reds first.
     """
-    from gideon.config.loader import AppConfig
+    from gideon.core.config.loader import AppConfig
 
     hand_edited = '{"evals": {"enabled": true}}\n'
     (eval_home / "config.json").write_text(hand_edited, encoding="utf-8")
 
     with ablation.live_state_unchanged():
-        AppConfig.load()  # the pin does exactly this
+        AppConfig.load()
 
     assert (eval_home / "config.json").read_text(encoding="utf-8") == hand_edited, (
         "AppConfig.load() rewrote a hand-edited config.json. It is a pure read; the "
         "persisting counterpart is config.migrations.load_and_persist_migrations()."
     )
-    # And a real mutation is still caught — the vacuity floor for the assertion above.
     with pytest.raises(ablation.LiveStateMutatedError, match="config.json"):
         with ablation.live_state_unchanged():
-            (eval_home / "config.json").write_text('{"evals": {"enabled": false}}\n', "utf-8")
+            (eval_home / "config.json").write_text(
+                '{"evals": {"enabled": false}}\n', "utf-8"
+            )
 
 
 def test_the_guard_watches_a_components_declared_spec_files(eval_home):
@@ -361,38 +369,33 @@ def test_the_guard_watches_a_components_declared_spec_files(eval_home):
     with pytest.raises(ablation.LiveStateMutatedError, match="triage.json"):
         with ablation.live_state_unchanged(refs):
             spec.write_text('{"nodes": [1]}\n', encoding="utf-8")
-    # And a use_case_settings file is watched without being declared.
     ucs = eval_home / "use_case_settings"
     ucs.mkdir()
     (ucs / "chat.json").write_text("{}\n", encoding="utf-8")
-    with pytest.raises(ablation.LiveStateMutatedError, match="use_case_settings/chat.json"):
+    with pytest.raises(
+        ablation.LiveStateMutatedError, match="use_case_settings/chat.json"
+    ):
         with ablation.live_state_unchanged():
             (ucs / "chat.json").write_text('{"x": 1}\n', encoding="utf-8")
 
 
-# ── 3. keep / remove / lighten are all reachable ──────────────────────────────
-
-
 def test_all_three_verdicts_are_reachable():
     reached = {
-        ablation.classify(0.90, 0.40),  # big degradation when off
-        ablation.classify(0.90, 0.895),  # no delta
-        ablation.classify(0.90, 0.40, 0.895),  # delta, but the cheap variant matches
+        ablation.classify(0.90, 0.40),
+        ablation.classify(0.90, 0.895),
+        ablation.classify(0.90, 0.40, 0.895),
     }
     assert reached == {ablation.KEEP, ablation.REMOVE, ablation.LIGHTEN}
     assert set(ablation.VERDICTS) == reached, "no declared verdict may be unreachable"
 
 
 def test_an_unmeasured_arm_is_inconclusive_not_remove():
-    # The §1.2 rule: a verifier that could not run is never a zero — and must not become a
-    # `remove` either, which is the recommendation with consequences.
     assert ablation.classify(None, 0.4) == ablation.INCONCLUSIVE
     assert ablation.classify(0.9, None) == ablation.INCONCLUSIVE
     assert ablation.INCONCLUSIVE not in ablation.VERDICTS
 
 
 def test_a_component_whose_absence_helped_is_remove_not_keep():
-    # Signed comparison: off scoring BETTER than on is not "keep with a negative delta".
     assert ablation.classify(0.40, 0.90) == ablation.REMOVE
 
 
@@ -406,9 +409,6 @@ def test_aggregate_by_never_borrows_the_other_arms_mean():
     assert arms[overlay_lib.ARM_ON]["mean_score"] == pytest.approx(0.85)
     assert arms[overlay_lib.ARM_OFF]["mean_score"] is None
     assert arms[overlay_lib.ARM_OFF]["counts"][VERIFIER_ABSENT] == 2
-
-
-# ── the registry + cadence ────────────────────────────────────────────────────
 
 
 def _write_registry(home: Path, rows: list[dict]) -> None:
@@ -426,18 +426,29 @@ def test_registry_ships_empty_and_skips_invalid_rows(eval_home):
         [
             _component(component_id="b").to_dict(),
             {"component_id": "bad-kind", "kind": "nope", "target": "t", "subject": "s"},
-            {"component_id": "", "kind": overlay_lib.KIND_SKILL, "target": "t", "subject": "s"},
+            {
+                "component_id": "",
+                "kind": overlay_lib.KIND_SKILL,
+                "target": "t",
+                "subject": "s",
+            },
             _component(component_id="a").to_dict(),
         ],
     )
     rows = ablation.registry()
-    assert [r.component_id for r in rows] == ["a", "b"], "sorted, and invalid rows dropped"
+    assert [r.component_id for r in rows] == [
+        "a",
+        "b",
+    ], "sorted, and invalid rows dropped"
 
 
 def test_pick_component_round_robins_over_the_registry(eval_home):
     _write_registry(
         eval_home,
-        [_component(component_id="a").to_dict(), _component(component_id="b").to_dict()],
+        [
+            _component(component_id="a").to_dict(),
+            _component(component_id="b").to_dict(),
+        ],
     )
     assert ablation.pick_component().component_id == "a"
     ablation.save_state({"cursor": 1, "last_run_ts": "", "history": []})
@@ -449,13 +460,14 @@ def test_pick_component_round_robins_over_the_registry(eval_home):
 def test_due_is_true_before_a_first_run_and_respects_the_cadence(eval_home):
     assert ablation.due(now=NOW, cadence_days=30) is True
     ablation.save_state(
-        {"cursor": 0, "last_run_ts": (NOW - timedelta(days=5)).isoformat(), "history": []}
+        {
+            "cursor": 0,
+            "last_run_ts": (NOW - timedelta(days=5)).isoformat(),
+            "history": [],
+        }
     )
     assert ablation.due(now=NOW, cadence_days=30) is False
     assert ablation.due(now=NOW, cadence_days=3) is True
-
-
-# ── run_ablation ──────────────────────────────────────────────────────────────
 
 
 def test_run_ablation_builds_the_arm_axis_and_writes_a_report(eval_home):
@@ -473,13 +485,11 @@ def test_run_ablation_builds_the_arm_axis_and_writes_a_report(eval_home):
     assert spec.trial_count == 2
     assert spec.component["kind"] == overlay_lib.KIND_CONFIG_FLAG
     assert spec.component["target"] == "learning.correction_heuristic"
-    # The component travels on the SPEC, so experiment.json alone answers "what was toggled".
     assert MatrixSpec.from_dict(spec.to_dict()) == spec
 
     assert report.verdict == ablation.KEEP
     assert report.delta == pytest.approx(0.5)
     assert report.matrix_id == matrix_id
-    # The report carries its own proof of non-mutation.
     assert "config.json" in report.live_state
     on_disk = ablation.read_report(matrix_id)
     assert on_disk is not None and on_disk.verdict == ablation.KEEP
@@ -523,41 +533,45 @@ def test_run_ablation_refuses_a_report_when_the_matrix_leaks_a_mutation(eval_hom
             trials=1,
             now=NOW,
             run_matrix=_fake_matrix(
-                {overlay_lib.ARM_ON: [0.9], overlay_lib.ARM_OFF: [0.4]}, side_effect=_leak
+                {overlay_lib.ARM_ON: [0.9], overlay_lib.ARM_OFF: [0.4]},
+                side_effect=_leak,
             ),
         )
-    assert list(ablation.reports_dir().glob("*.json")) == [], "no report from a leaked run"
-
-
-# ── 4. the LEARN-R9 attachment — the CALL SITE, and the GRADE ─────────────────
+    assert (
+        list(ablation.reports_dir().glob("*.json")) == []
+    ), "no report from a leaked run"
 
 
 def test_a_no_delta_report_attaches_as_ablation_grade_evidence(eval_home):
-    from gideon.learning import proposals
+    from gideon.cognition.learning import proposals
 
     report = ablation.run_ablation(
         _component(),
         trials=3,
         now=NOW,
         run_matrix=_fake_matrix(
-            {overlay_lib.ARM_ON: [0.90, 0.90, 0.90], overlay_lib.ARM_OFF: [0.895, 0.895, 0.895]}
+            {
+                overlay_lib.ARM_ON: [0.90, 0.90, 0.90],
+                overlay_lib.ARM_OFF: [0.895, 0.895, 0.895],
+            }
         ),
     )
     assert report.verdict == ablation.REMOVE
 
     verdict, proposal = ablation.file_retirement_proposal(report)
-    assert proposal is not None, f"a no-delta report must file a proposal (got {verdict})"
+    assert (
+        proposal is not None
+    ), f"a no-delta report must file a proposal (got {verdict})"
     assert proposal.kind == proposals.Kind.RETIREMENT.value
-    # The GRADE, not merely "some evidence": R9 asks for ablation-grade evidence and this is
-    # the only tier in the queue that means a paired on/off measurement.
     assert proposal.evidence_strength == ablation.ABLATION_EVIDENCE_STRENGTH
     assert proposal.evidence_strength != "correlated"
-    # And the report itself is attached, findable from the proposal alone.
     assert report.evidence_ref() in proposal.evidence_refs
     assert f"matrix:{report.matrix_id}" in proposal.evidence_refs
     assert report.matrix_id in proposal.body
-    # The proposal is in the real queue, not just returned.
-    assert any(p.id == proposal.id for p in proposals.list_pending(proposals.Kind.RETIREMENT.value))
+    assert any(
+        p.id == proposal.id
+        for p in proposals.list_pending(proposals.Kind.RETIREMENT.value)
+    )
 
 
 def test_the_ablation_grade_reaches_the_row_a_reviewer_decides_on(eval_home):
@@ -573,21 +587,22 @@ def test_the_ablation_grade_reaches_the_row_a_reviewer_decides_on(eval_home):
 
     So this asserts the far END of the hand-off — the row the Proposal Inbox serves.
     """
-    from gideon.learning import inbox, proposals
+    from gideon.cognition.learning import inbox, proposals
 
     report = ablation.run_ablation(
         _component(),
         trials=3,
         now=NOW,
         run_matrix=_fake_matrix(
-            {overlay_lib.ARM_ON: [0.90, 0.90, 0.90], overlay_lib.ARM_OFF: [0.895, 0.895, 0.895]}
+            {
+                overlay_lib.ARM_ON: [0.90, 0.90, 0.90],
+                overlay_lib.ARM_OFF: [0.895, 0.895, 0.895],
+            }
         ),
     )
     _verdict, filed = ablation.file_retirement_proposal(report)
     assert filed is not None
 
-    # A co-occurrence proposal with the SAME evidence count, in the SAME inbox, is the vacuity
-    # floor: every assertion below would pass on a hardcoded string without it.
     _v2, correlated = proposals.enqueue(
         kind=proposals.Kind.SKILL.value,
         title="summarize before filing",
@@ -603,21 +618,27 @@ def test_the_ablation_grade_reaches_the_row_a_reviewer_decides_on(eval_home):
     rows = {r.id: r for r in inbox.build_view(proposals.list_pending()).rows}
     measured_row, correlated_row = rows[filed.id], rows[correlated.id]
 
-    assert measured_row.to_dict()["evidence_strength"] == ablation.ABLATION_EVIDENCE_STRENGTH
+    assert (
+        measured_row.to_dict()["evidence_strength"]
+        == ablation.ABLATION_EVIDENCE_STRENGTH
+    )
     assert len(measured_row.evidence_refs) == len(correlated_row.evidence_refs)
     assert (
-        measured_row.to_dict()["evidence_strength"] != correlated_row.to_dict()["evidence_strength"]
+        measured_row.to_dict()["evidence_strength"]
+        != correlated_row.to_dict()["evidence_strength"]
     ), "the served rows must distinguish a measurement from a co-occurrence"
 
 
 def test_a_keep_report_files_nothing(eval_home):
-    from gideon.learning import proposals
+    from gideon.cognition.learning import proposals
 
     report = ablation.run_ablation(
         _component(),
         trials=1,
         now=NOW,
-        run_matrix=_fake_matrix({overlay_lib.ARM_ON: [0.9], overlay_lib.ARM_OFF: [0.4]}),
+        run_matrix=_fake_matrix(
+            {overlay_lib.ARM_ON: [0.9], overlay_lib.ARM_OFF: [0.4]}
+        ),
     )
     assert report.verdict == ablation.KEEP
     verdict, proposal = ablation.file_retirement_proposal(report)
@@ -626,35 +647,38 @@ def test_a_keep_report_files_nothing(eval_home):
 
 
 def test_an_inconclusive_report_files_nothing(eval_home):
-    from gideon.learning import proposals
+    from gideon.cognition.learning import proposals
 
     report = ablation.run_ablation(
         _component(),
         trials=1,
         now=NOW,
-        run_matrix=_fake_matrix({overlay_lib.ARM_ON: [0.9], overlay_lib.ARM_OFF: [None]}),
+        run_matrix=_fake_matrix(
+            {overlay_lib.ARM_ON: [0.9], overlay_lib.ARM_OFF: [None]}
+        ),
     )
     assert report.verdict == ablation.INCONCLUSIVE
     assert ablation.file_retirement_proposal(report)[1] is None
     assert proposals.list_pending(proposals.Kind.RETIREMENT.value) == []
 
 
-# ── the cadence entry point (one component per cadence) ───────────────────────
-
-
 def test_run_cadence_measures_one_component_files_it_and_advances(eval_home):
-    from gideon.learning import proposals
+    from gideon.cognition.learning import proposals
 
     _write_registry(
         eval_home,
-        [_component(component_id="a").to_dict(), _component(component_id="b").to_dict()],
+        [
+            _component(component_id="a").to_dict(),
+            _component(component_id="b").to_dict(),
+        ],
     )
     runs: list = []
     summary = ablation.run_cadence(
         now=NOW,
         trials=3,
         run_matrix=_fake_matrix(
-            {overlay_lib.ARM_ON: [0.9, 0.9, 0.9], overlay_lib.ARM_OFF: [0.9, 0.9, 0.9]}, seen=runs
+            {overlay_lib.ARM_ON: [0.9, 0.9, 0.9], overlay_lib.ARM_OFF: [0.9, 0.9, 0.9]},
+            seen=runs,
         ),
     )
     assert summary["ran"] is True
@@ -667,7 +691,6 @@ def test_run_cadence_measures_one_component_files_it_and_advances(eval_home):
     state = ablation.load_state()
     assert state["cursor"] == 1 and state["last_run_ts"] == NOW.isoformat()
     assert state["history"][-1]["component_id"] == "a"
-    # Second tick, same day: not due, so nothing runs and the cursor holds.
     again = ablation.run_cadence(now=NOW, run_matrix=_fake_matrix({}))
     assert again == {"ran": False, "reason": "not_due"}
     assert ablation.load_state()["cursor"] == 1
@@ -700,9 +723,6 @@ def test_a_second_concurrent_cadence_refuses_rather_than_doubling_up(eval_home):
     assert len(starts) == 1
 
 
-# ── the CALL SITE: the periodic tick that actually reaches these ──────────────
-
-
 def _enable_evals(home: Path, **fields) -> None:
     payload = {"enabled": True}
     payload.update(fields)
@@ -716,20 +736,23 @@ def test_the_maintenance_tick_reaches_both_cadences(eval_home, monkeypatch):
 
     Asserts the named function the durability loop calls — not a copy of its body.
     """
-    from gideon.durability import service
+    from gideon.operations.durability import service
 
     _enable_evals(eval_home)
     seen: list[str] = []
     monkeypatch.setattr(
-        "gideon.evals.model_watchdog.check",
+        "gideon.assurance.evals.model_watchdog.check",
         lambda **kw: seen.append(f"watchdog:{kw.get('notifier') is not None}")
         or type(
-            "R", (), {"changed": False, "queued": [], "previous_model_fp": "", "model_fp": ""}
+            "R",
+            (),
+            {"changed": False, "queued": [], "previous_model_fp": "", "model_fp": ""},
         )(),
     )
     monkeypatch.setattr(
-        "gideon.evals.ablation.run_cadence",
-        lambda **kw: seen.append("ablation") or {"ran": False, "reason": "empty_registry"},
+        "gideon.assurance.evals.ablation.run_cadence",
+        lambda **kw: seen.append("ablation")
+        or {"ran": False, "reason": "empty_registry"},
     )
     service._tick_evals_watchdog(notifier=lambda *a, **k: None)
     assert seen == ["watchdog:True", "ablation"], "the notifier must reach the digest"
@@ -737,26 +760,26 @@ def test_the_maintenance_tick_reaches_both_cadences(eval_home, monkeypatch):
 
 def test_the_maintenance_tick_does_nothing_while_evals_is_off(eval_home, monkeypatch):
     """THE VACUITY FLOOR for the tick: off by default has to mean nothing runs."""
-    from gideon.durability import service
+    from gideon.operations.durability import service
 
     (eval_home / "config.json").write_text("{}\n", encoding="utf-8")
 
     def _must_not_run(**kwargs):  # pragma: no cover - asserted absent
         raise AssertionError("evals.enabled is off; nothing may run")
 
-    monkeypatch.setattr("gideon.evals.model_watchdog.check", _must_not_run)
-    monkeypatch.setattr("gideon.evals.ablation.run_cadence", _must_not_run)
+    monkeypatch.setattr("gideon.assurance.evals.model_watchdog.check", _must_not_run)
+    monkeypatch.setattr("gideon.assurance.evals.ablation.run_cadence", _must_not_run)
     service._tick_evals_watchdog()
 
 
 def test_a_raising_cadence_never_breaks_the_maintenance_tick(eval_home, monkeypatch):
-    from gideon.durability import service
+    from gideon.operations.durability import service
 
     _enable_evals(eval_home)
 
     def _boom(**kwargs):
         raise RuntimeError("cadence exploded")
 
-    monkeypatch.setattr("gideon.evals.model_watchdog.check", _boom)
-    monkeypatch.setattr("gideon.evals.ablation.run_cadence", _boom)
-    service._tick_evals_watchdog()  # must not raise
+    monkeypatch.setattr("gideon.assurance.evals.model_watchdog.check", _boom)
+    monkeypatch.setattr("gideon.assurance.evals.ablation.run_cadence", _boom)
+    service._tick_evals_watchdog()

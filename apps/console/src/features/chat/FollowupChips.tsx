@@ -1,0 +1,34 @@
+import { motion } from 'framer-motion'
+import { CornerDownLeft } from 'lucide-react'
+import { spring } from '../../shared/theme/motion'
+import { QuietButton } from '../../shared/ui/QuietButton'
+import { IconButton } from '../../shared/ui/IconButton'
+
+export function followupAnnouncement(count: number): string {
+  if (count <= 0) return ''
+  return `${count} follow-up suggestion${count === 1 ? '' : 's'} available`
+}
+
+export function FollowupChips({ items, onPick, onSend }: {
+  items: string[]
+  onPick: (text: string) => void
+  onSend: (text: string) => void
+}) {
+  if (!items.length) return null
+  return (
+    <div role="group" className="mt-m flex flex-wrap items-center gap-1.5" aria-label="Suggested follow-ups">
+      {items.map((s, i) => (
+        <motion.span key={`${i}-${s}`}
+          initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ ...spring.spatialFast, delay: 0.04 * i }}
+          className="inline-flex items-center overflow-hidden rounded-pill border border-outline-variant/50 bg-surface-container hover:border-primary/40">
+          <QuietButton onClick={() => onPick(s)} onDoubleClick={() => onSend(s)}
+            title="Click to edit · double-click to send" className="max-w-[22rem] truncate rounded-none hover:bg-surface-high">
+            {s}
+          </QuietButton>
+          <IconButton icon={CornerDownLeft} label={`Send: ${s}`} onClick={() => onSend(s)} size={28} iconSize={13}
+            className="shrink-0 border-l border-outline-variant/40 hover:text-primary" />
+        </motion.span>
+      ))}
+    </div>
+  )
+}

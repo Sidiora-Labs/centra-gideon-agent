@@ -6,10 +6,8 @@ import pytest
 from aiohttp.test_utils import TestClient, TestServer
 from chat_test_helpers import _make_state, _make_tags_app
 
-from gideon.dashboard.chat_tags import _normalize_column, _valid_color
-from gideon.dashboard.state import _ChatSession
-
-# ── Pure helpers ──
+from gideon.interfaces.dashboard.chat_tags import _normalize_column, _valid_color
+from gideon.interfaces.dashboard.state import _ChatSession
 
 
 class TestValidColor:
@@ -72,7 +70,6 @@ class TestNormalizeColumn:
         state = self._state_with_tags(tmp_path)
         col = _normalize_column(state, {"order": "abc"})
         assert col is not None
-        # Default applied via setdefault
         assert col["order"] == 0
 
     def test_include_untagged_coerced_to_bool(self, tmp_path):
@@ -112,13 +109,12 @@ class TestNormalizeColumn:
         assert col["include_untagged"] is True
 
 
-# ── Tag vocabulary endpoints ──
-
-
 class TestTagVocabulary:
     @pytest.mark.asyncio
     async def test_list_seeds_default_vocabulary(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         state.load_tags()
         app = _make_tags_app(state)
@@ -132,7 +128,9 @@ class TestTagVocabulary:
 
     @pytest.mark.asyncio
     async def test_list_returns_in_order(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         state._tags = [
             {"id": "b", "name": "B", "color": "#000000", "order": 1, "status": False},
@@ -146,12 +144,15 @@ class TestTagVocabulary:
 
     @pytest.mark.asyncio
     async def test_create_tag(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         app = _make_tags_app(state)
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
-                "/api/chat/tags", json={"name": "Spike", "color": "#22c55e", "status": False}
+                "/api/chat/tags",
+                json={"name": "Spike", "color": "#22c55e", "status": False},
             )
             assert resp.status == 201
             tag = await resp.json()
@@ -163,17 +164,23 @@ class TestTagVocabulary:
 
     @pytest.mark.asyncio
     async def test_create_tag_invalid_color_falls_back(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         app = _make_tags_app(state)
         async with TestClient(TestServer(app)) as client:
-            resp = await client.post("/api/chat/tags", json={"name": "Bug", "color": "not-a-color"})
+            resp = await client.post(
+                "/api/chat/tags", json={"name": "Bug", "color": "not-a-color"}
+            )
             tag = await resp.json()
             assert tag["color"] == "#6b7280"
 
     @pytest.mark.asyncio
     async def test_create_tag_empty_name_rejected(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         app = _make_tags_app(state)
         async with TestClient(TestServer(app)) as client:
@@ -182,22 +189,30 @@ class TestTagVocabulary:
 
     @pytest.mark.asyncio
     async def test_create_tag_invalid_json_rejected(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         app = _make_tags_app(state)
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
-                "/api/chat/tags", data="not json", headers={"Content-Type": "application/json"}
+                "/api/chat/tags",
+                data="not json",
+                headers={"Content-Type": "application/json"},
             )
             assert resp.status == 400
 
     @pytest.mark.asyncio
     async def test_update_tag_rename_recolor_status(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         app = _make_tags_app(state)
         async with TestClient(TestServer(app)) as client:
-            tag = await (await client.post("/api/chat/tags", json={"name": "Old"})).json()
+            tag = await (
+                await client.post("/api/chat/tags", json={"name": "Old"})
+            ).json()
             resp = await client.patch(
                 f"/api/chat/tags/{tag['id']}",
                 json={"name": "New", "color": "#00ff00", "order": 9, "status": True},
@@ -211,27 +226,39 @@ class TestTagVocabulary:
 
     @pytest.mark.asyncio
     async def test_update_tag_empty_name_rejected(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         app = _make_tags_app(state)
         async with TestClient(TestServer(app)) as client:
-            tag = await (await client.post("/api/chat/tags", json={"name": "Keep"})).json()
-            resp = await client.patch(f"/api/chat/tags/{tag['id']}", json={"name": "   "})
+            tag = await (
+                await client.post("/api/chat/tags", json={"name": "Keep"})
+            ).json()
+            resp = await client.patch(
+                f"/api/chat/tags/{tag['id']}", json={"name": "   "}
+            )
             assert resp.status == 400
 
     @pytest.mark.asyncio
     async def test_update_tag_unparseable_order_ignored(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         app = _make_tags_app(state)
         async with TestClient(TestServer(app)) as client:
             tag = await (await client.post("/api/chat/tags", json={"name": "X"})).json()
-            resp = await client.patch(f"/api/chat/tags/{tag['id']}", json={"order": "abc"})
+            resp = await client.patch(
+                f"/api/chat/tags/{tag['id']}", json={"order": "abc"}
+            )
             assert resp.status == 200
 
     @pytest.mark.asyncio
     async def test_update_tag_not_found(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         app = _make_tags_app(state)
         async with TestClient(TestServer(app)) as client:
@@ -240,7 +267,9 @@ class TestTagVocabulary:
 
     @pytest.mark.asyncio
     async def test_update_tag_invalid_json_rejected(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         app = _make_tags_app(state)
         async with TestClient(TestServer(app)) as client:
@@ -253,23 +282,35 @@ class TestTagVocabulary:
             assert resp.status == 400
 
     @pytest.mark.asyncio
-    async def test_delete_tag_strips_from_slots_and_columns(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+    async def test_delete_tag_strips_from_slots_and_columns(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         app = _make_tags_app(state)
         async with TestClient(TestServer(app)) as client:
-            tag = await (await client.post("/api/chat/tags", json={"name": "Spike"})).json()
-            other = await (await client.post("/api/chat/tags", json={"name": "Other"})).json()
+            tag = await (
+                await client.post("/api/chat/tags", json={"name": "Spike"})
+            ).json()
+            other = await (
+                await client.post("/api/chat/tags", json={"name": "Other"})
+            ).json()
             session = _ChatSession("s1")
             session.tags = [tag["id"], other["id"]]
             state._sessions["s1"] = session
             col = await (
                 await client.post(
                     "/api/chat/tag-columns",
-                    json={"name": "Col", "tag_ids": [tag["id"], other["id"]], "mode": "any"},
+                    json={
+                        "name": "Col",
+                        "tag_ids": [tag["id"], other["id"]],
+                        "mode": "any",
+                    },
                 )
             ).json()
-            with patch("gideon.dashboard.chat_tags.save_session_to_history"):
+            with patch("gideon.interfaces.dashboard.chat_tags.save_session_to_history"):
                 resp = await client.delete(f"/api/chat/tags/{tag['id']}")
             assert resp.status == 200
             assert tag["id"] not in {t["id"] for t in state._tags}
@@ -280,7 +321,9 @@ class TestTagVocabulary:
 
     @pytest.mark.asyncio
     async def test_delete_tag_not_found(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         app = _make_tags_app(state)
         async with TestClient(TestServer(app)) as client:
@@ -288,13 +331,12 @@ class TestTagVocabulary:
             assert resp.status == 404
 
 
-# ── Session tag assignment ──
-
-
 class TestSessionTags:
     @pytest.mark.asyncio
     async def test_assign_filters_unknown_and_dedupes(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         app = _make_tags_app(state)
         async with TestClient(TestServer(app)) as client:
@@ -302,7 +344,7 @@ class TestSessionTags:
             t2 = await (await client.post("/api/chat/tags", json={"name": "T2"})).json()
             session = _ChatSession("s1")
             state._sessions["s1"] = session
-            with patch("gideon.dashboard.chat_tags.save_session_to_history"):
+            with patch("gideon.interfaces.dashboard.chat_tags.save_session_to_history"):
                 resp = await client.put(
                     "/api/chat/sessions/s1/tags",
                     json={"tags": [t1["id"], "ghost", t1["id"], t2["id"], 7]},
@@ -314,7 +356,9 @@ class TestSessionTags:
 
     @pytest.mark.asyncio
     async def test_assign_slot_not_found(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         app = _make_tags_app(state)
         async with TestClient(TestServer(app)) as client:
@@ -325,21 +369,26 @@ class TestSessionTags:
     async def test_assign_tags_to_disk_only_session(self, tmp_path, monkeypatch):
         """Tagging a session that's on disk but NOT in memory (post-restart) must
         rehydrate + persist, not 404 — the history list surfaces such sessions."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
-        # session exists only on disk (never loaded into memory)
         state.conversation_log.append("dashboard:on_disk", "user", "hi")
         assert "on_disk" not in state._sessions
         app = _make_tags_app(state)
         async with TestClient(TestServer(app)) as client:
             t1 = await (await client.post("/api/chat/tags", json={"name": "T1"})).json()
-            resp = await client.put("/api/chat/sessions/on_disk/tags", json={"tags": [t1["id"]]})
+            resp = await client.put(
+                "/api/chat/sessions/on_disk/tags", json={"tags": [t1["id"]]}
+            )
             assert resp.status == 200
             assert (await resp.json())["tags"] == [t1["id"]]
 
     @pytest.mark.asyncio
     async def test_assign_invalid_json_rejected(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         state._sessions["s1"] = _ChatSession("s1")
         app = _make_tags_app(state)
@@ -353,22 +402,25 @@ class TestSessionTags:
 
     @pytest.mark.asyncio
     async def test_assign_non_array_rejected(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         state._sessions["s1"] = _ChatSession("s1")
         app = _make_tags_app(state)
         async with TestClient(TestServer(app)) as client:
-            resp = await client.put("/api/chat/sessions/s1/tags", json={"tags": "not-a-list"})
+            resp = await client.put(
+                "/api/chat/sessions/s1/tags", json={"tags": "not-a-list"}
+            )
             assert resp.status == 400
-
-
-# ── Sidebar columns ──
 
 
 class TestColumns:
     @pytest.mark.asyncio
     async def test_list_columns_empty(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         app = _make_tags_app(state)
         async with TestClient(TestServer(app)) as client:
@@ -378,7 +430,9 @@ class TestColumns:
 
     @pytest.mark.asyncio
     async def test_create_column(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         app = _make_tags_app(state)
         async with TestClient(TestServer(app)) as client:
@@ -397,7 +451,9 @@ class TestColumns:
 
     @pytest.mark.asyncio
     async def test_create_column_invalid_mode_rejected(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         app = _make_tags_app(state)
         async with TestClient(TestServer(app)) as client:
@@ -406,7 +462,9 @@ class TestColumns:
 
     @pytest.mark.asyncio
     async def test_create_column_invalid_json_rejected(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         app = _make_tags_app(state)
         async with TestClient(TestServer(app)) as client:
@@ -419,13 +477,18 @@ class TestColumns:
 
     @pytest.mark.asyncio
     async def test_update_column(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         app = _make_tags_app(state)
         async with TestClient(TestServer(app)) as client:
-            col = await (await client.post("/api/chat/tag-columns", json={"name": "Old"})).json()
+            col = await (
+                await client.post("/api/chat/tag-columns", json={"name": "Old"})
+            ).json()
             resp = await client.patch(
-                f"/api/chat/tag-columns/{col['id']}", json={"name": "New", "include_untagged": True}
+                f"/api/chat/tag-columns/{col['id']}",
+                json={"name": "New", "include_untagged": True},
             )
             assert resp.status == 200
             data = await resp.json()
@@ -434,7 +497,9 @@ class TestColumns:
 
     @pytest.mark.asyncio
     async def test_update_column_not_found(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         app = _make_tags_app(state)
         async with TestClient(TestServer(app)) as client:
@@ -443,21 +508,31 @@ class TestColumns:
 
     @pytest.mark.asyncio
     async def test_update_column_invalid_payload_rejected(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         app = _make_tags_app(state)
         async with TestClient(TestServer(app)) as client:
-            col = await (await client.post("/api/chat/tag-columns", json={"name": "Col"})).json()
-            resp = await client.patch(f"/api/chat/tag-columns/{col['id']}", json={"mode": "fancy"})
+            col = await (
+                await client.post("/api/chat/tag-columns", json={"name": "Col"})
+            ).json()
+            resp = await client.patch(
+                f"/api/chat/tag-columns/{col['id']}", json={"mode": "fancy"}
+            )
             assert resp.status == 400
 
     @pytest.mark.asyncio
     async def test_update_column_invalid_json_rejected(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         app = _make_tags_app(state)
         async with TestClient(TestServer(app)) as client:
-            col = await (await client.post("/api/chat/tag-columns", json={"name": "Col"})).json()
+            col = await (
+                await client.post("/api/chat/tag-columns", json={"name": "Col"})
+            ).json()
             resp = await client.patch(
                 f"/api/chat/tag-columns/{col['id']}",
                 data="not json",
@@ -467,18 +542,24 @@ class TestColumns:
 
     @pytest.mark.asyncio
     async def test_delete_column(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         app = _make_tags_app(state)
         async with TestClient(TestServer(app)) as client:
-            col = await (await client.post("/api/chat/tag-columns", json={"name": "Col"})).json()
+            col = await (
+                await client.post("/api/chat/tag-columns", json={"name": "Col"})
+            ).json()
             resp = await client.delete(f"/api/chat/tag-columns/{col['id']}")
             assert resp.status == 200
             assert state._tag_boards == []
 
     @pytest.mark.asyncio
     async def test_delete_column_not_found(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         app = _make_tags_app(state)
         async with TestClient(TestServer(app)) as client:
@@ -487,33 +568,50 @@ class TestColumns:
 
     @pytest.mark.asyncio
     async def test_reorder_columns(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         app = _make_tags_app(state)
         async with TestClient(TestServer(app)) as client:
-            a = await (await client.post("/api/chat/tag-columns", json={"name": "A"})).json()
-            b = await (await client.post("/api/chat/tag-columns", json={"name": "B"})).json()
-            resp = await client.put("/api/chat/tag-columns/order", json={"ids": [b["id"], a["id"]]})
+            a = await (
+                await client.post("/api/chat/tag-columns", json={"name": "A"})
+            ).json()
+            b = await (
+                await client.post("/api/chat/tag-columns", json={"name": "B"})
+            ).json()
+            resp = await client.put(
+                "/api/chat/tag-columns/order", json={"ids": [b["id"], a["id"]]}
+            )
             assert resp.status == 200
             listed = await (await client.get("/api/chat/tag-columns")).json()
             assert [c["id"] for c in listed] == [b["id"], a["id"]]
 
     @pytest.mark.asyncio
-    async def test_reorder_columns_with_int_id_does_not_crash_audit(self, tmp_path, monkeypatch):
+    async def test_reorder_columns_with_int_id_does_not_crash_audit(
+        self, tmp_path, monkeypatch
+    ):
         """Regression: ``', '.join(ids[:10])`` raised TypeError on non-string
         elements, which would skip the SEL audit event after the state mutation."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         app = _make_tags_app(state)
         async with TestClient(TestServer(app)) as client:
-            a = await (await client.post("/api/chat/tag-columns", json={"name": "A"})).json()
-            # Send a malformed ids list mixing string + int (the audit join must coerce).
-            resp = await client.put("/api/chat/tag-columns/order", json={"ids": [a["id"], 42]})
+            a = await (
+                await client.post("/api/chat/tag-columns", json={"name": "A"})
+            ).json()
+            resp = await client.put(
+                "/api/chat/tag-columns/order", json={"ids": [a["id"], 42]}
+            )
             assert resp.status == 200
 
     @pytest.mark.asyncio
     async def test_reorder_invalid_json_rejected(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         app = _make_tags_app(state)
         async with TestClient(TestServer(app)) as client:
@@ -526,32 +624,41 @@ class TestColumns:
 
     @pytest.mark.asyncio
     async def test_reorder_non_list_rejected(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         app = _make_tags_app(state)
         async with TestClient(TestServer(app)) as client:
-            resp = await client.put("/api/chat/tag-columns/order", json={"ids": "not-a-list"})
+            resp = await client.put(
+                "/api/chat/tag-columns/order", json={"ids": "not-a-list"}
+            )
             assert resp.status == 400
-
-
-# ── Drag-drop semantics ──
 
 
 class TestDrop:
     @pytest.mark.asyncio
     async def test_drop_on_status_lane_swaps_status_tag(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         app = _make_tags_app(state)
         async with TestClient(TestServer(app)) as client:
             todo = await (
-                await client.post("/api/chat/tags", json={"name": "ToDo", "status": True})
+                await client.post(
+                    "/api/chat/tags", json={"name": "ToDo", "status": True}
+                )
             ).json()
             done = await (
-                await client.post("/api/chat/tags", json={"name": "Done", "status": True})
+                await client.post(
+                    "/api/chat/tags", json={"name": "Done", "status": True}
+                )
             ).json()
             spike = await (
-                await client.post("/api/chat/tags", json={"name": "spike", "status": False})
+                await client.post(
+                    "/api/chat/tags", json={"name": "spike", "status": False}
+                )
             ).json()
             session = _ChatSession("s1")
             session.tags = [todo["id"], spike["id"]]
@@ -562,7 +669,7 @@ class TestDrop:
                     json={"name": "Col", "tag_ids": [done["id"]], "mode": "any"},
                 )
             ).json()
-            with patch("gideon.dashboard.chat_tags.save_session_to_history"):
+            with patch("gideon.interfaces.dashboard.chat_tags.save_session_to_history"):
                 resp = await client.post(
                     "/api/chat/sessions/s1/drop", json={"column_id": col["id"]}
                 )
@@ -574,48 +681,65 @@ class TestDrop:
 
     @pytest.mark.asyncio
     async def test_drop_on_filter_only_column_is_noop(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         app = _make_tags_app(state)
         async with TestClient(TestServer(app)) as client:
             todo = await (
-                await client.post("/api/chat/tags", json={"name": "ToDo", "status": True})
+                await client.post(
+                    "/api/chat/tags", json={"name": "ToDo", "status": True}
+                )
             ).json()
             session = _ChatSession("s1")
             session.tags = [todo["id"]]
             state._sessions["s1"] = session
             col = await (
                 await client.post(
-                    "/api/chat/tag-columns", json={"name": "Col", "tag_ids": [], "mode": "any"}
+                    "/api/chat/tag-columns",
+                    json={"name": "Col", "tag_ids": [], "mode": "any"},
                 )
             ).json()
-            resp = await client.post("/api/chat/sessions/s1/drop", json={"column_id": col["id"]})
+            resp = await client.post(
+                "/api/chat/sessions/s1/drop", json={"column_id": col["id"]}
+            )
             data = await resp.json()
             assert data["ok"] is False
             assert data["tags"] == [todo["id"]]
 
     @pytest.mark.asyncio
     async def test_drop_slot_not_found(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         app = _make_tags_app(state)
         async with TestClient(TestServer(app)) as client:
-            resp = await client.post("/api/chat/sessions/ghost/drop", json={"column_id": "x"})
+            resp = await client.post(
+                "/api/chat/sessions/ghost/drop", json={"column_id": "x"}
+            )
             assert resp.status == 404
 
     @pytest.mark.asyncio
     async def test_drop_column_not_found(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         state._sessions["s1"] = _ChatSession("s1")
         app = _make_tags_app(state)
         async with TestClient(TestServer(app)) as client:
-            resp = await client.post("/api/chat/sessions/s1/drop", json={"column_id": "ghost"})
+            resp = await client.post(
+                "/api/chat/sessions/s1/drop", json={"column_id": "ghost"}
+            )
             assert resp.status == 404
 
     @pytest.mark.asyncio
     async def test_drop_invalid_json_rejected(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         state._sessions["s1"] = _ChatSession("s1")
         app = _make_tags_app(state)
@@ -630,15 +754,21 @@ class TestDrop:
     @pytest.mark.asyncio
     async def test_drop_on_multi_tag_column_is_noop(self, tmp_path, monkeypatch):
         """Drop on a column with > 1 status tag is a no-op (not a single-status lane)."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         app = _make_tags_app(state)
         async with TestClient(TestServer(app)) as client:
             todo = await (
-                await client.post("/api/chat/tags", json={"name": "ToDo", "status": True})
+                await client.post(
+                    "/api/chat/tags", json={"name": "ToDo", "status": True}
+                )
             ).json()
             done = await (
-                await client.post("/api/chat/tags", json={"name": "Done", "status": True})
+                await client.post(
+                    "/api/chat/tags", json={"name": "Done", "status": True}
+                )
             ).json()
             session = _ChatSession("s1")
             session.tags = [todo["id"]]
@@ -646,36 +776,41 @@ class TestDrop:
             col = await (
                 await client.post(
                     "/api/chat/tag-columns",
-                    json={"name": "Col", "tag_ids": [todo["id"], done["id"]], "mode": "any"},
+                    json={
+                        "name": "Col",
+                        "tag_ids": [todo["id"], done["id"]],
+                        "mode": "any",
+                    },
                 )
             ).json()
-            resp = await client.post("/api/chat/sessions/s1/drop", json={"column_id": col["id"]})
+            resp = await client.post(
+                "/api/chat/sessions/s1/drop", json={"column_id": col["id"]}
+            )
             data = await resp.json()
             assert data["ok"] is False
             assert data["tags"] == [todo["id"]]
-
-
-# ── load_tags safety: do not overwrite a present-but-corrupt tags.json ──
 
 
 class TestLoadTagsSafety:
     def test_load_failure_does_not_overwrite_with_defaults(self, tmp_path, monkeypatch):
         """If tags.json exists but cannot be parsed, never silently overwrite it
         with the seed vocabulary — that would destroy the user's data."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        # Write an unreadable / corrupt tags file
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         corrupt = tmp_path / "tags.json"
         corrupt.write_text("not-json-at-all", encoding="utf-8")
         original = corrupt.read_text(encoding="utf-8")
         state = _make_state(tmp_path)
         state.load_tags()
-        # On parse failure: vocabulary stays empty AND the file is untouched.
         assert state._tags == []
         assert corrupt.read_text(encoding="utf-8") == original
 
     def test_missing_file_seeds_defaults(self, tmp_path, monkeypatch):
         """If tags.json doesn't exist, seed the default 5 status tags."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         state.load_tags()
         names = {t["name"] for t in state._tags}
@@ -685,12 +820,13 @@ class TestLoadTagsSafety:
     def test_explicitly_empty_file_is_not_reseeded(self, tmp_path, monkeypatch):
         """If tags.json contains [], the user explicitly cleared every tag —
         do not re-seed defaults across restart."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         (tmp_path / "tags.json").write_text("[]", encoding="utf-8")
         state = _make_state(tmp_path)
         state.load_tags()
         assert state._tags == []
-        # And the file content is preserved (no re-seed write).
         assert (tmp_path / "tags.json").read_text(encoding="utf-8") == "[]"
 
 
@@ -699,57 +835,77 @@ class TestReorderUniqueOrders:
     async def test_partial_reorder_does_not_collide(self, tmp_path, monkeypatch):
         """Reordering only a subset of columns must not leave older columns
         sharing an `order` value with the newly-renumbered ones."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         app = _make_tags_app(state)
         async with TestClient(TestServer(app)) as client:
-            a = await (await client.post("/api/chat/tag-columns", json={"name": "A"})).json()
-            b = await (await client.post("/api/chat/tag-columns", json={"name": "B"})).json()
-            c = await (await client.post("/api/chat/tag-columns", json={"name": "C"})).json()
+            a = await (
+                await client.post("/api/chat/tag-columns", json={"name": "A"})
+            ).json()
+            b = await (
+                await client.post("/api/chat/tag-columns", json={"name": "B"})
+            ).json()
+            c = await (
+                await client.post("/api/chat/tag-columns", json={"name": "C"})
+            ).json()
             # Only reorder the C-then-B subset; A is left implicit.
-            resp = await client.put("/api/chat/tag-columns/order", json={"ids": [c["id"], b["id"]]})
+            resp = await client.put(
+                "/api/chat/tag-columns/order", json={"ids": [c["id"], b["id"]]}
+            )
             assert resp.status == 200
             listed = await (await client.get("/api/chat/tag-columns")).json()
             orders = {col["id"]: col["order"] for col in listed}
-            # All three orders must be unique
             assert len(set(orders.values())) == 3
-            # The explicitly-ordered ids land at 0 and 1, in submitted order.
             assert orders[c["id"]] == 0
             assert orders[b["id"]] == 1
-            # The unmentioned A is pushed past the explicit ordering.
             assert orders[a["id"]] >= 2
 
 
 class TestDropOnMixedColumn:
     @pytest.mark.asyncio
-    async def test_drop_on_status_plus_filter_still_swaps_status(self, tmp_path, monkeypatch):
+    async def test_drop_on_status_plus_filter_still_swaps_status(
+        self, tmp_path, monkeypatch
+    ):
         """The docstring promises that a drop on a column with exactly one
         status tag swaps onto that status — additional non-status tags in
         the column's filter must not block the swap."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         app = _make_tags_app(state)
         async with TestClient(TestServer(app)) as client:
             todo = await (
-                await client.post("/api/chat/tags", json={"name": "ToDo", "status": True})
+                await client.post(
+                    "/api/chat/tags", json={"name": "ToDo", "status": True}
+                )
             ).json()
             done = await (
-                await client.post("/api/chat/tags", json={"name": "Done", "status": True})
+                await client.post(
+                    "/api/chat/tags", json={"name": "Done", "status": True}
+                )
             ).json()
             spike = await (
-                await client.post("/api/chat/tags", json={"name": "spike", "status": False})
+                await client.post(
+                    "/api/chat/tags", json={"name": "spike", "status": False}
+                )
             ).json()
             session = _ChatSession("s1")
             session.tags = [todo["id"]]
             state._sessions["s1"] = session
-            # Column is "Done AND spike" — exactly one status tag in the filter.
             col = await (
                 await client.post(
                     "/api/chat/tag-columns",
-                    json={"name": "Col", "tag_ids": [done["id"], spike["id"]], "mode": "all"},
+                    json={
+                        "name": "Col",
+                        "tag_ids": [done["id"], spike["id"]],
+                        "mode": "all",
+                    },
                 )
             ).json()
-            with patch("gideon.dashboard.chat_tags.save_session_to_history"):
+            with patch("gideon.interfaces.dashboard.chat_tags.save_session_to_history"):
                 resp = await client.post(
                     "/api/chat/sessions/s1/drop", json={"column_id": col["id"]}
                 )

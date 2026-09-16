@@ -20,9 +20,9 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.workflows import checkpoints as CP
-from gideon.workflows import container_env, provisioning
-from gideon.workflows.container_env import (
+from gideon.automation.workflows import checkpoints as CP
+from gideon.automation.workflows import container_env, provisioning
+from gideon.automation.workflows.container_env import (
     WORKSPACE_MOUNT,
     AppleContainerBackend,
     BackendResult,
@@ -30,8 +30,8 @@ from gideon.workflows.container_env import (
     detect_backend,
     parse_manifest,
 )
-from gideon.workflows.models import WorkflowRun
-from gideon.workflows.workspace import Mode, WorkspaceSpec, parse_workspace
+from gideon.automation.workflows.models import WorkflowRun
+from gideon.automation.workflows.workspace import Mode, WorkspaceSpec, parse_workspace
 
 pytestmark = pytest.mark.anyio
 
@@ -46,7 +46,7 @@ def home(tmp_path, monkeypatch):
     h = tmp_path / "home"
     h.mkdir(exist_ok=True)
     monkeypatch.setenv("GIDEON_HOME", str(h))
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: h)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: h)
     return h
 
 
@@ -58,9 +58,6 @@ def _fatal_codes(issues):
     return {i.code for i in issues if i.fatal}
 
 
-# ── the typed manifest ──
-
-
 class TestManifest:
     def test_image_alone_is_a_valid_environment(self):
         manifest, issues = parse_manifest({"image": "python:3.12"})
@@ -68,7 +65,9 @@ class TestManifest:
         assert not issues
 
     def test_image_xor_build_is_fatal_when_both_declared(self):
-        _, issues = parse_manifest({"image": "a", "build": {"dockerfile": "Dockerfile"}})
+        _, issues = parse_manifest(
+            {"image": "a", "build": {"dockerfile": "Dockerfile"}}
+        )
         assert "container_image_xor_build" in _fatal_codes(issues)
 
     def test_neither_image_nor_build_is_fatal(self):
@@ -90,10 +89,15 @@ class TestManifest:
 
     def test_an_ordinary_mount_parses_with_its_readonly_flag(self):
         manifest, issues = parse_manifest(
-            {"image": "x", "mounts": [{"source": "/tmp/d", "target": "/data", "readonly": True}]}
+            {
+                "image": "x",
+                "mounts": [{"source": "/tmp/d", "target": "/data", "readonly": True}],
+            }
         )
         assert not _fatal_codes(issues)
-        assert manifest.mounts == [{"source": "/tmp/d", "target": "/data", "readonly": True}]
+        assert manifest.mounts == [
+            {"source": "/tmp/d", "target": "/data", "readonly": True}
+        ]
 
     def test_a_mount_missing_either_end_is_fatal(self):
         _, issues = parse_manifest({"image": "x", "mounts": [{"source": "/tmp/d"}]})
@@ -115,13 +119,13 @@ class TestManifest:
         assert not issues
 
 
-# ── workspace-block integration ──
-
-
 class TestWorkspaceParse:
     def test_container_mode_validates_its_manifest_at_save_time(self):
         _, issues = parse_workspace(
-            {"mode": "container", "container": {"image": "a", "build": {"dockerfile": "D"}}}
+            {
+                "mode": "container",
+                "container": {"image": "a", "build": {"dockerfile": "D"}},
+            }
         )
         assert "container_image_xor_build" in _fatal_codes(issues)
 
@@ -147,10 +151,12 @@ class TestWorkspaceParse:
         is declaration-only, and the enum carries NO remote/cloud member."""
         spec, _ = parse_workspace(None)
         assert spec.mode is Mode.SCRATCH
-        assert {m.value for m in Mode} == {"scratch", "worktree", "in_place", "container"}
-
-
-# ── backend detection ──
+        assert {m.value for m in Mode} == {
+            "scratch",
+            "worktree",
+            "in_place",
+            "container",
+        }
 
 
 class TestBackendDetection:
@@ -165,14 +171,18 @@ class TestBackendDetection:
 
     def test_nerdctl_covers_containerd_when_docker_is_absent(self, monkeypatch):
         monkeypatch.setattr(
-            container_env.shutil, "which", lambda b: "/bin/x" if b == "nerdctl" else None
+            container_env.shutil,
+            "which",
+            lambda b: "/bin/x" if b == "nerdctl" else None,
         )
         backend = detect_backend()
         assert backend is not None and backend.name == "nerdctl"
 
     def test_apple_cli_is_the_no_docker_macos_path(self, monkeypatch):
         monkeypatch.setattr(
-            container_env.shutil, "which", lambda b: "/bin/x" if b == "container" else None
+            container_env.shutil,
+            "which",
+            lambda b: "/bin/x" if b == "container" else None,
         )
         backend = detect_backend()
         assert isinstance(backend, AppleContainerBackend)
@@ -182,9 +192,6 @@ class TestBackendDetection:
         assert backend.can_snapshot is False
         result = await backend.snapshot("c1", tag="t")
         assert result.ok is False and "no commit verb" in result.reason
-
-
-# ── CLI argv construction (the engine-owned runtime semantics) ──
 
 
 class TestProvisionArgv:
@@ -221,25 +228,25 @@ class TestProvisionArgv:
         assert "--user worker" in joined
         assert "--volume /tmp/d:/data:ro" in joined
         assert "--cap-add NET_ADMIN" in joined
-        # The NAME is the returned handle, so teardown can never orphan on a truncated id.
-        assert result.value == "pclaw-run-r7" and "--name pclaw-run-r7" in joined
+        assert result.value == "gideon-run-r7" and "--name gideon-run-r7" in joined
 
     async def test_a_snapshot_ref_wins_over_the_manifest_image(self, monkeypatch):
         """The fork anchor's whole point: the child starts from the PARENT's committed state."""
         manifest, _ = parse_manifest({"image": "py:3"})
-        calls, _ = await self._argv_for(monkeypatch, manifest, from_snapshot="pclaw/run-r1:cp-2")
+        calls, _ = await self._argv_for(
+            monkeypatch, manifest, from_snapshot="gideon/run-r1:cp-2"
+        )
         (argv,) = calls
-        assert "pclaw/run-r1:cp-2" in argv and "py:3" not in argv
+        assert "gideon/run-r1:cp-2" in argv and "py:3" not in argv
 
     async def test_a_build_manifest_builds_then_runs_the_built_tag(self, monkeypatch):
-        manifest, _ = parse_manifest({"build": {"dockerfile": "Dockerfile", "context": "."}})
+        manifest, _ = parse_manifest(
+            {"build": {"dockerfile": "Dockerfile", "context": "."}}
+        )
         calls, _ = await self._argv_for(monkeypatch, manifest)
         build_argv, run_argv = calls
         assert build_argv[:2] == ["docker", "build"] and "-f" in build_argv
-        assert "pclaw/run-r7:build" in run_argv
-
-
-# ── the provisioning chain, driven with a fake backend ──
+        assert "gideon/run-r7:build" in run_argv
 
 
 class _FakeBackend:
@@ -256,13 +263,19 @@ class _FakeBackend:
     def available(self) -> bool:
         return True
 
-    async def provision(self, manifest, *, workspace_dir, run_id, from_snapshot="", context_dir=""):
+    async def provision(
+        self, manifest, *, workspace_dir, run_id, from_snapshot="", context_dir=""
+    ):
         self.provision_calls.append(
-            {"workspace_dir": workspace_dir, "run_id": run_id, "from_snapshot": from_snapshot}
+            {
+                "workspace_dir": workspace_dir,
+                "run_id": run_id,
+                "from_snapshot": from_snapshot,
+            }
         )
         if not self.provision_ok:
             return BackendResult(False, reason="image pull refused by fake")
-        return BackendResult(True, value=f"pclaw-run-{run_id}")
+        return BackendResult(True, value=f"gideon-run-{run_id}")
 
     async def snapshot(self, container_id, *, tag):
         return BackendResult(True, value=tag)
@@ -273,30 +286,40 @@ class _FakeBackend:
 
 
 def _container_spec() -> WorkspaceSpec:
-    spec, issues = parse_workspace({"mode": "container", "container": {"image": "py:3"}})
+    spec, issues = parse_workspace(
+        {"mode": "container", "container": {"image": "py:3"}}
+    )
     assert not [i for i in issues if i.fatal]
     return spec
 
 
 class TestProvisioningChain:
-    async def test_a_declared_container_provisions_and_reads_clean(self, home, monkeypatch):
+    async def test_a_declared_container_provisions_and_reads_clean(
+        self, home, monkeypatch
+    ):
         fake = _FakeBackend()
         monkeypatch.setattr(container_env, "detect_backend", lambda: fake)
         result = await provisioning.provision(_container_spec(), run_id="r1")
         assert result.ok and result.path
-        assert result.container_id == "pclaw-run-r1" and result.container_backend == "fakectl"
+        assert (
+            result.container_id == "gideon-run-r1"
+            and result.container_backend == "fakectl"
+        )
         assert result.degraded_reason == "" and result.isolated is True
-        # The host-side scratch dir is what got mounted.
         assert fake.provision_calls[0]["workspace_dir"] == result.path
 
-    async def test_no_backend_degrades_with_the_reason_recorded(self, home, monkeypatch):
+    async def test_no_backend_degrades_with_the_reason_recorded(
+        self, home, monkeypatch
+    ):
         monkeypatch.setattr(container_env, "detect_backend", lambda: None)
         result = await provisioning.provision(_container_spec(), run_id="r2")
         assert result.ok and result.path, "the run must stay startable"
         assert "no container backend" in result.degraded_reason
         assert result.container_id == "" and result.isolated is False
 
-    async def test_backend_failure_degrades_with_the_backend_reason(self, home, monkeypatch):
+    async def test_backend_failure_degrades_with_the_backend_reason(
+        self, home, monkeypatch
+    ):
         fake = _FakeBackend(provision_ok=False)
         monkeypatch.setattr(container_env, "detect_backend", lambda: fake)
         result = await provisioning.provision(_container_spec(), run_id="r3")
@@ -308,46 +331,53 @@ class TestProvisioningChain:
         fake = _FakeBackend()
         monkeypatch.setattr(container_env, "detect_backend", lambda: fake)
         await provisioning.provision(
-            _container_spec(), run_id="r4", from_snapshot="pclaw/run-r1:cp-2"
+            _container_spec(), run_id="r4", from_snapshot="gideon/run-r1:cp-2"
         )
-        assert fake.provision_calls[0]["from_snapshot"] == "pclaw/run-r1:cp-2"
+        assert fake.provision_calls[0]["from_snapshot"] == "gideon/run-r1:cp-2"
 
     async def test_container_fields_ride_the_run_record_dict(self, home, monkeypatch):
         fake = _FakeBackend()
         monkeypatch.setattr(container_env, "detect_backend", lambda: fake)
         result = await provisioning.provision(_container_spec(), run_id="r5")
         d = result.to_dict()
-        assert d["container_id"] == "pclaw-run-r5" and d["container_backend"] == "fakectl"
-
-
-# ── snapshot → checkpoint → fork: the anchor, end to end ──
+        assert (
+            d["container_id"] == "gideon-run-r5" and d["container_backend"] == "fakectl"
+        )
 
 
 class TestForkAnchor:
     def test_checkpoint_round_trips_the_anchor_and_tolerates_old_rows(self, home):
         cp = CP.Checkpoint(
-            id="cp-1", run_id="r1", spec_version=1, workspace_snapshot="pclaw/run-r1:cp-1"
+            id="cp-1",
+            run_id="r1",
+            spec_version=1,
+            workspace_snapshot="gideon/run-r1:cp-1",
         )
-        assert CP.Checkpoint.from_dict(cp.to_dict()).workspace_snapshot == "pclaw/run-r1:cp-1"
+        assert (
+            CP.Checkpoint.from_dict(cp.to_dict()).workspace_snapshot
+            == "gideon/run-r1:cp-1"
+        )
         old = CP.Checkpoint.from_dict({"id": "c0", "run_id": "r0", "spec_version": 1})
         assert old.workspace_snapshot == ""
 
     def test_fork_from_checkpoint_threads_the_anchor_into_forked_from(self, home):
-        from gideon.workflows import store
+        from gideon.automation.workflows import store
 
         parent = store.create(WorkflowRun(id="", workflow_name="w", inputs={}))
-        cp = CP.save_checkpoint(parent, {}, workspace_snapshot="pclaw/run-x:cp-3")
+        cp = CP.save_checkpoint(parent, {}, workspace_snapshot="gideon/run-x:cp-3")
         result = CP.fork_run(parent, {"name": "w", "root": {}}, {}, checkpoint_id=cp.id)
-        assert result.child.forked_from["workspace_snapshot"] == "pclaw/run-x:cp-3"
+        assert result.child.forked_from["workspace_snapshot"] == "gideon/run-x:cp-3"
 
     def test_a_fork_from_head_carries_no_anchor(self, home):
-        from gideon.workflows import store
+        from gideon.automation.workflows import store
 
         parent = store.create(WorkflowRun(id="", workflow_name="w", inputs={}))
         result = CP.fork_run(parent, {"name": "w", "root": {}}, {})
         assert result.child.forked_from["workspace_snapshot"] == ""
 
-    async def test_snapshot_workspace_reads_the_run_state_and_commits(self, home, monkeypatch):
+    async def test_snapshot_workspace_reads_the_run_state_and_commits(
+        self, home, monkeypatch
+    ):
         committed = {}
 
         async def fake_snapshot(self, container_id, *, tag):
@@ -360,19 +390,16 @@ class TestForkAnchor:
 
         run = WorkflowRun(id="r9", workflow_name="w", inputs={})
         run.extra[provisioning.WORKSPACE_KEY] = {
-            "container_id": "pclaw-run-r9",
+            "container_id": "gideon-run-r9",
             "container_backend": "docker",
         }
         ref = await provisioning.snapshot_workspace(run, tag_suffix="cp-1")
-        assert ref == "pclaw/run-r9:cp-1"
-        assert committed == {"container": "pclaw-run-r9", "tag": "pclaw/run-r9:cp-1"}
+        assert ref == "gideon/run-r9:cp-1"
+        assert committed == {"container": "gideon-run-r9", "tag": "gideon/run-r9:cp-1"}
 
     async def test_snapshot_workspace_is_empty_for_uncontainerized_runs(self, home):
         run = WorkflowRun(id="r10", workflow_name="w", inputs={})
         assert await provisioning.snapshot_workspace(run, tag_suffix="cp-1") == ""
-
-
-# ── teardown removes the container before the directory ──
 
 
 class TestTeardown:
@@ -391,14 +418,16 @@ class TestTeardown:
         run.extra[provisioning.WORKSPACE_KEY] = {
             "path": str(ws),
             "isolated": True,
-            "container_id": "pclaw-run-r11",
+            "container_id": "gideon-run-r11",
             "container_backend": "docker",
         }
         out = await provisioning.teardown(run)
-        assert ("docker", "pclaw-run-r11") in removed
+        assert ("docker", "gideon-run-r11") in removed
         assert any("remove container" in step for step in out.ran)
 
-    async def test_a_failed_removal_is_recorded_not_raised(self, home, tmp_path, monkeypatch):
+    async def test_a_failed_removal_is_recorded_not_raised(
+        self, home, tmp_path, monkeypatch
+    ):
         async def fake_remove(self, container_id):
             return BackendResult(False, reason="daemon gone")
 
@@ -409,7 +438,7 @@ class TestTeardown:
         run.extra[provisioning.WORKSPACE_KEY] = {
             "path": str(ws),
             "isolated": True,
-            "container_id": "pclaw-run-r12",
+            "container_id": "gideon-run-r12",
             "container_backend": "docker",
         }
         out = await provisioning.teardown(run)

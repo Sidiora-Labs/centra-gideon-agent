@@ -36,8 +36,8 @@ import json
 
 import pytest
 
-from gideon.agents.native.tools import ARGUMENTS_UNREADABLE, read_tool_arguments
-from gideon.guardrails.failure import FailureMode, correction_note
+from gideon.engine.agents.native.tools import ARGUMENTS_UNREADABLE, read_tool_arguments
+from gideon.security.guardrails.failure import FailureMode, correction_note
 
 
 class TestReadingArguments:
@@ -68,7 +68,9 @@ class TestReadingArguments:
         code discarded as "not a dict" and reported as no arguments at all."""
         assert read_tool_arguments(json.dumps('{"path": "a.md"}')) == {"path": "a.md"}
 
-    @pytest.mark.parametrize("raw", ['"just a string"', "[1, 2]", "42", "```json\n```", 12.5])
+    @pytest.mark.parametrize(
+        "raw", ['"just a string"', "[1, 2]", "42", "```json\n```", 12.5]
+    )
     def test_a_non_object_is_unreadable(self, raw) -> None:
         assert read_tool_arguments(raw) is ARGUMENTS_UNREADABLE
 
@@ -78,15 +80,13 @@ class TestTheCallSiteAttributesIt:
 
     @staticmethod
     def _prep(tool_input: str, stop_reason: str = ""):
-        from gideon.agents.native.runtime import NativeAgentRuntime
-        from gideon.llm.events import AgentEvent
+        from gideon.engine.agents.native.runtime import NativeAgentRuntime
+        from gideon.integrations.llm.events import AgentEvent
 
         call = AgentEvent(kind="tool_call", tool_call_id="tc-1", title="read_file")
         call.tool_input = tool_input
         call.stop_reason = stop_reason
         runtime = NativeAgentRuntime.__new__(NativeAgentRuntime)
-        # Only what `_prepare_call` touches — constructing a whole runtime would drag a provider,
-        # a cwd and a tool registry into a test about one branch.
         runtime._resolve_name = lambda n: n  # type: ignore[method-assign]
         runtime._tool_risk = {}  # type: ignore[attr-defined]
         runtime._requires_approval = lambda n: False  # type: ignore[method-assign]
@@ -96,9 +96,7 @@ class TestTheCallSiteAttributesIt:
     def test_a_TRUNCATED_call_is_answered_with_the_overflow_note(self) -> None:
         prep = self._prep('{"path": "notes/q3-recon', stop_reason="length")
         assert prep.arg_error == correction_note(FailureMode.TOKEN_OVERFLOW)
-        # `_unrunnable_result` is the ONE seam both dispatch paths consult before invoking, so an
-        # observation here means the tool is not run and the call is still answered.
-        from gideon.agents.native.runtime import NativeAgentRuntime
+        from gideon.engine.agents.native.runtime import NativeAgentRuntime
 
         observation = NativeAgentRuntime._unrunnable_result(prep, [])
         assert observation is not None
@@ -111,7 +109,9 @@ class TestTheCallSiteAttributesIt:
         prep = self._prep('{"path": "notes/q3', stop_reason="max_tokens")
         assert prep.arg_error == correction_note(FailureMode.TOKEN_OVERFLOW)
 
-    def test_MALFORMED_but_complete_arguments_are_not_blamed_on_truncation(self) -> None:
+    def test_MALFORMED_but_complete_arguments_are_not_blamed_on_truncation(
+        self,
+    ) -> None:
         """🪤 The floor. Calling everything truncation would be a second misattribution, pointing
         the model at length when the real defect is its JSON."""
         prep = self._prep("{'path': 'a.md'}", stop_reason="stop")
@@ -121,8 +121,9 @@ class TestTheCallSiteAttributesIt:
 
     def test_a_GOOD_call_is_untouched_and_still_runs(self) -> None:
         """The other floor, and the one that matters most: this branch sits in front of every tool
-        call the agent makes. `_unrunnable_result` returning None is what lets it run."""
-        from gideon.agents.native.runtime import NativeAgentRuntime
+        call the agent makes. `_unrunnable_result` returning None is what lets it run.
+        """
+        from gideon.engine.agents.native.runtime import NativeAgentRuntime
 
         prep = self._prep('{"path": "a.md"}', stop_reason="tool_calls")
         assert prep.arg_error == ""
@@ -130,7 +131,7 @@ class TestTheCallSiteAttributesIt:
         assert NativeAgentRuntime._unrunnable_result(prep, []) is None
 
     def test_a_call_with_no_arguments_still_runs(self) -> None:
-        from gideon.agents.native.runtime import NativeAgentRuntime
+        from gideon.engine.agents.native.runtime import NativeAgentRuntime
 
         prep = self._prep("", stop_reason="tool_calls")
         assert prep.arg_error == ""
@@ -142,19 +143,21 @@ def test_the_overflow_correction_note_now_has_a_writer() -> None:
     the issue's framing is right: this closes one rather than adding a control."""
     import subprocess
 
-    from gideon.agents.native import runtime as runtime_mod
+    from gideon.engine.agents.native import runtime as runtime_mod
 
     src = open(runtime_mod.__file__, encoding="utf-8").read()
-    assert "FailureMode.TOKEN_OVERFLOW" in src, "the runtime no longer writes the overflow mode"
-    # And it is reachable from the argument branch specifically, not merely imported somewhere.
+    assert (
+        "FailureMode.TOKEN_OVERFLOW" in src
+    ), "the runtime no longer writes the overflow mode"
     assert "correction_note(FailureMode.TOKEN_OVERFLOW)" in src
     del subprocess
 
 
 def test_the_openai_flush_recognises_length() -> None:
     """`"length"` was never a case, so a truncated tool call reached the defensive flush with no
-    stop reason attached — the signal existed on the wire and was dropped at the boundary."""
-    from gideon.llm import openai as openai_mod
+    stop reason attached — the signal existed on the wire and was dropped at the boundary.
+    """
+    from gideon.integrations.llm import openai as openai_mod
 
     src = open(openai_mod.__file__, encoding="utf-8").read()
     assert '{"tool_calls", "stop", "length"}' in src
@@ -163,8 +166,10 @@ def test_the_openai_flush_recognises_length() -> None:
 
 def test_anthropic_reads_a_stop_reason_at_all() -> None:
     """It read none. The field was declared in `llm/events.py` and never written on this path."""
-    from gideon.llm import anthropic as anthropic_mod
+    from gideon.integrations.llm import anthropic as anthropic_mod
 
     src = open(anthropic_mod.__file__, encoding="utf-8").read()
     assert "stop_reason = str(reason)" in src
-    assert src.count("stop_reason=stop_reason") >= 2, "both streaming regions must carry it"
+    assert (
+        src.count("stop_reason=stop_reason") >= 2
+    ), "both streaming regions must carry it"

@@ -14,20 +14,17 @@ import asyncio
 
 import pytest
 
-from gideon.llm.catalog import (
+from gideon.integrations.llm.catalog import (
     ModelCatalog,
     ModelInfo,
     infer_capabilities,
     openai_compatible_list_models,
 )
-from gideon.llm.registry import ProviderEntry, ProviderRegistry
+from gideon.integrations.llm.registry import ProviderEntry, ProviderRegistry
 
 
 def _run(coro):
     return asyncio.run(coro)
-
-
-# ── Registry seam ──────────────────────────────────────────────────────
 
 
 def test_build_catalog_none_for_unregistered_type():
@@ -62,7 +59,7 @@ def test_build_catalog_failsoft_when_factory_raises():
 
     reg.register_catalog("boomtype", _boom)
     entry = ProviderEntry(name="E", type="boomtype", model="m", options={})
-    assert reg.build_catalog(entry) is None  # swallowed, not raised
+    assert reg.build_catalog(entry) is None
 
 
 def test_register_catalog_last_wins():
@@ -70,9 +67,6 @@ def test_register_catalog_last_wins():
     reg.register_catalog("t", lambda o, model="": "first")
     reg.register_catalog("t", lambda o, model="": "second")
     assert reg.catalog_of("t")({}) == "second"
-
-
-# ── infer_capabilities (moved from the handler onto the shared seam) ──────
 
 
 @pytest.mark.parametrize(
@@ -91,9 +85,6 @@ def test_infer_capabilities(mid, expected_contains):
         assert c in caps
 
 
-# ── openai_compatible_list_models (shared protocol helper) ────────────────
-
-
 def test_openai_compatible_helper_returns_empty_without_config():
     assert _run(openai_compatible_list_models(None, None)) == []
 
@@ -104,14 +95,12 @@ def test_openai_compatible_discovery_layers_operator_egress(monkeypatch):
     allow-lists a private/loopback host (vLLM/LM Studio/Ollama) can actually
     discover its models. Regression: raw CONNECTOR blocked an allow-listed
     localhost endpoint, so the picker was always empty."""
-    from gideon.net import CONNECTOR
+    from gideon.security.net import CONNECTOR
 
     sentinel = CONNECTOR.with_overrides(allow_hosts=("127.0.0.1",))
     seen: dict = {}
 
     def fake_layer(policy):
-        # Prove the helper asks for the operator-layered policy, and hand back a
-        # distinguishable sentinel so we can assert fetch received THAT, not raw.
         seen["layered_base"] = policy.name
         return sentinel
 
@@ -124,10 +113,11 @@ def test_openai_compatible_discovery_layers_operator_egress(monkeypatch):
         seen["url"] = url
         return _Resp()
 
-    # Patch at the source module the helper imports from (late import inside fn).
-    monkeypatch.setattr("gideon.net.egress_policy_for", fake_layer, raising=False)
+    monkeypatch.setattr(
+        "gideon.security.net.egress_policy_for", fake_layer, raising=False
+    )
     monkeypatch.setattr("gideon.sdk.net.egress_policy_for", fake_layer, raising=False)
-    monkeypatch.setattr("gideon.net.client.fetch", fake_fetch, raising=False)
+    monkeypatch.setattr("gideon.security.net.client.fetch", fake_fetch, raising=False)
     monkeypatch.setattr("gideon.sdk.net.fetch", fake_fetch, raising=False)
 
     out = _run(openai_compatible_list_models("http://127.0.0.1:11434/v1", ""))
@@ -136,3 +126,70 @@ def test_openai_compatible_discovery_layers_operator_egress(monkeypatch):
     ), "discovery must use egress_policy_for(CONNECTOR), not raw CONNECTOR"
     assert seen["url"].endswith("/v1/models")
     assert [m.id for m in out] == ["qwen2.5:0.5b"]
+
+
+def test_catalog_wire_projection_retains_zero_and_protects_emitted_fields():
+    from gideon.integrations.llm.catalog import ConnectionResult, PullProgress
+
+    model = ModelInfo(
+        id="authoritative",
+        name="Named",
+        capabilities=["chat"],
+        size=0,
+        downloaded=False,
+        extra={"id": "shadow", "size": 999, "owner": "local"},
+    )
+    encoded = model.to_dict()
+    assert encoded == {
+        "id": "authoritative",
+        "name": "Named",
+        "capabilities": ["chat"],
+        "size": 0,
+        "downloaded": False,
+        "owner": "local",
+    }
+    encoded["capabilities"].append("changed")
+    assert model.capabilities == ["chat"]
+    assert ConnectionResult(False, model_count=0).to_dict() == {
+        "ok": False,
+        "model_count": 0,
+    }
+    assert PullProgress("loading", completed=0, total=0).to_dict() == {
+        "status": "loading",
+        "completed": 0,
+        "total": 0,
+    }
+    assert PullProgress("loading", completed=10, error="failed").to_dict() == {
+        "error": "failed"
+    }
+
+
+@pytest.mark.parametrize(
+    "identifier,families,wanted",
+    [
+        ("whisper-embedding-vision", [], ["embedding"]),
+        ("tts-whisper", [], ["stt"]),
+        ("flux-sora", [], ["video_gen"]),
+        (
+            "voice-vision-video-vl",
+            [],
+            ["chat", "image_modality", "video_modality", "audio_modality"],
+        ),
+        ("local", ["clip"], ["chat", "image_modality"]),
+    ],
+)
+def test_capability_rule_order_and_composable_modalities(identifier, families, wanted):
+    assert infer_capabilities(identifier, families) == wanted
+
+
+def test_model_row_decoder_ignores_malformed_rows_and_retains_owner():
+    from gideon.integrations.llm.catalog import _decode_model_rows
+
+    assert _decode_model_rows([{"id": "not-a-response"}]) == []
+    assert _decode_model_rows({"data": {"id": "not-a-list"}}) == []
+    rows = _decode_model_rows(
+        {"data": [None, {}, {"id": 4}, {"id": "qwen", "owned_by": "local"}]}
+    )
+    assert [row.to_dict() for row in rows] == [
+        {"id": "qwen", "name": "qwen", "capabilities": ["chat"], "owned_by": "local"}
+    ]

@@ -1,9 +1,3 @@
-# CI — inherited from the Gideon apps repo (GideonApps/.github/workflows/ci.yml),
-# adapted for a repo that is ONE app at its root rather than many app subdirectories.
-# The four jobs and their semantics are unchanged: manifest-validate · tests · boundary ·
-# dco (PR-only). The only divergence is the path each job looks at — `app.json` and `*.py`
-# at the root instead of `*/app.json` and `*/*.py`. Keep them in sync: this template exists
-# to prove scaffold output passes the apps-repo checks as generated.
 name: CI
 
 on:
@@ -19,15 +13,10 @@ permissions:
   contents: read
 
 env:
-  # Core is installed from main until PyPI has a release; switch to a pinned
-  # "gideon==<version>" then. Mirrors the apps repo's CORE_SPEC.
   CORE_SPEC: "gideon @ git+https://github.com/Gideon/Gideon@main"
 
 jobs:
   manifest-validate:
-    # app.json parses against core's own manifest parser (the real contract), not a
-    # hand-rolled schema, and round-trips stably — so a manifest core would reject
-    # fails here rather than at install time on someone's machine.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -36,8 +25,7 @@ jobs:
         with:
           enable-cache: true
       - name: Install core (for gideon.apps.manifest)
-        # A uv-managed venv, not `--system`: the runner's /usr is PEP-668
-        # externally-managed and uv refuses `--system` there.
+
         run: |
           uv venv --python 3.12 .venv
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
@@ -63,8 +51,6 @@ jobs:
           PY
 
   tests:
-    # The bundle's test_*.py, with core installed but NO vendor SDKs — an app that needs
-    # a vendor SDK stubs it into sys.modules; a test importing a real one fails here.
     runs-on: ubuntu-latest
     env:
       GIDEON_SKIP_APP_BACKENDS: "1"
@@ -81,20 +67,16 @@ jobs:
           echo "VIRTUAL_ENV=$PWD/.venv" >> "$GITHUB_ENV"
           uv pip install --python "$PWD/.venv/bin/python" "$CORE_SPEC" pytest pytest-asyncio
       - name: Install this app's declared pythonDependencies, then run its tests
-        # Declared deps are what the platform installs at real app-install time, so CI
-        # installs exactly those and nothing else.
         run: |
           deps=$(python -c "import json; d=json.load(open('app.json')); print(' '.join((d.get('dependencies') or {}).get('pythonDependencies') or []))")
           [ -n "$deps" ] && uv pip install $deps
           python -m pytest . -q
 
   boundary:
-    # SDK-only import lint: an installed app may import core ONLY via gideon.sdk.* —
-    # never a deep internal. Mirrors core's tests/test_apps_import_boundary.py.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      # Pure-stdlib ast lint — no core install needed.
+
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
@@ -131,8 +113,6 @@ jobs:
           PY
 
   dco:
-    # Every commit in a PR carries a Signed-off-by trailer (`git commit -s`), same
-    # provenance rule as core and the apps repo. Pure-git check, PR-only.
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:

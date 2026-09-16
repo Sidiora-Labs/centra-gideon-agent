@@ -11,10 +11,8 @@ import json
 
 import pytest
 
-from gideon.dashboard import session_export as se
-from gideon.dashboard import session_templates as st
-
-# ── templates ────────────────────────────────────────────────────────────────
+from gideon.interfaces.dashboard import session_export as se
+from gideon.interfaces.dashboard import session_templates as st
 
 
 @pytest.fixture(autouse=True)
@@ -69,7 +67,9 @@ def test_invalid_reasoning_effort_is_rejected():
 
 @pytest.mark.parametrize("effort", ["", "low", "medium", "high", "max"])
 def test_valid_reasoning_efforts_accepted(effort):
-    tid, err = st.save_template({"name": f"t-{effort or 'none'}", "reasoning_effort": effort})
+    tid, err = st.save_template(
+        {"name": f"t-{effort or 'none'}", "reasoning_effort": effort}
+    )
     assert err == ""
     assert tid
 
@@ -95,8 +95,6 @@ def test_template_limit_refuses_rather_than_growing_unbounded():
 def test_list_is_newest_first():
     a, _ = st.save_template({"name": "older"})
     b, _ = st.save_template({"name": "newer"})
-    # created_at can tie on a coarse clock; assert both present and the order is by
-    # created_at descending rather than depending on sub-ms resolution.
     ids = [t["id"] for t in st.list_templates()]
     assert set(ids) == {a, b}
     stamps = [t["created_at"] for t in st.list_templates()]
@@ -131,7 +129,6 @@ def test_corrupt_store_reads_as_empty_not_an_exception(_isolated_home):
     path.write_text("{not json", encoding="utf-8")
     assert st.list_templates() == []
     assert st.get_template("anything") is None
-    # And it recovers: a save over a corrupt file works.
     tid, err = st.save_template({"name": "recovered"})
     assert err == ""
     assert st.get_template(tid) is not None
@@ -143,8 +140,6 @@ def test_non_dict_json_reads_as_empty(_isolated_home):
     path.write_text("[1, 2, 3]", encoding="utf-8")
     assert st.list_templates() == []
 
-
-# ── export ───────────────────────────────────────────────────────────────────
 
 _MSGS = [
     {
@@ -187,7 +182,6 @@ def test_markdown_blockquotes_content_so_it_cannot_restructure_the_document():
     """A transcript containing markdown headings must not become the export's outline."""
     msgs = [{"role": "assistant", "content": "# Fake Title\n## Fake Section"}]
     md = se.render_markdown(title="Real", key="k", meta={}, messages=msgs)
-    # Every content line is quoted, so no bare heading exists below the header block.
     body = md.split("## Assistant", 1)[1]
     assert "> # Fake Title" in body
     assert "\n# Fake Title" not in body
@@ -207,7 +201,10 @@ def test_empty_transcript_still_renders_valid_output():
 
 
 def test_blank_content_messages_are_skipped():
-    msgs = [{"role": "user", "content": "   "}, {"role": "assistant", "content": "real"}]
+    msgs = [
+        {"role": "user", "content": "   "},
+        {"role": "assistant", "content": "real"},
+    ]
     payload = json.loads(se.render_json(title="t", key="k", meta={}, messages=msgs))
     assert [m["content"] for m in payload["messages"]] == ["real"]
 
@@ -220,10 +217,14 @@ def test_non_dict_entries_are_tolerated():
 
 def test_title_is_redacted_too():
     """A session auto-titled from a message can carry the secret in its TITLE."""
-    md = se.render_markdown(title="setting up AKIAIOSFODNN7EXAMPLE", key="k", meta={}, messages=[])
+    md = se.render_markdown(
+        title="setting up AKIAIOSFODNN7EXAMPLE", key="k", meta={}, messages=[]
+    )
     assert "AKIAIOSFODNN7EXAMPLE" not in md
     payload = json.loads(
-        se.render_json(title="setting up AKIAIOSFODNN7EXAMPLE", key="k", meta={}, messages=[])
+        se.render_json(
+            title="setting up AKIAIOSFODNN7EXAMPLE", key="k", meta={}, messages=[]
+        )
     )
     assert "AKIAIOSFODNN7EXAMPLE" not in payload["title"]
 
@@ -256,7 +257,7 @@ def test_export_filename_is_filesystem_safe(title, expected):
 def test_export_filename_is_ascii_so_plain_content_disposition_is_valid():
     """The route uses `filename="…"` (not RFC 5987), so the name must be ASCII."""
     name = se.export_filename("日本語のチャット", "fallback-key", "json")
-    name.encode("ascii")  # raises if not
+    name.encode("ascii")
     assert name.endswith(".json")
 
 

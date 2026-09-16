@@ -3,52 +3,52 @@
   "apps": [
     {
       "name": "channel-null",
-      "repo": "https://github.com/Gideon/channel-null",
+      "repo": "https://example.invalid/gideon/channel-null",
       "types": [
         "channel"
       ],
       "permissions_declared": [],
       "license": "MIT",
-      "maintainer": "keyurgolani",
+      "maintainer": "paxlabs-inc",
       "added": "2026-09-02",
       "last_validated": "2026-09-07T12:19:15Z",
       "last_scan_verdict": "clean"
     },
     {
       "name": "inbox-github-notifications",
-      "repo": "https://github.com/Gideon/inbox-github-notifications",
+      "repo": "https://example.invalid/gideon/inbox-github-notifications",
       "types": [
         "inbox"
       ],
       "permissions_declared": [],
       "license": "MIT",
-      "maintainer": "keyurgolani",
+      "maintainer": "paxlabs-inc",
       "added": "2026-09-02",
       "last_validated": "2026-09-07T12:19:15Z",
       "last_scan_verdict": "clean"
     },
     {
       "name": "watched-source-github",
-      "repo": "https://github.com/Gideon/watched-source-github",
+      "repo": "https://example.invalid/gideon/watched-source-github",
       "types": [
         "trigger_source"
       ],
       "permissions_declared": [],
       "license": "MIT",
-      "maintainer": "keyurgolani",
+      "maintainer": "paxlabs-inc",
       "added": "2026-09-02",
       "last_validated": "2026-09-07T12:19:15Z",
       "last_scan_verdict": "clean"
     },
     {
       "name": "action-home-assistant",
-      "repo": "https://github.com/Gideon/action-home-assistant",
+      "repo": "https://example.invalid/gideon/action-home-assistant",
       "types": [
         "action"
       ],
       "permissions_declared": [],
       "license": "MIT",
-      "maintainer": "keyurgolani",
+      "maintainer": "paxlabs-inc",
       "added": "2026-09-02",
       "last_validated": "2026-09-07T12:19:15Z",
       "last_scan_verdict": "clean"

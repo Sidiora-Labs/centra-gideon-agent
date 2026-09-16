@@ -1,0 +1,1577 @@
+{
+  "data": {
+    "fields": {
+      "agent.acp_concurrent_sessions": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "agent.approval_mode": {
+        "default": "auto",
+        "sensitive": false,
+        "type": "str"
+      },
+      "agent.bot_name": {
+        "default": "",
+        "sensitive": false,
+        "type": "str"
+      },
+      "agent.durable_sessions": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "agent.log_level": {
+        "default": "WARNING",
+        "sensitive": false,
+        "type": "str"
+      },
+      "agent.max_subagents": {
+        "default": 3,
+        "sensitive": false,
+        "type": "int"
+      },
+      "agent.orchestrator_skill": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "agent.prompt_cache_enabled": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "agent.provider": {
+        "default": "native",
+        "sensitive": false,
+        "type": "str"
+      },
+      "agent.runner_health_check_secs": {
+        "default": 3600,
+        "sensitive": false,
+        "type": "int"
+      },
+      "agent.runner_idle_release_secs": {
+        "default": 1800,
+        "sensitive": false,
+        "type": "int"
+      },
+      "agent.sandbox": {
+        "default": "auto",
+        "sensitive": false,
+        "type": "str"
+      },
+      "agent.self_qa.enabled": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "agent.self_qa.fix_branch_enabled": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "agent.self_qa.max_scenarios_per_fire": {
+        "default": 3,
+        "sensitive": false,
+        "type": "int"
+      },
+      "agent.self_qa.watched_repo": {
+        "default": "",
+        "sensitive": false,
+        "type": "str"
+      },
+      "agent.soft_stop_budget_secs": {
+        "default": 10.0,
+        "sensitive": false,
+        "type": "float"
+      },
+      "agent.spawn_min_memory_gb": {
+        "default": 4.0,
+        "sensitive": false,
+        "type": "float"
+      },
+      "agent.subagent_cwd_allowed_roots": {
+        "default": [
+          "~/workspace",
+          "~/workplace"
+        ],
+        "sensitive": false,
+        "type": "list[str]"
+      },
+      "agent.subagent_max_turns": {
+        "default": 100,
+        "sensitive": false,
+        "type": "int"
+      },
+      "agent.subagent_timeout_secs": {
+        "default": 1800,
+        "sensitive": false,
+        "type": "int"
+      },
+      "agent.unattended_requires_verified_adapter": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "agent.yolo": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "agents": {
+        "default": {},
+        "sensitive": false,
+        "type": "dict[str, AgentProfile]"
+      },
+      "agents_routing.cooldown_hours": {
+        "default": 24.0,
+        "sensitive": false,
+        "type": "float"
+      },
+      "agents_routing.enabled": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "agents_routing.min_confidence": {
+        "default": 0.62,
+        "sensitive": false,
+        "type": "float"
+      },
+      "ambient.default_refresh_ttl_secs": {
+        "default": 900,
+        "sensitive": false,
+        "type": "int"
+      },
+      "ambient.genui_enabled": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "ambient.max_tiles": {
+        "default": 12,
+        "sensitive": false,
+        "type": "int"
+      },
+      "ambient.surfaces_max_layer": {
+        "default": 2,
+        "sensitive": false,
+        "type": "int"
+      },
+      "ambient.tiles_enabled": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "ambient.tray_enabled": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "apps.bundled_source_enabled": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "apps.registry_source_enabled": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "auth.lockout_threshold": {
+        "default": 5,
+        "sensitive": false,
+        "type": "int"
+      },
+      "auth.lockout_window": {
+        "default": "15m",
+        "sensitive": false,
+        "type": "str"
+      },
+      "auth.login_enabled": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "auth.require_totp": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "auth.session_ttl": {
+        "default": "30d",
+        "sensitive": false,
+        "type": "str"
+      },
+      "auto_update": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "browse.user_browser_enabled": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "checkpoints.enabled": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "checkpoints.max_file_mb": {
+        "default": 8,
+        "sensitive": false,
+        "type": "int"
+      },
+      "checkpoints.max_mb": {
+        "default": 200,
+        "sensitive": false,
+        "type": "int"
+      },
+      "checkpoints.max_turns": {
+        "default": 50,
+        "sensitive": false,
+        "type": "int"
+      },
+      "companion.discovery_enabled": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "companion.instance_name": {
+        "default": "",
+        "sensitive": false,
+        "type": "str"
+      },
+      "dashboard.auto_open_browser": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "dashboard.auto_tag_sessions": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "dashboard.dashboard_layout": {
+        "default": {},
+        "sensitive": false,
+        "type": "dict"
+      },
+      "dashboard.document_editing": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "dashboard.followup_chips": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "dashboard.mcp_probe_timeout_secs": {
+        "default": 15,
+        "sensitive": false,
+        "type": "int"
+      },
+      "dashboard.merge_queued_messages": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "dashboard.offer_check_work": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "dashboard.public_url": {
+        "default": "",
+        "sensitive": false,
+        "type": "str"
+      },
+      "dashboard.restore_sessions": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "dashboard.restore_window_minutes": {
+        "default": 30,
+        "sensitive": false,
+        "type": "int"
+      },
+      "dashboard.screen_share_enabled": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "dashboard.send_on_enter": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "dashboard.show_thinking_inline": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "dashboard.show_timestamps": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "dashboard.simplified_tool_names": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "dashboard.stream_reveal": {
+        "default": "smooth",
+        "sensitive": false,
+        "type": "str"
+      },
+      "dashboard.terminal": {
+        "default": {
+          "enabled": true
+        },
+        "sensitive": false,
+        "type": "dict"
+      },
+      "dashboard.trusted_proxies": {
+        "default": [],
+        "sensitive": false,
+        "type": "list[str]"
+      },
+      "dashboard.update_dev_mode": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "dashboard.url": {
+        "default": "",
+        "sensitive": false,
+        "type": "str"
+      },
+      "dashboard.user_name": {
+        "default": "",
+        "sensitive": false,
+        "type": "str"
+      },
+      "dashboard.username": {
+        "default": "",
+        "sensitive": false,
+        "type": "str"
+      },
+      "dashboard.widget_density": {
+        "default": "more",
+        "sensitive": false,
+        "type": "str"
+      },
+      "default_agent": {
+        "default": "",
+        "sensitive": false,
+        "type": "str"
+      },
+      "durability.auto_backup": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "durability.keep_daily": {
+        "default": 14,
+        "sensitive": false,
+        "type": "int"
+      },
+      "durability.keep_monthly": {
+        "default": 12,
+        "sensitive": false,
+        "type": "int"
+      },
+      "durability.keep_weekly": {
+        "default": 8,
+        "sensitive": false,
+        "type": "int"
+      },
+      "durability.restore_drills": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "durability.sync_enabled": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "durability.sync_encrypt": {
+        "default": "auto",
+        "sensitive": false,
+        "type": "str"
+      },
+      "durability.sync_stale_after_secs": {
+        "default": 900,
+        "sensitive": false,
+        "type": "int"
+      },
+      "durability.sync_transport": {
+        "default": "",
+        "sensitive": false,
+        "type": "str"
+      },
+      "durability.time_travel": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "evals.ablation_cadence_days": {
+        "default": 30,
+        "sensitive": false,
+        "type": "int"
+      },
+      "evals.bakeoff_capture_enabled": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "evals.default_budget_usd": {
+        "default": 0.0,
+        "sensitive": false,
+        "type": "float"
+      },
+      "evals.enabled": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "evals.judge_agreement_floor": {
+        "default": 0.6,
+        "sensitive": false,
+        "type": "float"
+      },
+      "evals.study_default_k": {
+        "default": 5,
+        "sensitive": false,
+        "type": "int"
+      },
+      "external_access.a2a.allow_remote": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "external_access.a2a.enabled": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "external_access.auto_disable_after_breaches": {
+        "default": 10,
+        "sensitive": false,
+        "type": "int"
+      },
+      "external_access.bridge.allow_remote": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "external_access.bridge.enabled": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "external_access.capture.allow_remote": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "external_access.capture.enabled": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "external_access.capture.retention_days": {
+        "default": 30,
+        "sensitive": false,
+        "type": "int"
+      },
+      "external_access.capture.upstream_allowlist": {
+        "default": [],
+        "sensitive": false,
+        "type": "list[str]"
+      },
+      "external_access.capture_retention_days": {
+        "default": 30,
+        "sensitive": false,
+        "type": "int"
+      },
+      "external_access.enabled": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "external_access.mcp.allow_remote": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "external_access.mcp.enabled": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "external_access.openai.allow_remote": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "external_access.openai.enabled": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "external_access.public_url": {
+        "default": "",
+        "sensitive": false,
+        "type": "str"
+      },
+      "external_access.rate_burst": {
+        "default": 20,
+        "sensitive": false,
+        "type": "int"
+      },
+      "external_access.rate_concurrent": {
+        "default": 4,
+        "sensitive": false,
+        "type": "int"
+      },
+      "external_access.rate_rps": {
+        "default": 1.0,
+        "sensitive": false,
+        "type": "float"
+      },
+      "feedback.enabled": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "feedback.min_n": {
+        "default": 5,
+        "sensitive": false,
+        "type": "int"
+      },
+      "feedback.retire_threshold": {
+        "default": 0.4,
+        "sensitive": false,
+        "type": "float"
+      },
+      "feedback.window_days": {
+        "default": 90,
+        "sensitive": false,
+        "type": "int"
+      },
+      "guardrails.autonomy.clean_approvals": {
+        "default": 10,
+        "sensitive": false,
+        "type": "int"
+      },
+      "guardrails.autonomy.cooldown_days": {
+        "default": 14,
+        "sensitive": false,
+        "type": "int"
+      },
+      "guardrails.autonomy.evidence_window_days": {
+        "default": 30,
+        "sensitive": false,
+        "type": "int"
+      },
+      "guardrails.autonomy.max_rejections": {
+        "default": 0,
+        "sensitive": false,
+        "type": "int"
+      },
+      "guardrails.autonomy.min_days": {
+        "default": 7,
+        "sensitive": false,
+        "type": "int"
+      },
+      "guardrails.breaker.failure_threshold": {
+        "default": 5,
+        "sensitive": false,
+        "type": "int"
+      },
+      "guardrails.breaker.recovery_secs": {
+        "default": 30.0,
+        "sensitive": false,
+        "type": "float"
+      },
+      "guardrails.budgets.max_dollars_per_day": {
+        "default": 0.0,
+        "sensitive": false,
+        "type": "float"
+      },
+      "guardrails.budgets.max_tokens_per_day": {
+        "default": 0,
+        "sensitive": false,
+        "type": "int"
+      },
+      "guardrails.budgets.max_tokens_per_run": {
+        "default": 0,
+        "sensitive": false,
+        "type": "int"
+      },
+      "guardrails.scan_mode": {
+        "default": "redact",
+        "sensitive": false,
+        "type": "str"
+      },
+      "hooks": {
+        "default": {},
+        "sensitive": false,
+        "type": "dict"
+      },
+      "inbox.enabled": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "inbox.engagement_half_life_days": {
+        "default": 0.0,
+        "sensitive": false,
+        "type": "float"
+      },
+      "inbox.engagement_ranking_enabled": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "inbox.poll_interval_seconds": {
+        "default": 60,
+        "sensitive": false,
+        "type": "int"
+      },
+      "inbox.style_rules": {
+        "default": [],
+        "sensitive": false,
+        "type": "list[str]"
+      },
+      "inbox.test_mode": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "inbox.user_id": {
+        "default": "",
+        "sensitive": false,
+        "type": "str"
+      },
+      "inbox.watched_channels": {
+        "default": [],
+        "sensitive": false,
+        "type": "list[str]"
+      },
+      "knowledge.auto_ingest_artifacts": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "knowledge.conflict_model_pass": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "knowledge.consolidate_min_cluster": {
+        "default": 5,
+        "sensitive": false,
+        "type": "int"
+      },
+      "knowledge.consolidate_min_hours": {
+        "default": 6,
+        "sensitive": false,
+        "type": "int"
+      },
+      "knowledge.default_ttl": {
+        "default": "",
+        "sensitive": false,
+        "type": "str"
+      },
+      "knowledge.embed_batch_size": {
+        "default": 32,
+        "sensitive": false,
+        "type": "int"
+      },
+      "knowledge.embed_retry_budget": {
+        "default": 3,
+        "sensitive": false,
+        "type": "int"
+      },
+      "knowledge.idempotent_persist": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "knowledge.lint_every_n_persists": {
+        "default": 12,
+        "sensitive": false,
+        "type": "int"
+      },
+      "knowledge.maintenance_max_staleness_secs": {
+        "default": 900,
+        "sensitive": false,
+        "type": "int"
+      },
+      "knowledge.max_mentions_per_claim": {
+        "default": 20,
+        "sensitive": false,
+        "type": "int"
+      },
+      "knowledge.report_budget_chars": {
+        "default": 40000,
+        "sensitive": false,
+        "type": "int"
+      },
+      "knowledge.require_citations": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "knowledge.session_brief_max_tokens": {
+        "default": 800,
+        "sensitive": false,
+        "type": "int"
+      },
+      "knowledge.similarity_degree_cap": {
+        "default": 32,
+        "sensitive": false,
+        "type": "int"
+      },
+      "knowledge.similarity_min_score": {
+        "default": 0.55,
+        "sensitive": false,
+        "type": "float"
+      },
+      "knowledge.similarity_top_k": {
+        "default": 8,
+        "sensitive": false,
+        "type": "int"
+      },
+      "knowledge.synthesis_window": {
+        "default": 20,
+        "sensitive": false,
+        "type": "int"
+      },
+      "knowledge.vault_mode": {
+        "default": "off",
+        "sensitive": false,
+        "type": "str"
+      },
+      "knowledge.vault_path": {
+        "default": "knowledge-vault",
+        "sensitive": false,
+        "type": "str"
+      },
+      "learning.attribution_enabled": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "learning.context_budget_tokens": {
+        "default": 4000,
+        "sensitive": false,
+        "type": "int"
+      },
+      "learning.correction_heuristic": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "learning.curator_enabled": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "learning.enabled": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "learning.identity_report_cadence": {
+        "default": "monthly",
+        "sensitive": false,
+        "type": "str"
+      },
+      "learning.min_evidence": {
+        "default": 3,
+        "sensitive": false,
+        "type": "int"
+      },
+      "learning.min_lesson_confidence": {
+        "default": 0.5,
+        "sensitive": false,
+        "type": "float"
+      },
+      "learning.min_session_score": {
+        "default": 0.0,
+        "sensitive": false,
+        "type": "float"
+      },
+      "learning.min_tool_calls": {
+        "default": 4,
+        "sensitive": false,
+        "type": "int"
+      },
+      "learning.propose_quota_per_run": {
+        "default": 5,
+        "sensitive": false,
+        "type": "int"
+      },
+      "learning.replay_enabled": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "learning.replay_max_dollars": {
+        "default": 0.0,
+        "sensitive": false,
+        "type": "float"
+      },
+      "learning.run_end_enabled": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "learning.self_model_enabled": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "learning.skill_ladder": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "learning.staging_enabled": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "learning.surface_chip": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "legibility.context_adapters": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "legibility.discover_tips": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "local_models.hide_unrunnable_models": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "local_models.memory_reserve_gb": {
+        "default": 3.0,
+        "sensitive": false,
+        "type": "float"
+      },
+      "local_models.pressure_warn_pct": {
+        "default": 85,
+        "sensitive": false,
+        "type": "int"
+      },
+      "local_models.sidecar_restart_max": {
+        "default": 3,
+        "sensitive": false,
+        "type": "int"
+      },
+      "loops.check_work_stages": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "loops.default_idle_secs": {
+        "default": 120,
+        "sensitive": false,
+        "type": "int"
+      },
+      "loops.judge_use_case": {
+        "default": "reasoning",
+        "sensitive": false,
+        "type": "str"
+      },
+      "loops.max_cycles_hard_cap": {
+        "default": 100,
+        "sensitive": false,
+        "type": "int"
+      },
+      "loops.stagnation_window": {
+        "default": 5,
+        "sensitive": false,
+        "type": "int"
+      },
+      "loops.trust_ttl_secs": {
+        "default": 86400,
+        "sensitive": false,
+        "type": "int"
+      },
+      "loops.worktree_sparse": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "memory.active_recall": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "memory.active_recall_timeout_ms": {
+        "default": 1500,
+        "sensitive": false,
+        "type": "int"
+      },
+      "memory.auto_promote_enabled": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "memory.auto_promote_every_n": {
+        "default": 10,
+        "sensitive": false,
+        "type": "int"
+      },
+      "memory.auto_promote_max_per_run": {
+        "default": 5,
+        "sensitive": false,
+        "type": "int"
+      },
+      "memory.episodic_dedup_threshold": {
+        "default": 0.88,
+        "sensitive": false,
+        "type": "float"
+      },
+      "memory.episodic_max_count": {
+        "default": 10000,
+        "sensitive": false,
+        "type": "int"
+      },
+      "memory.episodic_max_results": {
+        "default": 8,
+        "sensitive": false,
+        "type": "int"
+      },
+      "memory.graph_enabled": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "memory.graph_topology_in_context": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "memory.history_idle_hours": {
+        "default": 3.0,
+        "sensitive": false,
+        "type": "float"
+      },
+      "memory.history_max_days": {
+        "default": 365,
+        "sensitive": false,
+        "type": "int"
+      },
+      "memory.holder_attribution": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "memory.l1_manifest": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "memory.migrated": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "memory.proactive_commitments": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "memory.proactive_commitments_max_per_day": {
+        "default": 3,
+        "sensitive": false,
+        "type": "int"
+      },
+      "memory.push_context": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "memory.push_min_confidence": {
+        "default": 0.7,
+        "sensitive": false,
+        "type": "float"
+      },
+      "memory.semantic_confidence_threshold": {
+        "default": 0.8,
+        "sensitive": false,
+        "type": "float"
+      },
+      "memory.semantic_keys": {
+        "default": [],
+        "sensitive": false,
+        "type": "list[str]"
+      },
+      "memory.slot_size_cap": {
+        "default": 1400,
+        "sensitive": false,
+        "type": "int"
+      },
+      "memory.vault_mode": {
+        "default": "off",
+        "sensitive": false,
+        "type": "str"
+      },
+      "memory.vault_path": {
+        "default": "memory-vault",
+        "sensitive": false,
+        "type": "str"
+      },
+      "memory_stores": {
+        "default": {},
+        "sensitive": false,
+        "type": "dict[str, MemoryStoreConfig]"
+      },
+      "mobile.ntfy_topic_url": {
+        "default": "",
+        "sensitive": false,
+        "type": "str"
+      },
+      "mobile.push_backend": {
+        "default": "webpush",
+        "sensitive": false,
+        "type": "str"
+      },
+      "mobile.relay_url": {
+        "default": "",
+        "sensitive": false,
+        "type": "str"
+      },
+      "observe_max_messages": {
+        "default": 200,
+        "sensitive": false,
+        "type": "int"
+      },
+      "observe_ttl_hours": {
+        "default": 168.0,
+        "sensitive": false,
+        "type": "float"
+      },
+      "packs.connector_catalog_url": {
+        "default": "",
+        "sensitive": false,
+        "type": "str"
+      },
+      "packs.fingerprint_enabled": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "packs.skill_catalogs": {
+        "default": [],
+        "sensitive": false,
+        "type": "list[SkillCatalogConfig]"
+      },
+      "planning.scratchpad_path": {
+        "default": "",
+        "sensitive": false,
+        "type": "str"
+      },
+      "proactive.auto_execute_enabled": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "proactive.classifier_gate_enabled": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "proactive.decision_default_horizon_days": {
+        "default": 90,
+        "sensitive": false,
+        "type": "int"
+      },
+      "proactive.digest_schedule": {
+        "default": "0 8 * * *",
+        "sensitive": false,
+        "type": "str"
+      },
+      "proactive.max_auto_actions_per_run": {
+        "default": 5,
+        "sensitive": false,
+        "type": "int"
+      },
+      "proactive.triage_enabled": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "resilience.cancel_replace_min_interval_secs": {
+        "default": 2.0,
+        "sensitive": false,
+        "type": "float"
+      },
+      "resilience.degraded_indicator": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "resilience.doctor_enabled": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "resilience.mid_turn_policy": {
+        "default": "queue",
+        "sensitive": false,
+        "type": "str"
+      },
+      "resilience.remediation.enabled": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "resilience.remediation.idle_minutes_healthy": {
+        "default": 60,
+        "sensitive": false,
+        "type": "int"
+      },
+      "resilience.remediation.max_cost_usd": {
+        "default": 1.0,
+        "sensitive": false,
+        "type": "float"
+      },
+      "resilience.remediation.target_score": {
+        "default": 90,
+        "sensitive": false,
+        "type": "int"
+      },
+      "resilience.remediation.tick_minutes_degraded": {
+        "default": 5,
+        "sensitive": false,
+        "type": "int"
+      },
+      "routing.cloud_quality_margin": {
+        "default": 0.1,
+        "sensitive": false,
+        "type": "float"
+      },
+      "routing.enabled": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "routing.energy_sampling": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "routing.hysteresis": {
+        "default": 0.05,
+        "sensitive": false,
+        "type": "float"
+      },
+      "routing.local_timeout_secs": {
+        "default": 20.0,
+        "sensitive": false,
+        "type": "float"
+      },
+      "routing.min_samples": {
+        "default": 5,
+        "sensitive": false,
+        "type": "int"
+      },
+      "routing.reproposal_cooldown_days": {
+        "default": 14,
+        "sensitive": false,
+        "type": "int"
+      },
+      "routing.weights.feedback": {
+        "default": 0.4,
+        "sensitive": false,
+        "type": "float"
+      },
+      "routing.weights.success": {
+        "default": 0.6,
+        "sensitive": false,
+        "type": "float"
+      },
+      "sandbox.cgroup_scopes": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "sandbox.env_passthrough": {
+        "default": [],
+        "sensitive": false,
+        "type": "list[str]"
+      },
+      "sandbox.max_pids": {
+        "default": 0,
+        "sensitive": false,
+        "type": "int"
+      },
+      "sandbox.max_rss_mb": {
+        "default": 0,
+        "sensitive": false,
+        "type": "int"
+      },
+      "sandbox.nofile": {
+        "default": 4096,
+        "sensitive": false,
+        "type": "int"
+      },
+      "security.autonomy_denylist": {
+        "default": [],
+        "sensitive": false,
+        "type": "list[dict]"
+      },
+      "security.credential_keychain": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "security.denied_commands": {
+        "default": [],
+        "sensitive": false,
+        "type": "list[str]"
+      },
+      "security.egress.allow_hosts": {
+        "default": [],
+        "sensitive": false,
+        "type": "list[str]"
+      },
+      "security.egress.allow_private": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "security.egress.deny_hosts": {
+        "default": [],
+        "sensitive": false,
+        "type": "list[str]"
+      },
+      "session.auto_archive_days": {
+        "default": 30,
+        "sensitive": false,
+        "type": "int"
+      },
+      "session.autocompact_pct": {
+        "default": 90.0,
+        "sensitive": false,
+        "type": "float"
+      },
+      "session.pool_agent": {
+        "default": "",
+        "sensitive": false,
+        "type": "str"
+      },
+      "session.pool_size": {
+        "default": 0,
+        "sensitive": false,
+        "type": "int"
+      },
+      "session.pool_ttl_secs": {
+        "default": 1800,
+        "sensitive": false,
+        "type": "int"
+      },
+      "session.timeout_secs": {
+        "default": 3600,
+        "sensitive": false,
+        "type": "int"
+      },
+      "skills.auto_create_from_sessions": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "skills.auto_min_tool_calls": {
+        "default": 5,
+        "sensitive": false,
+        "type": "int"
+      },
+      "skills.auto_refine_on_deviation": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "skills.auto_similarity_threshold": {
+        "default": 0.85,
+        "sensitive": false,
+        "type": "float"
+      },
+      "skills.max_triggered": {
+        "default": 3,
+        "sensitive": false,
+        "type": "int"
+      },
+      "skills.progressive_disclosure_threshold": {
+        "default": 8,
+        "sensitive": false,
+        "type": "int"
+      },
+      "snapshot_dir": {
+        "default": "",
+        "sensitive": false,
+        "type": "str"
+      },
+      "sources.daily_request_budget": {
+        "default": 288,
+        "sensitive": false,
+        "type": "int"
+      },
+      "sources.enabled": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "sources.max_items_per_poll": {
+        "default": 50,
+        "sensitive": false,
+        "type": "int"
+      },
+      "sources.max_sources": {
+        "default": 100,
+        "sensitive": false,
+        "type": "int"
+      },
+      "sources.network_floor_secs": {
+        "default": 900,
+        "sensitive": false,
+        "type": "int"
+      },
+      "sources.poll_interval_default_secs": {
+        "default": 3600,
+        "sensitive": false,
+        "type": "int"
+      },
+      "timezone": {
+        "default": "",
+        "sensitive": false,
+        "type": "str"
+      },
+      "tools.bg_compress_enabled": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "tools.bg_compress_idle_days": {
+        "default": 7.0,
+        "sensitive": false,
+        "type": "float"
+      },
+      "tools.group_defaults": {
+        "default": {},
+        "sensitive": false,
+        "type": "dict[str, list[str]]"
+      },
+      "tools.groups_enabled": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "tools.projection_rules": {
+        "default": [],
+        "sensitive": false,
+        "type": "list[ProjectionRuleConfig]"
+      },
+      "updates.auto": {
+        "default": "off",
+        "sensitive": false,
+        "type": "Literal[off, staged]"
+      },
+      "updates.channel": {
+        "default": "stable",
+        "sensitive": false,
+        "type": "Literal[stable, beta, nightly]"
+      },
+      "updates.check_enabled": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "updates.check_interval_hours": {
+        "default": 12,
+        "sensitive": false,
+        "type": "int"
+      },
+      "updates.last_version": {
+        "default": "",
+        "sensitive": false,
+        "type": "str"
+      },
+      "updates.pin": {
+        "default": "",
+        "sensitive": false,
+        "type": "str"
+      },
+      "voice.clean_for_speech_enabled": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "voice.confirmation_phrases": {
+        "default": [
+          "do it",
+          "go ahead",
+          "send it",
+          "execute"
+        ],
+        "sensitive": false,
+        "type": "list[str]"
+      },
+      "voice.duplex_mute_enabled": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "voice.echo_filter_enabled": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "voice.exit_phrases": {
+        "default": [
+          "cancel",
+          "never mind",
+          "forget it"
+        ],
+        "sensitive": false,
+        "type": "list[str]"
+      },
+      "voice.push_to_talk_chord": {
+        "default": "CommandOrControl+Shift+Space",
+        "sensitive": false,
+        "type": "str"
+      },
+      "voice.voice_disclaimer_enabled": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "workflows.confirmation_ttl_secs": {
+        "default": 604800,
+        "sensitive": false,
+        "type": "int"
+      },
+      "workflows.default_node_timeout_stall_secs": {
+        "default": 300,
+        "sensitive": false,
+        "type": "int"
+      },
+      "workflows.default_node_timeout_total_secs": {
+        "default": 900,
+        "sensitive": false,
+        "type": "int"
+      },
+      "workflows.default_quiet_windows": {
+        "default": "",
+        "sensitive": false,
+        "type": "str"
+      },
+      "workflows.duty_gate_default": {
+        "default": "",
+        "sensitive": false,
+        "type": "str"
+      },
+      "workflows.enabled": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "workflows.lease_ttl_secs": {
+        "default": 900,
+        "sensitive": false,
+        "type": "int"
+      },
+      "workflows.match_threshold": {
+        "default": 0.62,
+        "sensitive": false,
+        "type": "float"
+      },
+      "workflows.max_active_runs": {
+        "default": 10,
+        "sensitive": false,
+        "type": "int"
+      },
+      "workflows.max_concurrent_io_nodes": {
+        "default": 2,
+        "sensitive": false,
+        "type": "int"
+      },
+      "workflows.max_concurrent_llm_nodes": {
+        "default": 4,
+        "sensitive": false,
+        "type": "int"
+      },
+      "workflows.max_concurrent_nodes": {
+        "default": 6,
+        "sensitive": false,
+        "type": "int"
+      },
+      "workflows.max_materialized_per_foreach": {
+        "default": 20,
+        "sensitive": false,
+        "type": "int"
+      },
+      "workflows.model_tier_fast": {
+        "default": "background",
+        "sensitive": false,
+        "type": "str"
+      },
+      "workflows.model_tier_reasoning": {
+        "default": "reasoning",
+        "sensitive": false,
+        "type": "str"
+      },
+      "workflows.model_tier_standard": {
+        "default": "orchestration",
+        "sensitive": false,
+        "type": "str"
+      },
+      "workflows.retention_per_def": {
+        "default": 100,
+        "sensitive": false,
+        "type": "int"
+      },
+      "workflows.self_schedule_max_outstanding": {
+        "default": 20,
+        "sensitive": false,
+        "type": "int"
+      },
+      "workflows.surface_mode_default": {
+        "default": "off",
+        "sensitive": false,
+        "type": "str"
+      },
+      "workflows.workspace_default_mode": {
+        "default": "scratch",
+        "sensitive": false,
+        "type": "str"
+      },
+      "workflows.workspace_teardown_on_expiry": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
+      }
+    }
+  },
+  "kind": "gideon.configuration",
+  "version": 1
+}

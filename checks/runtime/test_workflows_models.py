@@ -11,7 +11,7 @@ what it cannot dispatch, so that raises.
 
 from __future__ import annotations
 
-from gideon.workflows.models import (
+from gideon.automation.workflows.models import (
     FROZEN_STATES,
     LANE_COMPUTE,
     LANE_IO,
@@ -47,14 +47,24 @@ def _spec() -> dict:
                 "kind": "branch",
                 "id": "route",
                 "config": {"on": "{{nodes.classify.output.k}}"},
-                "cases": {"bug": {"kind": "stage", "id": "fix", "config": {"prompt": "f"}}},
-                "default": {"kind": "action", "id": "note", "config": {"provider": "notify"}},
+                "cases": {
+                    "bug": {"kind": "stage", "id": "fix", "config": {"prompt": "f"}}
+                },
+                "default": {
+                    "kind": "action",
+                    "id": "note",
+                    "config": {"provider": "notify"},
+                },
             },
             {
                 "kind": "foreach",
                 "id": "each",
                 "config": {"items": "{{inputs.xs}}"},
-                "body": {"kind": "transform", "id": "t", "config": {"expr": "{{item}}"}},
+                "body": {
+                    "kind": "transform",
+                    "id": "t",
+                    "config": {"expr": "{{item}}"},
+                },
             },
         ],
     }
@@ -85,12 +95,15 @@ class TestNodeTree:
 
     def test_round_trip_is_lossless(self) -> None:
         d = _spec()
-        assert Node.from_dict(d).to_dict() == Node.from_dict(Node.from_dict(d).to_dict()).to_dict()
+        assert (
+            Node.from_dict(d).to_dict()
+            == Node.from_dict(Node.from_dict(d).to_dict()).to_dict()
+        )
 
     def test_child_nodes_covers_all_container_shapes(self) -> None:
         n = Node.from_dict(_spec())
-        assert len(n.children[1].child_nodes()) == 2  # one case + default
-        assert len(n.children[2].child_nodes()) == 1  # body
+        assert len(n.children[1].child_nodes()) == 2
+        assert len(n.children[2].child_nodes()) == 1
 
 
 class TestLanes:
@@ -131,10 +144,15 @@ class TestTolerantReads:
         """A newer engine may write a status this build lacks. Refusing to load the row
         would hide the run entirely — including from the user trying to delete it."""
         assert (
-            WorkflowRun.from_dict({"id": "a", "workflow_name": "w", "status": "teleporting"}).status
+            WorkflowRun.from_dict(
+                {"id": "a", "workflow_name": "w", "status": "teleporting"}
+            ).status
             is RunStatus.DRAFT
         )
-        assert Failure.from_dict({"class": "gremlins"}).failure_class is FailureClass.INTERNAL
+        assert (
+            Failure.from_dict({"class": "gremlins"}).failure_class
+            is FailureClass.INTERNAL
+        )
         assert (
             WorkflowRun.from_dict(
                 {"id": "a", "workflow_name": "w", "origin": {"kind": "telepathy"}}
@@ -217,8 +235,12 @@ class TestRunGenealogy:
     def test_terminal_statuses(self) -> None:
         assert RunStatus.COMPLETE in TERMINAL_RUN_STATUSES
         assert RunStatus.NEEDS_INPUT not in TERMINAL_RUN_STATUSES
-        assert WorkflowRun(id="a", workflow_name="w", status=RunStatus.FAILED).is_terminal
-        assert not WorkflowRun(id="a", workflow_name="w", status=RunStatus.RUNNING).is_terminal
+        assert WorkflowRun(
+            id="a", workflow_name="w", status=RunStatus.FAILED
+        ).is_terminal
+        assert not WorkflowRun(
+            id="a", workflow_name="w", status=RunStatus.RUNNING
+        ).is_terminal
 
 
 class TestNames:
@@ -227,6 +249,13 @@ class TestNames:
             assert valid_name(ok), ok
 
     def test_invalid_names_are_rejected(self) -> None:
-        # The name becomes a directory, so anything path-shaped is a traversal risk.
-        for bad in ("Research", "with space", "-leading", "a" * 64, "", "../escape", "a/b"):
+        for bad in (
+            "Research",
+            "with space",
+            "-leading",
+            "a" * 64,
+            "",
+            "../escape",
+            "a/b",
+        ):
             assert not valid_name(bad), bad

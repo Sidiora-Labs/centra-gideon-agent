@@ -21,9 +21,10 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.triggers import chain
-from gideon.triggers.models import KINDS, Trigger
-from gideon.triggers.store import TriggerStore
+from gideon.automation.triggers import chain
+from gideon.automation.triggers.models import KINDS, Trigger
+from gideon.automation.triggers.store import TriggerStore
+from gideon.engine.trigger_dispatch import TriggerDispatch
 
 
 @pytest.fixture
@@ -44,9 +45,6 @@ def _add(store, tid, kind, spec):
         )
     )
     return store.get(tid).trigger
-
-
-# ── matching ──
 
 
 def test_a_chain_trigger_is_FOUND_for_its_source(store):
@@ -81,9 +79,9 @@ def test_a_DISABLED_chain_does_not_fire(store):
 def test_a_DEF_keyed_chain_matches_the_workflow_ref(store):
     """The second key `SPEC_KEYS` declares: "after any run of that workflow"."""
     _add(store, "run_completed:d", "run_completed", {"source_def": "nightly-backup"})
-    assert [t.id for t in chain.chain_triggers_for_def(store, source_def="nightly-backup")] == [
-        "run_completed:d"
-    ]
+    assert [
+        t.id for t in chain.chain_triggers_for_def(store, source_def="nightly-backup")
+    ] == ["run_completed:d"]
 
 
 def test_a_def_keyed_chain_is_NOT_matched_by_trigger_id(store):
@@ -97,9 +95,6 @@ def test_a_def_keyed_chain_is_NOT_matched_by_trigger_id(store):
 def test_an_empty_def_matches_nothing(store):
     _add(store, "run_completed:d", "run_completed", {"source_def": "x"})
     assert chain.chain_triggers_for_def(store, source_def="") == []
-
-
-# ── the chain actually chains ──
 
 
 def test_a_completed_run_produces_the_NEXT_fire(store):
@@ -116,11 +111,15 @@ def test_a_chain_carries_TWO_links(store):
     """A → B → C is the case chaining exists for."""
     _add(store, "clock:nightly", "clock", {"kind": "interval", "interval_secs": 60})
     _add(store, "run_completed:b", "run_completed", {"source_trigger": "clock:nightly"})
-    _add(store, "run_completed:c", "run_completed", {"source_trigger": "run_completed:b"})
+    _add(
+        store, "run_completed:c", "run_completed", {"source_trigger": "run_completed:b"}
+    )
 
     fires, _ = chain.next_fires(store, source_id="clock:nightly", source_payload={})
     payload_b = fires[0][1]
-    fires2, _ = chain.next_fires(store, source_id="run_completed:b", source_payload=payload_b)
+    fires2, _ = chain.next_fires(
+        store, source_id="run_completed:b", source_payload=payload_b
+    )
     assert [t.id for t, _ in fires2] == ["run_completed:c"]
     assert fires2[0][1][chain.PATH_KEY] == ["clock:nightly", "run_completed:b"]
 
@@ -140,16 +139,18 @@ def test_the_depth_INCREMENTS_along_the_chain(store):
     assert fires[0][1][chain.DEPTH_KEY] == 2
 
 
-# ── the two controls ──
-
-
 def test_a_CYCLE_is_refused_AND_NAMED_as_a_cycle(store):
     """🔴 A → B → A is an infinite fire loop a scheduler cannot distinguish from enthusiasm.
 
     Named as a CYCLE rather than reported as a depth overflow, deliberately: "too deep" sends the
     user off to raise a limit that was never the problem, while "this loops" is the actual fix.
     """
-    _add(store, "run_completed:loop", "run_completed", {"source_trigger": "run_completed:loop"})
+    _add(
+        store,
+        "run_completed:loop",
+        "run_completed",
+        {"source_trigger": "run_completed:loop"},
+    )
     fires, refused = chain.next_fires(
         store,
         source_id="run_completed:loop",
@@ -166,7 +167,10 @@ def test_the_DEPTH_CAP_refuses_with_a_visible_reason(store):
     fires, refused = chain.next_fires(
         store,
         source_id="clock:nightly",
-        source_payload={chain.DEPTH_KEY: chain.MAX_CHAIN_DEPTH, chain.PATH_KEY: ["x", "y", "z"]},
+        source_payload={
+            chain.DEPTH_KEY: chain.MAX_CHAIN_DEPTH,
+            chain.PATH_KEY: ["x", "y", "z"],
+        },
     )
     assert fires == []
     assert "depth limit" in refused[0]["reason"]
@@ -177,7 +181,9 @@ def test_a_chain_INSIDE_the_cap_still_fires(store):
     """The cap must bound abuse without breaking the legitimate A → B → C case."""
     _add(store, "run_completed:b", "run_completed", {"source_trigger": "a"})
     fires, refused = chain.next_fires(
-        store, source_id="a", source_payload={chain.DEPTH_KEY: chain.MAX_CHAIN_DEPTH - 1}
+        store,
+        source_id="a",
+        source_payload={chain.DEPTH_KEY: chain.MAX_CHAIN_DEPTH - 1},
     )
     assert [t.id for t, _ in fires] == ["run_completed:b"]
     assert refused == []
@@ -194,11 +200,10 @@ def test_a_MALFORMED_depth_is_treated_as_zero_not_crashed(store):
 
 def test_a_MALFORMED_path_is_treated_as_empty(store):
     _add(store, "run_completed:b", "run_completed", {"source_trigger": "a"})
-    fires, _ = chain.next_fires(store, source_id="a", source_payload={chain.PATH_KEY: "nope"})
+    fires, _ = chain.next_fires(
+        store, source_id="a", source_payload={chain.PATH_KEY: "nope"}
+    )
     assert [t.id for t, _ in fires] == ["run_completed:b"]
-
-
-# ── the wiring ──
 
 
 def test_the_gateway_CHAINS_after_a_completed_run():
@@ -209,9 +214,9 @@ def test_the_gateway_CHAINS_after_a_completed_run():
     """
     import inspect
 
-    from gideon.gateway import GatewayOrchestrator
+    from gideon.engine.gateway import RuntimeCoordinator
 
-    src = inspect.getsource(GatewayOrchestrator._fire_store_trigger)
+    src = inspect.getsource(TriggerDispatch.execute)
     assert "_fire_chained_triggers" in src
 
 
@@ -220,9 +225,13 @@ def test_a_chained_fire_goes_through_THE_SAME_dispatch():
     capability fence to be forgotten — exactly how the `web_watch` gap happened."""
     import inspect
 
-    from gideon.gateway import GatewayOrchestrator
+    from gideon.engine.automation_routes import AutomationRoutes
+    from gideon.engine.gateway import RuntimeCoordinator
 
-    src = inspect.getsource(GatewayOrchestrator._fire_chained_triggers)
+    assert "AutomationRoutes" in inspect.getsource(
+        RuntimeCoordinator._fire_chained_triggers
+    )
+    src = inspect.getsource(AutomationRoutes.cascade)
     assert "_fire_store_trigger" in src
 
 
@@ -231,26 +240,25 @@ def test_a_failing_chain_NEVER_fails_the_run_it_followed():
     chaining strictly worse than not chaining."""
     import inspect
 
-    from gideon.gateway import GatewayOrchestrator
+    from gideon.engine.automation_routes import AutomationRoutes
+    from gideon.engine.gateway import RuntimeCoordinator
 
-    src = inspect.getsource(GatewayOrchestrator._fire_chained_triggers)
+    assert "AutomationRoutes" in inspect.getsource(
+        RuntimeCoordinator._fire_chained_triggers
+    )
+    src = inspect.getsource(AutomationRoutes.cascade)
     assert "except Exception" in src
 
 
-# ── the completeness check the pattern earned ──
-
-#: Every kind, and how it fires. `file` (S93), `web_watch` (S121) and `run_completed` (S122) were
-#: each found DECLARED-BUT-UNPOLLED, so this is a table rather than a comment: an entry is a live
-#: runtime or a stated reason, and a new kind added without either fails the test below.
 KIND_RUNTIMES: dict[str, str] = {
-    "clock": "gideon.triggers.loop.run_forever (the tick)",
-    "file": "gideon.triggers.file_poll.poll_all (S93)",
-    "web_watch": "gideon.triggers.web_poll.poll_all (S121)",
-    "run_completed": "gideon.triggers.chain.next_fires (S122)",
-    "event": "gideon.event_triggers.execute_event_action (the data-event engine)",
+    "clock": "gideon.automation.triggers.loop.run_forever (the tick)",
+    "file": "gideon.automation.triggers.file_poll.poll_all (S93)",
+    "web_watch": "gideon.automation.triggers.web_poll.poll_all (S121)",
+    "run_completed": "gideon.automation.triggers.chain.next_fires (S122)",
+    "event": "gideon.automation.event_triggers.execute_event_action (the data-event engine)",
     "manual": "the Run button / automation_run — fires on demand, needs no runtime",
-    "view": "gideon.triggers.pull_on_view.on_render (S123 — render-driven, not polled)",
-    "idle": "gideon.triggers.idle_poll.poll (WF2AUT-11 — driven off the tick)",
+    "view": "gideon.automation.triggers.pull_on_view.on_render (S123 — render-driven, not polled)",
+    "idle": "gideon.automation.triggers.idle_poll.poll (WF2AUT-11 — driven off the tick)",
     "webhook": "DEFERRED: needs POST /api/triggers/{id}/fire, which does not exist yet (see S119)",
 }
 

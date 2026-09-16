@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from gideon.dashboard.chat_utils import (
+from gideon.interfaces.dashboard.chat_utils import (
     _extract_bash_command,
     _history_key_for,
     _normalize_model,
@@ -38,7 +38,6 @@ class TestToolInputToStr:
         assert tool_input_to_str(42) == "42"
 
     def test_result_is_sliceable(self):
-        # The bug: dict[:4000] → KeyError(slice). Coerced output must slice.
         for v in (None, "hi", {"k": "v"}, ["a"], 7):
             assert isinstance(tool_input_to_str(v)[:4000], str)
 
@@ -47,12 +46,11 @@ class TestToolInputToStr:
             pass
 
         out = tool_input_to_str({"obj": _NoJSON()})
-        assert isinstance(out, str) and out  # default=str makes it serialize
+        assert isinstance(out, str) and out
 
 
 class TestRedactDeep:
     def test_string(self):
-        # AKIAIOSFODNN7EXAMPLE is a well-known test AWS key
         result = _redact_deep("key AKIAIOSFODNN7EXAMPLE here")
         assert "AKIAIOSFODNN7EXAMPLE" not in result
 
@@ -87,7 +85,6 @@ class TestExtractBashCommand:
         assert _extract_bash_command("not json {") == "not json {"
 
     def test_native_dict_bash_command(self):
-        # Native loop passes the parsed dict, not a JSON string.
         assert _extract_bash_command({"command": "ls -la"}) == "ls -la"
 
     def test_native_dict_non_bash_returns_empty_string(self):
@@ -95,17 +92,15 @@ class TestExtractBashCommand:
         must coerce to "" — returning the dict made downstream regex guards
         (is_read_only_bash) raise "expected string or bytes-like object, got
         'dict'" on every native tool that hits the approval path."""
-        from gideon.dashboard.state import is_read_only_bash
+        from gideon.interfaces.dashboard.state import is_read_only_bash
 
         cmd = _extract_bash_command({"path": "poem.txt", "content": "roses"})
         assert cmd == ""
-        # The downstream guard must not raise on the coerced value.
         assert is_read_only_bash(cmd) is False
 
     def test_non_string_non_dict_returns_empty(self):
         assert _extract_bash_command(None) == ""
         assert _extract_bash_command(42) == ""
-        # A dict whose `command` is itself non-string coerces to "".
         assert _extract_bash_command({"command": {"nested": 1}}) == ""
 
 
@@ -151,8 +146,6 @@ class TestHistoryKeyFor:
         assert _history_key_for("dashboard_dashboard_chat-1") == "dashboard:chat-1"
 
     def test_bare_id_namespaced_generically(self):
-        # _history_key_for is for DASHBOARD ids only — it namespaces any bare id.
-        # Channel-thread resolution is provider-agnostic + runtime (resolve_history_key).
         assert _history_key_for("1783737058.246229") == "dashboard:1783737058.246229"
 
 
@@ -170,7 +163,6 @@ class TestResolveHistoryKey:
             return {"created_at": "x"} if key in self._keys else {}
 
     def test_channel_thread_key_resolves_bare(self):
-        # Persisted under the bare provider key (e.g. a Slack/Discord/… thread).
         log = self._FakeLog({"1783737058.246229"})
         assert resolve_history_key(log, "1783737058.246229") == "1783737058.246229"
 

@@ -1,18 +1,18 @@
-# harness/ — the Gideon self-development harness
+# checks/harness/ — the Gideon self-development harness
 
 **The harness, not the agent (and not the human's memory), owns verification.**
 
 This is repo-inner dev infrastructure that mechanizes the project's verification *culture*
 (campaign/LEDGER validation, auto-memory gotchas, hard-won bug-class knowledge) into
 machine-checked, versioned, shared institutional knowledge. It lives beside `src/`,
-`tests/`, and `scripts/`, and is **not** part of the shipped wheel (`pyproject` finds
+`checks/runtime/`, and `tooling/scripts/`, and is **not** part of the shipped wheel (`pyproject` finds
 packages only under `src/`).
 
 It is built across the Self-Verification plan
 sessions. Landed so far (Sessions 1–3):
 
 ```
-harness/
+checks/harness/
   specs/
     rules/       # architectural invariants        (type: ai-coding-rule)
     scenarios/   # triage playbooks                (type: triage-scenario)
@@ -27,7 +27,7 @@ harness/
   baselines.py   # baseline gating (hard thresholds + drift; missing-scenario-fails)
   fanout_measure.py # token-matched fan-out vs single-agent verdict (sub-5pt == inconclusive)
   worktree_bench.py # worktree fan-out hydration baseline + HARNESS-CRAFT §1.1 measure-first gate
-  cli.py         # python -m harness  validate | explain | run [--diff] | scan [--diff] | replay
+  cli.py         # python -m checks.harness  validate | explain | run [--diff] | scan [--diff] | replay
   traces/        # recorded NDJSON event traces + baselines.json
   exemplars/     # (Session 4) per-slice runnable exemplars
 ```
@@ -35,7 +35,7 @@ harness/
 The recorder half lives in **core** (`gideon.trace_recorder`, env-gated by
 `GIDEON_TRACE_DIR`, zero overhead when off) because core cannot import the harness.
 The metrics/baseline half lives here. The FE-fold replay driver is
-`web/src/harness/replayFold.ts` (+ `.test.ts`).
+`apps/console/src/harness/replayFold.ts` (+ `.test.ts`).
 
 Later sessions add: resume-audit + MCP record/replay-as-fake-server (Session 4), and —
 once the Workflows-v2 engine lands — the Self-QA Companion (§3).
@@ -45,9 +45,9 @@ once the Workflows-v2 engine lands — the Self-QA Companion (§3).
 Turns the K42/K44/K45 stream-coalescer bug class into a *replayable* regression:
 
 1. **Record** — set `GIDEON_TRACE_DIR=<dir>` and drive the gateway; taps at
-   `SseRegistry.publish`, `DashboardState._broadcast`, `inbox_service._ingest`, and
+   `SseRegistry.publish`, `ConsoleState._broadcast`, `inbox_service._ingest`, and
    `mcp_client.call_tool` write redacted NDJSON (`{ts, stream, key, seq?, type, payload}`).
-2. **Replay** — `python -m harness replay` folds backend-stream traces into metrics
+2. **Replay** — `python -m checks.harness replay` folds backend-stream traces into metrics
    (`duplicate_event_rate`, `order_violation_count`, `reconnect_loss_count`,
    `event_fanout_ratio`, per-stream latency p50/p95) and gates them against
    `traces/baselines.json`; the vitest `replayFold.test.ts` folds chat/run traces through
@@ -64,7 +64,7 @@ relies on it — `traces/workflow-journal-projection/` (a clean 3-node run) and
 must be dropped). Both are in `baselines.REQUIRED_SCENARIOS`, so **their absence from disk
 fails the run outright** (not merely "one fewer scenario"). Each baseline pins a `fold` block
 — the terminal state the pure Python **event-fold** (`replay.fold_workflow`, the mirror of
-`web/src/pages/workflows/workflowFold.ts`) reconstructs. The fold compare is EXACT, not a
+`apps/console/src/pages/workflows/workflowFold.ts`) reconstructs. The fold compare is EXACT, not a
 threshold: a journal/projection format change that breaks the event-fold law (a renamed event
 kind, a dropped guard, a changed terminal state) changes the fold and fails the compare
 (Success Criterion #4). No engine change was needed to record these — the workflow SSE tap at
@@ -72,7 +72,7 @@ kind, a dropped guard, a changed terminal state) changes the fold and fails the 
 
 ## Token-matched fan-out measurement (WF2WOR-9)
 
-`harness/fanout_measure.py` implements WORK-CONTAINERS amendment (e): **before any widening of the
+`checks/harness/fanout_measure.py` implements WORK-CONTAINERS amendment (e): **before any widening of the
 fan-out concurrency ceiling, a token-matched local comparison against the single-agent path on the
 same work, with a sub-5-point delta reported as `inconclusive`.**
 
@@ -104,7 +104,7 @@ refusals:
 5. Write the observations file and run it:
 
 ```bash
-.venv/bin/python -m harness fanout-measure path/to/observations.json [--json]
+.venv/bin/python -m checks.harness fanout-measure path/to/observations.json [--json]
 ```
 
 ```json
@@ -148,7 +148,7 @@ touched, so advisories are about *your* change.
 ### Diff-aware selection
 
 `run --diff` computes the touched files vs the merge-base and **forces** the profiles that
-guard them, independent of what the task spec claims — touching `web/src/pages/chat/`
+guard them, independent of what the task spec claims — touching `apps/console/src/pages/chat/`
 forces `replay`; touching `config/loader.py` or `action_providers/` forces `scan`. The
 spec author can add requirements; the diff can only add more, never remove.
 
@@ -157,13 +157,13 @@ spec author can add requirements; the diff can only add more, never remove.
 Run on the repo venv, from the repo root:
 
 ```bash
-.venv/bin/python -m harness validate        # shape + reference-resolve every spec
-.venv/bin/python -m harness validate --fast  # shape only (skip pytest collection)
-.venv/bin/python -m harness explain T1.foo    # what commands/rules/tests a task owes
-.venv/bin/python -m harness run T1.foo         # execute the task's required profiles
-.venv/bin/python -m harness run --diff         # diff-aware selection (Session 2)
-.venv/bin/python -m harness scan               # boundary scanner (Session 2)
-.venv/bin/python -m harness fanout-measure obs.json  # token-matched fan-out verdict (WF2WOR-9)
+.venv/bin/python -m checks.harness validate        # shape + reference-resolve every spec
+.venv/bin/python -m checks.harness validate --fast  # shape only (skip pytest collection)
+.venv/bin/python -m checks.harness explain T1.foo    # what commands/rules/tests a task owes
+.venv/bin/python -m checks.harness run T1.foo         # execute the task's required profiles
+.venv/bin/python -m checks.harness run --diff         # diff-aware selection (Session 2)
+.venv/bin/python -m checks.harness scan               # boundary scanner (Session 2)
+.venv/bin/python -m checks.harness fanout-measure obs.json  # token-matched fan-out verdict (WF2WOR-9)
 ```
 
 ## The three spec kinds

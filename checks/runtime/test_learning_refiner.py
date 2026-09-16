@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.learning.refiner import (
+from gideon.cognition.learning.refiner import (
     CHECK_SCORES,
     CRITIC_EPSILON,
     CRITIC_RUNS,
@@ -73,16 +73,13 @@ _GOOD = {
 _OK_OPS = [{"op": "update_node", "node": "fetch", "fields": {"prompt": "retry on 503"}}]
 
 
-# ── the ledger contract ──
-
-
 def test_evidence_kinds_exist_in_the_real_ledger():
     """A renamed event would STARVE the refiner silently.
 
     It would see zero failures and propose nothing, which is indistinguishable from a healthy
     template.
     """
-    from gideon.workflows.journal import LEDGER_KINDS
+    from gideon.automation.workflows.journal import LEDGER_KINDS
 
     for kind in EVIDENCE_KINDS:
         assert kind in LEDGER_KINDS, f"{kind} is not a real ledger kind"
@@ -95,12 +92,9 @@ def test_the_gold_signal_is_among_them():
 
 def test_diff_ops_are_a_subset_of_the_engines_own_vocabulary():
     """Expressed in the engine's terms so accepted diffs are machine-applicable."""
-    from gideon.workflows.mutations import OpKind
+    from gideon.automation.workflows.mutations import OpKind
 
     assert DIFF_OPS < {k.value for k in OpKind}
-
-
-# ── clustering ──
 
 
 def test_one_mechanism_across_many_runs_is_ONE_cluster():
@@ -135,7 +129,9 @@ def test_rank_is_frequency_TIMES_unresolvedness():
 
 
 def test_a_completion_resolves_failures_on_the_same_node():
-    events = _failures(3) + [{"kind": "step_completed", "node_id": "fetch", "run_id": "r9"}]
+    events = _failures(3) + [
+        {"kind": "step_completed", "node_id": "fetch", "run_id": "r9"}
+    ]
     cluster = next(c for c in cluster_failures(events) if c.node == "fetch")
     assert cluster.resolved >= 1
     assert cluster.unresolvedness < 1.0
@@ -143,12 +139,17 @@ def test_a_completion_resolves_failures_on_the_same_node():
 
 def test_a_repeatedly_skipped_step_is_its_own_mechanism():
     """The user keeps saying this step should not be here — a deletion, not a prompt rewrite."""
-    events = [{"kind": "step_skipped", "node_id": "summarize", "run_id": f"r{i}"} for i in range(4)]
+    events = [
+        {"kind": "step_skipped", "node_id": "summarize", "run_id": f"r{i}"}
+        for i in range(4)
+    ]
     cluster = cluster_failures(events)[0]
     assert "skipped" in cluster.signature and cluster.count == 4
 
 
-def test_each_skip_is_attributed_to_its_OWN_node_through_the_REAL_writer(tmp_path, monkeypatch):
+def test_each_skip_is_attributed_to_its_OWN_node_through_the_REAL_writer(
+    tmp_path, monkeypatch
+):
     """Per-node attribution, asserted against rows the LEDGER WRITER actually produced.
 
     The regression this pins: `cluster_failures` used to read `event["node"]`/`event["path"]`,
@@ -158,13 +159,13 @@ def test_each_skip_is_attributed_to_its_OWN_node_through_the_REAL_writer(tmp_pat
     the step. TWO distinct nodes are required to see it at all: with one skipped node, an
     all-events-under-`""` bucket is indistinguishable from correct attribution.
     """
-    from gideon.workflows import store
-    from gideon.workflows.journal import Journal, ledger
+    from gideon.automation.workflows import store
+    from gideon.automation.workflows.journal import Journal, ledger
 
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
-    assert store.config_dir() == home  # the isolation itself, not a real home
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
+    assert store.config_dir() == home
 
     skips = [
         ("skipnode0", "root.children[0]", "summarize"),
@@ -179,19 +180,18 @@ def test_each_skip_is_attributed_to_its_OWN_node_through_the_REAL_writer(tmp_pat
 
     assert len(events) == len(skips)
 
-    # ── the vacuity floor ──
-    # A regression to the old keys is only *catchable* because the real writer stamps NEITHER of
-    # them. Assert that, so this test cannot silently pass on hand-built rows that carry `node`.
     for row in events:
-        assert "node" not in row, "writer stamps `node_id`; a bare `node` would hide the defect"
+        assert (
+            "node" not in row
+        ), "writer stamps `node_id`; a bare `node` would hide the defect"
         assert "path" not in row, "writer stamps `instance_path`, never `path`"
         assert row["node_id"] and row["instance_path"]
 
     by_node = {c.node: c for c in cluster_failures(events)}
 
-    # The load-bearing assertion: each skip lands under its OWN node id, and nothing lands in the
-    # anonymous bucket the buggy read produced.
-    assert "" not in by_node, f"skips collapsed into the anonymous node bucket: {by_node}"
+    assert (
+        "" not in by_node
+    ), f"skips collapsed into the anonymous node bucket: {by_node}"
     assert set(by_node) == {"summarize", "translate"}
     assert by_node["summarize"].count == 2
     assert by_node["translate"].count == 1
@@ -216,7 +216,10 @@ def test_hand_fixes_are_captured_verbatim():
 def test_unknown_ledger_kinds_are_ignored_not_guessed_at():
     """The ledger is append-only and gains kinds; reacting to one nobody designed would
     propose against an unintended signal."""
-    assert cluster_failures([{"kind": "buffer_seal", "node_id": "x", "run_id": "r1"}]) == []
+    assert (
+        cluster_failures([{"kind": "buffer_seal", "node_id": "x", "run_id": "r1"}])
+        == []
+    )
 
 
 def test_clustering_survives_malformed_events():
@@ -226,9 +229,6 @@ def test_clustering_survives_malformed_events():
 def test_clusters_come_back_worst_first():
     events = _failures(2, node="a") + _failures(6, node="b")
     assert cluster_failures(events)[0].node == "b"
-
-
-# ── the power-discipline floor ──
 
 
 def test_an_under_evidenced_cluster_never_reaches_a_model():
@@ -249,17 +249,17 @@ def test_the_floor_counts_DISTINCT_runs_not_occurrences():
 
 def test_a_fully_resolved_cluster_is_never_the_target():
     events = _failures(4) + [
-        {"kind": "step_completed", "node_id": "fetch", "run_id": f"r{i}"} for i in range(8)
+        {"kind": "step_completed", "node_id": "fetch", "run_id": f"r{i}"}
+        for i in range(8)
     ]
     top = top_cluster(cluster_failures(events))
     assert top is None or top.rank > 0
 
 
-# ── the frozen region ──
-
-
 def test_a_prompt_edit_is_allowed():
-    assert check_op({"op": "update_node", "node": "a", "fields": {"prompt": "better"}}).allowed
+    assert check_op(
+        {"op": "update_node", "node": "a", "fields": {"prompt": "better"}}
+    ).allowed
 
 
 @pytest.mark.parametrize("frozen", sorted(FROZEN_FIELDS))
@@ -306,9 +306,6 @@ def test_one_illegal_op_rejects_the_WHOLE_diff():
 def test_an_empty_diff_is_refused():
     ok, refusals = check_diff([])
     assert not ok and refusals
-
-
-# ── the median-of-3 critic ──
 
 
 def test_a_single_critic_run_can_never_accept():
@@ -358,22 +355,25 @@ def test_the_epsilon_is_documented():
     assert CRITIC_EPSILON == 0.05
 
 
-# ── the held-out replay gate ──
-
-
 def test_a_clean_improvement_passes():
-    assert gate_ok(target="t", before={"t": 0.5, "a": 0.8}, after={"t": 0.9, "a": 0.8}).passed
+    assert gate_ok(
+        target="t", before={"t": 0.5, "a": 0.8}, after={"t": 0.9, "a": 0.8}
+    ).passed
 
 
 def test_an_edit_that_fixes_one_failure_by_breaking_another_is_refused():
     """A regression that looks like progress on the metric it was written against."""
-    result = gate_ok(target="t", before={"t": 0.5, "a": 0.8}, after={"t": 0.9, "a": 0.5})
+    result = gate_ok(
+        target="t", before={"t": 0.5, "a": 0.8}, after={"t": 0.9, "a": 0.5}
+    )
     assert not result.passed
     assert result.regressed == ["a"]
 
 
 def test_noise_below_epsilon_on_another_cluster_is_tolerated():
-    assert gate_ok(target="t", before={"t": 0.5, "a": 0.800}, after={"t": 0.9, "a": 0.795}).passed
+    assert gate_ok(
+        target="t", before={"t": 0.5, "a": 0.800}, after={"t": 0.9, "a": 0.795}
+    ).passed
 
 
 def test_a_target_improvement_below_the_floor_is_churn():
@@ -384,7 +384,9 @@ def test_a_target_improvement_below_the_floor_is_churn():
 
 def test_a_gain_elsewhere_cannot_substitute_for_the_target():
     """Requiring TARGET improvement stops a diff being accepted for a coincidental gain."""
-    assert not gate_ok(target="t", before={"t": 0.5, "a": 0.5}, after={"t": 0.5, "a": 0.99}).passed
+    assert not gate_ok(
+        target="t", before={"t": 0.5, "a": 0.5}, after={"t": 0.5, "a": 0.99}
+    ).passed
 
 
 def test_an_unmeasured_target_FAILS_rather_than_scoring_zero():
@@ -405,14 +407,13 @@ def test_the_gate_constants_are_documented():
     assert MIN_TARGET_IMPROVEMENT == 0.02
 
 
-# ── risk tiers ──
-
-
 def test_the_tier_is_the_riskiest_op_in_the_diff():
     """A destructive delete bundled with four parameter tweaks is a destructive diff."""
     assert risk_tier([{"op": "set_input"}]) == RiskTier.LOW.value
     assert risk_tier([{"op": "update_node"}]) == RiskTier.REVIEW.value
-    assert risk_tier([{"op": "set_input"}, {"op": "delete"}]) == RiskTier.MANUAL_ONLY.value
+    assert (
+        risk_tier([{"op": "set_input"}, {"op": "delete"}]) == RiskTier.MANUAL_ONLY.value
+    )
 
 
 def test_an_empty_diff_is_manual_only():
@@ -424,9 +425,6 @@ def test_there_is_no_auto_tier_to_reach_for():
     assert "auto" not in {t.value for t in RiskTier}
 
 
-# ── the assembled conjunction ──
-
-
 def test_all_gates_must_pass_for_a_diff_to_surface():
     assert evaluate_diff(ops=_OK_OPS, **_GOOD).surfaced
 
@@ -434,7 +432,9 @@ def test_all_gates_must_pass_for_a_diff_to_surface():
 def test_a_frozen_op_drops_the_diff_before_any_critic_run():
     """Cheapest and most decisive first: paying three critic runs to discover an unfixable op is
     waste."""
-    decision = evaluate_diff(ops=[{"op": "update_node", "fields": {"id": "x"}}], **_GOOD)
+    decision = evaluate_diff(
+        ops=[{"op": "update_node", "fields": {"id": "x"}}], **_GOOD
+    )
     assert not decision.surfaced
     assert decision.critic is None
 
@@ -456,16 +456,15 @@ def test_a_held_out_regression_drops_a_critic_approved_diff():
 
 def test_a_dropped_diff_still_records_why():
     """Dropped SILENTLY from the user's view, but the log has to say what happened."""
-    decision = evaluate_diff(ops=[{"op": "delete", "fields": {"triggers": []}}], **_GOOD)
+    decision = evaluate_diff(
+        ops=[{"op": "delete", "fields": {"triggers": []}}], **_GOOD
+    )
     assert not decision.surfaced and decision.refusals
 
 
 def test_the_decision_serializes_for_a_log():
     payload = evaluate_diff(ops=_OK_OPS, **_GOOD).to_dict()
     assert set(payload) >= {"surfaced", "tier", "refusals", "critic", "gate"}
-
-
-# ── stop rules, manifests, verdicts ──
 
 
 def test_a_converged_cycle_stops():
@@ -487,7 +486,10 @@ def test_a_manifest_is_falsifiable_or_it_is_just_an_assertion():
     cluster = Cluster(signature="http 503", count=5, runs=[f"r{i}" for i in range(5)])
     decision = evaluate_diff(ops=_OK_OPS, **_GOOD)
     manifest = build_manifest(
-        cluster=cluster, decision=decision, measured_at="2024-01-01T00:00:00Z", model="haiku"
+        cluster=cluster,
+        decision=decision,
+        measured_at="2024-01-01T00:00:00Z",
+        model="haiku",
     )
     assert manifest.falsifiable
     assert manifest.run_ids and manifest.metric and manifest.measured_at
@@ -498,14 +500,18 @@ def test_manifest_confidence_is_derived_not_self_reported():
     """A self-reported confidence is the same ornamental signal §2.5 rejects for helpfulness."""
     decision = evaluate_diff(ops=_OK_OPS, **_GOOD)
     manifest = build_manifest(
-        cluster=Cluster(signature="s", runs=["r1"]), decision=decision, measured_at="2024-01-01"
+        cluster=Cluster(signature="s", runs=["r1"]),
+        decision=decision,
+        measured_at="2024-01-01",
     )
     assert 0.0 <= manifest.confidence <= 1.0
     assert manifest.confidence > 0
 
 
 def test_manifest_run_ids_are_bounded_and_deduped():
-    cluster = Cluster(signature="s", count=99, runs=["r1"] * 50 + [f"x{i}" for i in range(40)])
+    cluster = Cluster(
+        signature="s", count=99, runs=["r1"] * 50 + [f"x{i}" for i in range(40)]
+    )
     manifest = build_manifest(
         cluster=cluster,
         decision=evaluate_diff(ops=_OK_OPS, **_GOOD),

@@ -9,7 +9,7 @@ that sentence, executable.
 Three decisions here are structural rather than incidental:
 
 * **The benchmark reads the SHIPPED log line; it does not keep its own stopwatch.** Durations come
-  from parsing `gideon.loop.worktree`'s timing line, so the number in this report is the
+  from parsing `gideon.automation.loop.worktree`'s timing line, so the number in this report is the
   number production emits. A parallel timer in the harness would be a second implementation of the
   measurement, free to disagree with the one that ships — and the disagreement would surface as a
   mystery months later. It also gives the log-line contract a real reader: change its fields and
@@ -41,9 +41,9 @@ load rather than working-tree hydration answers the wrong question and looks ide
 
 Usage::
 
-    python -m harness worktree-bench                    # synthesize 10K files, fan out 4
-    python -m harness worktree-bench --repo /path/to/repo --width 4
-    python -m harness worktree-bench --contended --json  # record the load caveat + emit the dict
+    python -m checks.harness worktree-bench                    # synthesize 10K files, fan out 4
+    python -m checks.harness worktree-bench --repo /path/to/repo --width 4
+    python -m checks.harness worktree-bench --contended --json  # record the load caveat + emit the dict
 
 Never runs against the real Gideon home: worktrees land under an explicit temp home and the
 run refuses to proceed if that home resolves to the default one.
@@ -63,39 +63,22 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterator, Sequence
 
-from gideon.loop import worktree
+from gideon.automation.loop import worktree
 
-#: The §1.1 threshold, verbatim: "<2s per worktree on the benchmark = skip and re-scope".
-#: Not a tunable. Lowering it to make an optimization look justified is the objection that
-#: deferred this plan in the first place ("worktree optimization without a real bottleneck").
 GATE_MS_PER_WORKTREE = 2000.0
 
-#: Half-width of the band around the gate in which no verdict is offered, as a fraction of the
-#: gate. 20% (±400ms) is not a statistical claim; it is the honest resolution of a wall-clock
-#: measurement on a machine that also runs test suites and builds. Inside it, the run reports
-#: `unresolved` and says what would settle it (an idle machine, more trials).
 GATE_UNRESOLVED_FRACTION = 0.20
 
-#: The benchmark repo size §1.1 names. A smaller repo produces a real number that is simply not
-#: an answer to the gate's question, so the verdict says so instead of generalizing.
 BENCHMARK_MIN_FILES = 10_000
 
-#: The fan-out width §1.1 names. Today's creation path is sequential (one `add_worktree` per READY
-#: task inside the scheduler loop), so the benchmark is sequential too — measuring a pooled
-#: creation that does not exist yet would be measuring `HC-2` instead of justifying it.
 DEFAULT_WIDTH = 4
 
 VERDICT_PROCEED = "proceed"
 VERDICT_SKIP_AND_RESCOPE = "skip_and_rescope"
 VERDICT_UNRESOLVED = "unresolved"
 
-#: Every verdict this module can return. Exported so a caller asserts the vocabulary instead of
-#: string-matching, and so `unresolved` is a first-class outcome rather than an error path.
 VERDICTS = frozenset({VERDICT_PROCEED, VERDICT_SKIP_AND_RESCOPE, VERDICT_UNRESOLVED})
 
-#: Files per directory in the synthetic repo. Real checkouts are not one flat directory, and a
-#: flat one measures a different filesystem behavior (one huge dirent scan) than the tree git
-#: actually hydrates.
 _SYNTH_FILES_PER_DIR = 100
 
 
@@ -103,13 +86,9 @@ class BenchmarkError(RuntimeError):
     """The benchmark could not run (no git, an unusable repo, the real home as a target)."""
 
 
-# ── the log-line contract (the benchmark's input) ──
-
-#: Parser for `gideon.loop.worktree`'s timing line. Anchored on the module's own prefix
-#: constant rather than a copied string, so a renamed prefix is a red test here and not a
-#: silently-empty report.
 _ROW_RE = re.compile(
-    re.escape(worktree.TIMING_LOG_PREFIX) + r"\s+outcome=(?P<outcome>\S+)\s+task=(?P<task>\S+)"
+    re.escape(worktree.TIMING_LOG_PREFIX)
+    + r"\s+outcome=(?P<outcome>\S+)\s+task=(?P<task>\S+)"
     r"\s+ms=(?P<ms>-?\d+)\s+files=(?P<files>-?\d+)\s+size_class=(?P<size_class>\S+)"
 )
 
@@ -181,9 +160,6 @@ def collect_timing_rows() -> Iterator[list[TimingRow]]:
         log.disabled = prior_disabled
 
 
-# ── the gate ──
-
-
 @dataclass
 class GateVerdict:
     """The §1.1 measure-first decision plus the reasoning that produced it."""
@@ -199,7 +175,9 @@ class GateVerdict:
         return {"verdict": self.verdict, "notes": list(self.notes)}
 
 
-def evaluate_gate(samples_ms: Sequence[int], *, repo_files: int, width: int) -> GateVerdict:
+def evaluate_gate(
+    samples_ms: Sequence[int], *, repo_files: int, width: int
+) -> GateVerdict:
     """Apply §1.1's gate to the per-worktree observations, requiring UNANIMITY.
 
     The gate takes the samples, not their mean, and that is the central decision in this module.
@@ -270,9 +248,6 @@ def evaluate_gate(samples_ms: Sequence[int], *, repo_files: int, width: int) -> 
     return GateVerdict(VERDICT_UNRESOLVED, notes)
 
 
-# ── the measurement ──
-
-
 @dataclass
 class FanOutBaseline:
     """A recorded fan-out-of-N baseline: the durations the shipped log line reported."""
@@ -341,7 +316,9 @@ class FanOutBaseline:
         return [r.ms for r in self.rows if r.outcome == worktree.OUTCOME_FAILED]
 
     def gate(self) -> GateVerdict:
-        verdict = evaluate_gate(self.created_ms, repo_files=self.repo_files, width=self.width)
+        verdict = evaluate_gate(
+            self.created_ms, repo_files=self.repo_files, width=self.width
+        )
         if self.failed_ms:
             verdict.notes.append(
                 f"{len(self.failed_ms)} of {self.width} worktrees FAILED after "
@@ -405,8 +382,6 @@ def synthesize_repo(root: str | Path, files: int = BENCHMARK_MIN_FILES) -> Path:
     for i in range(files):
         d = repo / f"pkg{i // _SYNTH_FILES_PER_DIR:04d}"
         d.mkdir(exist_ok=True)
-        # ~200 bytes each: big enough that hydration is real file I/O, small enough that 10K
-        # files stay a ~2MB checkout rather than something the disk cache cannot hold.
         (d / f"mod{i % _SYNTH_FILES_PER_DIR:04d}.py").write_text(
             f'"""synthetic module {i}."""\n\nVALUE = {i}\n\n\ndef f{i}(x):\n'
             f"    return x + {i}  # {'y' * 120}\n",
@@ -476,9 +451,6 @@ def measure_fanout(
             raise BenchmarkError(f"{repo_path} is not a git repo")
         if not worktree.ensure_base_commit(str(repo_path)):
             raise BenchmarkError(f"{repo_path} has no commit to branch from")
-        # Prime the size-class cache OUTSIDE the measured calls, exactly as production does after
-        # its first creation — otherwise the first row of every benchmark carries a `git ls-files`
-        # the later rows do not, and the mean would be reporting the instrumentation.
         files = worktree.repo_file_count(str(repo_path))
         try:
             with collect_timing_rows() as rows:
@@ -505,16 +477,18 @@ def run_benchmark(
 ) -> FanOutBaseline:
     """Measure a fan-out, synthesizing a benchmark repo under a temp dir when none is given.
 
-    Everything the benchmark creates — the synthetic repo and the PClaw home holding the
+    Everything the benchmark creates — the synthetic repo and the Gideon home holding the
     worktrees — lives in one temp directory that is removed on the way out, so nothing it measures
     can end up in the committed tree.
     """
     if repo is not None:
-        with tempfile.TemporaryDirectory(prefix="pclaw-wt-bench-home-") as home:
+        with tempfile.TemporaryDirectory(prefix="gideon-wt-bench-home-") as home:
             return measure_fanout(repo, home, width=width, contended=contended)
-    with tempfile.TemporaryDirectory(prefix="pclaw-wt-bench-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="gideon-wt-bench-") as tmp:
         synthesized = synthesize_repo(Path(tmp) / "repo", files=files)
         try:
-            return measure_fanout(synthesized, Path(tmp) / "home", width=width, contended=contended)
+            return measure_fanout(
+                synthesized, Path(tmp) / "home", width=width, contended=contended
+            )
         finally:
             shutil.rmtree(synthesized, ignore_errors=True)

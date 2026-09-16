@@ -5,8 +5,15 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from gideon.dashboard.handlers.triggers import api_trigger_create, api_triggers
-from gideon.schedule import ScheduleDefinition, ScheduleJob, make_agent_action
+from gideon.automation.schedule import (
+    ScheduleDefinition,
+    ScheduleJob,
+    make_agent_action,
+)
+from gideon.interfaces.dashboard.handlers.triggers import (
+    api_trigger_create,
+    api_triggers,
+)
 
 
 def _action(task="m", approval_mode=""):
@@ -46,9 +53,7 @@ class TestScheduleTriggerApprovalMode:
         )
         resp = await api_trigger_create(request)
         assert resp.status == 200
-        # 🔴 SUPERSEDED CONTRACT (S101 write re-point): the action rides `workflow.inline` in the
-        # store now, not an `add_job` kwarg. The approval_mode is still folded into its config.
-        from gideon.dashboard.handlers.triggers import _trigger_store
+        from gideon.interfaces.dashboard.handlers.triggers import _trigger_store
 
         workflow = _trigger_store().get("clock:t").trigger.workflow
         assert workflow["inline"]["config"]["approval_mode"] == "auto"
@@ -80,10 +85,7 @@ class TestScheduleTriggerApprovalMode:
         )
         resp = await api_trigger_create(request)
         assert resp.status == 200
-        # 🔴 SUPERSEDED CONTRACT (S101 write re-point). This asserted the legacy `add_job` mock's
-        # `.silent`; the row now lives in the unified store, where `silent` is `delivery == "none"`
-        # (LEGACY_FIELD_MAP). Reading the mock would pass forever without the write happening.
-        from gideon.dashboard.handlers.triggers import _trigger_store
+        from gideon.interfaces.dashboard.handlers.triggers import _trigger_store
 
         trigger = _trigger_store().get("clock:t").trigger
         assert trigger.delivery == "none"
@@ -110,10 +112,10 @@ class TestTriggerListFields:
         The wire contract is unchanged: the same keys, from the store's addresses (`delivery`
         carries channel + silent; `approval_mode` rides inside `workflow.inline.config`).
         """
-        import gideon.config.loader as loader
-        from gideon.dashboard.handlers import triggers as T
-        from gideon.triggers.models import Trigger
-        from gideon.triggers.store import TriggerStore
+        import gideon.core.config.loader as loader
+        from gideon.automation.triggers.models import Trigger
+        from gideon.automation.triggers.store import TriggerStore
+        from gideon.interfaces.dashboard.handlers import triggers as T
 
         monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
         monkeypatch.setattr(T, "config_dir", lambda: tmp_path)
@@ -124,8 +126,6 @@ class TestTriggerListFields:
                 kind="clock",
                 enabled=True,
                 spec={"kind": "interval", "interval_secs": 300},
-                # `delivery: none` IS the legacy `silent=True`; a silent job delivers nowhere,
-                # so the channel is not carried alongside it (S98's mapping).
                 delivery="none",
                 workflow={
                     "inline": {
@@ -149,16 +149,7 @@ class TestTriggerListFields:
         assert t["id"] == "schedule:j1"
         assert t["approval_mode"] == "auto"
         assert t["silent"] is True
-        # The action derives from the invoke-agent exec mode.
         assert t["action"]["provider"] == "invoke-agent"
-
-
-# ── 🔴 #587 at the HTTP layer: `enabled` on POST /api/triggers ────────────────
-#
-# `_create_schedule` never read `body["enabled"]`. It called `tools.create` (which hardcoded
-# `enabled=True`), post-processed only `delivery`, then called `_arm_if_needed` — so a caller
-# asking for a trigger created switched off got a live, ARMED one, and the response echoed it as
-# enabled: accurate about the wrong thing.
 
 
 class TestCreateHonorsEnabledOverTheWire:
@@ -172,20 +163,27 @@ class TestCreateHonorsEnabledOverTheWire:
         return request
 
     def _home(self, monkeypatch, tmp_path):
-        import gideon.config.loader as loader
-        from gideon.dashboard.handlers import triggers as T
+        import gideon.core.config.loader as loader
+        from gideon.interfaces.dashboard.handlers import triggers as T
 
         monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
         monkeypatch.setattr(T, "config_dir", lambda: tmp_path)
 
     def _body(self, **over):
-        body = {"trigger_type": "schedule", "name": "t", "every": 300, "action": _action()}
+        body = {
+            "trigger_type": "schedule",
+            "name": "t",
+            "every": 300,
+            "action": _action(),
+        }
         body.update(over)
         return body
 
     @pytest.mark.asyncio
-    async def test_enabled_false_creates_a_disabled_unarmed_trigger(self, monkeypatch, tmp_path):
-        from gideon.triggers.store import TriggerStore
+    async def test_enabled_false_creates_a_disabled_unarmed_trigger(
+        self, monkeypatch, tmp_path
+    ):
+        from gideon.automation.triggers.store import TriggerStore
 
         self._home(monkeypatch, tmp_path)
         resp = await api_trigger_create(self._request(self._body(enabled=False)))
@@ -200,7 +198,7 @@ class TestCreateHonorsEnabledOverTheWire:
     @pytest.mark.asyncio
     async def test_omitting_enabled_still_creates_it_live(self, monkeypatch, tmp_path):
         """Vacuity floor and the compatibility contract — every existing client omits the field."""
-        from gideon.triggers.store import TriggerStore
+        from gideon.automation.triggers.store import TriggerStore
 
         self._home(monkeypatch, tmp_path)
         resp = await api_trigger_create(self._request(self._body()))
@@ -212,7 +210,9 @@ class TestCreateHonorsEnabledOverTheWire:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("bad", ["false", "true", 0, 1, "0", None, [], {}])
-    async def test_a_non_bool_enabled_is_a_400_not_a_coercion(self, bad, monkeypatch, tmp_path):
+    async def test_a_non_bool_enabled_is_a_400_not_a_coercion(
+        self, bad, monkeypatch, tmp_path
+    ):
         """The same rule `POST /api/triggers/{id}/toggle` already applies, and for the same reason:
         the JSON string "false" is TRUTHY under `bool()`, so coercing would silently ARM a trigger
         the caller asked to be created off — inverting the request rather than refusing it.
@@ -221,14 +221,14 @@ class TestCreateHonorsEnabledOverTheWire:
         """
         import json
 
-        from gideon.triggers.store import TriggerStore
+        from gideon.automation.triggers.store import TriggerStore
 
         self._home(monkeypatch, tmp_path)
         resp = await api_trigger_create(self._request(self._body(enabled=bad)))
         assert resp.status == 400
-        # The STRUCTURED envelope, unlike this function's older flat siblings: a new refusal joins
-        # the shape `test_wire_error_envelope_census` ratchets the codebase toward.
         error = json.loads(resp.body.decode())["error"]
         assert error["code"] == "invalid_request"
         assert "enabled" in error["message"]
-        assert TriggerStore(base_dir=tmp_path).load() == [], "a refused create must persist nothing"
+        assert (
+            TriggerStore(base_dir=tmp_path).load() == []
+        ), "a refused create must persist nothing"

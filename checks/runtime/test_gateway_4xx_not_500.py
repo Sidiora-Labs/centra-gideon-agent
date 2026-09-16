@@ -14,8 +14,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from gideon.skills.marketplace import SkillNotFoundError
-from gideon.skills.native import NativeSkillsMarketplace
+from gideon.extensions.skills.marketplace import SkillNotFoundError
+from gideon.extensions.skills.native import NativeSkillsMarketplace
 
 
 @pytest.fixture(autouse=True)
@@ -27,9 +27,6 @@ def _isolate_home(tmp_path, monkeypatch):
 
 def _body(resp):
     return json.loads(resp.body.decode())
-
-
-# ── native fetch: ids are names, never paths ─────────────────────────────────
 
 
 @pytest.fixture()
@@ -51,13 +48,10 @@ class TestNativeFetchTraversal:
         assert any(f["path"] == "SKILL.md" for f in detail.files)
 
     def test_dotdot_id_refused(self, skill_root):
-        # ../outside names a dir that DOES carry a SKILL.md — the old code
-        # happily rglob'd it (and its secret.txt) out of the root.
         with pytest.raises(SkillNotFoundError):
             NativeSkillsMarketplace(root=skill_root).fetch("../outside")
 
     def test_absolute_id_refused(self, skill_root, tmp_path):
-        # pathlib: root / "/abs" REPLACES the root entirely.
         with pytest.raises(SkillNotFoundError):
             NativeSkillsMarketplace(root=skill_root).fetch(str(tmp_path / "outside"))
 
@@ -78,9 +72,6 @@ class TestNativeFetchTraversal:
     def test_missing_id_is_typed_not_runtimeerror(self, skill_root):
         with pytest.raises(SkillNotFoundError):
             NativeSkillsMarketplace(root=skill_root).fetch("nope")
-
-
-# ── handlers: not-found is 404, malformed is 400 — never 500 ────────────────
 
 
 def _query_req(query):
@@ -104,7 +95,9 @@ def _json_req(body, match_info=None):
 class TestSkillEndpoints4xx:
     @pytest.mark.asyncio
     async def test_marketplace_detail_missing_native_skill_is_404(self):
-        from gideon.dashboard.handlers.skills import api_skills_marketplace_detail
+        from gideon.interfaces.dashboard.handlers.skills import (
+            api_skills_marketplace_detail,
+        )
 
         resp = await api_skills_marketplace_detail(
             _query_req({"id": "definitely-not-a-skill", "marketplace": "native"})
@@ -113,7 +106,9 @@ class TestSkillEndpoints4xx:
 
     @pytest.mark.asyncio
     async def test_marketplace_detail_traversal_id_is_404(self):
-        from gideon.dashboard.handlers.skills import api_skills_marketplace_detail
+        from gideon.interfaces.dashboard.handlers.skills import (
+            api_skills_marketplace_detail,
+        )
 
         resp = await api_skills_marketplace_detail(
             _query_req({"id": "../../etc", "marketplace": "native"})
@@ -122,7 +117,7 @@ class TestSkillEndpoints4xx:
 
     @pytest.mark.asyncio
     async def test_install_missing_native_skill_is_404(self, tmp_path):
-        from gideon.dashboard.handlers.skills import api_skills_install
+        from gideon.interfaces.dashboard.handlers.skills import api_skills_install
 
         resp = await api_skills_install(
             _json_req(
@@ -139,8 +134,7 @@ class TestSkillEndpoints4xx:
 class TestPromptEndpoints4xx:
     @pytest.mark.asyncio
     async def test_preview_bad_variable_type_is_400(self):
-        # Create routes the same payload through ValueError→400; preview must not 500.
-        from gideon.dashboard.handlers.prompts import api_prompt_preview
+        from gideon.interfaces.dashboard.handlers.prompts import api_prompt_preview
 
         resp = await api_prompt_preview(
             _json_req(
@@ -155,8 +149,9 @@ class TestPromptEndpoints4xx:
 
     @pytest.mark.asyncio
     async def test_bindings_save_unhashable_use_case_is_400(self):
-        # `in frozenset` raised TypeError on a list use_case — the adjacent ref IS guarded.
-        from gideon.dashboard.handlers.prompts import api_prompt_bindings_save
+        from gideon.interfaces.dashboard.handlers.prompts import (
+            api_prompt_bindings_save,
+        )
 
         resp = await api_prompt_bindings_save(
             _json_req({"use_case": ["not", "a", "string"], "ref": ""})
@@ -164,12 +159,9 @@ class TestPromptEndpoints4xx:
         assert resp.status == 400
 
 
-# ── loops: PUT mirrors the create gate's numeric/boolean floor ───────────────
-
-
 class TestLoopSpecEditFloor:
     def _errs(self, patch):
-        from gideon.loop.validation import spec_edit_errors
+        from gideon.automation.loop.validation import spec_edit_errors
 
         return spec_edit_errors(patch, kind="goal", existing_kind_config={})
 
@@ -180,14 +172,18 @@ class TestLoopSpecEditFloor:
         assert any("hard cap" in e.lower() for e in self._errs({"max_cycles": 10**9}))
 
     def test_non_int_max_cycles_rejected(self):
-        assert any("whole number" in e.lower() for e in self._errs({"max_cycles": "lots"}))
+        assert any(
+            "whole number" in e.lower() for e in self._errs({"max_cycles": "lots"})
+        )
 
     def test_non_int_idle_secs_rejected(self):
         assert any("idle_secs" in e for e in self._errs({"idle_secs": "abc"}))
 
     def test_string_false_autopilot_rejected(self):
-        # int(bool("false")) == 1: the silent wrong direction the floor exists for.
-        assert any("'autopilot' must be a boolean" in e for e in self._errs({"autopilot": "false"}))
+        assert any(
+            "'autopilot' must be a boolean" in e
+            for e in self._errs({"autopilot": "false"})
+        )
 
     @pytest.mark.parametrize("f", ["attended", "auto_teardown_on_complete"])
     def test_sibling_bool_fields_rejected_as_strings(self, f):
@@ -200,10 +196,13 @@ class TestLoopSpecEditFloor:
         assert self._errs({"name": "renamed"}) == []
 
     def test_create_gate_shares_the_boolean_floor(self):
-        from gideon.loop.validation import validate
+        from gideon.automation.loop.validation import validate
 
         result = validate(
-            {"task": "a perfectly reasonable and detailed task description", "autopilot": "false"},
+            {
+                "task": "a perfectly reasonable and detailed task description",
+                "autopilot": "false",
+            },
             agent_exists=True,
         )
         assert any("'autopilot' must be a boolean" in e for e in result.errors)

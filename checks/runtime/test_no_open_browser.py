@@ -2,7 +2,7 @@
 
 Covers:
 - DashboardConfig.auto_open_browser default and JSON loading
-- GatewayOrchestrator stores no_open flag
+- RuntimeCoordinator stores no_open flag
 - run_gateway passes no_open to orchestrator
 """
 
@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from gideon.config.loader import AppConfig, DashboardConfig
+from gideon.core.config.loader import AppConfig, DashboardConfig
 
 
 def _load_from_raw_string(content: str) -> AppConfig:
@@ -27,7 +27,7 @@ def _load_from_raw_string(content: str) -> AppConfig:
         f.write(content)
         tmp = Path(f.name)
 
-    with patch("gideon.config.loader.config_path", return_value=tmp):
+    with patch("gideon.core.config.loader.config_path", return_value=tmp):
         return AppConfig.load()
 
 
@@ -65,40 +65,40 @@ class TestAutoOpenBrowserConfig:
             mode="w", suffix=".json", delete=False, encoding="utf-8"
         ) as f:
             tmp = Path(f.name)
-        with patch("gideon.config.loader.config_path", return_value=tmp):
+        with patch("gideon.core.config.loader.config_path", return_value=tmp):
             cfg.save()
             loaded = AppConfig.load()
         assert loaded.dashboard.auto_open_browser is False
 
 
 class TestNoOpenCliFlag:
-    """Tests for the --no-open flag propagation to GatewayOrchestrator."""
+    """Tests for the --no-open flag propagation to RuntimeCoordinator."""
 
     def test_orchestrator_stores_no_open_true(self) -> None:
-        """GatewayOrchestrator stores no_open=True."""
-        from gideon.gateway import GatewayOrchestrator
+        """RuntimeCoordinator stores no_open=True."""
+        from gideon.engine.gateway import RuntimeCoordinator
 
         cfg = AppConfig()
         with patch.object(cfg, "load_credentials", return_value={}):
-            orch = GatewayOrchestrator(cfg, no_open=True)
+            orch = RuntimeCoordinator(cfg, no_open=True)
         assert orch._no_open is True
 
     def test_orchestrator_stores_no_open_false_by_default(self) -> None:
-        """GatewayOrchestrator defaults no_open to False."""
-        from gideon.gateway import GatewayOrchestrator
+        """RuntimeCoordinator defaults no_open to False."""
+        from gideon.engine.gateway import RuntimeCoordinator
 
         cfg = AppConfig()
         with patch.object(cfg, "load_credentials", return_value={}):
-            orch = GatewayOrchestrator(cfg)
+            orch = RuntimeCoordinator(cfg)
         assert orch._no_open is False
 
     @pytest.mark.asyncio
     async def test_run_gateway_passes_no_open(self) -> None:
-        """run_gateway forwards no_open to GatewayOrchestrator."""
-        from gideon.gateway import run_gateway
+        """run_gateway forwards no_open to RuntimeCoordinator."""
+        from gideon.engine.gateway import run_gateway
 
         cfg = AppConfig()
-        with patch("gideon.gateway.GatewayOrchestrator") as mock_orch_cls:
+        with patch("gideon.engine.gateway.RuntimeCoordinator") as mock_orch_cls:
             mock_orch = MagicMock()
             mock_orch.run = AsyncMock()
             mock_orch_cls.return_value = mock_orch

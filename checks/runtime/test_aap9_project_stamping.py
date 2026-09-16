@@ -24,30 +24,36 @@ from types import SimpleNamespace
 
 import pytest
 
-import gideon.mcp_artifacts as ma
-from gideon.mcp_core import _CURRENT_SESSION_KEY
+import gideon.integrations.mcp_artifacts as ma
+from gideon.integrations.mcp_core import _CURRENT_SESSION_KEY
 
 
 class TestNativePathNeverAsksTheGateway:
     def test_a_bound_contextvar_short_circuits_before_any_http(self, monkeypatch):
         monkeypatch.setattr(
-            "gideon.agents.native.builtin_tools.current_project_id", lambda: "p-native"
+            "gideon.engine.agents.native.builtin_tools.current_project_id",
+            lambda: "p-native",
         )
         called: list[str] = []
-        monkeypatch.setattr(ma, "_session_bound_project_id", lambda: called.append("http") or "")
+        monkeypatch.setattr(
+            ma, "_session_bound_project_id", lambda: called.append("http") or ""
+        )
         assert ma._current_project_id() == "p-native"
         assert called == [], "the native path must not fall through to the gateway read"
 
-    def test_in_process_native_with_no_project_returns_empty_without_asking(self, monkeypatch):
+    def test_in_process_native_with_no_project_returns_empty_without_asking(
+        self, monkeypatch
+    ):
         """The load-bearing guard. An unscoped NATIVE turn has an empty project contextvar
         but a live session key, so without the in-process check it would issue a blocking
         GET from inside the gateway — the gateway waiting on itself."""
         monkeypatch.setattr(
-            "gideon.agents.native.builtin_tools.current_project_id", lambda: ""
+            "gideon.engine.agents.native.builtin_tools.current_project_id", lambda: ""
         )
         calls: list[str] = []
         monkeypatch.setattr(
-            "gideon.mcp_core._get", lambda path: calls.append(path) or {"project_id": "p-x"}
+            "gideon.integrations.mcp_core._get",
+            lambda path: calls.append(path) or {"project_id": "p-x"},
         )
         token = _CURRENT_SESSION_KEY.set("dashboard:native-turn")
         try:
@@ -62,7 +68,7 @@ class TestAcpPathResolvesFromTheSessionKey:
     def _out_of_process(self, monkeypatch):
         """No native contextvars: exactly the state of an ACP CLI's mcp-core process."""
         monkeypatch.setattr(
-            "gideon.agents.native.builtin_tools.current_project_id", lambda: ""
+            "gideon.engine.agents.native.builtin_tools.current_project_id", lambda: ""
         )
         token = _CURRENT_SESSION_KEY.set("")
         yield
@@ -72,7 +78,7 @@ class TestAcpPathResolvesFromTheSessionKey:
         monkeypatch.setattr(ma, "_resolve_session_key", lambda: "dashboard:acp-chat")
         seen: list[str] = []
         monkeypatch.setattr(
-            "gideon.mcp_core._get",
+            "gideon.integrations.mcp_core._get",
             lambda path: seen.append(path) or {"project_id": "p-acp"},
         )
         assert ma._current_project_id() == "p-acp"
@@ -82,14 +88,17 @@ class TestAcpPathResolvesFromTheSessionKey:
         """A 200 with an empty id is the normal unscoped answer — not an error, and not a
         reason to substitute a default."""
         monkeypatch.setattr(ma, "_resolve_session_key", lambda: "dashboard:acp-chat")
-        monkeypatch.setattr("gideon.mcp_core._get", lambda path: {"project_id": ""})
+        monkeypatch.setattr(
+            "gideon.integrations.mcp_core._get", lambda path: {"project_id": ""}
+        )
         assert ma._current_project_id() == ""
 
     def test_no_session_identity_asks_nothing(self, monkeypatch):
         monkeypatch.setattr(ma, "_resolve_session_key", lambda: "")
         calls: list[str] = []
         monkeypatch.setattr(
-            "gideon.mcp_core._get", lambda path: calls.append(path) or {"project_id": "p"}
+            "gideon.integrations.mcp_core._get",
+            lambda path: calls.append(path) or {"project_id": "p"},
         )
         assert ma._current_project_id() == ""
         assert calls == []
@@ -99,7 +108,8 @@ class TestAcpPathResolvesFromTheSessionKey:
         an unreachable gateway must not become a stamped project OR a failed save."""
         monkeypatch.setattr(ma, "_resolve_session_key", lambda: "dashboard:acp-chat")
         monkeypatch.setattr(
-            "gideon.mcp_core._get", lambda path: {"error": "Connection refused"}
+            "gideon.integrations.mcp_core._get",
+            lambda path: {"error": "Connection refused"},
         )
         assert ma._current_project_id() == ""
 
@@ -109,7 +119,7 @@ class TestAcpPathResolvesFromTheSessionKey:
         def _boom(path):
             raise RuntimeError("socket exploded")
 
-        monkeypatch.setattr("gideon.mcp_core._get", _boom)
+        monkeypatch.setattr("gideon.integrations.mcp_core._get", _boom)
         assert ma._current_project_id() == ""
 
 
@@ -122,7 +132,9 @@ class TestTheEndpointKeysOffTheHeaderOnly:
         return SimpleNamespace(app={"state": state}, headers=headers)
 
     async def _call(self, request):
-        from gideon.dashboard.chat_handlers import api_chat_session_bound_project
+        from gideon.interfaces.dashboard.chat_handlers import (
+            api_chat_session_bound_project,
+        )
 
         resp = await api_chat_session_bound_project(request)
         import json
@@ -132,12 +144,16 @@ class TestTheEndpointKeysOffTheHeaderOnly:
     @pytest.mark.asyncio
     async def test_the_header_names_the_session(self):
         sessions = {"a": SimpleNamespace(project_id="p-a")}
-        got = await self._call(self._request({"X-Session-Key": "dashboard:a"}, sessions))
+        got = await self._call(
+            self._request({"X-Session-Key": "dashboard:a"}, sessions)
+        )
         assert got == {"project_id": "p-a"}
 
     @pytest.mark.asyncio
     async def test_an_absent_header_is_an_empty_id_not_an_error(self):
-        got = await self._call(self._request({}, {"a": SimpleNamespace(project_id="p-a")}))
+        got = await self._call(
+            self._request({}, {"a": SimpleNamespace(project_id="p-a")})
+        )
         assert got == {"project_id": ""}
 
     @pytest.mark.asyncio
@@ -146,7 +162,8 @@ class TestTheEndpointKeysOffTheHeaderOnly:
         exclusion ``handlers/context._session_project_id`` makes."""
         got = await self._call(
             self._request(
-                {"X-Session-Key": "dashboard:ui"}, {"ui": SimpleNamespace(project_id="p")}
+                {"X-Session-Key": "dashboard:ui"},
+                {"ui": SimpleNamespace(project_id="p")},
             )
         )
         assert got == {"project_id": ""}
@@ -159,7 +176,9 @@ class TestTheEndpointKeysOffTheHeaderOnly:
     @pytest.mark.asyncio
     async def test_a_session_with_no_project_resolves_to_empty_never_a_default(self):
         sessions = {"a": SimpleNamespace(project_id="")}
-        got = await self._call(self._request({"X-Session-Key": "dashboard:a"}, sessions))
+        got = await self._call(
+            self._request({"X-Session-Key": "dashboard:a"}, sessions)
+        )
         assert got == {"project_id": ""}
 
 

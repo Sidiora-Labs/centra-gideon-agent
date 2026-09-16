@@ -14,7 +14,7 @@ The fix is structural, so the rail has to be structural too. Two claims are pinn
    two paths is DERIVED from the source by AST, not hand-listed, and the derived set must
    equal the reviewed one exactly. A new site reds (someone taught a fifth place to delete
    a copy); a vanished site reds too (the guarantee
-   :func:`~gideon.apps.app_manager._restore_preserved_data` relies on — that a
+   :func:`~gideon.extensions.apps.app_manager._restore_preserved_data` relies on — that a
    parked dir exists only if the whole copy landed — is exactly "``uninstall_keep_data``
    writes that path once, with a rename", and it stops holding the moment that line
    changes shape).
@@ -37,11 +37,16 @@ from pathlib import Path
 
 import pytest
 
-SRC = Path(__file__).resolve().parents[1] / "src" / "gideon" / "apps" / "app_manager.py"
-SRC_ROOT = Path(__file__).resolve().parents[1] / "src" / "gideon"
+SRC = (
+    Path(__file__).resolve().parents[2]
+    / "runtime"
+    / "gideon"
+    / "extensions"
+    / "apps"
+    / "app_manager.py"
+)
+SRC_ROOT = Path(__file__).resolve().parents[2] / "runtime" / "gideon"
 
-#: Names whose value IS one of the two copy paths (or, for ``_restore_preserved_data``,
-#: returns one). An expression mentioning any of them taints what it is assigned to.
 TAINT_SOURCES = frozenset(
     {
         "_preserved_data_dir",
@@ -52,9 +57,6 @@ TAINT_SOURCES = frozenset(
     }
 )
 
-#: Module-level callees that destroy or overwrite, and WHICH argument they do it to.
-#: ``shutil.move``/``os.rename`` consume argument 0 as well as overwriting argument 1, so
-#: both count; ``copytree``'s destination is argument 1 while its source is only read.
 DESTRUCTIVE_CALLS = {
     "shutil.rmtree": {0},
     "shutil.move": {0, 1},
@@ -65,30 +67,10 @@ DESTRUCTIVE_CALLS = {
     "os.remove": {0},
     "os.unlink": {0},
 }
-#: Methods that destroy or overwrite their RECEIVER.
 DESTRUCTIVE_METHODS = frozenset({"rename", "replace", "unlink", "rmdir"})
 
-#: The functions allowed to hold one of these decisions at all.
 OWNERS = frozenset({"_discard_preserved_data", "install", "uninstall_keep_data"})
 
-#: The reviewed census. ``(function, callee, roles) -> how many times``.
-#:
-#: * ``_discard_preserved_data`` / ``rmtree(target)`` — the deliberate eradicate, called by
-#:   ``force_uninstall``. The one site whose job IS to destroy a parked copy. Reaching it
-#:   from the keep-data rung while an unconsumed park existed was the third shape in the
-#:   family; ``uninstall_keep_data``'s refusal, not a change here, is what stops that.
-#: * ``install`` / ``rmtree(parked)`` — GC after the restore is past rollback. Safe because
-#:   the copy has just been reproduced inside the app tree; a FAILED restore returns
-#:   ``None`` instead, so this never runs on a copy that was not consumed.
-#: * ``uninstall_keep_data`` / ``copytree(live_data, staged)`` — mints the stage. The only
-#:   writer of that path in the codebase.
-#: * ``uninstall_keep_data`` / ``rmtree(staged)`` ×2 — the two fail-closed cleanups
-#:   (preserve failed; ``force_uninstall`` refused). Both act on a stage THIS call created
-#:   while ``live_data`` is still on disk, which is only true because the rung refuses when
-#:   a stage already exists — that is what makes them redundant duplicates rather than last
-#:   copies (#2574).
-#: * ``uninstall_keep_data`` / ``.rename`` — the atomic park. Destination provably absent,
-#:   same filesystem, so a parked copy is complete BY CONSTRUCTION (#2585).
 EXPECTED = Counter(
     {
         ("_discard_preserved_data", "shutil.rmtree", ("arg0",)): 1,
@@ -117,12 +99,11 @@ def census(source: str) -> list[tuple[tuple[str, str, tuple[str, ...]], str, int
     for fn in ast.walk(tree):
         if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
-        # Intra-function taint: names bound to an expression naming a taint source, then
-        # transitively to those names. Bounded and order-dependent on purpose — it models
-        # "the local variable holding this path", which is all any site here does.
         tainted: set[str] = set()
         for node in ast.walk(fn):
-            value = node.value if isinstance(node, (ast.Assign, ast.AnnAssign)) else None
+            value = (
+                node.value if isinstance(node, (ast.Assign, ast.AnnAssign)) else None
+            )
             if value is None:
                 continue
             if not _idents(value) & (TAINT_SOURCES | tainted):
@@ -148,7 +129,10 @@ def census(source: str) -> list[tuple[tuple[str, str, tuple[str, ...]], str, int
                     elif names & tainted:
                         roles.append(f"arg{pos}")
                         how = how or "alias"
-            elif isinstance(node.func, ast.Attribute) and node.func.attr in DESTRUCTIVE_METHODS:
+            elif (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr in DESTRUCTIVE_METHODS
+            ):
                 spelling = f".{node.func.attr}"
                 names = _idents(node.func.value)
                 if names & TAINT_SOURCES:
@@ -194,7 +178,9 @@ def test_the_census_is_not_vacuous():
     only matched literal ``_preserved_data_dir(...)`` in an argument would score zero.
     """
     sites = census(SRC.read_text(encoding="utf-8"))
-    assert len(sites) >= 6, f"the census found only {len(sites)} sites; it has gone blind"
+    assert (
+        len(sites) >= 6
+    ), f"the census found only {len(sites)} sites; it has gone blind"
     aliased = [s for s in sites if s[1] == "alias"]
     assert len(aliased) >= 3, (
         f"only {len(aliased)} sites resolved through the alias tracker; a literal-only "
@@ -212,9 +198,11 @@ def _plant(source: str, statement: str) -> str:
     assert marker in source, "the planting site moved; pick another non-owner function"
     head, _, tail = source.partition(marker)
     body_start = tail.index("\n") + 1
-    planted = head + marker + tail[:body_start] + f"    {statement}\n" + tail[body_start:]
+    planted = (
+        head + marker + tail[:body_start] + f"    {statement}\n" + tail[body_start:]
+    )
     assert len(planted) > len(source), "the plant did not change the source"
-    ast.parse(planted)  # a bypass the rail cannot see because it does not parse is no proof
+    ast.parse(planted)
     return planted
 
 
@@ -239,7 +227,7 @@ def test_the_census_reds_on_a_planted_bypass(statement, label):
     ), f"the planted {label} bypass was invisible to the census: {new}"
     hows = {how for key, how, _line in planted if key[0] == "enable"}
     assert hows == {label}, f"the bypass was found, but by the wrong route: {hows}"
-    assert "enable" not in OWNERS  # so the owner claim reds too
+    assert "enable" not in OWNERS
 
 
 def test_no_other_module_reaches_the_data_copy_paths():
@@ -248,10 +236,14 @@ def test_no_other_module_reaches_the_data_copy_paths():
     A count floor comes with it: ``app_manager`` itself must mention every token, so the
     scan cannot be green because the names were renamed out from under it.
     """
-    tokens = sorted(TAINT_SOURCES - {"_restore_preserved_data"}) + ["_restore_preserved_data"]
+    tokens = sorted(TAINT_SOURCES - {"_restore_preserved_data"}) + [
+        "_restore_preserved_data"
+    ]
     own = SRC.read_text(encoding="utf-8")
     missing = [t for t in tokens if t not in own]
-    assert not missing, f"{missing} no longer exist in app_manager; this scan is checking air"
+    assert (
+        not missing
+    ), f"{missing} no longer exist in app_manager; this scan is checking air"
 
     offenders: dict[str, list[str]] = {}
     scanned = 0
@@ -263,7 +255,9 @@ def test_no_other_module_reaches_the_data_copy_paths():
         hits = [t for t in tokens if t in text]
         if hits:
             offenders[str(path.relative_to(SRC_ROOT))] = hits
-    assert scanned > 100, f"only {scanned} modules scanned; the walk is not finding the tree"
+    assert (
+        scanned > 100
+    ), f"only {scanned} modules scanned; the walk is not finding the tree"
     assert not offenders, (
         "a module outside app_manager reaches an app-data copy path directly: "
         f"{offenders}. Route the decision through app_manager._unconsumed_data_copies "

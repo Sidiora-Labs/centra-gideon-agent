@@ -7,8 +7,8 @@ from unittest.mock import patch
 
 import pytest
 
-from gideon.agents.native.builtin_tools import NativeBuiltinToolProvider
-from gideon.tasks import registry
+from gideon.engine.agents.native.builtin_tools import NativeBuiltinToolProvider
+from gideon.engine.tasks import registry
 
 
 @pytest.fixture
@@ -18,8 +18,8 @@ def provider(tmp_path):
     ws.mkdir()
     store = tmp_path / "home"
     with (
-        patch("gideon.tasks.native.config_dir", return_value=store),
-        patch("gideon.tasks.hierarchy.config_dir", return_value=store),
+        patch("gideon.engine.tasks.native.config_dir", return_value=store),
+        patch("gideon.engine.tasks.hierarchy.config_dir", return_value=store),
     ):
         yield NativeBuiltinToolProvider(ws)
     registry._providers.clear()
@@ -43,7 +43,9 @@ async def test_task_tools_listed(provider):
 
 @pytest.mark.asyncio
 async def test_task_create_and_get(provider):
-    r = await provider.invoke("task_create", {"title": "Write the spec", "priority": "high"})
+    r = await provider.invoke(
+        "task_create", {"title": "Write the spec", "priority": "high"}
+    )
     assert r.success and "created task" in r.output
     tid = r.output.split("created task ")[1].split(":")[0]
     g = await provider.invoke("task_get", {"id": tid})
@@ -63,22 +65,28 @@ async def test_task_list_and_search(provider):
     lst = await provider.invoke("task_list", {})
     assert lst.success and "Alpha task" in lst.output and "Beta task" in lst.output
     found = await provider.invoke("task_search", {"query": "alpha"})
-    assert found.success and "Alpha task" in found.output and "Beta task" not in found.output
+    assert (
+        found.success
+        and "Alpha task" in found.output
+        and "Beta task" not in found.output
+    )
 
 
 @pytest.mark.asyncio
 async def test_task_update_status_and_complete_gate(provider):
     r = await provider.invoke(
         "task_create",
-        {"title": "Ship", "exit_criteria": [{"description": "tests pass", "met": False}]},
+        {
+            "title": "Ship",
+            "exit_criteria": [{"description": "tests pass", "met": False}],
+        },
     )
     tid = r.output.split("created task ")[1].split(":")[0]
-    # Completing while a criterion is unmet is rejected with a helpful hint.
     blocked = await provider.invoke("task_update", {"id": tid, "status": "done"})
     assert not blocked.success and "exit criteria" in blocked.error
-    # Mark the criterion met, then completing succeeds.
     await provider.invoke(
-        "task_update", {"id": tid, "exit_criteria": [{"description": "tests pass", "met": True}]}
+        "task_update",
+        {"id": tid, "exit_criteria": [{"description": "tests pass", "met": True}]},
     )
     ok = await provider.invoke("task_update", {"id": tid, "status": "done"})
     assert ok.success and "[done]" in ok.output
@@ -86,9 +94,6 @@ async def test_task_update_status_and_complete_gate(provider):
 
 @pytest.mark.asyncio
 async def test_task_update_coerces_status_synonyms(provider):
-    # An LLM commonly emits "complete"/"todo"/"in-progress" instead of the canonical
-    # done/open/in_progress — coerce them so the worker doesn't loop on a confusing
-    # (mislabeled) ValueError and leave the cockpit rail stale.
     r = await provider.invoke("task_create", {"title": "Do it"})
     tid = r.output.split("created task ")[1].split(":")[0]
     ip = await provider.invoke("task_update", {"id": tid, "status": "in-progress"})
@@ -114,7 +119,6 @@ async def test_task_ready_respects_dependencies(provider):
     await provider.invoke("task_create", {"title": "B", "depends_on": [aid]})
     ready = await provider.invoke("task_ready", {})
     assert "A" in ready.output and "B" not in ready.output.replace("B-", "")
-    # finish A → B becomes ready
     await provider.invoke("task_update", {"id": aid, "status": "done"})
     ready2 = await provider.invoke("task_ready", {})
     assert "B" in ready2.output
@@ -125,11 +129,15 @@ async def test_project_and_task_list_create_and_derived_label(provider):
     p = await provider.invoke("project_create", {"name": "Website"})
     assert p.success and "Website" in p.output
     pid = p.output.split("id=")[1].rstrip(")")
-    tl = await provider.invoke("task_list_create", {"name": "Launch", "project_id": pid})
+    tl = await provider.invoke(
+        "task_list_create", {"name": "Launch", "project_id": pid}
+    )
     assert tl.success
     tlid = tl.output.split("id=")[1].split(",")[0]
-    t = await provider.invoke("task_create", {"title": "Build it", "task_list_id": tlid})
-    assert t.success and "@Website" in t.output  # project label derived from the list
+    t = await provider.invoke(
+        "task_create", {"title": "Build it", "task_list_id": tlid}
+    )
+    assert t.success and "@Website" in t.output
 
     lst = await provider.invoke("project_list", {})
     assert "Website" in lst.output and "Launch" in lst.output
@@ -141,6 +149,5 @@ async def test_task_create_rejects_cycle(provider):
     aid = a.output.split("created task ")[1].split(":")[0]
     b = await provider.invoke("task_create", {"title": "B", "depends_on": [aid]})
     bid = b.output.split("created task ")[1].split(":")[0]
-    # A depends on B and B already depends on A → cycle, rejected.
     r = await provider.invoke("task_update", {"id": aid, "depends_on": [bid]})
     assert not r.success and "cycle" in r.error.lower()

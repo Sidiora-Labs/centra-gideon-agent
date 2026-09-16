@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-import gideon.heartbeat as hb_mod
-from gideon.heartbeat import (
+import gideon.engine.heartbeat as hb_mod
+from gideon.engine.heartbeat import (
     _HEADER,
     HeartbeatService,
     _should_keep,
@@ -99,7 +99,9 @@ class TestHeartbeatRetention:
 
         svc = HeartbeatService(on_task=on_task)
         hb_path = tmp_path / "HEARTBEAT.md"
-        hb_path.write_text(_HEADER + "- Check pending ticket\n- Check resolved ticket\n")
+        hb_path.write_text(
+            _HEADER + "- Check pending ticket\n- Check resolved ticket\n"
+        )
 
         original = hb_mod.heartbeat_path
         hb_mod.heartbeat_path = lambda: hb_path
@@ -235,7 +237,7 @@ class TestCommitmentDeliveryHook:
         original = hb_mod.heartbeat_path
         hb_mod.heartbeat_path = lambda: tmp_path / "HEARTBEAT.md"
         try:
-            await svc._beat()  # must not raise
+            await svc._beat()
         finally:
             hb_mod.heartbeat_path = original
 
@@ -246,6 +248,6 @@ class TestCommitmentDeliveryHook:
         original = hb_mod.heartbeat_path
         hb_mod.heartbeat_path = lambda: tmp_path / "HEARTBEAT.md"
         try:
-            await svc._beat()  # must not raise
+            await svc._beat()
         finally:
             hb_mod.heartbeat_path = original

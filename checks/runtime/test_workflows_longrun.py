@@ -10,8 +10,8 @@ import time
 
 import pytest
 
-from gideon.workflows.bindings import BindingContext, BindingError, resolve
-from gideon.workflows.longrun import (
+from gideon.automation.workflows.bindings import BindingContext, BindingError, resolve
+from gideon.automation.workflows.longrun import (
     DIVERSITY_FLOOR,
     MAX_ADAPTIVE_DELAY_SECS,
     MIN_ADAPTIVE_DELAY_SECS,
@@ -30,16 +30,17 @@ from gideon.workflows.longrun import (
     significance_of,
     web_hygiene,
 )
-from gideon.workflows.models import InstanceState, JoinMode, LoopMode, Node
-from gideon.workflows.tick import container_outcome, loop_should_continue, reap_watchers
-from gideon.workflows.validator import validate_node_tree
+from gideon.automation.workflows.models import InstanceState, JoinMode, LoopMode, Node
+from gideon.automation.workflows.tick import (
+    container_outcome,
+    loop_should_continue,
+    reap_watchers,
+)
+from gideon.automation.workflows.validator import validate_node_tree
 
 
 def codes(spec) -> list[str]:
     return [i.code for i in validate_node_tree(Node.from_dict(spec)).issues]
-
-
-# ── item identity ──
 
 
 def test_a_republished_item_keeps_its_identity():
@@ -66,9 +67,6 @@ def test_an_unidentifiable_item_yields_no_guid():
     seen-set skips it instead of collapsing every empty item into one."""
     assert item_guid({}) == ""
     assert item_guid(None) == ""
-
-
-# ── seen-set ──
 
 
 def test_the_second_cycle_only_sees_novel_items():
@@ -112,7 +110,8 @@ def test_a_zero_capacity_does_not_disable_the_set():
 
 def test_the_seen_set_round_trips_through_the_journal_shape():
     """A restart must not re-process what the run already paid for — the seen-set is journaled
-    precisely because a restart is when a months-long watcher is most likely interrupted."""
+    precisely because a restart is when a months-long watcher is most likely interrupted.
+    """
     items = [{"guid": "a"}, {"guid": "b"}]
     seen = SeenSet(capacity=99)
     seen.mark_all(items)
@@ -127,16 +126,15 @@ def test_an_unreadable_seen_record_restores_an_empty_set():
     assert len(SeenSet.from_dict("garbage")) == 0
 
 
-# ── significance + sibling views ──
-
-
 def test_an_item_with_no_significance_is_kept():
     """Defaulting to 0.0 would make the filter silently discard every output from a template
     that never opted in."""
     assert significance_of({"statement": "x"}) == 1.0
 
 
-@pytest.mark.parametrize("word,expected", [("critical", 1.0), ("low", 0.3), ("noise", 0.0)])
+@pytest.mark.parametrize(
+    "word,expected", [("critical", 1.0), ("low", 0.3), ("noise", 0.0)]
+)
 def test_word_significance_is_first_class(word, expected):
     """Models return words far more reliably than calibrated floats."""
     assert significance_of({"significance": word}) == expected
@@ -155,7 +153,8 @@ def test_a_sibling_read_is_bounded_by_default():
 
 def test_full_actually_opts_out():
     """Measured regression: filtering inside `as_root` made `| full` inert — it could only ever
-    see items the default had already dropped, a control that looks present and does nothing."""
+    see items the default had already dropped, a control that looks present and does nothing.
+    """
     outputs = [{"findings": [{"statement": f"f{i}"} for i in range(60)]}]
     assert len(sibling_view(outputs, full=True)) == 60
 
@@ -170,21 +169,26 @@ def test_the_filter_runs_before_the_window():
 
 def test_iteration_envelopes_are_flattened_to_items():
     """`siblings.<id>.output` MEANS items. Unflattened, `| full` returned one envelope out of
-    60 items and `| unseen` returned nothing at all — an envelope carries no identity."""
-    outputs = [{"findings": [{"guid": "a"}, {"guid": "b"}]}, {"findings": [{"guid": "c"}]}]
+    60 items and `| unseen` returned nothing at all — an envelope carries no identity.
+    """
+    outputs = [
+        {"findings": [{"guid": "a"}, {"guid": "b"}]},
+        {"findings": [{"guid": "c"}]},
+    ]
     assert len(sibling_view(outputs, full=True)) == 3
 
 
 def test_an_output_with_no_carrier_key_passes_through_whole():
-    assert sibling_view([{"report": "a summary"}], full=True) == [{"report": "a summary"}]
-
-
-# ── bindings ──
+    assert sibling_view([{"report": "a summary"}], full=True) == [
+        {"report": "a summary"}
+    ]
 
 
 def test_a_bare_sibling_binding_is_bounded():
     ctx = BindingContext(
-        sibling_outputs={"main": [{"findings": [{"statement": f"f{i}"} for i in range(60)]}]}
+        sibling_outputs={
+            "main": [{"findings": [{"statement": f"f{i}"} for i in range(60)]}]
+        }
     )
     assert len(resolve("{{siblings.main.output}}", ctx)) == 20
 
@@ -193,7 +197,9 @@ def test_an_explicit_window_is_not_re_defaulted():
     """A template that stated its own bound has said what it wants; silently applying the
     default on top would make `window(50)` mean 20."""
     ctx = BindingContext(
-        sibling_outputs={"main": [{"findings": [{"statement": f"f{i}"} for i in range(60)]}]}
+        sibling_outputs={
+            "main": [{"findings": [{"statement": f"f{i}"} for i in range(60)]}]
+        }
     )
     assert len(resolve("{{siblings.main.output | window(50)}}", ctx)) == 50
 
@@ -213,7 +219,9 @@ def test_unseen_applies_the_engine_seen_set():
         sibling_outputs={"main": [{"findings": [{"guid": "a"}, {"guid": "b"}]}]},
         seen_filter=seen.unseen,
     )
-    assert [i["guid"] for i in resolve("{{siblings.main.output | unseen}}", ctx)] == ["b"]
+    assert [i["guid"] for i in resolve("{{siblings.main.output | unseen}}", ctx)] == [
+        "b"
+    ]
 
 
 def test_previous_output_resolves_when_present():
@@ -226,7 +234,8 @@ def test_a_first_cycle_previous_is_not_an_error():
     `{{previous.output.summary | default('None yet')}}`; raising would make each one fail on its
     own first cycle unless it grew a branch node for the case."""
     assert (
-        resolve("{{previous.output.report | default('None yet')}}", BindingContext()) == "None yet"
+        resolve("{{previous.output.report | default('None yet')}}", BindingContext())
+        == "None yet"
     )
 
 
@@ -238,16 +247,21 @@ def test_a_genuine_typo_still_raises():
 
 
 def test_the_clamp_pipe_bounds_a_model_proposal():
-    assert resolve("{{inputs.d | clamp(30, 86400)}}", BindingContext(inputs={"d": 5})) == 30
-    assert resolve("{{inputs.d | clamp(30, 86400)}}", BindingContext(inputs={"d": 10**9})) == 86400
+    assert (
+        resolve("{{inputs.d | clamp(30, 86400)}}", BindingContext(inputs={"d": 5}))
+        == 30
+    )
+    assert (
+        resolve("{{inputs.d | clamp(30, 86400)}}", BindingContext(inputs={"d": 10**9}))
+        == 86400
+    )
 
 
 def test_the_hygiene_pipe_drops_junk():
-    ctx = BindingContext(inputs={"items": [{"title": "Read more"}, {"title": "A real headline x"}]})
+    ctx = BindingContext(
+        inputs={"items": [{"title": "Read more"}, {"title": "A real headline x"}]}
+    )
     assert len(resolve("{{inputs.items | hygiene}}", ctx)) == 1
-
-
-# ── loop mode + reaping ──
 
 
 def test_until_cancelled_never_self_terminates():
@@ -271,7 +285,9 @@ def test_join_any_does_not_short_circuit_on_its_own():
     runs. That check is deliberate (a join must not fire early on a fan-out), which is why the
     reaping is a separate rule instead of a change to join semantics."""
     assert (
-        container_outcome([InstanceState.DONE, InstanceState.RUNNING], join=JoinMode.ANY)
+        container_outcome(
+            [InstanceState.DONE, InstanceState.RUNNING], join=JoinMode.ANY
+        )
         == InstanceState.RUNNING
     )
 
@@ -297,8 +313,16 @@ def _watcher_spec():
                         "kind": "sequence",
                         "id": "cycle",
                         "children": [
-                            {"kind": "wait", "id": "w", "config": {"duration_secs": 300}},
-                            {"kind": "stage", "id": "syn", "config": {"prompt": "synthesize"}},
+                            {
+                                "kind": "wait",
+                                "id": "w",
+                                "config": {"duration_secs": 300},
+                            },
+                            {
+                                "kind": "stage",
+                                "id": "syn",
+                                "config": {"prompt": "synthesize"},
+                            },
                         ],
                     },
                 },
@@ -328,7 +352,10 @@ def test_a_failed_worker_does_not_reap():
 
 def test_an_already_terminal_watcher_is_not_re_reaped():
     root = _watcher_spec()
-    states = {"root.children[0]": InstanceState.DONE, "root.children[1]": InstanceState.CANCELLED}
+    states = {
+        "root.children[0]": InstanceState.DONE,
+        "root.children[1]": InstanceState.CANCELLED,
+    }
     assert reap_watchers(root, states) == []
 
 
@@ -337,7 +364,10 @@ def test_join_all_never_reaps():
     change the template's declared completion semantics."""
     spec = _watcher_spec().to_dict()
     spec["config"]["join"] = "all"
-    assert reap_watchers(Node.from_dict(spec), {"root.children[0]": InstanceState.DONE}) == []
+    assert (
+        reap_watchers(Node.from_dict(spec), {"root.children[0]": InstanceState.DONE})
+        == []
+    )
 
 
 def test_a_container_worker_leg_still_reaps():
@@ -351,9 +381,6 @@ def test_a_container_worker_leg_still_reaps():
     }
     states = {"root.children[0].children[0]": InstanceState.DONE}
     assert reap_watchers(Node.from_dict(spec), states) == ["root.children[1]"]
-
-
-# ── validation ──
 
 
 def test_an_unreapable_watcher_is_refused():
@@ -386,14 +413,27 @@ def test_max_iterations_makes_a_bare_watcher_valid():
 
 def test_a_parallel_of_only_watchers_is_refused():
     """It can never satisfy its own join, so it is exactly as immortal as a bare loop."""
-    body = {"kind": "sequence", "children": [{"kind": "wait", "config": {"duration_secs": 60}}]}
+    body = {
+        "kind": "sequence",
+        "children": [{"kind": "wait", "config": {"duration_secs": 60}}],
+    }
     spec = {
         "kind": "parallel",
         "id": "root",
         "config": {"join": "any"},
         "children": [
-            {"kind": "loop", "id": "a", "config": {"mode": "until_cancelled"}, "body": body},
-            {"kind": "loop", "id": "b", "config": {"mode": "until_cancelled"}, "body": body},
+            {
+                "kind": "loop",
+                "id": "a",
+                "config": {"mode": "until_cancelled"},
+                "body": body,
+            },
+            {
+                "kind": "loop",
+                "id": "b",
+                "config": {"mode": "until_cancelled"},
+                "body": body,
+            },
         ],
     }
     assert codes(spec).count("WF_UNREAPABLE_WATCHER") == 2
@@ -403,7 +443,11 @@ def test_a_watcher_with_no_wait_is_refused():
     """It would cycle as fast as the model answers and burn a whole budget in minutes — the one
     long-run failure that is expensive rather than merely slow."""
     spec = _watcher_spec().to_dict()
-    spec["children"][1]["body"] = {"kind": "stage", "id": "syn", "config": {"prompt": "go"}}
+    spec["children"][1]["body"] = {
+        "kind": "stage",
+        "id": "syn",
+        "config": {"prompt": "go"},
+    }
     assert "WF_WATCHER_NO_WAIT" in codes(spec)
 
 
@@ -431,9 +475,6 @@ def test_a_seal_with_no_stale_flush_warns():
 def test_an_empty_seal_reports_exactly_one_issue():
     """Three issues for one typo is how a validation report stops being read."""
     assert codes({"kind": "wait", "id": "w", "config": {"seal": {}}}) == ["WF_BAD_SEAL"]
-
-
-# ── buffer seal ──
 
 
 def test_a_full_buffer_seals():
@@ -482,9 +523,6 @@ def test_the_buffer_round_trips():
     assert restored.items == [{"a": 1}]
 
 
-# ── adaptive delay ──
-
-
 def test_a_spin_proposal_is_clamped_up():
     """2 seconds would burn a whole budget in an hour, and it would look like a working run."""
     secs, reason = clamp_delay(2, default=300)
@@ -506,9 +544,6 @@ def test_garbage_falls_back_to_the_configured_delay_not_the_floor():
     assert clamp_delay("nonsense", default=300)[0] == 300
     assert clamp_delay(None, default=300)[0] == 300
     assert clamp_delay(True, default=300)[0] == 300
-
-
-# ── convergence guard ──
 
 
 def test_echoing_sources_are_flagged():
@@ -539,9 +574,6 @@ def test_high_confidence_suppresses_the_flag():
     assert convergence_warning(echo, confidence=0.95) == ""
 
 
-# ── lineage ──
-
-
 def test_a_thrice_reflected_item_is_no_longer_eligible():
     """Past that point the watcher is summarizing its own summaries: each pass loses detail while
     gaining confidence."""
@@ -559,15 +591,14 @@ def test_bumping_does_not_mutate_the_input():
     assert "reflection_count" not in original
 
 
-# ── continuity ──
-
-
 def test_continuity_keeps_the_newest_lines():
     """Dropping the newest would make the object progressively less relevant the longer a
     recurring workflow ran."""
     state: dict = {}
     for n in range(8):
-        state = roll_continuity(state, outcome=f"run {n}", topics=[f"t{n}"], refs=[f"r{n}"])
+        state = roll_continuity(
+            state, outcome=f"run {n}", topics=[f"t{n}"], refs=[f"r{n}"]
+        )
     assert state["summary"][0] == "run 7"
     assert len(state["summary"]) == 5
 
@@ -593,17 +624,18 @@ def test_an_empty_continuity_renders_nothing():
 
 
 def test_a_populated_continuity_renders_a_header():
-    state = roll_continuity({}, outcome="found three issues", topics=["latency"], refs=["r1"])
+    state = roll_continuity(
+        {}, outcome="found three issues", topics=["latency"], refs=["r1"]
+    )
     header = continuity_header(state)
     assert "previous runs" in header
     assert "found three issues" in header
 
 
-# ── hygiene ──
-
-
 def test_junk_titles_are_dropped():
-    kept = web_hygiene([{"title": "Read more"}, {"title": "A real headline about rates"}])
+    kept = web_hygiene(
+        [{"title": "Read more"}, {"title": "A real headline about rates"}]
+    )
     assert len(kept) == 1
 
 
@@ -615,10 +647,10 @@ def test_domain_filtering_is_on_host_boundaries():
         {"title": "A third real headline", "url": "https://news.example.com/c"},
     ]
     kept = web_hygiene(items, allow_domains=["example.com"])
-    assert {i["url"] for i in kept} == {"https://example.com/a", "https://news.example.com/c"}
-
-
-# ── payload compression ──
+    assert {i["url"] for i in kept} == {
+        "https://example.com/a",
+        "https://news.example.com/c",
+    }
 
 
 def test_compression_says_the_view_is_incomplete():
@@ -634,13 +666,10 @@ def test_a_small_payload_passes_through_untouched():
     assert (text, was) == ("short", False)
 
 
-# ── the wait dispatcher ──
-
-
 def _wait(cfg, ctx=None, now=None):
     import asyncio
 
-    from gideon.workflows.engine import dispatch_wait
+    from gideon.automation.workflows.engine import dispatch_wait
 
     node = Node.from_dict({"kind": "wait", "id": "w", "config": cfg})
     return asyncio.get_event_loop().run_until_complete(
@@ -667,7 +696,13 @@ def test_a_wait_with_no_adaptive_key_uses_its_configured_duration():
 def test_a_seal_wait_completes_when_the_buffer_is_full():
     ctx = BindingContext(inputs={"buf": [{"a": 1}] * 25})
     result = _wait(
-        {"seal": {"threshold": 20, "flush_stale_after_secs": 3600, "items": "{{inputs.buf}}"}},
+        {
+            "seal": {
+                "threshold": 20,
+                "flush_stale_after_secs": 3600,
+                "items": "{{inputs.buf}}",
+            }
+        },
         ctx=ctx,
     )
     assert result.state == InstanceState.DONE
@@ -699,13 +734,10 @@ def test_a_wait_with_nothing_configured_fails():
     assert _wait({}).state == InstanceState.FAILED
 
 
-# ── ledger + enum drift ──
-
-
 def test_the_new_ledger_kinds_are_registered():
     """A watcher stopped early produced fewer cycles than its cadence implies; a refiner reading
     cycle counts without the event would conclude the template under-performed."""
-    from gideon.workflows import journal
+    from gideon.automation.workflows import journal
 
     for kind in (
         journal.WATCHER_REAPED,
@@ -720,17 +752,17 @@ def test_until_cancelled_is_in_the_loop_mode_enum():
     assert LoopMode("until_cancelled") is LoopMode.UNTIL_CANCELLED
 
 
-# ── engine path handling (three defects found by running the plan's shape live) ──
-
-
 def test_a_node_below_an_iteration_marker_keeps_its_spec_path():
     """`_base_path` truncated at the last marker, so `…body@0.children[0]` resolved to the body
     SEQUENCE. Live effect: a `wait` nested in a loop body was read as a gate by
     `_wake_due_nodes`, and every cycle failed with "gate timed out with no answer" — for a
     template containing no gate at all."""
-    from gideon.workflows.controller import _base_path
+    from gideon.automation.workflows.controller import _base_path
 
-    assert _base_path("root.children[0].body@0.children[0]") == "root.children[0].body.children[0]"
+    assert (
+        _base_path("root.children[0].body@0.children[0]")
+        == "root.children[0].body.children[0]"
+    )
     assert _base_path("root.body#3.children[1]") == "root.body.children[1]"
     assert _base_path("root.body@2") == "root.body"
     assert _base_path("root") == "root"
@@ -741,21 +773,24 @@ def test_a_container_bodied_loop_finds_its_parent():
     one — so `int("0.children[2]")` raised, `_advance_loop` returned silently, the loop never
     advanced and the run deadlocked after exactly one iteration. Five shipped templates use
     container-bodied loops."""
-    from gideon.workflows.controller import _loop_parent
+    from gideon.automation.workflows.controller import _loop_parent
 
-    assert _loop_parent("root.children[1].body@0.children[2]") == ("root.children[1]", 0)
+    assert _loop_parent("root.children[1].body@0.children[2]") == (
+        "root.children[1]",
+        0,
+    )
     assert _loop_parent("root.children[0].body@2") == ("root.children[0]", 2)
 
 
 def test_the_innermost_loop_marker_wins():
     """A loop nested in another loop's body must advance ITSELF, not its parent."""
-    from gideon.workflows.controller import _loop_parent
+    from gideon.automation.workflows.controller import _loop_parent
 
     assert _loop_parent("root.body@1.body@3.children[0]") == ("root.body@1", 3)
 
 
 def test_a_foreach_marker_is_not_a_loop_iteration():
-    from gideon.workflows.controller import _loop_parent
+    from gideon.automation.workflows.controller import _loop_parent
 
     assert _loop_parent("root.body#2.children[0]") == (None, 0)
 
@@ -764,7 +799,7 @@ def test_instance_paths_sort_numerically():
     """A string sort puts `body@10` before `body@2`, so "oldest first" silently became wrong at
     the tenth iteration: the window would keep the wrong items and `previous.output` would
     return the wrong cycle. Ten cycles in is later than any short test would reach."""
-    from gideon.workflows.controller import _natural_key
+    from gideon.automation.workflows.controller import _natural_key
 
     paths = [f"root.body@{n}.children[0]" for n in range(12)]
     ordered = [p.split("@")[1].split(".")[0] for p in sorted(paths, key=_natural_key)]
@@ -773,8 +808,9 @@ def test_instance_paths_sort_numerically():
 
 def test_derive_state_is_public_for_the_iteration_check():
     """A container-bodied loop advances on "did the whole body finish?", and a second private
-    notion of completeness would disagree with the scheduler exactly where it matters."""
-    from gideon.workflows.tick import derive_state
+    notion of completeness would disagree with the scheduler exactly where it matters.
+    """
+    from gideon.automation.workflows.tick import derive_state
 
     body = Node.from_dict(
         {

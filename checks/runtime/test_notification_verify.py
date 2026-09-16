@@ -26,15 +26,15 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from gideon import notification_rules
-from gideon.inbox import (
+from gideon.integrations.inbox import (
     InboxItem,
     InboxStore,
     ItemStatus,
     _verification_opted_in,
     emit_attention_item,
 )
-from gideon.notification_verify import (
+from gideon.workspace import notification_rules
+from gideon.workspace.notification_verify import (
     CONFIRMED,
     REFUTED,
     SKIPPED,
@@ -55,24 +55,21 @@ def state():
     return st
 
 
-# ── _parse_verdict: the closed verdict map, conservative ─────────────────
-
-
 @pytest.mark.parametrize(
     "raw, expected",
     [
         ("REFUTED", REFUTED),
         ("refuted", REFUTED),
-        ("REFUTED — the claim is contradicted", REFUTED),  # first token wins
+        ("REFUTED — the claim is contradicted", REFUTED),
         ('{"verdict": "refuted"}', REFUTED),
         ("CONFIRMED", CONFIRMED),
         ('{"verdict": "confirmed"}', CONFIRMED),
-        ("UNCERTAIN", SKIPPED),  # ambiguity delivers
-        ("", SKIPPED),  # empty delivers
+        ("UNCERTAIN", SKIPPED),
+        ("", SKIPPED),
         ("   ", SKIPPED),
-        ("I think it might be refuted", SKIPPED),  # buried, not first token → deliver
+        ("I think it might be refuted", SKIPPED),
         ("garbage {not json", SKIPPED),
-        ('{"verdict": "maybe"}', SKIPPED),  # unknown verdict word → deliver
+        ('{"verdict": "maybe"}', SKIPPED),
     ],
 )
 def test_parse_verdict_maps_onto_the_closed_set(raw, expected):
@@ -84,14 +81,11 @@ def test_parse_verdict_never_returns_an_off_menu_value():
         assert _parse_verdict(raw) in (CONFIRMED, REFUTED, SKIPPED)
 
 
-# ── verify_attention_item: the one model call, fail-OPEN ─────────────────
-
-
 @pytest.mark.asyncio
 async def test_empty_claim_skips_without_calling_the_model(monkeypatch):
     """No claim to check → skip, and never spend a model call doing it."""
     called = MagicMock()
-    monkeypatch.setattr("gideon.llm_helpers.one_shot_completion", called)
+    monkeypatch.setattr("gideon.integrations.llm_helpers.one_shot_completion", called)
     assert await verify_attention_item("", "") == SKIPPED
     called.assert_not_called()
 
@@ -99,7 +93,8 @@ async def test_empty_claim_skips_without_calling_the_model(monkeypatch):
 @pytest.mark.asyncio
 async def test_a_clear_refutation_refutes(monkeypatch):
     monkeypatch.setattr(
-        "gideon.llm_helpers.one_shot_completion", AsyncMock(return_value="REFUTED")
+        "gideon.integrations.llm_helpers.one_shot_completion",
+        AsyncMock(return_value="REFUTED"),
     )
     assert await verify_attention_item("A false claim") == REFUTED
 
@@ -107,7 +102,8 @@ async def test_a_clear_refutation_refutes(monkeypatch):
 @pytest.mark.asyncio
 async def test_a_confirmation_confirms(monkeypatch):
     monkeypatch.setattr(
-        "gideon.llm_helpers.one_shot_completion", AsyncMock(return_value="CONFIRMED")
+        "gideon.integrations.llm_helpers.one_shot_completion",
+        AsyncMock(return_value="CONFIRMED"),
     )
     assert await verify_attention_item("A true claim") == CONFIRMED
 
@@ -115,7 +111,8 @@ async def test_a_confirmation_confirms(monkeypatch):
 @pytest.mark.asyncio
 async def test_uncertainty_skips(monkeypatch):
     monkeypatch.setattr(
-        "gideon.llm_helpers.one_shot_completion", AsyncMock(return_value="UNCERTAIN")
+        "gideon.integrations.llm_helpers.one_shot_completion",
+        AsyncMock(return_value="UNCERTAIN"),
     )
     assert await verify_attention_item("An ambiguous claim") == SKIPPED
 
@@ -131,18 +128,17 @@ async def test_uncertainty_skips(monkeypatch):
 )
 async def test_every_model_failure_path_fails_open_to_skipped(monkeypatch, boom):
     """No model, timeout, breaker/budget — a claim we could not check is still delivered."""
-    monkeypatch.setattr("gideon.llm_helpers.one_shot_completion", AsyncMock(side_effect=boom))
+    monkeypatch.setattr(
+        "gideon.integrations.llm_helpers.one_shot_completion",
+        AsyncMock(side_effect=boom),
+    )
     assert await verify_attention_item("Unverifiable due to failure") == SKIPPED
-
-
-# ── _verification_opted_in: registry AND rule, fail-CLOSED ───────────────
 
 
 def test_opted_in_true_only_for_a_verifiable_kind_whose_rule_asked(monkeypatch):
     monkeypatch.setattr(
         notification_rules, "resolve_rule", lambda s, k: SimpleNamespace(verify=True)
     )
-    # skills/proposal is registered verifiable=True.
     assert _verification_opted_in("skills", "proposal") is True
 
 
@@ -151,7 +147,6 @@ def test_opted_in_false_for_a_non_verifiable_kind(monkeypatch):
     monkeypatch.setattr(
         notification_rules, "resolve_rule", lambda s, k: SimpleNamespace(verify=True)
     )
-    # loop/needs_input is attention-bearing but NOT verifiable.
     assert _verification_opted_in("loop", "needs_input") is False
 
 
@@ -172,9 +167,6 @@ def test_opted_in_fails_closed_when_the_rule_read_throws(monkeypatch):
     assert _verification_opted_in("skills", "proposal") is False
 
 
-# ── emit_attention_item hook: the OUTCOME (not-inert proof) ──────────────
-
-
 def _opt_in(monkeypatch, verify=True):
     monkeypatch.setattr(
         notification_rules, "resolve_rule", lambda s, k: SimpleNamespace(verify=verify)
@@ -183,11 +175,14 @@ def _opt_in(monkeypatch, verify=True):
 
 def _verdict(monkeypatch, verdict):
     monkeypatch.setattr(
-        "gideon.notification_verify.run_verification_sync", lambda *a, **k: verdict
+        "gideon.workspace.notification_verify.run_verification_sync",
+        lambda *a, **k: verdict,
     )
 
 
-def test_a_refuted_verifiable_item_is_filtered_and_not_notified(store, state, monkeypatch):
+def test_a_refuted_verifiable_item_is_filtered_and_not_notified(
+    store, state, monkeypatch
+):
     _opt_in(monkeypatch)
     _verdict(monkeypatch, REFUTED)
     item_id = emit_attention_item(
@@ -225,8 +220,12 @@ def test_a_skipped_verdict_delivers_carrying_the_marker(store, state, monkeypatc
 def test_a_non_verifiable_kind_is_never_verified(store, state, monkeypatch):
     """The common path makes NO model call and carries no verify marker."""
     ran = MagicMock()
-    monkeypatch.setattr("gideon.notification_verify.run_verification_sync", ran)
-    emit_attention_item(state, source="loop", kind="needs_input", title="T", store=store)
+    monkeypatch.setattr(
+        "gideon.workspace.notification_verify.run_verification_sync", ran
+    )
+    emit_attention_item(
+        state, source="loop", kind="needs_input", title="T", store=store
+    )
     ran.assert_not_called()
     assert state.notify.call_count == 1
 
@@ -234,13 +233,12 @@ def test_a_non_verifiable_kind_is_never_verified(store, state, monkeypatch):
 def test_a_verifiable_kind_not_opted_in_is_never_verified(store, state, monkeypatch):
     _opt_in(monkeypatch, verify=False)
     ran = MagicMock()
-    monkeypatch.setattr("gideon.notification_verify.run_verification_sync", ran)
+    monkeypatch.setattr(
+        "gideon.workspace.notification_verify.run_verification_sync", ran
+    )
     emit_attention_item(state, source="skills", kind="proposal", title="T", store=store)
     ran.assert_not_called()
     assert state.notify.call_count == 1
-
-
-# ── Restore: fire the withheld notification exactly once ─────────────────
 
 
 def _filtered_item(store):
@@ -288,9 +286,9 @@ def _restore_request(store, item_id):
 async def test_restore_flips_to_pending_and_fires_the_withheld_notification_once(
     store, monkeypatch
 ):
-    from gideon.dashboard import handlers_inbox as h
+    from gideon.interfaces.dashboard import handlers_inbox as h
 
-    monkeypatch.setattr(h, "sel", MagicMock())  # no SEL write to the real home
+    monkeypatch.setattr(h, "sel", MagicMock())
     item = _filtered_item(store)
     req, st = _restore_request(store, item.id)
 
@@ -301,22 +299,23 @@ async def test_restore_flips_to_pending_and_fires_the_withheld_notification_once
     assert st.notify.call_count == 1, "the withheld notification fires exactly once"
     kind, title, body = st.notify.call_args[0][:3]
     assert (kind, title) == ("skills:proposal", "Add a bogus skill")
-    # The replay payload is consumed so no later path can re-fire it.
     assert "verify_withheld" not in store.items[item.id].refs
     assert store.items[item.id].refs["verify"] == "restored"
 
 
 @pytest.mark.asyncio
-async def test_restore_on_an_already_restored_item_is_a_conflict_no_op(store, monkeypatch):
+async def test_restore_on_an_already_restored_item_is_a_conflict_no_op(
+    store, monkeypatch
+):
     """A second call cannot double-notify: only the FILTERED→PENDING edge fires."""
-    from gideon.dashboard import handlers_inbox as h
+    from gideon.interfaces.dashboard import handlers_inbox as h
 
     monkeypatch.setattr(h, "sel", MagicMock())
     item = _filtered_item(store)
     req, st = _restore_request(store, item.id)
 
-    await h.api_inbox_restore(req)  # first: fires
-    resp2 = await h.api_inbox_restore(req)  # second: item is PENDING now
+    await h.api_inbox_restore(req)
+    resp2 = await h.api_inbox_restore(req)
 
     assert resp2.status == 409
     assert st.notify.call_count == 1, "still exactly one notification, never two"
@@ -324,14 +323,11 @@ async def test_restore_on_an_already_restored_item_is_a_conflict_no_op(store, mo
 
 @pytest.mark.asyncio
 async def test_restore_missing_item_is_404(store, monkeypatch):
-    from gideon.dashboard import handlers_inbox as h
+    from gideon.interfaces.dashboard import handlers_inbox as h
 
     monkeypatch.setattr(h, "sel", MagicMock())
     req, _ = _restore_request(store, "does_not_exist_0.0")
     assert (await h.api_inbox_restore(req)).status == 404
-
-
-# ── V6: true + planted-false + unbound model in one flow ─────────────────
 
 
 def test_v6_true_delivers_false_filters_unbound_delivers(store, state, monkeypatch):
@@ -347,7 +343,7 @@ def test_v6_true_delivers_false_filters_unbound_delivers(store, state, monkeypat
     false_id = emit_attention_item(
         state, source="skills", kind="proposal", title="planted false", store=store
     )
-    _verdict(monkeypatch, SKIPPED)  # unbound model → skipped (fail-open)
+    _verdict(monkeypatch, SKIPPED)
     unbound_id = emit_attention_item(
         state, source="skills", kind="proposal", title="unbound", store=store
     )
@@ -355,5 +351,4 @@ def test_v6_true_delivers_false_filters_unbound_delivers(store, state, monkeypat
     assert store.items[true_id].status == ItemStatus.PENDING.value
     assert store.items[false_id].status == ItemStatus.FILTERED.value
     assert store.items[unbound_id].status == ItemStatus.PENDING.value
-    # Two delivered (true + unbound), one withheld (false).
     assert state.notify.call_count == 2

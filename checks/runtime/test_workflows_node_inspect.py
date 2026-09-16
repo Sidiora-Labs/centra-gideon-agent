@@ -27,25 +27,25 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import make_mocked_request
 
-from gideon.workflows import handlers as H
-from gideon.workflows import journal as J
-from gideon.workflows import store
-from gideon.workflows.models import InstanceState, NodeInstance, WorkflowRun
+from gideon.automation.workflows import handlers as H
+from gideon.automation.workflows import journal as J
+from gideon.automation.workflows import store
+from gideon.automation.workflows.models import InstanceState, NodeInstance, WorkflowRun
 
 pytestmark = pytest.mark.anyio
 
-# A real AWS access-key ID (the canonical AWS docs example) — matches the credential redactor's
-# `AKIA[A-Z0-9]{16}` pattern, so if it survives into a response the redaction genuinely failed.
 SECRET = "AKIAIOSFODNN7EXAMPLE"
 
-# A `stage` node (one subagent execution — it produces an LLM prompt) depends on `upstream`;
-# the binding is what makes `resolved_inputs` non-empty.
 SPEC = {
     "kind": "sequence",
     "id": "main",
     "children": [
         {"kind": "transform", "id": "upstream", "config": {"expr": {"v": 1}}},
-        {"kind": "stage", "id": "target", "config": {"prompt": "use {{nodes.upstream.output.v}}"}},
+        {
+            "kind": "stage",
+            "id": "target",
+            "config": {"prompt": "use {{nodes.upstream.output.v}}"},
+        },
     ],
 }
 UP_PATH = "root.children[0]"
@@ -61,7 +61,7 @@ def anyio_backend() -> str:
 def _isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
     return home
 
 
@@ -69,7 +69,9 @@ def _req(run_id: str, node_id: str):
     """A mocked GET with the two path params the handler reads. No app state: inspect is a
     read, so it takes no guard and needs none."""
     req = make_mocked_request(
-        "GET", f"/api/workflows/runs/{run_id}/nodes/{node_id}/inspect", app=web.Application()
+        "GET",
+        f"/api/workflows/runs/{run_id}/nodes/{node_id}/inspect",
+        app=web.Application(),
     )
     req.match_info["run_id"] = run_id
     req.match_info["node_id"] = node_id
@@ -103,19 +105,21 @@ def _build_run(
 
     tgt_out = {"answer": "ok"} if target_output is None else target_output
     tgt_ref = store.write_output(run.id, TGT_PATH, tgt_out)
-    # The prompt is written RAW at `<path>::prompt`, mirroring the controller's `_store_prompt`
-    # (which does NOT redact) — this is what makes the secrets-absent test meaningful.
     store.write_output(run.id, f"{TGT_PATH}::prompt", prompt)
 
     store.write_state(
         run.id,
         {
-            UP_PATH: NodeInstance(path=UP_PATH, state=InstanceState.DONE, output_ref=up_ref),
+            UP_PATH: NodeInstance(
+                path=UP_PATH, state=InstanceState.DONE, output_ref=up_ref
+            ),
             TGT_PATH: NodeInstance(
                 path=TGT_PATH,
                 state=target_state,
                 attempt=attempts,
-                output_ref=(target_output_ref if target_output_ref is not None else tgt_ref),
+                output_ref=(
+                    target_output_ref if target_output_ref is not None else tgt_ref
+                ),
             ),
         },
     )
@@ -133,7 +137,12 @@ def _build_run(
         )
     if cached:
         j.step_cached(
-            TGT_PATH, "target", epoch=0, cache_key="k", state=InstanceState.DONE, output_ref=tgt_ref
+            TGT_PATH,
+            "target",
+            epoch=0,
+            cache_key="k",
+            state=InstanceState.DONE,
+            output_ref=tgt_ref,
         )
     else:
         j.step_completed(
@@ -152,7 +161,13 @@ class TestReconstructabilitySet:
     async def test_all_six_fields_are_present_for_a_terminal_node(self) -> None:
         run_id = _build_run()
         body = _body(await H.api_run_node_inspect(_req(run_id, "target")))
-        for key in ("resolved_prompt", "resolved_inputs", "output", "attempts", "ledger_events"):
+        for key in (
+            "resolved_prompt",
+            "resolved_inputs",
+            "output",
+            "attempts",
+            "ledger_events",
+        ):
             assert key in body, key
         assert "cached" in body and isinstance(body["cached"], bool)
         assert body["node_id"] == "target"
@@ -174,7 +189,10 @@ class TestReconstructabilitySet:
         big = "x" * (J.MAX_INLINE_OUTPUT_BYTES + 10)
         run_id = _build_run(prompt=big)
         body = _body(await H.api_run_node_inspect(_req(run_id, "target")))
-        assert isinstance(body["resolved_prompt"], dict) and "ref" in body["resolved_prompt"]
+        assert (
+            isinstance(body["resolved_prompt"], dict)
+            and "ref" in body["resolved_prompt"]
+        )
         assert big not in json.dumps(body)
 
     async def test_the_ledger_slice_is_scoped_to_this_instance(self) -> None:
@@ -278,7 +296,11 @@ class TestClientMethodExists:
         from pathlib import Path
 
         api_ts = (
-            Path(__file__).resolve().parent.parent / "web" / "src" / "lib" / "api.ts"
+            Path(__file__).resolve().parent.parent.parent
+            / "apps/console"
+            / "src"
+            / "lib"
+            / "api.ts"
         ).read_text(encoding="utf-8")
         assert "workflowRunNodeInspect" in api_ts
         assert "/nodes/${encodeURIComponent(nodeId)}/inspect" in api_ts

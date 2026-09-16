@@ -14,8 +14,9 @@ to any installed model app). Ollama is the one model provider that stays core-na
 (it owns model download/management), so it is not built on this surface.
 """
 
-from gideon.llm.anthropic import AnthropicProvider  # noqa: F401
-from gideon.llm.base import (  # noqa: F401
+from gideon.extensions.providers.media_scanners import register_scanner  # noqa: F401
+from gideon.integrations.llm.anthropic import AnthropicProvider  # noqa: F401
+from gideon.integrations.llm.base import (
     EVENT_COMPLETE,
     EVENT_TEXT_CHUNK,
     EVENT_THINKING_CHUNK,
@@ -24,9 +25,10 @@ from gideon.llm.base import (  # noqa: F401
     LLMEvent,
     ModelProvider,
 )
-from gideon.llm.branded_specs import BrandedProviderSpec  # noqa: F401
-from gideon.llm.capabilities import Capability, ProviderCapability  # noqa: F401
-from gideon.llm.catalog import (  # noqa: F401
+from gideon.integrations.llm.branded_specs import BrandedProviderSpec  # noqa: F401
+from gideon.integrations.llm.capabilities import ProviderCapability  # noqa: F401
+from gideon.integrations.llm.capabilities import Capability
+from gideon.integrations.llm.catalog import (
     ConnectionResult,
     ModelCatalog,
     ModelInfo,
@@ -35,53 +37,24 @@ from gideon.llm.catalog import (  # noqa: F401
     infer_capabilities,
     openai_compatible_list_models,
 )
-from gideon.llm.credentials import Credential  # noqa: F401
-
-# The two supported inference-PROTOCOL clients — the standards Gideon speaks,
-# not provider-specific. A model-provider app declares which protocol it speaks +
-# how it authenticates/configures: an OpenAI-compatible endpoint app (openai, vllm,
-# lmstudio, together, …) builds on OpenAIProvider; an Anthropic-compatible one builds
-# on AnthropicProvider. (A provider with a distinct wire, e.g. Bedrock's Converse API,
-# owns its own client in its app.)
-from gideon.llm.openai import OpenAIProvider  # noqa: F401
-
-# ``CACHE_HINT_KEY`` rides alongside ``PromptCache`` because an app whose provider owns
-# its OWN wire (Bedrock's Converse API) must READ the neutral marker to translate it —
-# core never learns that vendor's cache syntax. Core's own tests/test_apps_import_boundary.py
-# names this the prescribed fix: "If a symbol isn't on the SDK yet, the fix is to PROMOTE it
-# to a gideon.sdk submodule instead of reaching around the boundary."
-from gideon.llm.prompt_cache import CACHE_HINT_KEY, PromptCache  # noqa: F401
-from gideon.llm.registry import (  # noqa: F401
+from gideon.integrations.llm.credentials import Credential  # noqa: F401
+from gideon.integrations.llm.openai import OpenAIProvider  # noqa: F401
+from gideon.integrations.llm.prompt_cache import PromptCache  # noqa: F401
+from gideon.integrations.llm.prompt_cache import CACHE_HINT_KEY
+from gideon.integrations.llm.registry import (
     CredentialMissing,
     ProviderEntry,
     ProviderResolutionError,
     get_default_registry,
 )
-from gideon.llm.stream_tags import KIND_OUTSIDE, make_think_splitter  # noqa: F401
-
-# Media-model catalog contribution: the OpenAI-compatible audio/image PROTOCOL
-# clients are core, but WHICH concrete models a vendor serves (OpenAI's whisper-1/
-# gpt-image-1/dall-e-*) is vendor data the provider's app contributes here, keyed by
-# provider type. See gideon.media_catalogs.
-from gideon.media_catalogs import (  # noqa: F401
+from gideon.integrations.llm.stream_tags import make_think_splitter  # noqa: F401
+from gideon.integrations.llm.stream_tags import KIND_OUTSIDE
+from gideon.integrations.media_catalogs import (
     MediaCatalog,
     MediaModel,
     register_media_catalog,
 )
-from gideon.model_windows import model_context_window  # noqa: F401
-
-# Media-capability config scanners — the app-owned extension point a model app
-# calls at import to contribute per-capability adapters (image/video/stt/embedding)
-# for its provider WITHOUT core knowing the vendor. See gideon.providers.media_scanners.
-from gideon.providers.media_scanners import register_scanner  # noqa: F401
-
-# ``register_branded_app`` is the one name here that a SIBLING SDK module owns rather than
-# core. Re-exported so an app uses the single stable ``gideon.sdk.model`` path. This is
-# a plain top-of-file import and MUST stay one: ``sdk.provider_helpers`` imports its core
-# machinery straight from ``gideon.llm.*``, so the edge runs one way only. Reversing
-# that (importing ``sdk.model`` from ``provider_helpers``) reinstates a module-scope cycle in
-# which whichever module is imported first from a cold interpreter decides whether the SDK
-# loads at all. tests/test_sdk_import_cycle.py drives both orders and fails if it comes back.
+from gideon.integrations.model_windows import model_context_window  # noqa: F401
 from gideon.sdk.provider_helpers import register_branded_app  # noqa: F401
 
 __all__ = [
@@ -106,7 +79,6 @@ __all__ = [
     "model_context_window",
     "OpenAIProvider",
     "AnthropicProvider",
-    # Catalog / management / connectivity axis (Settings → Models discovery).
     "ModelCatalog",
     "ModelManager",
     "ModelInfo",
@@ -114,13 +86,10 @@ __all__ = [
     "PullProgress",
     "infer_capabilities",
     "openai_compatible_list_models",
-    # Branded/generic protocol-provider app helpers (see sdk.provider_helpers).
     "BrandedProviderSpec",
     "register_branded_app",
-    # Media-model catalog contribution (stt/tts/image vendor catalogs).
     "MediaCatalog",
     "MediaModel",
     "register_media_catalog",
-    # Media-capability config scanner registration (app-owned extension point).
     "register_scanner",
 ]

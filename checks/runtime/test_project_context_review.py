@@ -1,7 +1,7 @@
 """The self-updating project-context review (LEARN E1.4 — WF2LEA-12).
 
 The five clauses of the contract, each pinned against the REAL proposal queue, HierarchyStore and
-SkillsLoader (monkeypatched to a tmp home), not hand-built state:
+ProcedureLibrary (monkeypatched to a tmp home), not hand-built state:
 
 1. a review emits `project_instruction` / `project_file` / `project_skill` proposals with a
    per-item rationale into the §2.2 queue;
@@ -17,10 +17,10 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.learning import project_context_review as pcr
-from gideon.learning import proposals as P
-from gideon.learning.proposals import Kind, Status
-from gideon.tasks.hierarchy import HierarchyStore
+from gideon.cognition.learning import project_context_review as pcr
+from gideon.cognition.learning import proposals as P
+from gideon.cognition.learning.proposals import Kind, Status
+from gideon.engine.tasks.hierarchy import HierarchyStore
 
 
 @pytest.fixture(autouse=True)
@@ -28,11 +28,11 @@ def home(tmp_path, monkeypatch):
     """Point the queue, projects and skills at a tmp home. NEVER the real one — these WRITE.
 
     `GIDEON_HOME` is set (not just the loader symbol patched) because `HierarchyStore` and
-    `SkillsLoader` bind `config_dir` at import; only the env var — which `config_dir()` re-reads
+    `ProcedureLibrary` bind `config_dir` at import; only the env var — which `config_dir()` re-reads
     live every call — isolates every store this review touches, not just the proposal queue.
     """
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     monkeypatch.setattr(P, "_surface_in_inbox", lambda prop: None)
     monkeypatch.setattr(P, "_resolve_inbox_item", lambda pid, status: None)
     monkeypatch.setattr(P, "_audit", lambda operation, prop, outcome: None)
@@ -68,9 +68,6 @@ def _candidates():
     ]
 
 
-# ── clause 1: typed proposals with rationale into the queue ──
-
-
 def test_review_emits_the_three_typed_proposals_with_rationale(project):
     filed = pcr.project_context_review(_candidates(), project_id=project.id)
     assert {p.kind for p in filed} == {
@@ -78,7 +75,6 @@ def test_review_emits_the_three_typed_proposals_with_rationale(project):
         Kind.PROJECT_FILE.value,
         Kind.PROJECT_SKILL.value,
     }
-    # The rationale rides as the title — what a reviewer reads in the queue before deciding.
     titles = {p.title for p in filed}
     assert "We agreed lint must pass pre-commit" in titles
     assert all(p.status == Status.PENDING.value for p in filed)
@@ -87,7 +83,11 @@ def test_review_emits_the_three_typed_proposals_with_rationale(project):
 
 def test_a_candidate_without_a_rationale_is_dropped(project):
     filed = pcr.project_context_review(
-        [pcr.ReviewCandidate(kind=Kind.PROJECT_INSTRUCTION.value, body="x", rationale="")],
+        [
+            pcr.ReviewCandidate(
+                kind=Kind.PROJECT_INSTRUCTION.value, body="x", rationale=""
+            )
+        ],
         project_id=project.id,
     )
     assert filed == []
@@ -99,23 +99,16 @@ def test_no_project_id_files_nothing(project):
     assert P.list_pending() == []
 
 
-# ── clause 2: nothing written until accepted ──
-
-
 def test_review_writes_no_project_context(project):
     pcr.project_context_review(_candidates(), project_id=project.id)
-    # The project's instructions are unchanged, no context file exists, no skill was created.
     fresh = HierarchyStore().get_project(project.id)
     assert not (fresh.agent_instructions_template or "").strip()
     context_dir = HierarchyStore().context_dir(project.id)
     assert not (context_dir / "conventions.md").exists()
 
-    from gideon.skills.loader import SkillsLoader
+    from gideon.extensions.skills.loader import ProcedureLibrary
 
-    assert SkillsLoader().load_skill("deploy-demo") is None
-
-
-# ── clause 3: accepting applies EXACTLY the accepted item ──
+    assert ProcedureLibrary().load_skill("deploy-demo") is None
 
 
 def test_accepting_the_instruction_appends_only_it(project):
@@ -126,13 +119,11 @@ def test_accepting_the_instruction_appends_only_it(project):
 
     fresh = HierarchyStore().get_project(project.id)
     assert "make lint" in fresh.agent_instructions_template
-    # The file and skill proposals were NOT touched — per-item granularity.
     context_dir = HierarchyStore().context_dir(project.id)
     assert not (context_dir / "conventions.md").exists()
-    from gideon.skills.loader import SkillsLoader
+    from gideon.extensions.skills.loader import ProcedureLibrary
 
-    assert SkillsLoader().load_skill("deploy-demo") is None
-    # The other two rows remain pending for their own decision.
+    assert ProcedureLibrary().load_skill("deploy-demo") is None
     assert {p.kind for p in P.list_pending()} == {
         Kind.PROJECT_FILE.value,
         Kind.PROJECT_SKILL.value,
@@ -148,8 +139,9 @@ def test_accepting_the_file_writes_only_that_file(project):
     context_dir = HierarchyStore().context_dir(project.id)
     written = (context_dir / "conventions.md").read_text(encoding="utf-8")
     assert "Use tabs" in written
-    # Instructions untouched.
-    assert not (HierarchyStore().get_project(project.id).agent_instructions_template or "").strip()
+    assert not (
+        HierarchyStore().get_project(project.id).agent_instructions_template or ""
+    ).strip()
 
 
 def test_accepting_the_skill_creates_only_that_skill(project):
@@ -158,13 +150,15 @@ def test_accepting_the_skill_creates_only_that_skill(project):
 
     P.accept(ps.id, installer=_installer(), actor="user")
 
-    from gideon.skills.loader import SkillsLoader
+    from gideon.extensions.skills.loader import ProcedureLibrary
 
-    assert "npm run deploy" in (SkillsLoader().load_skill("deploy-demo") or "")
+    assert "npm run deploy" in (ProcedureLibrary().load_skill("deploy-demo") or "")
 
 
 def test_an_instruction_appends_rather_than_replacing(project):
-    HierarchyStore().update_project(project.id, agent_instructions_template="Existing rule.")
+    HierarchyStore().update_project(
+        project.id, agent_instructions_template="Existing rule."
+    )
     filed = pcr.project_context_review(_candidates(), project_id=project.id)
     instr = next(p for p in filed if p.kind == Kind.PROJECT_INSTRUCTION.value)
 
@@ -191,16 +185,11 @@ def test_an_unsafe_context_filename_fails_the_accept(project):
         P.accept(pf.id, installer=_installer(), actor="user")
 
 
-# ── clause 4: a rejected item is not re-proposed ──
-
-
 def test_a_rejected_item_is_not_reproposed_on_a_second_review(project):
     first = pcr.project_context_review(_candidates(), project_id=project.id)
     instr = next(p for p in first if p.kind == Kind.PROJECT_INSTRUCTION.value)
     assert P.reject(instr.id, actor="user") is True
 
-    # A second review of the SAME items: the rejected instruction is suppressed, the others re-file
-    # or reinforce, but the declined one never returns to the queue.
     pcr.project_context_review(_candidates(), project_id=project.id)
     pending_kinds = [p.kind for p in P.list_pending()]
     assert Kind.PROJECT_INSTRUCTION.value not in pending_kinds
@@ -215,9 +204,6 @@ def test_an_accepted_item_is_not_reproposed(project):
     assert Kind.PROJECT_FILE.value not in {p.kind for p in again}
 
 
-# ── clause 5: prompt-only trigger, never automatic ──
-
-
 def test_the_trigger_is_a_prompt_only_chat_tool():
     """The review is exposed as an mcp_core chat tool the agent must CALL — not a turn hook.
 
@@ -225,7 +211,7 @@ def test_the_trigger_is_a_prompt_only_chat_tool():
     per-turn observer (self_model_observer.observe_turn) fires every turn. The trigger being the
     former is what makes this prompt-only.
     """
-    from gideon import mcp_core
+    from gideon.integrations import mcp_core
 
     names = {t["name"] for t in mcp_core._list_tools()}
     assert "project_context_review" in names
@@ -244,9 +230,6 @@ def test_nothing_on_a_turn_path_calls_the_review_automatically():
     for rel in ("dashboard/chat_runner.py", "heartbeat.py"):
         text = (root / rel).read_text(encoding="utf-8")
         assert "project_context_review" not in text, rel
-
-
-# ── shared installer, mirroring dashboard/handlers/learning.py::_installer_for ──
 
 
 def _installer():

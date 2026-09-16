@@ -26,14 +26,14 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.apps.manifest import PROVIDER_TYPES
+from gideon.extensions.apps.manifest import PROVIDER_TYPES
 
 
 @pytest.fixture
 def registered(tmp_path, monkeypatch) -> set[str]:
     """The live handler registry. Isolated home — building it constructs real providers."""
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    import gideon.providers.registry as reg
+    import gideon.extensions.providers.registry as reg
 
     monkeypatch.setattr(reg, "_registry", None, raising=False)
     return set(reg.get_provider_registry()._type_handlers)
@@ -60,23 +60,21 @@ def test_every_runtime_handler_is_a_declared_type(registered):
 
 def test_the_comparison_is_not_vacuous(registered):
     """Both sides are populated. Two empty sets are equal and prove nothing."""
-    assert len(PROVIDER_TYPES) >= 15, f"PROVIDER_TYPES looks truncated: {sorted(PROVIDER_TYPES)}"
-    assert len(registered) >= 15, f"the handler registry looks truncated: {sorted(registered)}"
+    assert (
+        len(PROVIDER_TYPES) >= 15
+    ), f"PROVIDER_TYPES looks truncated: {sorted(PROVIDER_TYPES)}"
+    assert (
+        len(registered) >= 15
+    ), f"the handler registry looks truncated: {sorted(registered)}"
 
 
-#: The three types whose handler is an `EntitySeamHandler` — enable/disable + Settings seams
-#: only, whose factory returns None BY DESIGN because the entity lives elsewhere (agents in
-#: `config.json agents{}`, skills in the skills store, notifications in the kinds registry).
-#: Pinned so a FOURTH seam-only type cannot appear silently: a seam that nobody meant to be a
-#: seam is a provider type that installs and produces nothing, which reads exactly like the
-#: unregistered case above but passes it.
 SEAM_ONLY_TYPES = frozenset({"agent", "notification", "skills"})
 
 
 def test_the_seam_only_types_are_exactly_the_declared_three(tmp_path, monkeypatch):
     """Which types are seams is a DECISION; this is where it is written down."""
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    import gideon.providers.registry as reg
+    import gideon.extensions.providers.registry as reg
 
     monkeypatch.setattr(reg, "_registry", None, raising=False)
     handlers = reg.get_provider_registry()._type_handlers
@@ -95,7 +93,7 @@ def test_a_seam_handler_documents_where_its_entity_lives(tmp_path, monkeypatch):
     would create "a second source of truth nothing reads (the Bedrock trap)".
     """
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    import gideon.providers.registry as reg
+    import gideon.extensions.providers.registry as reg
 
     monkeypatch.setattr(reg, "_registry", None, raising=False)
     handlers = reg.get_provider_registry()._type_handlers
@@ -114,7 +112,10 @@ def test_the_manifest_note_points_at_this_file():
     """
     from pathlib import Path
 
-    src = Path(__file__).resolve().parent.parent / "src/gideon/apps/manifest.py"
+    src = (
+        Path(__file__).resolve().parent.parent.parent
+        / "runtime/gideon/extensions/apps/manifest.py"
+    )
     text = src.read_text(encoding="utf-8")
     assert "test_manifest_types_match_handlers" in text, (
         "manifest.py no longer names its guard — if this test is renamed, update every citation "

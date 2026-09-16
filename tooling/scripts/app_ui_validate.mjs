@@ -1,55 +1,4 @@
 #!/usr/bin/env node
-// App-bundle UI validation harness — drive one or more app bundles through the
-// real Store/Library/Tools surfaces in a real browser and report per-leg.
-//
-// WHY this exists as committed, reusable code rather than a one-off drive: every
-// first-party app bundle carries the same acceptance clause ("added as a local
-// Store source and driven in the real UI"), and hand-driving one bundle costs a
-// full agent session. The legs below ARE that clause, mechanised once.
-//
-// The six legs, per bundle:
-//   1 store-source        register the bundle's staging dir as a local Store source
-//   2 store-card          the Store card + detail panel describe the app
-//   3 ui-install          install through the UI, clicking through the scanner's
-//                         consent dialog as a user would (never bypassed)
-//   4 library-and-tools   it lands in the Library and its tools render on #/tools
-//   5 tool-invoke         run one of its tools from the UI and capture the result
-//   6 reactivate          Deactivate → Activate round-trip
-//
-// Reporting rules (see scripts/lib/app_validate_report.mjs, which owns them and is
-// unit-tested): a leg that cannot run is SKIPPED **with a reason string** and never
-// PASS. A leg the driver never reached is SKIPPED with an explicit not-reached
-// reason, so an aborted run cannot read as a clean one.
-//
-// Isolation: a fresh GIDEON_HOME under the OS temp dir per run (never
-// ~/.gideon), its own gateway on an ephemeral high port, and both torn down on
-// exit. The first-party apps dir is neutralised so the Store contains ONLY the
-// bundles under validation. Nothing is left behind except the screenshots and the
-// report, which are the output.
-//
-// Usage:
-//   node scripts/app_ui_validate.mjs <bundle-dir> [<bundle-dir>…] [options]
-//
-//   --out DIR              screenshot + report destination (default: a temp dir)
-//   --port N               gateway port (default: an ephemeral free port)
-//   --python PATH          interpreter that runs the gateway (default: ./.venv/bin/python)
-//   --apps-root DIR        where sibling bundles live, for the model provider app
-//                          (default: the parent of the first bundle)
-//   --home-base DIR        parent of the throwaway GIDEON_HOME
-//                          (default $PCLAW_HARNESS_HOME_BASE or the OS temp dir)
-//   --model-endpoint URL   model endpoint (default $PCLAW_HARNESS_MODEL_ENDPOINT
-//                          or http://127.0.0.1:11434)
-//   --model NAME           model id to pin (default $PCLAW_HARNESS_MODEL)
-//   --model-app NAME|DIR   provider app that wires the endpoint
-//                          (default $PCLAW_HARNESS_MODEL_APP or ollama-models)
-//   --model-type TYPE      provider type that app registers
-//                          (default $PCLAW_HARNESS_MODEL_TYPE or ollama)
-//   --no-model             skip model wiring entirely
-//   --keep                 leave the temp home + gateway logs in place (debugging)
-//   --headed               run the browser headed
-//
-// Requires a built SPA served by the gateway (`make web-build`) and the Playwright
-// Chromium binary (`npx playwright install chromium`).
 
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:net'
@@ -65,11 +14,8 @@ import {
 } from './lib/app_validate_report.mjs'
 import { fillRequiredArgs } from './lib/app_validate_form.mjs'
 
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const SHELL_SELECTOR = 'nav[data-tour="rail"]'
-/** Environment-lacking signatures in a tool error. A tool that fails because this
- *  machine has no credential/daemon is a SKIPPED with a reason, not a product FAIL —
- *  and faking the credential is never an option. */
 const ENV_LACKING = [
   /not authenticated/i, /gh auth/i, /auth(entication)? (required|failed)/i,
   /api[_ -]?key/i, /credential/i, /unauthorized/i, /\b401\b/, /\b403\b/,
@@ -82,16 +28,15 @@ const ENV_LACKING = [
 function log(msg) { console.log(`[app-ui-validate] ${msg}`) }
 function warn(msg) { console.error(`[app-ui-validate] ${msg}`) }
 
-// ── argv ─────────────────────────────────────────────────────────────────────
 
 function parseArgs(argv) {
   const opts = {
     bundles: [], out: '', port: 0, python: '', appsRoot: '',
-    homeBase: process.env.PCLAW_HARNESS_HOME_BASE || os.tmpdir(),
-    modelEndpoint: process.env.PCLAW_HARNESS_MODEL_ENDPOINT || 'http://127.0.0.1:11434',
-    model: process.env.PCLAW_HARNESS_MODEL || '',
-    modelApp: process.env.PCLAW_HARNESS_MODEL_APP || 'ollama-models',
-    modelType: process.env.PCLAW_HARNESS_MODEL_TYPE || 'ollama',
+    homeBase: process.env.GIDEON_HARNESS_HOME_BASE || os.tmpdir(),
+    modelEndpoint: process.env.GIDEON_HARNESS_MODEL_ENDPOINT || 'http://127.0.0.1:11434',
+    model: process.env.GIDEON_HARNESS_MODEL || '',
+    modelApp: process.env.GIDEON_HARNESS_MODEL_APP || 'ollama-models',
+    modelType: process.env.GIDEON_HARNESS_MODEL_TYPE || 'ollama',
     noModel: false, keep: false, headed: false,
   }
   const takesValue = new Set(['--out', '--port', '--python', '--apps-root', '--home-base',
@@ -120,10 +65,7 @@ function parseArgs(argv) {
   return opts
 }
 
-// ── gateway lifecycle ────────────────────────────────────────────────────────
 
-/** An ephemeral free loopback port. Never 10000: that port belongs to a
- *  long-running dev gateway on this machine and must not be disturbed. */
 async function freePort() {
   for (let attempt = 0; attempt < 20; attempt++) {
     const port = await new Promise((resolve, reject) => {
@@ -142,26 +84,20 @@ async function freePort() {
 function resolvePython(explicit) {
   const candidates = [
     explicit,
-    process.env.PCLAW_HARNESS_PYTHON,
+    process.env.GIDEON_HARNESS_PYTHON,
     path.join(REPO_ROOT, '.venv', 'bin', 'python'),
   ].filter(Boolean)
   for (const c of candidates) if (existsSync(c)) return c
   return 'python3'
 }
 
-/** Boot an isolated gateway. Resolves once the READY line lands (which also
- *  carries the owner token — the SPA renders onboarding without it, so a port
- *  probe would let the run proceed against an unauthenticated gateway). */
 function startGateway({ python, home, port, firstPartyDir, logSink }) {
   const env = {
     ...process.env,
     GIDEON_HOME: home,
     GIDEON_WORKSPACE: path.join(home, 'workspace'),
-    // A path that does not exist DISABLES the always-present first-party source
-    // (catalog._default_local_sources), so the Store shows only what this harness
-    // registers. Without it every sibling bundle in the apps tree floods the grid.
     GIDEON_FIRST_PARTY_APPS_DIR: firstPartyDir,
-    PYTHONPATH: [path.join(REPO_ROOT, 'src'), process.env.PYTHONPATH].filter(Boolean).join(':'),
+    PYTHONPATH: [path.join(REPO_ROOT, 'runtime'), process.env.PYTHONPATH].filter(Boolean).join(':'),
   }
   const proc = spawn(python, ['-m', 'gideon', 'gateway', '--port', String(port), '--no-open', '--json-ready'],
     { cwd: REPO_ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] })
@@ -185,7 +121,7 @@ function startGateway({ python, home, port, firstPartyDir, logSink }) {
         settled = true
         clearTimeout(timer)
         let token = ''
-        try { token = JSON.parse(m[1]).token ?? '' } catch { /* token stays empty */ }
+        try { token = JSON.parse(m[1]).token ?? '' } catch {   }
         resolve({ proc, token })
       }
     }
@@ -209,12 +145,7 @@ async function stopGateway(proc) {
   })
 }
 
-// ── gateway API (read-only checks + setup that is NOT part of a validated leg) ──
 
-/** The gateway's own API. `token` rides the query string (the documented
- *  non-browser path); POSTs also carry an allowed Origin for the CSRF check.
- *  Used ONLY for setup and for cross-checking what the UI showed — never as a
- *  substitute for a UI leg. */
 function apiClient(base, token) {
   const call = async (method, route, body) => {
     const sep = route.includes('?') ? '&' : '?'
@@ -224,7 +155,7 @@ function apiClient(base, token) {
       body: body === undefined ? undefined : JSON.stringify(body),
     })
     let json = null
-    try { json = await res.json() } catch { /* not every response is JSON */ }
+    try { json = await res.json() } catch {   }
     return { status: res.status, ok: res.ok, json }
   }
   return {
@@ -234,7 +165,6 @@ function apiClient(base, token) {
   }
 }
 
-// ── screenshots ──────────────────────────────────────────────────────────────
 
 function shotter(page, dir) {
   let n = 0
@@ -247,7 +177,6 @@ function shotter(page, dir) {
   }
 }
 
-// ── UI helpers ───────────────────────────────────────────────────────────────
 
 async function gotoRoute(page, base, route) {
   await page.goto(`${base}/#${route}`, { waitUntil: 'load', timeout: 45_000 })
@@ -255,39 +184,24 @@ async function gotoRoute(page, base, route) {
   await page.waitForTimeout(500)
 }
 
-/** The Store/Library card for `displayName`. Anchored on the card's own hit-target
- *  button (`<name> — details`), then folded up to the innermost element containing
- *  it — which is the card root. Anchoring on visible text instead would match the
- *  detail panel and the source rail too. */
 function cardFor(page, displayName) {
   return page.locator('div').filter({ has: page.locator(`button[aria-label="${displayName} — details"]`) }).last()
 }
 
-/** The docked inspector, named by its title (SidePanel is a role=region landmark).
- *  Scoping to it matters: the Store grid behind the panel carries an "Install"
- *  button per card, so an unscoped button lookup can click the wrong app. */
 function sidePanel(page, title) {
   return page.getByRole('region', { name: title })
 }
 
-/** A tool row's clickable body on the Tools page. The row button's accessible name
- *  is its whole subtree (name + description + param count), so a by-name role
- *  lookup never matches; the monospace identifier's `title` is the stable anchor. */
 function toolRow(page, name) {
   return page.locator(`button:has(span[title="${name}"])`)
 }
 
-/** The Tools-page group header that owns `provider`, as rendered text — it carries
- *  the provenance badge, which is worth recording verbatim. */
 async function toolGroupHeader(page, provider) {
   const label = page.getByText(provider, { exact: true }).first()
   if (!(await label.count())) return ''
   return (await label.locator('xpath=..').innerText().catch(() => '')).replace(/\s+/g, ' ').trim()
 }
 
-/** Click a candidate control if it is actually visible, then wait for the Manage
- *  Sources panel. Every step is visibility-gated: a hidden match (the overflow
- *  menu's copy of a header control) would otherwise burn a full click timeout. */
 async function openManageSources(page) {
   const candidates = [
     page.locator('button[title="Manage Sources"]'),
@@ -311,7 +225,6 @@ async function closePanel(page) {
   await page.waitForTimeout(500)
 }
 
-// ── the drive ────────────────────────────────────────────────────────────────
 
 async function driveBundle({ browser, base, api, bundleDir, outDir, home, model }) {
   const bundle = path.basename(bundleDir)
@@ -331,9 +244,6 @@ async function driveBundle({ browser, base, api, bundleDir, outDir, home, model 
   const appName = manifest.name ?? bundle
   const displayName = manifest.displayName ?? appName
 
-  // A local Store source is a DIRECTORY OF app subdirs, so a single bundle needs a
-  // staging parent. Symlinked, never copied: the bundle under validation must be the
-  // bytes on disk, and the harness must not be able to modify it.
   const stagingRoot = path.join(home, 'harness-sources', bundle)
   mkdirSync(stagingRoot, { recursive: true })
   const link = path.join(stagingRoot, bundle)
@@ -349,7 +259,6 @@ async function driveBundle({ browser, base, api, bundleDir, outDir, home, model 
     await page.goto(`${base}/?token=${encodeURIComponent(api.token)}`, { waitUntil: 'load', timeout: 45_000 })
     await gotoRoute(page, base, '/apps?view=store')
 
-    // ── leg 1: register the local source ──────────────────────────────────
     if (!(await openManageSources(page))) {
       failLeg(legs, 'store-source', 'no "Manage Sources" control was reachable on the Store tab')
       notReached = 'the local source could not be registered, so no later leg could run'
@@ -359,8 +268,6 @@ async function driveBundle({ browser, base, api, bundleDir, outDir, home, model 
     const localInput = sourcesPanel.locator('input[name="app-local-source"]')
     await localInput.waitFor({ state: 'visible', timeout: 10_000 })
     await localInput.fill(stagingRoot)
-    // The Local sources section's own Add button — the git section has one too, and
-    // it sits earlier in the DOM, so anchor on the input rather than on the label.
     await localInput.locator('xpath=following::button[1]').click({ timeout: 10_000 })
     await page.waitForTimeout(1500)
     const sourcesShot = await shot('store-source')
@@ -379,12 +286,6 @@ async function driveBundle({ browser, base, api, bundleDir, outDir, home, model 
     })
     await closePanel(page)
 
-    // ── leg 2: the Store card + detail panel ──────────────────────────────
-    // Filter the grid to THIS local source (the Store's own `ssrc` rail filter).
-    // Two reasons: the gateway ships a non-removable git source carrying the same
-    // app names, so an unfiltered grid can show the REMOTE copy of the bundle; and
-    // the catalog read behind the filter includes a network registry fetch, so the
-    // first read after registering a source can still be stale — hence the retry.
     const srcKey = `local:${stagingRoot}`
     const card = cardFor(page, displayName)
     let found = false
@@ -443,7 +344,6 @@ async function driveBundle({ browser, base, api, bundleDir, outDir, home, model 
       })
     }
 
-    // ── leg 3: install through the UI, consent included ───────────────────
     const toolsBefore = new Set((((await api.get('/api/tools')).json?.tools) ?? []).map((t) => `${t.provider}::${t.name}`))
     const installBtn = panel.getByRole('button', { name: 'Install', exact: true })
     if (!(await installBtn.count())) {
@@ -460,9 +360,6 @@ async function driveBundle({ browser, base, api, bundleDir, outDir, home, model 
     let consentText = ''
     let sawConsent = false
     let installedApp = null
-    // Three outcomes to watch for at once: the scanner's consent dialog, an install
-    // that went straight through, and a terminal refusal. Racing two fixed timeouts
-    // instead made the no-dialog path a coin flip between them.
     for (let i = 0; i < 60; i++) {
       if (await anywayBtn.first().isVisible().catch(() => false)) { sawConsent = true; break }
       installedApp = ((await api.get('/api/apps')).json?.apps ?? []).find((a) => a.name === appName) ?? null
@@ -471,25 +368,18 @@ async function driveBundle({ browser, base, api, bundleDir, outDir, home, model 
       await page.waitForTimeout(1000)
     }
     if (sawConsent) {
-      // The dialog animates in (opacity/scale). Screenshotting the frame the button
-      // first became visible captured a half-transparent ghost that reads as an
-      // unreadable dialog — a harness artifact, not a product defect. Let it settle.
       await page.waitForTimeout(1200)
       consentText = (await consentModal.first().innerText().catch(() => '')).replace(/\s+/g, ' ').trim()
       consentShot = await shot('ui-install-consent')
       noteLeg(legs, 'ui-install', { screenshots: [consentShot], notes: ['the scanner raised a consent dialog; clicked through it as a user'] })
       await anywayBtn.first().click()
     }
-    // Installation copies the bundle and may install python deps — give it room.
     for (let i = 0; i < 90 && !installedApp; i++) {
       await page.waitForTimeout(2000)
       installedApp = ((await api.get('/api/apps')).json?.apps ?? []).find((a) => a.name === appName) ?? null
       if (installedApp) break
       if (await page.getByText(/cannot be installed|scanner flagged dangerous/i).count()) break
     }
-    // A TERMINAL refusal renders the same dialog with the findings and no "Install
-    // anyway". Capture its text before screenshotting: the findings are the whole
-    // reason the bundle cannot be driven, so a bare "not installed" is not a report.
     let refusalText = ''
     if (!installedApp) {
       await page.waitForTimeout(1200)
@@ -508,16 +398,10 @@ async function driveBundle({ browser, base, api, bundleDir, outDir, home, model 
       details: { consentDialogShown: sawConsent, consentText, version: installedApp.version ?? '' },
     })
 
-    // ── leg 4: Library + Tools page ───────────────────────────────────────
-    // Both pages fetch after mount, so both need a real wait rather than a count()
-    // on the first frame — otherwise a slow render reads as a missing card, which is
-    // exactly the false FAIL this harness exists to avoid.
     await gotoRoute(page, base, '/apps?view=library')
     const libCard = cardFor(page, displayName)
     const inLibrary = await libCard.first().waitFor({ state: 'visible', timeout: 20_000 })
       .then(() => true).catch(() => false)
-    // Cards animate in (opacity 0 → 1 with a per-index delay); screenshotting the
-    // first visible frame captured a dimmed card that reads as "disabled".
     await page.waitForTimeout(900)
     const libShot = await shot('library')
 
@@ -553,7 +437,6 @@ async function driveBundle({ browser, base, api, bundleDir, outDir, home, model 
       })
     }
 
-    // ── leg 5: invoke a tool from the UI ──────────────────────────────────
     if (!contributed.length) {
       skipLeg(legs, 'tool-invoke', 'the app contributes no tools, so there is nothing to invoke from the UI')
     } else {
@@ -578,7 +461,6 @@ async function driveBundle({ browser, base, api, bundleDir, outDir, home, model 
       }
     }
 
-    // ── leg 6: deactivate → reactivate ────────────────────────────────────
     const round = await deactivateReactivate({ page, base, api, appName, displayName, shot })
     if (round.ok) passLeg(legs, 'reactivate', { screenshots: round.screenshots, details: round.details })
     else if (round.skip) skipLeg(legs, 'reactivate', round.skip, { screenshots: round.screenshots, details: round.details })
@@ -593,10 +475,6 @@ async function driveBundle({ browser, base, api, bundleDir, outDir, home, model 
   } finally {
     await page.close().catch(() => {})
     await context.close().catch(() => {})
-    // Per-bundle cleanup so the next bundle sees a Store with only its own card.
-    // `force=1` because a plain DELETE is "deactivate, keep files" — the app would
-    // stay in the Library and the next bundle's Library assertion would read a
-    // neighbour's card. Only ever applied to what this run installed.
     await api.del(`/api/apps/${encodeURIComponent(appName)}?force=1`).catch(() => {})
     await api.del(`/api/apps/local-sources?path=${encodeURIComponent(stagingRoot)}`).catch(() => {})
   }
@@ -616,13 +494,8 @@ async function driveBundle({ browser, base, api, bundleDir, outDir, home, model 
   return report
 }
 
-/** Signals "this leg failed and the rest of the bundle cannot be driven" without
- *  conflating it with an unexpected harness crash. */
 class LegAbort extends Error {}
 
-/** Prefer a tool with no required arguments — bundle-agnostic and side-effect-light.
- *  Otherwise a tool whose required arguments are all primitives the harness can fill
- *  with a self-describing placeholder. */
 function pickInvokableTool(tools) {
   const req = (t) => (t.parameters?.required ?? [])
   const noArgs = tools.filter((t) => req(t).length === 0)
@@ -634,8 +507,6 @@ function pickInvokableTool(tools) {
   return primitive[0] ?? null
 }
 
-/** Open the tool inspector, expand "Try it", fill any required primitives, and go
- *  through "Run tool" → "Confirm & run" — the same two clicks a user makes. */
 async function runToolFromUi({ page, base, tool, shot }) {
   const screenshots = []
   await gotoRoute(page, base, '/tools')
@@ -658,9 +529,6 @@ async function runToolFromUi({ page, base, tool, shot }) {
   await tryIt.first().click()
   await page.waitForTimeout(500)
 
-  // Fill by ACCESSIBLE NAME and read every value back — see scripts/lib/app_validate_form.mjs.
-  // A required argument the harness cannot enter BLOCKS the leg: running the tool anyway
-  // yields its own "needs an X" error, which the report would then blame on the bundle.
   const { args, unfilled } = await fillRequiredArgs(page, tool)
   screenshots.push(await shot('tool-invoke-form'))
   if (unfilled.length) {
@@ -747,17 +615,13 @@ async function deactivateReactivate({ page, base, api, appName, displayName, sho
   return { ok: true, screenshots, details }
 }
 
-// ── model wiring ─────────────────────────────────────────────────────────────
 
-/** Probe the configured model endpoint. Returns a reason string when it is not
- *  usable — model-backed tools then report SKIPPED with that reason rather than
- *  failing for a cause that is not the bundle's. */
 async function probeModelEndpoint(endpoint) {
   for (const route of ['/v1/models', '/api/tags']) {
     try {
       const res = await fetch(`${endpoint.replace(/\/$/, '')}${route}`, { signal: AbortSignal.timeout(5000) })
       if (res.ok) return { ok: true, route }
-    } catch (err) { /* try the next route */ }
+    } catch (err) {   }
   }
   return { ok: false, reason: `no model endpoint answered at ${endpoint} (tried /v1/models and /api/tags)` }
 }
@@ -794,12 +658,11 @@ async function createModelProvider({ api, opts }) {
   }
 }
 
-// ── main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
   const opts = parseArgs(process.argv.slice(2))
-  if (!existsSync(path.join(REPO_ROOT, 'src', 'gideon', 'static', 'dist', 'index.html'))) {
-    warn('the gateway has no built SPA to serve (src/gideon/static/dist/index.html missing) — run `make web-build`')
+  if (!existsSync(path.join(REPO_ROOT, 'runtime', 'gideon', 'static', 'dist', 'index.html'))) {
+    warn('the gateway has no built SPA to serve (runtime/gideon/static/dist/index.html missing) — run `make web-build`')
     process.exitCode = 2
     return
   }
@@ -812,13 +675,10 @@ async function main() {
   }
 
   const appsRoot = opts.appsRoot || path.dirname(opts.bundles[0])
-  const home = mkdtempSync(path.join(opts.homeBase, 'pclaw-app-ui-validate-'))
+  const home = mkdtempSync(path.join(opts.homeBase, 'gideon-app-ui-validate-'))
   const outDir = opts.out || path.join(home, 'report')
   mkdirSync(path.join(home, 'workspace'), { recursive: true })
   mkdirSync(outDir, { recursive: true })
-  // `onboarded` is derived from a server-side user name; without it every route
-  // renders the onboarding screen and every leg would assert against a surface no
-  // user of an installed app ever sees.
   writeFileSync(path.join(home, 'config.json'), JSON.stringify({ dashboard: { user_name: 'Harness' } }))
 
   const port = opts.port || await freePort()
@@ -834,8 +694,6 @@ async function main() {
   let gateway = null
   let bundles = []
   let model = null
-  // An interrupted run must not orphan a gateway or leave a home behind. `finally`
-  // does not run on a signal, so wire the two explicitly.
   const onSignal = (sig) => {
     if (gateway) gateway.kill('SIGKILL')
     if (!opts.keep && !outDir.startsWith(home)) rmSync(home, { recursive: true, force: true })
@@ -845,9 +703,6 @@ async function main() {
   process.once('SIGINT', () => onSignal('SIGINT'))
   process.once('SIGTERM', () => onSignal('SIGTERM'))
   try {
-    // Boot once for setup (installing a provider app registers a provider TYPE at
-    // import time, which the running process may not pick up), then boot again so
-    // the provider type is present before any bundle is driven.
     let started = await startGateway({ python, home, port, firstPartyDir, logSink: gatewayLog })
     gateway = started.proc
     let api = { ...apiClient(`http://127.0.0.1:${port}`, started.token), token: started.token }
@@ -877,7 +732,7 @@ async function main() {
     await stopGateway(gateway)
     const report = shapeReport({
       bundles,
-      harness: { script: 'scripts/app_ui_validate.mjs', port, home, outDir, python, repoRoot: REPO_ROOT },
+      harness: { script: 'tooling/scripts/app_ui_validate.mjs', port, home, outDir, python, repoRoot: REPO_ROOT },
       model,
     })
     const reportPath = path.join(outDir, 'report.json')
@@ -886,8 +741,6 @@ async function main() {
     console.log(formatReport(report))
     log(`report ${reportPath}`)
     if (!opts.keep) {
-      // The home is the only thing this harness creates outside --out. Screenshots
-      // and the report live under --out; when that defaults into the home, keep it.
       if (!outDir.startsWith(home)) rmSync(home, { recursive: true, force: true })
       else log(`kept ${home} (it holds the report)`)
     } else {

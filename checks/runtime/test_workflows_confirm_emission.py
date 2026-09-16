@@ -24,9 +24,13 @@ import asyncio
 
 import pytest
 
-from gideon.ledger import outcomes
-from gideon.workflows.confirmation import ConfirmationType, request_id
-from gideon.workflows.journal import CONFIRMATION_PENDING, CONFIRMATION_RESOLVED, ledger
+from gideon.assurance.ledger import outcomes
+from gideon.automation.workflows.confirmation import ConfirmationType, request_id
+from gideon.automation.workflows.journal import (
+    CONFIRMATION_PENDING,
+    CONFIRMATION_RESOLVED,
+    ledger,
+)
 
 
 def _spec(gate_config: dict) -> dict:
@@ -50,10 +54,10 @@ def _spec(gate_config: dict) -> dict:
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.workflows import store as wstore
+    from gideon.automation.workflows import store as wstore
 
     monkeypatch.setattr(wstore, "config_dir", lambda: tmp_path)
-    from gideon.action_providers import registry as apreg
+    from gideon.integrations.action_providers import registry as apreg
 
     apreg._ensure_default_providers_registered()
     yield
@@ -61,10 +65,10 @@ def _isolated(tmp_path, monkeypatch):
 
 async def _park_on_gate(gate_config: dict, run_id: str = "r-1"):
     """Start a run and let it park on its gate. Returns `(controller, continuations)`."""
-    from gideon.workflows import store as wstore
-    from gideon.workflows.controller import EngineServices, RunController
-    from gideon.workflows.human_input import list_continuations
-    from gideon.workflows.models import WorkflowRun
+    from gideon.automation.workflows import store as wstore
+    from gideon.automation.workflows.controller import EngineServices, RunController
+    from gideon.automation.workflows.human_input import list_continuations
+    from gideon.automation.workflows.models import WorkflowRun
 
     run = WorkflowRun(id=run_id, workflow_name="t")
     wstore.create(run)
@@ -82,9 +86,6 @@ def _rows(kind: str, run_id: str = "r-1") -> list[dict]:
 
 
 APPROVAL = {"kind": "approval", "prompt": "ok to ship?"}
-
-
-# ── the pending half ──
 
 
 def test_a_parked_gate_EMITS_a_pending_confirmation():
@@ -121,7 +122,10 @@ def test_the_pending_row_classifies_an_ORDINARY_approval():
         await _park_on_gate(APPROVAL)
 
     asyncio.run(go())
-    assert _rows(CONFIRMATION_PENDING)[0]["confirmation_kind"] == ConfirmationType.APPROVAL.value
+    assert (
+        _rows(CONFIRMATION_PENDING)[0]["confirmation_kind"]
+        == ConfirmationType.APPROVAL.value
+    )
 
 
 def test_a_DESTRUCTIVE_gate_is_a_different_confirmation_TYPE():
@@ -142,9 +146,11 @@ def test_a_DESTRUCTIVE_gate_is_a_different_confirmation_TYPE():
 def test_the_classification_reads_the_AUTHOR_s_declaration():
     """Kept with the author who made it rather than inferred from prompt text at render time — a
     heuristic on the wording would reclassify a gate when someone edited its prose."""
-    from gideon.workflows.controller import _confirmation_kind
+    from gideon.automation.workflows.controller import _confirmation_kind
 
-    assert _confirmation_kind({"risk_category": "irreversible"}) == "destructive_confirm"
+    assert (
+        _confirmation_kind({"risk_category": "irreversible"}) == "destructive_confirm"
+    )
     assert _confirmation_kind({"kind": "question"}) == "needs_input"
     assert _confirmation_kind({}) == "approval"
 
@@ -152,12 +158,9 @@ def test_the_classification_reads_the_AUTHOR_s_declaration():
 def test_an_UNKNOWN_risk_word_falls_back_to_approval():
     """APPROVAL's expiry policy is HOLD — the run waits for a human rather than auto-resolving
     something this build could not classify."""
-    from gideon.workflows.controller import _confirmation_kind
+    from gideon.automation.workflows.controller import _confirmation_kind
 
     assert _confirmation_kind({"risk_category": "vibes"}) == "approval"
-
-
-# ── the resolution half ──
 
 
 def test_answering_a_gate_emits_a_PAIRED_resolution():
@@ -204,7 +207,8 @@ def test_a_DENIAL_records_reject_and_false():
 
 def test_an_UNATTRIBUTED_resolution_says_dashboard_not_empty():
     """An empty resolver reads as "no resolver", indistinguishable from an unrecorded one. An HTTP
-    caller is already authenticated by the gateway, so `dashboard` is the honest default."""
+    caller is already authenticated by the gateway, so `dashboard` is the honest default.
+    """
 
     async def go():
         controller, conts = await _park_on_gate(APPROVAL)
@@ -239,9 +243,6 @@ def test_an_unanswered_gate_has_pending_but_NO_resolution():
     assert _rows(CONFIRMATION_RESOLVED) == []
 
 
-# ── the escalation's OUTCOME: was interrupting the user worth it? (PP-9) ──
-
-
 def test_a_parked_gate_OPENS_an_escalation_OUTCOME():
     """`confirmation_pending` records that we ASKED. This records the BET — that asking was worth
     it — on the general outcome facility, keyed to the same `confirmation_id` so the answer grades
@@ -256,11 +257,11 @@ def test_a_parked_gate_OPENS_an_escalation_OUTCOME():
     asyncio.run(go())
     (question,) = outcomes.open_questions(ledger("r-1"))
     assert question.producer == outcomes.PRODUCER_ESCALATION
-    # ledger-sourced: the ground truth is an event this run writes itself, so it grades on a box
-    # with no vector store at all
     assert question.metric_source == outcomes.SOURCE_LEDGER
     assert question.metric == CONFIRMATION_RESOLVED
-    assert question.match == {"confirmation_id": _rows(CONFIRMATION_PENDING)[0]["confirmation_id"]}
+    assert question.match == {
+        "confirmation_id": _rows(CONFIRMATION_PENDING)[0]["confirmation_id"]
+    }
     assert question.horizon_secs > 0.0
 
 
@@ -294,7 +295,8 @@ def test_ANSWERING_the_gate_MEASURES_the_escalation_outcome():
 def test_a_DENIED_gate_measures_as_a_LOST_bet_not_an_unreadable_one():
     """A rejection is a MEASUREMENT (0.0 against a baseline of 1.0 → score −1), not an
     inconclusive. Collapsing the two would make "we interrupted the user and they said no"
-    indistinguishable from "nobody ever looked", which are opposite facts about the same gate."""
+    indistinguishable from "nobody ever looked", which are opposite facts about the same gate.
+    """
 
     async def go():
         controller, conts = await _park_on_gate(APPROVAL)
@@ -309,19 +311,16 @@ def test_a_DENIED_gate_measures_as_a_LOST_bet_not_an_unreadable_one():
     assert outcomes.score(measured, question.baseline) == pytest.approx(-1.0)
 
 
-# ── the id contract ──
-
-
 def test_the_id_comes_from_the_SHIPPED_request_id():
     """Two id schemes for one record is the failure where the halves never pair up, and nobody
     notices until someone asks how long a gate waited."""
-    from gideon.workflows.controller import _confirmation_id
+    from gideon.automation.workflows.controller import _confirmation_id
 
     assert _confirmation_id("r", "g", 1) == request_id("r", "g", 1)
 
 
 def test_the_id_is_STABLE_across_polls():
-    from gideon.workflows.controller import _confirmation_id
+    from gideon.automation.workflows.controller import _confirmation_id
 
     assert _confirmation_id("r", "g", 1) == _confirmation_id("r", "g", 1)
 
@@ -329,7 +328,7 @@ def test_the_id_is_STABLE_across_polls():
 def test_the_EPOCH_is_in_the_id_so_a_rewind_asks_a_NEW_question():
     """A rewound gate is being asked about different work. Deriving from the resume token instead
     would break this: a token rotates per poll, so the two halves would disagree."""
-    from gideon.workflows.controller import _confirmation_id
+    from gideon.automation.workflows.controller import _confirmation_id
 
     assert _confirmation_id("r", "g", 1) != _confirmation_id("r", "g", 2)
 
@@ -339,24 +338,22 @@ def test_the_id_is_NOT_the_resume_token():
     never match."""
     import inspect
 
-    from gideon.workflows.controller import RunController
+    from gideon.automation.workflows.controller import RunController
 
     source = inspect.getsource(RunController._ensure_continuation)
     assert "_confirmation_id(" in source
     assert "confirmation_id=cont.token" not in source
 
 
-# ── both channels ──
-
-
 def test_the_pending_event_also_reaches_the_LIVE_stream():
     """The ledger is what a rebuild reads; the stream is what an open view folds. A gate that
-    appeared in only one would show on the board and vanish on reload, or the reverse."""
+    appeared in only one would show on the board and vanish on reload, or the reverse.
+    """
 
     async def go():
-        from gideon.workflows import store as wstore
-        from gideon.workflows.controller import EngineServices, RunController
-        from gideon.workflows.models import WorkflowRun
+        from gideon.automation.workflows import store as wstore
+        from gideon.automation.workflows.controller import EngineServices, RunController
+        from gideon.automation.workflows.models import WorkflowRun
 
         published: list = []
         run = WorkflowRun(id="r-1", workflow_name="t")
@@ -382,9 +379,9 @@ def test_the_needs_input_event_is_STILL_emitted():
     the resume affordance already bind to, and replacing it would break both."""
 
     async def go():
-        from gideon.workflows import store as wstore
-        from gideon.workflows.controller import EngineServices, RunController
-        from gideon.workflows.models import WorkflowRun
+        from gideon.automation.workflows import store as wstore
+        from gideon.automation.workflows.controller import EngineServices, RunController
+        from gideon.automation.workflows.models import WorkflowRun
 
         published: list = []
         run = WorkflowRun(id="r-1", workflow_name="t")

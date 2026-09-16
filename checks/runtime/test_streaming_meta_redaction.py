@@ -2,7 +2,7 @@
 
 import json
 
-from gideon.dashboard.chat import _build_stream_chunk, _redact_deep
+from gideon.interfaces.dashboard.chat import _build_stream_chunk, _redact_deep
 
 
 def _build_streaming_chunk(msg: dict) -> dict:

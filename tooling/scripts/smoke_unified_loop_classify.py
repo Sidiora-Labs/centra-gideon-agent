@@ -7,7 +7,7 @@ walkthrough had never touched a real model. Run this against a configured model
 produces a real, well-formed classification end-to-end — a repeatable pre-cutover
 gate that the in-process unit suite can't provide.
 
-    GIDEON_HOME=~/.gideon .venv/bin/python scripts/smoke_unified_loop_classify.py
+    GIDEON_HOME=~/.gideon .venv/bin/python tooling/scripts/smoke_unified_loop_classify.py
 
 Exits non-zero if any kind fails to classify (classified=False) or raises. Not a
 pytest test: it requires a live provider, so it stays out of the unit gate.
@@ -20,8 +20,8 @@ import sys
 
 
 async def _check(kind: str, task: str) -> bool:
-    from gideon.llm_helpers import one_shot_completion
-    from gideon.loop import kinds
+    from gideon.integrations.llm_helpers import one_shot_completion
+    from gideon.automation.loop import kinds
 
     kinds.ensure_loaded()
 
@@ -43,7 +43,8 @@ async def _check(kind: str, task: str) -> bool:
 
 
 async def main() -> int:
-    from gideon.llm.registry import get_default_registry, sync_entries_from_config
+    from gideon.integrations.llm.registry import get_default_registry
+    from gideon.integrations.llm.registry import sync_entries_from_config
 
     n = sync_entries_from_config()
     entries = [e.name for e in get_default_registry().list_entries()]

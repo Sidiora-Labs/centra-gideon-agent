@@ -27,16 +27,12 @@ import asyncio
 
 import pytest
 
-import gideon.agents.native.runtime as runtime_mod
-from gideon.agents.native.builtin_tools import NativeBuiltinToolProvider
-from gideon.agents.native.runtime import NativeAgentRuntime
-from gideon.agents.provider import AgentRuntimeDefinition
-from gideon.guardrails.failure import CircuitOpenError, FailureMode
-from gideon.llm.events import (
-    EVENT_COMPLETE,
-    EVENT_TEXT_CHUNK,
-    AgentEvent,
-)
+import gideon.engine.agents.native.runtime as runtime_mod
+from gideon.engine.agents.native.builtin_tools import NativeBuiltinToolProvider
+from gideon.engine.agents.native.runtime import NativeAgentRuntime
+from gideon.engine.agents.provider import AgentRuntimeDefinition
+from gideon.integrations.llm.events import EVENT_COMPLETE, EVENT_TEXT_CHUNK, AgentEvent
+from gideon.security.guardrails.failure import CircuitOpenError, FailureMode
 
 pytestmark = pytest.mark.asyncio
 
@@ -89,7 +85,9 @@ async def _run(tmp_path, model, monkeypatch) -> tuple[list[AgentEvent], list]:
     monkeypatch.setattr(runtime_mod, "record_attempt", rows.append)
     monkeypatch.setattr(runtime_mod, "_INFERENCE_RETRY_BACKOFF_SECS", 0.0)
     rt = NativeAgentRuntime(
-        definition=AgentRuntimeDefinition(name="T", provider="native", model="scripted"),
+        definition=AgentRuntimeDefinition(
+            name="T", provider="native", model="scripted"
+        ),
         model_provider=model,
         tool_providers=[NativeBuiltinToolProvider(tmp_path, sandbox_mode="none")],
         cwd=tmp_path,
@@ -100,7 +98,9 @@ async def _run(tmp_path, model, monkeypatch) -> tuple[list[AgentEvent], list]:
     return events, rows
 
 
-async def test_pre_stream_transient_is_retried_once_and_the_turn_completes(tmp_path, monkeypatch):
+async def test_pre_stream_transient_is_retried_once_and_the_turn_completes(
+    tmp_path, monkeypatch
+):
     model = _FlakyModel([RuntimeError("HTTP 500"), [_text("hi"), _complete()]])
     events, rows = await _run(tmp_path, model, monkeypatch)
 
@@ -108,7 +108,6 @@ async def test_pre_stream_transient_is_retried_once_and_the_turn_completes(tmp_p
     texts = [ev.text for ev in events if ev.kind == EVENT_TEXT_CHUNK]
     assert texts == ["hi"], "the retried stream is the ONLY visible one — no duplicates"
     assert any(ev.kind == EVENT_COMPLETE for ev in events)
-    # Audit: one failed direct attempt + one passing retry attempt.
     assert [(r.attempt, r.failure_mode, r.passed, r.strategy) for r in rows] == [
         (1, FailureMode.PROVIDER_ERROR.value, False, "direct"),
         (2, FailureMode.NONE.value, True, "retry"),
@@ -116,18 +115,25 @@ async def test_pre_stream_transient_is_retried_once_and_the_turn_completes(tmp_p
     assert all(r.use_case == "native_loop" for r in rows)
 
 
-async def test_provider_error_retry_does_not_inject_a_correction_note(tmp_path, monkeypatch):
+async def test_provider_error_retry_does_not_inject_a_correction_note(
+    tmp_path, monkeypatch
+):
     model = _FlakyModel([RuntimeError("HTTP 500"), [_text("ok"), _complete()]])
     await _run(tmp_path, model, monkeypatch)
-    # correction_note(PROVIDER_ERROR) is "" — the retry re-issues unchanged.
-    assert not any(m.get("_volatile") and m.get("role") == "user" for m in model.last_messages)
+    assert not any(
+        m.get("_volatile") and m.get("role") == "user" for m in model.last_messages
+    )
 
 
-async def test_timeout_retry_injects_the_taxonomys_correction_note(tmp_path, monkeypatch):
+async def test_timeout_retry_injects_the_taxonomys_correction_note(
+    tmp_path, monkeypatch
+):
     model = _FlakyModel([asyncio.TimeoutError(), [_text("ok"), _complete()]])
     events, rows = await _run(tmp_path, model, monkeypatch)
     assert any(ev.kind == EVENT_COMPLETE for ev in events)
-    tail_notes = [m for m in model.last_messages if m.get("role") == "user" and m.get("_volatile")]
+    tail_notes = [
+        m for m in model.last_messages if m.get("role") == "user" and m.get("_volatile")
+    ]
     assert len(tail_notes) == 1 and "timed out" in tail_notes[0]["content"]
     assert rows[0].failure_mode == FailureMode.TIMEOUT.value
 
@@ -143,14 +149,20 @@ async def test_non_retryable_circuit_open_is_never_retried(tmp_path, monkeypatch
     model = _FlakyModel([CircuitOpenError("bedrock", 30.0)])
     with pytest.raises(CircuitOpenError):
         await _run(tmp_path, model, monkeypatch)
-    assert model.calls == 1, "an open breaker fails in microseconds — retrying defeats it"
+    assert (
+        model.calls == 1
+    ), "an open breaker fails in microseconds — retrying defeats it"
 
 
-async def test_mid_stream_failure_after_visible_output_propagates(tmp_path, monkeypatch):
+async def test_mid_stream_failure_after_visible_output_propagates(
+    tmp_path, monkeypatch
+):
     model = _FlakyModel([([_text("partial")], RuntimeError("dropped")), [_complete()]])
     with pytest.raises(RuntimeError, match="dropped"):
         await _run(tmp_path, model, monkeypatch)
-    assert model.calls == 1, "visible output already streamed — a retry would duplicate it"
+    assert (
+        model.calls == 1
+    ), "visible output already streamed — a retry would duplicate it"
 
 
 async def test_cancellation_is_never_swallowed(tmp_path, monkeypatch):

@@ -1,4 +1,4 @@
-"""``python -m harness`` — validate | explain | run | scan.
+"""``python -m checks.harness`` — validate | explain | run | scan.
 
 The agent-facing surface of the self-development harness:
 
@@ -35,16 +35,16 @@ import subprocess
 import sys
 from pathlib import Path
 
-from harness import scanner
-from harness.diff import (
+from checks.harness import scanner
+from checks.harness.diff import (
     commit_subjects_since,
     compute_diff,
     has_fix_shaped_commit,
     touches_specs,
 )
-from harness.profiles import get_profile, resolve_commands
-from harness.selection import forced_profiles
-from harness.specs import (
+from checks.harness.profiles import get_profile, resolve_commands
+from checks.harness.selection import forced_profiles
+from checks.harness.specs import (
     KIND_TASK,
     Spec,
     SpecError,
@@ -52,7 +52,7 @@ from harness.specs import (
     specs_root,
     validate_all,
 )
-from harness.validate_refs import validate_refs
+from checks.harness.validate_refs import validate_refs
 
 _OK = "✅"
 _FAIL = "❌"
@@ -60,7 +60,7 @@ _WARN = "⚠️ "
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parent.parent
+    return Path(__file__).resolve().parent.parent.parent
 
 
 def _load_or_die() -> list[Spec]:
@@ -72,9 +72,6 @@ def _load_or_die() -> list[Spec]:
         raise SystemExit(2) from exc
 
 
-# ── validate ──────────────────────────────────────────────────────────────────
-
-
 def cmd_validate(args: argparse.Namespace) -> int:
     specs = _load_or_die()
     if not specs:
@@ -83,7 +80,11 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
     issues = validate_all(specs)
     issues.extend(
-        validate_refs(specs, check_tests=not args.fast, known_scanner_checks=scanner.known_checks())
+        validate_refs(
+            specs,
+            check_tests=not args.fast,
+            known_scanner_checks=scanner.known_checks(),
+        )
     )
 
     errors = [i for i in issues if i.level == "error"]
@@ -95,17 +96,19 @@ def cmd_validate(args: argparse.Namespace) -> int:
             rel = issue.path.relative_to(root)
         except ValueError:
             rel = issue.path
-        print(f"{marker} {rel}: {issue.message}", file=sys.stderr if errors else sys.stdout)
+        print(
+            f"{marker} {rel}: {issue.message}",
+            file=sys.stderr if errors else sys.stdout,
+        )
 
     n = len(specs)
     if errors:
-        print(f"\n{_FAIL} {len(errors)} error(s), {len(warnings)} warning(s) across {n} specs")
+        print(
+            f"\n{_FAIL} {len(errors)} error(s), {len(warnings)} warning(s) across {n} specs"
+        )
         return 1
     print(f"{_OK} {n} specs valid ({len(warnings)} warning(s))")
     return 0
-
-
-# ── explain ─────────────────────────────────────────────────────────────────
 
 
 def _find_task(specs: list[Spec], task_id: str) -> Spec | None:
@@ -115,7 +118,9 @@ def _find_task(specs: list[Spec], task_id: str) -> Spec | None:
     return None
 
 
-def _resolved_for_task(specs: list[Spec], task: Spec) -> tuple[list[str], list[str], list[str]]:
+def _resolved_for_task(
+    specs: list[Spec], task: Spec
+) -> tuple[list[str], list[str], list[str]]:
     """Union a task's requirements with those of its referenced scenario.
 
     Returns (profiles, rule_ids, test_node_ids), each de-duplicated in declaration order.
@@ -141,8 +146,6 @@ def _resolved_for_task(specs: list[Spec], task: Spec) -> tuple[list[str], list[s
         add_from(by_id[str(scenario_id)])
     add_from(task)
 
-    # A referenced rule contributes its own requiredTests (a rule names the tests that
-    # prove it), so a task inherits the proof obligations of every rule it must satisfy.
     for rid in list(rules):
         rule = by_id.get(rid)
         if rule:
@@ -174,7 +177,6 @@ def cmd_explain(args: argparse.Namespace) -> int:
         print("    (none resolved — check requiredProfiles / requiredTests)")
     for rc in cmds:
         print(f"    [{rc.profile}] {rc.command}")
-    # Negative acceptance is the clause LEDGER prose always drops — surface it loudly.
     acc = task.meta.get("acceptance")
     if isinstance(acc, dict) and acc.get("negative"):
         print("  negative acceptance (must NOT happen):")
@@ -184,12 +186,10 @@ def cmd_explain(args: argparse.Namespace) -> int:
     return 0
 
 
-# ── run ───────────────────────────────────────────────────────────────────────
-
-
 def _execute(commands: list[str], *, dry_run: bool) -> int:
     """Run each command from the repo root, streaming output. Stops at the first failure
-    (a later command shouldn't mask an earlier break). Returns the aggregate exit code."""
+    (a later command shouldn't mask an earlier break). Returns the aggregate exit code.
+    """
     root = _repo_root()
     for cmd in commands:
         print(f"\n{'» (dry-run) ' if dry_run else '» '}{cmd}")
@@ -197,7 +197,10 @@ def _execute(commands: list[str], *, dry_run: bool) -> int:
             continue
         proc = subprocess.run(cmd, cwd=root, shell=True, check=False)
         if proc.returncode != 0:
-            print(f"{_FAIL} command failed (exit {proc.returncode}): {cmd}", file=sys.stderr)
+            print(
+                f"{_FAIL} command failed (exit {proc.returncode}): {cmd}",
+                file=sys.stderr,
+            )
             return 1
     return 0
 
@@ -207,7 +210,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         return _run_diff(args)
 
     if not args.task:
-        print(f"{_FAIL} run needs a task id (or --diff); e.g. `run T1.1`", file=sys.stderr)
+        print(
+            f"{_FAIL} run needs a task id (or --diff); e.g. `run T1.1`", file=sys.stderr
+        )
         return 2
 
     specs = _load_or_die()
@@ -217,7 +222,6 @@ def cmd_run(args: argparse.Namespace) -> int:
         return 2
 
     profiles, _rules, tests = _resolved_for_task(specs, task)
-    # A profile that needs test node-ids but has none resolved is a defective task spec.
     for name in profiles:
         prof = get_profile(name)
         if prof and prof.needs_tests and not tests:
@@ -249,19 +253,16 @@ def _run_diff(args: argparse.Namespace) -> int:
     for fp in forced:
         print(f"  forced [{fp.profile}]: {'; '.join(fp.reasons)}")
 
-    # Same-PR rule (§1.4): a fix-shaped change should add/update a spec in the same change,
-    # moving "every fixed bug becomes permanent" from private memory into the versioned repo.
     subjects = commit_subjects_since(_repo_root(), diff.base)
     if has_fix_shaped_commit(subjects) and not touches_specs(diff.files):
         print(
             f"{_WARN}same-PR rule: this looks like a fix "
-            f"(commit subject matches fix/bug/regression) but touches no harness/specs/ — "
+            f"(commit subject matches fix/bug/regression) but touches no checks/harness/specs/ — "
             f"add or update a rule/scenario spec so the fixed bug becomes a permanent check."
         )
 
     profiles: list[str] = []
     tests: list[str] = []
-    # A task spec can add more (its profiles/tests) on top of the forced set.
     if args.task:
         specs = _load_or_die()
         task = _find_task(specs, args.task)
@@ -290,7 +291,6 @@ def _run_scan_if_selected(profiles: list[str], diff: object = None) -> int:
         files = diff.abs_files(root)  # type: ignore[attr-defined]
         changed_lines = diff.abs_changed_lines(root)  # type: ignore[attr-defined]
     else:
-        # Bare scan over tracked files (no diff): scan the whole tree.
         files = _tracked_files(root)
         changed_lines = None
     findings = scanner.scan(files, root, changed_lines=changed_lines)
@@ -341,7 +341,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
 def cmd_resume_audit(args: argparse.Namespace) -> int:
     """Fresh-session resumability audit for a loop (§2.4): can it answer
     done/verified/next/how-to-verify from persisted state alone?"""
-    from harness import resume_audit
+    from checks.harness import resume_audit
 
     report = resume_audit.audit_loop(args.loop_id)
     if not report.exists:
@@ -367,7 +367,7 @@ def cmd_workflow_resume_audit(args: argparse.Namespace) -> int:
     """Fresh-session resumability audit for a workflow run (§2.4, workflow half): killed and
     resumed from disk alone, does the reconstructed frontier match the pre-kill snapshot
     byte-for-byte, and does the journal event-fold rebuild the same node states?"""
-    from harness import resume_audit
+    from checks.harness import resume_audit
 
     report = resume_audit.audit_workflow_run(args.run_id)
     if not report.exists:
@@ -393,11 +393,13 @@ def cmd_replay(args: argparse.Namespace) -> int:
     A threshold breach, a missing required scenario recording, or an unbaselined recording
     all fail. This is the command the ``replay`` profile runs.
     """
-    from harness import baselines
+    from checks.harness import baselines
 
     results = baselines.check_baselines()
     if not results:
-        print(f"{_WARN}no replay scenarios/baselines found under harness/traces/")
+        print(
+            f"{_WARN}no replay scenarios/baselines found under checks/harness/traces/"
+        )
         return 0
     failed = [r for r in results if not r.ok]
     for r in results:
@@ -421,7 +423,7 @@ def cmd_fanout_measure(args: argparse.Namespace) -> int:
     ever reports wins. Only a malformed observation file — which is a measurement that did not
     happen — exits non-zero.
     """
-    from harness import fanout_measure
+    from checks.harness import fanout_measure
 
     try:
         result = fanout_measure.measure_file(args.observations)
@@ -458,7 +460,7 @@ def cmd_worktree_bench(args: argparse.Namespace) -> int:
     honest answer look like a broken run, and the whole point of the gate is that BOTH outcomes
     (build §1.2, or skip and re-scope) are acceptable results.
     """
-    from harness import worktree_bench
+    from checks.harness import worktree_bench
 
     try:
         baseline = worktree_bench.run_benchmark(
@@ -499,7 +501,7 @@ def cmd_dispatch_bench(args: argparse.Namespace) -> int:
     these" would make the honest answer look like a broken run, and "concurrency did not
     pay here" is a finding the gate exists to be able to report.
     """
-    from harness import tool_dispatch_bench as tdb
+    from checks.harness import tool_dispatch_bench as tdb
 
     try:
         baseline = tdb.run_benchmark(
@@ -532,13 +534,15 @@ def cmd_dispatch_bench(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="python -m harness",
+        prog="python -m checks.harness",
         description="Gideon self-development harness — spec validation, "
         "explain, and required-check execution.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_val = sub.add_parser("validate", help="Shape-validate specs + resolve references.")
+    p_val = sub.add_parser(
+        "validate", help="Shape-validate specs + resolve references."
+    )
     p_val.add_argument(
         "--fast",
         action="store_true",
@@ -546,21 +550,35 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_val.set_defaults(func=cmd_validate)
 
-    p_exp = sub.add_parser("explain", help="Print the commands/rules/tests a task owes.")
+    p_exp = sub.add_parser(
+        "explain", help="Print the commands/rules/tests a task owes."
+    )
     p_exp.add_argument("task", help="Task spec id (e.g. T1.1)")
     p_exp.set_defaults(func=cmd_explain)
 
-    p_run = sub.add_parser("run", help="Execute a task's required profiles (or --diff).")
+    p_run = sub.add_parser(
+        "run", help="Execute a task's required profiles (or --diff)."
+    )
     p_run.add_argument("task", nargs="?", help="Task spec id")
-    p_run.add_argument("--diff", action="store_true", help="Diff-aware selection (Session 2).")
-    p_run.add_argument("--dry-run", action="store_true", help="Print commands without running.")
+    p_run.add_argument(
+        "--diff", action="store_true", help="Diff-aware selection (Session 2)."
+    )
+    p_run.add_argument(
+        "--dry-run", action="store_true", help="Print commands without running."
+    )
     p_run.set_defaults(func=cmd_run)
 
-    p_scan = sub.add_parser("scan", help="Static boundary scanner (whole tree or --diff).")
-    p_scan.add_argument("--diff", action="store_true", help="Scan only files changed vs base.")
+    p_scan = sub.add_parser(
+        "scan", help="Static boundary scanner (whole tree or --diff)."
+    )
+    p_scan.add_argument(
+        "--diff", action="store_true", help="Scan only files changed vs base."
+    )
     p_scan.set_defaults(func=cmd_scan)
 
-    p_replay = sub.add_parser("replay", help="Gate replay scenarios vs checked-in baselines.")
+    p_replay = sub.add_parser(
+        "replay", help="Gate replay scenarios vs checked-in baselines."
+    )
     p_replay.set_defaults(func=cmd_replay)
 
     p_resume = sub.add_parser(
@@ -597,16 +615,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Existing git repo to measure. Default: synthesize one under a temp dir.",
     )
-    # Defaults resolve in the command, not here: reading them off the module would force a
-    # top-level `harness.worktree_bench` import (and with it all of core) onto every
-    # `python -m harness validate` run.
     p_wt_bench.add_argument(
         "--files",
         type=int,
         default=None,
         help="Files in the synthesized repo (default 10000; ignored with --repo).",
     )
-    p_wt_bench.add_argument("--width", type=int, default=None, help="Fan-out width (default 4).")
+    p_wt_bench.add_argument(
+        "--width", type=int, default=None, help="Fan-out width (default 4)."
+    )
     p_wt_bench.add_argument(
         "--contended",
         action="store_true",
@@ -627,8 +644,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Existing directory to run the lookup turn against. Default: synthesize one.",
     )
-    # Defaults resolve in the command, not here — same reason as worktree-bench: reading
-    # them off the module would force the import of core onto every `harness validate` run.
     p_disp.add_argument(
         "--files",
         type=int,
@@ -643,7 +658,9 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Record that the machine was under concurrent load (both arms pessimistic).",
     )
-    p_disp.add_argument("--json", action="store_true", help="Also print the machine-readable dict.")
+    p_disp.add_argument(
+        "--json", action="store_true", help="Also print the machine-readable dict."
+    )
     p_disp.set_defaults(func=cmd_dispatch_bench)
 
     return parser

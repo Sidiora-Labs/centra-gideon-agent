@@ -37,12 +37,11 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer, make_mocked_request
 
-from gideon.providers.failure_copy import UNEXPECTED_FAILURE_COPY
+from gideon.extensions.providers.failure_copy import UNEXPECTED_FAILURE_COPY
 
-#: The marker no response body may ever contain — what the raw text would leak.
 _SECRET = "secret traceback detail"
 
-SRC = Path(__file__).resolve().parents[1] / "src" / "gideon"
+SRC = Path(__file__).resolve().parents[2] / "runtime" / "gideon"
 
 _HANDLER_FILES = (
     "skills.py",
@@ -64,9 +63,6 @@ def _assert_guidance_not_leak(payload: dict) -> None:
     assert _SECRET not in json.dumps(payload)
 
 
-# ── skills.py — GET /api/skills/search, named-marketplace branch ───────────────
-
-
 class _ExplodingMarketplace:
     """The smallest registrable source; its search IS the internal crash."""
 
@@ -79,9 +75,9 @@ class _ExplodingMarketplace:
 
 @pytest.mark.asyncio
 async def test_skills_search_failure_speaks_guidance(monkeypatch) -> None:
-    import gideon.dashboard.handlers.skills as skills_h
-    from gideon.skills import marketplace as mp_mod
-    from gideon.skills.marketplace import SkillsRegistry
+    import gideon.interfaces.dashboard.handlers.skills as skills_h
+    from gideon.extensions.skills import marketplace as mp_mod
+    from gideon.extensions.skills.marketplace import SkillsRegistry
 
     registry = SkillsRegistry()
     registry.register("boom", _ExplodingMarketplace())
@@ -89,15 +85,14 @@ async def test_skills_search_failure_speaks_guidance(monkeypatch) -> None:
 
     app = web.Application()
     app["state"] = SimpleNamespace()
-    req = make_mocked_request("GET", "/api/skills/search?q=postgres&marketplace=boom", app=app)
+    req = make_mocked_request(
+        "GET", "/api/skills/search?q=postgres&marketplace=boom", app=app
+    )
 
     resp = await skills_h.api_skills_search(req)
 
     assert resp.status == 500
     _assert_guidance_not_leak(_body(resp))
-
-
-# ── mcp.py — POST /api/mcp/toggle, mcp.json write failure ──────────────────────
 
 
 class _JsonRequest:
@@ -116,7 +111,7 @@ class _JsonRequest:
 
 @pytest.mark.asyncio
 async def test_mcp_toggle_write_failure_speaks_guidance(tmp_path, monkeypatch) -> None:
-    import gideon.dashboard.handlers.mcp as mcp_h
+    import gideon.interfaces.dashboard.handlers.mcp as mcp_h
 
     mcp_json = tmp_path / "mcp.json"
     mcp_json.write_text(json.dumps({"mcpServers": {"srv": {"command": "x"}}}))
@@ -134,21 +129,17 @@ async def test_mcp_toggle_write_failure_speaks_guidance(tmp_path, monkeypatch) -
     _assert_guidance_not_leak(_body(resp))
 
 
-# ── files.py — POST /api/create-dir, mkdir failure ─────────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_create_dir_failure_speaks_guidance(tmp_path, monkeypatch) -> None:
     import os
 
-    from gideon.dashboard.handlers import api_create_dir
+    from gideon.interfaces.dashboard.handlers import api_create_dir
 
     target = tmp_path / "newdir"
     real_mkdir = os.mkdir
 
     def fake_mkdir(path, *args, **kwargs):
         if os.path.realpath(str(path)) == os.path.realpath(str(target)):
-            # An OSError whose text carries errno + the absolute path — the leak shape.
             raise PermissionError(13, _SECRET)
         return real_mkdir(path, *args, **kwargs)
 
@@ -161,12 +152,9 @@ async def test_create_dir_failure_speaks_guidance(tmp_path, monkeypatch) -> None
         _assert_guidance_not_leak(await resp.json())
 
 
-# ── agents.py — PUT /api/agent/config, apply failure ───────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_agent_config_apply_failure_speaks_guidance(tmp_path) -> None:
-    from gideon.dashboard.handlers import api_agent_config
+    from gideon.interfaces.dashboard.handlers import api_agent_config
 
     installed = tmp_path / "gideon.json"
     installed.write_text(json.dumps({"name": "gideon"}))
@@ -181,22 +169,25 @@ async def test_agent_config_apply_failure_speaks_guidance(tmp_path) -> None:
     request.json = mock_json
 
     with (
-        patch("gideon.dashboard.handlers._installed_agent_config", return_value=installed),
         patch(
-            "gideon.dashboard.handlers._find_agent_config",
+            "gideon.interfaces.dashboard.handlers._installed_agent_config",
+            return_value=installed,
+        ),
+        patch(
+            "gideon.interfaces.dashboard.handlers._find_agent_config",
             return_value=tmp_path / "defaults.json",
         ),
         patch(
-            "gideon.dashboard.handlers._reset_all_sessions",
+            "gideon.interfaces.dashboard.handlers._reset_all_sessions",
             new_callable=AsyncMock,
             side_effect=RuntimeError(_SECRET),
         ),
         patch(
-            "gideon.dashboard.handlers.config_path",
+            "gideon.interfaces.dashboard.handlers.config_path",
             return_value=tmp_path / "config.json",
         ),
         patch(
-            "gideon.agent.get_shipped_tools",
+            "gideon.engine.agent.get_shipped_tools",
             return_value={"tools": [], "allowedTools": []},
         ),
     ):
@@ -206,12 +197,9 @@ async def test_agent_config_apply_failure_speaks_guidance(tmp_path) -> None:
     _assert_guidance_not_leak(_body(resp))
 
 
-# ── agent_marketplace.py — POST /api/agent-marketplace/agents/:name/test ───────
-
-
 @pytest.mark.asyncio
 async def test_agent_marketplace_test_failure_speaks_guidance(monkeypatch) -> None:
-    import gideon.dashboard.handlers.agent_marketplace as am_h
+    import gideon.interfaces.dashboard.handlers.agent_marketplace as am_h
 
     class _ExplodingSessions:
         async def get_or_create(self, session_key, agent=None):
@@ -223,7 +211,9 @@ async def test_agent_marketplace_test_failure_speaks_guidance(monkeypatch) -> No
     defn = SimpleNamespace(system_prompt="", provider_entry="")
     marketplace = SimpleNamespace(get=lambda name: defn)
     monkeypatch.setattr(
-        am_h, "get_default_agent_registry", lambda: SimpleNamespace(get=lambda n: marketplace)
+        am_h,
+        "get_default_agent_registry",
+        lambda: SimpleNamespace(get=lambda n: marketplace),
     )
 
     app = web.Application()
@@ -241,16 +231,15 @@ async def test_agent_marketplace_test_failure_speaks_guidance(monkeypatch) -> No
     _assert_guidance_not_leak(_body(resp))
 
 
-# ── tools.py — POST /api/tools/invoke, provider crash ──────────────────────────
-
-
 class _ExplodingProvider:
     name = "gideon-artifacts"
 
     async def list_tools(self):
-        from gideon.tool_providers.base import ToolDefinition
+        from gideon.integrations.tool_providers.base import ToolDefinition
 
-        return [ToolDefinition(name="artifact_list", description="d", provider=self.name)]
+        return [
+            ToolDefinition(name="artifact_list", description="d", provider=self.name)
+        ]
 
     async def invoke(self, name, arguments):
         raise RuntimeError(_SECRET)
@@ -258,38 +247,41 @@ class _ExplodingProvider:
 
 @pytest.mark.asyncio
 async def test_tool_invoke_failure_speaks_guidance(monkeypatch) -> None:
-    import gideon.dashboard.handlers.tools as tools_h
+    import gideon.interfaces.dashboard.handlers.tools as tools_h
 
     provider = _ExplodingProvider()
     monkeypatch.setattr(
-        "gideon.tool_providers.registry.get_provider",
+        "gideon.integrations.tool_providers.registry.get_provider",
         lambda name: provider if name == provider.name else None,
     )
-    monkeypatch.setattr("gideon.tool_providers.registry.list_providers", lambda: [provider])
-    monkeypatch.setattr("gideon.tool_providers.tool_prefs.load_disabled", lambda: set())
     monkeypatch.setattr(
-        "gideon.tool_providers.tool_prefs.load_disabled_providers", lambda: set()
+        "gideon.integrations.tool_providers.registry.list_providers", lambda: [provider]
+    )
+    monkeypatch.setattr(
+        "gideon.integrations.tool_providers.tool_prefs.load_disabled", lambda: set()
+    )
+    monkeypatch.setattr(
+        "gideon.integrations.tool_providers.tool_prefs.load_disabled_providers",
+        lambda: set(),
     )
 
     resp = await tools_h.api_tool_invoke(_JsonRequest({"tool": "artifact_list"}))
 
     assert resp.status == 500
     payload = _body(resp)
-    assert payload["ok"] is False  # the envelope this route always had
+    assert payload["ok"] is False
     _assert_guidance_not_leak(payload)
-
-
-# ── auth.py — POST /api/auth/password, credential-store failure ────────────────
 
 
 @pytest.mark.asyncio
 async def test_set_password_store_failure_speaks_guidance(monkeypatch) -> None:
-    from gideon.auth import credentials as creds
-    from gideon.dashboard.handlers import auth as auth_h
+    from gideon.interfaces.dashboard.handlers import auth as auth_h
+    from gideon.security.auth import credentials as creds
 
     def _boom(username: str, password: str) -> None:
-        # The real messages embed paths + OS errno ("could not write <path>: ...").
-        raise creds.CredentialError(f"could not write /home/u/credentials.json: {_SECRET}")
+        raise creds.CredentialError(
+            f"could not write /home/u/credentials.json: {_SECRET}"
+        )
 
     monkeypatch.setattr(creds, "set_password", _boom)
 
@@ -299,13 +291,11 @@ async def test_set_password_store_failure_speaks_guidance(monkeypatch) -> None:
     app.router.add_post("/api/auth/password", auth_h.api_auth_set_password)
     async with TestClient(TestServer(app)) as client:
         resp = await client.post(
-            "/api/auth/password", json={"username": "jordan", "password": "long-enough-pass"}
+            "/api/auth/password",
+            json={"username": "jordan", "password": "long-enough-pass"},
         )
         assert resp.status == 500
         _assert_guidance_not_leak(await resp.json())
-
-
-# ── the structural scan: every 500 in these files routes exc through the rail ──
 
 
 def _is_json_response_call(node: ast.Call) -> bool:
@@ -364,8 +354,10 @@ def test_no_handler_ships_exception_text_in_a_500_payload() -> None:
         src = path.read_text(encoding="utf-8")
         leaks = _leaky_500_sites(src, name)
         assert not leaks, f"raw exception text reaches a 500 payload at: {leaks}"
-        # And the rail is actually wired in, not merely un-leaked.
-        assert "from gideon.providers.failure_copy import relayed_failure_copy" in src, name
+        assert (
+            "from gideon.extensions.providers.failure_copy import relayed_failure_copy"
+            in src
+        ), name
 
 
 def test_self_check_the_scan_still_sees_a_leak() -> None:
@@ -394,7 +386,6 @@ def test_self_check_the_scan_still_sees_a_leak() -> None:
         '        return web.json_response({"error": relayed_failure_copy(exc)}, status=500)\n'
     )
     assert _leaky_500_sites(good, "good.py") == []
-    # A 400 keeping authored ValueError words is NOT a leak this scan flags.
     authored = (
         "async def h(request):\n"
         "    try:\n"

@@ -11,7 +11,7 @@ profile. (The field was renamed hooks→triggers in P4b.)
 
 from __future__ import annotations
 
-from gideon.config.loader import AgentProfile, AppConfig, resolve_agent_bindings
+from gideon.core.config.loader import AgentProfile, AppConfig, resolve_agent_bindings
 
 
 def _cfg_with_agent(name: str, triggers: list[str]) -> AppConfig:
@@ -22,7 +22,6 @@ def _cfg_with_agent(name: str, triggers: list[str]) -> AppConfig:
 
 
 def test_profile_triggers_default_empty():
-    # The seeded/default agent ships zero triggers (the "default fires nothing" rule).
     assert AgentProfile().triggers == []
 
 
@@ -38,8 +37,6 @@ def test_resolve_empty_when_agent_has_no_triggers():
 
 
 def test_resolve_is_per_agent_not_global():
-    # Two agents, different trigger sets — resolution returns THIS agent's set only,
-    # never a union (the structural "no global firing" guarantee).
     cfg = AppConfig()
     cfg.agents = {
         "a": AgentProfile(triggers=["only-a"]),
@@ -51,8 +48,6 @@ def test_resolve_is_per_agent_not_global():
 
 
 def test_resolve_unknown_agent_falls_back_to_default_triggers():
-    # An unknown agent name resolves to the default agent's bindings (and its
-    # trigger set), never a phantom — so firing stays scoped to a real profile.
     cfg = _cfg_with_agent("default-one", ["d1"])
     assert resolve_agent_bindings(cfg, "nonexistent").triggers == ["d1"]
 
@@ -73,7 +68,6 @@ def test_triggers_survive_save_load_roundtrip(tmp_path, monkeypatch):
 
     reloaded = AppConfig.load()
     assert reloaded.agents["coder"].triggers == ["trig-x", "trig-y"]
-    # And the firing path reads the persisted set.
     assert resolve_agent_bindings(reloaded, "coder").triggers == ["trig-x", "trig-y"]
 
 
@@ -83,7 +77,7 @@ def test_legacy_hooks_key_migrates_to_triggers(tmp_path, monkeypatch):
     import json
 
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.config.loader import config_dir
+    from gideon.core.config.loader import config_dir
 
     cfg_path = config_dir() / "config.json"
     cfg_path.parent.mkdir(parents=True, exist_ok=True)

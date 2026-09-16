@@ -37,10 +37,10 @@ from pathlib import Path
 
 import pytest
 
-from gideon.knowledge import maintenance, maintenance_passes
-from gideon.knowledge import vault as kv
-from gideon.knowledge.store import KnowledgeStore, knowledge_db_path
-from gideon.memory_vault import (
+from gideon.cognition.knowledge import maintenance, maintenance_passes
+from gideon.cognition.knowledge import vault as kv
+from gideon.cognition.knowledge.store import KnowledgeStore, knowledge_db_path
+from gideon.cognition.memory_vault import (
     CONFLICT_KEY,
     HASH_KEY,
     body_hash,
@@ -115,9 +115,6 @@ def _touch_later(path: Path) -> None:
     os.utime(path, (stamp, stamp))
 
 
-# ── the gate: off by default, and provably turns something on ────────────────
-
-
 class TestGate:
     def test_off_is_the_default(self, store, home):
         """No `vault_mode` in config at all resolves to `off`, not to a mirror."""
@@ -140,23 +137,19 @@ class TestGate:
         """
         _note(store, "Alpha")
         _write_config(home, "mirror")
-        # Patched on the PACKAGE, which is where `projection_pass` imports it from. Patching
-        # `kv.get_knowledge_store` would need `raising=False` (the name is not bound there) and
-        # would be a patch that does nothing — a green test measuring the real singleton.
-        import gideon.knowledge as knowledge_pkg
+        import gideon.cognition.knowledge as knowledge_pkg
 
         monkeypatch.setattr(knowledge_pkg, "get_knowledge_store", lambda: store)
         assert kv.projection_pass(batch_size=10) == 1
-        pages = sorted(p.name for p in (kv.vault_path_from_config() / "items").glob("*.md"))
+        pages = sorted(
+            p.name for p in (kv.vault_path_from_config() / "items").glob("*.md")
+        )
         assert len(pages) == 1
 
     def test_an_unreadable_config_is_off(self, store, home):
         """Garbage in config.json must not start writing the owner's files."""
         (home / "config.json").write_text("{ not json", encoding="utf-8")
         assert kv.vault_mode_from_config() == "off"
-
-
-# ── the projection: identity + relations, in plain markdown ──────────────────
 
 
 class TestProjection:
@@ -177,8 +170,6 @@ class TestProjection:
         assert fm["tags"] == ["x", "y"]
         assert fm["collections"] == ["Shelf"]
         assert fm["relations"] == [f"depends_on:{b}"]
-        # The same relation as a link a human can follow, derived from the ROW — the target's
-        # page exists, so the link resolves.
         assert f"[[{kv.page_basename(store.get_item(b))}]]" in body
         assert "alpha body" in body
 
@@ -188,16 +179,10 @@ class TestProjection:
         b = _note(store, "Beta")
         store.add_item_relation(a, b, "depends_on")
         v = _vault(store, home)
-        # Bound to one item, so exactly one of the pair has a page in this batch.
         v.sync_batch(max_items=1)
         pages = list((v.path / "items").glob("*.md"))
         assert len(pages) == 1
         text = pages[0].read_text(encoding="utf-8")
-        # The relation is still IDENTITY in the front-matter (it is a fact about the item), but
-        # there is no `## Relations` link section, because the other end has no page yet and a
-        # link the vault cannot resolve would make its own broken-link check fire on correct
-        # output. Ordering by `items.id` decides which of the two got projected, so this
-        # asserts the property rather than a particular page.
         assert "## Relations" not in text
         assert "depends_on:" in text
 
@@ -219,9 +204,13 @@ class TestProjection:
         v.sync_batch()
 
         for item_id, other in ((a, b), (b, a)):
-            block, body = split_page(_page(v, store, item_id).read_text(encoding="utf-8"))
+            block, body = split_page(
+                _page(v, store, item_id).read_text(encoding="utf-8")
+            )
             fm = parse_frontmatter(block)
-            assert fm["relations"] == [f"depends_on:{other}"], f"{item_id} lost the edge"
+            assert fm["relations"] == [
+                f"depends_on:{other}"
+            ], f"{item_id} lost the edge"
             assert f"[[{kv.page_basename(store.get_item(other))}]]" in body
         assert not [f for f in v.lint_flags() if f[0] == "knowledge_vault_broken_link"]
 
@@ -279,14 +268,12 @@ class TestProjection:
         a = _note(store, "Big", content=big)
         v = _vault(store, home)
         v.sync_batch()
-        assert not (v.path / "items").exists() or not list((v.path / "items").glob("*.md"))
+        assert not (v.path / "items").exists() or not list(
+            (v.path / "items").glob("*.md")
+        )
         assert store.get_item(a)["content"] == big
         assert any(c[0] == "knowledge_vault_conflict" for c in v.lint_flags())
-        # And it leaves the backlog, so the host does not re-render it every sub-batch.
         assert store.count_items_needing_vault_projection() == 0
-
-
-# ── ownership: an editor edit is READ BACK, not overwritten ──────────────────
 
 
 class TestTwoWay:
@@ -307,7 +294,6 @@ class TestTwoWay:
         assert result["absorbed"] == 1
         assert result["conflicts"] == 0
         assert store.get_item(a)["content"].strip() == "OWNER TEXT"
-        # And the re-projected page carries the owner's text, not the old one.
         assert "OWNER TEXT" in page.read_text(encoding="utf-8")
         assert "original body" not in page.read_text(encoding="utf-8")
 
@@ -323,7 +309,8 @@ class TestTwoWay:
         v.sync_batch()
         page = _page(v, store, a)
         page.write_text(
-            page.read_text(encoding="utf-8").replace("intro", "NEW INTRO"), encoding="utf-8"
+            page.read_text(encoding="utf-8").replace("intro", "NEW INTRO"),
+            encoding="utf-8",
         )
         _touch_later(page)
         v.sync_batch()
@@ -341,7 +328,8 @@ class TestTwoWay:
         v.sync_batch()
         page = _page(v, store, a)
         page.write_text(
-            page.read_text(encoding="utf-8").replace("alpha body", "EDITED"), encoding="utf-8"
+            page.read_text(encoding="utf-8").replace("alpha body", "EDITED"),
+            encoding="utf-8",
         )
         _touch_later(page)
         v.sync_batch()
@@ -350,7 +338,9 @@ class TestTwoWay:
         assert fm["relations"] == [f"depends_on:{b}"]
         assert fm["tags"] == ["x"]
         assert "EDITED" in body
-        assert store.inbound_references(a)["relations"], "the typed edge must still be in the db"
+        assert store.inbound_references(a)[
+            "relations"
+        ], "the typed edge must still be in the db"
 
     def test_mirror_mode_overwrites_and_counts_it(self, store, home):
         """`mirror` means one direction. It says so in the config help and in the README.
@@ -372,7 +362,6 @@ class TestTwoWay:
         assert result["absorbed"] == 0
         assert store.get_item(a)["content"] == "original body"
         assert "original body" in page.read_text(encoding="utf-8")
-        # And it settles: mirror must not re-detect the same edit forever.
         assert v.sync_batch()["units"] == 0
 
     def test_a_page_with_no_heading_is_refused_not_guessed(self, store, home):
@@ -382,16 +371,15 @@ class TestTwoWay:
         page = _page(v, store, a)
         block, body = split_page(page.read_text(encoding="utf-8"))
         page.write_text(
-            page.read_text(encoding="utf-8").replace("# Alpha", "Alpha (heading removed)"),
+            page.read_text(encoding="utf-8").replace(
+                "# Alpha", "Alpha (heading removed)"
+            ),
             encoding="utf-8",
         )
         _touch_later(page)
         result = v.sync_batch()
         assert result["conflicts"] == 1
         assert store.get_item(a)["content"] == "original body"
-
-
-# ── the self-retrigger loop ──────────────────────────────────────────────────
 
 
 class TestNoSelfRetrigger:
@@ -489,15 +477,13 @@ class TestNoSelfRetrigger:
         v.sync_batch()
         page = _page(v, store, a)
         page.write_text(
-            page.read_text(encoding="utf-8").replace("# Alpha", "no heading"), encoding="utf-8"
+            page.read_text(encoding="utf-8").replace("# Alpha", "no heading"),
+            encoding="utf-8",
         )
         _touch_later(page)
         assert v.sync_batch()["conflicts"] == 1
         assert v.sync_batch()["units"] == 0
         assert v.sync_batch()["units"] == 0
-
-
-# ── the two-sided conflict ───────────────────────────────────────────────────
 
 
 class TestTwoSidedConflict:
@@ -506,10 +492,11 @@ class TestTwoSidedConflict:
         v = _vault(store, home)
         v.sync_batch()
         page = _page(v, store, a)
-        owner_bytes = page.read_text(encoding="utf-8").replace("original body", "OWNER TEXT")
+        owner_bytes = page.read_text(encoding="utf-8").replace(
+            "original body", "OWNER TEXT"
+        )
         page.write_text(owner_bytes, encoding="utf-8")
         _touch_later(page)
-        # …and the app changes the same item.
         store.update_item(a, content="APP TEXT")
         return a, v, page, owner_bytes
 
@@ -525,19 +512,14 @@ class TestTwoSidedConflict:
 
         assert result["conflicts"] == 1
         assert result["absorbed"] == 0
-        # 1. The store is untouched — the owner's edit did NOT silently win.
         assert store.get_item(a)["content"] == "APP TEXT"
-        # 2. The owner's body is byte-for-byte what they wrote — the app did NOT silently win.
         _, body_now = split_page(page.read_text(encoding="utf-8"))
         _, body_owner = split_page(owner_bytes)
         assert body_now.rstrip() == body_owner.rstrip()
-        # 3. It surfaces: in the file the owner was editing…
         fm = parse_frontmatter(split_page(page.read_text(encoding="utf-8"))[0])
         assert CONFLICT_KEY in fm
         assert "both" in str(fm[CONFLICT_KEY]).lower()
-        # …in the verification flags…
         assert [f for f in v.lint_flags() if f[0] == "knowledge_vault_conflict"]
-        # …and in the ledger the Doctor probe reads.
         assert [r for r in store.vault_projection_flags() if r["conflict"]]
         assert v.status()["conflicts"] == 1
 
@@ -564,9 +546,6 @@ class TestTwoSidedConflict:
         assert "APP TEXT" not in page.read_text(encoding="utf-8")
 
 
-# ── deletion, in both directions ─────────────────────────────────────────────
-
-
 class TestDeletion:
     def test_deleted_page_is_not_recreated(self, store, home):
         """A page the owner removed stays removed — and the item is NOT deleted with it."""
@@ -582,19 +561,15 @@ class TestDeletion:
         assert not page.exists()
         for _ in range(3):
             v.sync_batch()
-            assert not page.exists(), "the projection re-created a page the owner deleted"
-        # And it survives a LATER change in the app, which is the case the tombstone actually
-        # exists for. Without it, "not re-created" holds only by accident: the projection
-        # backlog is keyed on `updated_at`, so a deleted file simply is not noticed — until any
-        # edit in the app puts the item back in the backlog and the page reappears.
+            assert (
+                not page.exists()
+            ), "the projection re-created a page the owner deleted"
         store.update_item(a, title="Alpha renamed")
         v.sync_batch()
         v.sync_batch()
         assert not list(
             (v.path / "items").glob("*.md")
         ), "an app-side edit resurrected a page the owner deleted"
-        # Deleting a file is an ambiguous signal (a moved directory, a half-restored backup),
-        # so it must never delete the owner's knowledge.
         assert store.get_item(a) is not None
         assert [f for f in v.lint_flags() if f[0] == "knowledge_vault_page_deleted"]
         assert v.status()["owner_deleted"] == 1
@@ -628,9 +603,9 @@ class TestDeletion:
         store.add_item_relation(a, b, "depends_on")
         v = _vault(store, home)
         v.sync_batch()
-        assert f"[[{kv.page_basename(store.get_item(b))}]]" in _page(v, store, a).read_text(
-            encoding="utf-8"
-        )
+        assert f"[[{kv.page_basename(store.get_item(b))}]]" in _page(
+            v, store, a
+        ).read_text(encoding="utf-8")
 
         store.delete_item(b)
         v.sync_batch()
@@ -675,16 +650,15 @@ class TestDeletion:
         assert orphans[0]["relpath"].endswith(".md")
 
 
-# ── the host: KL-14's cadence, not a new one ─────────────────────────────────
-
-
 class TestHostWiring:
     def test_registered_on_kl14s_host_as_resumable(self):
         """It runs on KL-14's host, and `batched=True` because it drains a real backlog."""
         maintenance.clear_passes()
         names = maintenance_passes.register_all()
         assert maintenance_passes.PASS_VAULT_PROJECTION in names
-        assert maintenance_passes.PASS_VAULT_PROJECTION in maintenance.registered_passes()
+        assert (
+            maintenance_passes.PASS_VAULT_PROJECTION in maintenance.registered_passes()
+        )
         maintenance.clear_passes()
 
     def test_the_pass_is_a_no_op_when_the_gate_is_off(self, store, home):
@@ -692,9 +666,6 @@ class TestHostWiring:
         _note(store, "Alpha")
         assert maintenance_passes._vault_projection_pass(batch_size=5) == 0
         assert not kv.vault_path_from_config().exists()
-
-
-# ── verification + config round trip ────────────────────────────────────────
 
 
 class TestVerificationAndConfig:
@@ -712,8 +683,8 @@ class TestVerificationAndConfig:
 
     def test_config_round_trip(self, home):
         """dataclass → load() → to_dict(), plus the PATCH allowlist entry that writes it."""
-        from gideon.config.loader import AppConfig
-        from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+        from gideon.core.config.loader import AppConfig
+        from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
         _write_config(home, "two_way")
         cfg = AppConfig.load()
@@ -723,16 +694,20 @@ class TestVerificationAndConfig:
         assert cfg.to_dict()["knowledge"]["vault_path"] == "knowledge-vault"
         assert "knowledge.vault_mode" in _EDITABLE_CONFIG
         assert "knowledge.vault_path" in _EDITABLE_CONFIG
-        assert _EDITABLE_CONFIG["knowledge.vault_mode"]["values"] == ["off", "mirror", "two_way"]
+        assert _EDITABLE_CONFIG["knowledge.vault_mode"]["values"] == [
+            "off",
+            "mirror",
+            "two_way",
+        ]
 
     def test_an_invalid_mode_in_the_file_resolves_to_off(self, home):
-        from gideon.config.loader import AppConfig
+        from gideon.core.config.loader import AppConfig
 
         _write_config(home, "yolo")
         assert AppConfig.load().knowledge.vault_mode == "off"
 
     def test_the_doctor_probe_is_registered(self):
-        from gideon.resilience.doctor import all_probes
+        from gideon.operations.resilience.doctor import all_probes
 
         ids = {p.id for p in all_probes()}
         assert "knowledge.vault" in ids
@@ -741,14 +716,15 @@ class TestVerificationAndConfig:
         """The probe is the reachable reader of the ledger — not a list nobody consults."""
         import asyncio
 
-        from gideon.resilience.doctor import DoctorContext, all_probes
+        from gideon.operations.resilience.doctor import DoctorContext, all_probes
 
         a = _note(store, "Alpha", content="original body")
         v = _vault(store, home)
         v.sync_batch()
         page = _page(v, store, a)
         page.write_text(
-            page.read_text(encoding="utf-8").replace("original body", "OWNER"), encoding="utf-8"
+            page.read_text(encoding="utf-8").replace("original body", "OWNER"),
+            encoding="utf-8",
         )
         _touch_later(page)
         store.update_item(a, content="APP")
@@ -757,12 +733,11 @@ class TestVerificationAndConfig:
 
         probe = next(p for p in all_probes() if p.id == "knowledge.vault")
         result = asyncio.run(probe.run(DoctorContext(home=home)))
-        assert result.ok, "a conflict is the projection working — never a failed capability"
+        assert (
+            result.ok
+        ), "a conflict is the projection working — never a failed capability"
         assert result.evidence["conflicts"] == 1
         assert "waiting on you" in result.detail
-
-
-# ── isolation ────────────────────────────────────────────────────────────────
 
 
 def test_the_real_home_is_never_touched(store, home):

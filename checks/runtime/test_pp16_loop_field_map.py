@@ -34,10 +34,10 @@ from typing import Any
 
 import pytest
 
-from gideon.loop.loop import Loop, LoopStatus
-from gideon.workflows import loop_run_map
-from gideon.workflows.intent import Intent
-from gideon.workflows.loop_run_map import (
+from gideon.automation.loop.loop import Loop, LoopStatus
+from gideon.automation.workflows import loop_run_map
+from gideon.automation.workflows.intent import Intent
+from gideon.automation.workflows.loop_run_map import (
     DEF,
     DEST_KINDS,
     DIRECT_PATH_KINDS,
@@ -51,13 +51,18 @@ from gideon.workflows.loop_run_map import (
     RUN_INPUT,
     STATUS_VOCABULARY_DELTA,
 )
-from gideon.workflows.models import Node, RunStatus, WorkflowDef, WorkflowRun
-from gideon.workflows.supervisor_policy import SupervisorPolicy
+from gideon.automation.workflows.models import Node, RunStatus, WorkflowDef, WorkflowRun
+from gideon.automation.workflows.supervisor_policy import SupervisorPolicy
 
-_BUNDLED = Path(__file__).resolve().parent.parent / "src" / "gideon" / "workflows" / "bundled"
+_BUNDLED = (
+    Path(__file__).resolve().parent.parent.parent
+    / "runtime"
+    / "gideon"
+    / "automation"
+    / "workflows"
+    / "bundled"
+)
 
-#: The fields PP-16 must decide about before `loop/store.py` can be retired. Pinned EXACTLY: this
-#: set shrinks as the atom lands. Growing it is a deliberate act that has to be argued for here.
 _EXPECTED_HOMELESS = {
     "name",
     "provider_agent",
@@ -65,8 +70,6 @@ _EXPECTED_HOMELESS = {
     "strategy_config",
     "auto_teardown_on_complete",
     "tasks_project_id",
-    # `AG-14` ceilings/classification: v2 has no run-wide time budget and no closed run-level
-    # stop reason (see the two NONE rows' consequence notes). Argued in the AG-14 change itself.
     "deadline_secs",
     "stop_reason",
 }
@@ -85,13 +88,13 @@ def _resolve(root: type, path: str) -> Any:
     cur: Any = root
     for part in rest.split("."):
         if not is_dataclass(cur):
-            raise AttributeError(f"{path}: {cur!r} is not a dataclass, cannot resolve {part!r}")
+            raise AttributeError(
+                f"{path}: {cur!r} is not a dataclass, cannot resolve {part!r}"
+            )
         match = [f for f in fields(cur) if f.name == part]
         if not match:
             raise AttributeError(f"{path}: {cur.__name__} has no field {part!r}")
         cur = match[0].type
-        # Dataclass field types come back as strings under `from __future__ import annotations`;
-        # resolve the ones we need to walk into through the declaring module's namespace.
         if isinstance(cur, str):
             cur = _ROOTS_BY_NAME.get(cur.split("[")[0].strip(), cur)
     return cur
@@ -104,13 +107,12 @@ _ROOT_FOR_KIND: dict[str, type] = {
     INTENT: Intent,
 }
 
-#: Nested dataclasses the resolver walks into (field types are strings under PEP 563).
 _ROOTS_BY_NAME: dict[str, type] = {}
 
 
 def _load_nested_types() -> None:
-    from gideon.guardrails.policy import SafetyProfile
-    from gideon.workflows.models import RunBudget, RunDefaults
+    from gideon.automation.workflows.models import RunBudget, RunDefaults
+    from gideon.security.guardrails.policy import SafetyProfile
 
     _ROOTS_BY_NAME.update(
         {
@@ -151,21 +153,22 @@ def test_the_map_covers_every_loop_field_exactly_once():
 def test_every_declared_destination_resolves():
     resolved = 0
     for row in LOOP_FIELD_MAP:
-        assert row.dest_kind in DEST_KINDS, f"{row.field}: unknown dest_kind {row.dest_kind!r}"
+        assert (
+            row.dest_kind in DEST_KINDS
+        ), f"{row.field}: unknown dest_kind {row.dest_kind!r}"
         if row.dest_kind in DIRECT_PATH_KINDS:
             _resolve(_ROOT_FOR_KIND[row.dest_kind], row.dest)
             resolved += 1
         elif row.dest_kind in {PROJECTION, NONE}:
-            assert not row.dest, f"{row.field}: {row.dest_kind} rows carry no destination path"
-    # Vacuity floor: if a refactor turned every row into a PROJECTION this test would pass while
-    # resolving nothing. Eighteen paths resolve today (10 run + 5 policy + 2 def + 1 intent —
-    # `task_list_ids` re-homed to PROJECTION in PP-16 seam 4c).
-    assert resolved >= 15, f"only {resolved} destination paths resolved — has the map gone inert?"
+            assert (
+                not row.dest
+            ), f"{row.field}: {row.dest_kind} rows carry no destination path"
+    assert (
+        resolved >= 15
+    ), f"only {resolved} destination paths resolved — has the map gone inert?"
 
 
 def test_the_resolver_rejects_a_path_that_names_nothing():
-    # Negative control for the test above: without this, a resolver that swallowed a bad attribute
-    # would make every row pass forever.
     with pytest.raises(AttributeError):
         _resolve(WorkflowRun, "WorkflowRun.no_such_field")
     with pytest.raises(AttributeError):
@@ -186,10 +189,9 @@ def test_every_run_input_destination_is_a_real_template_input():
 
 
 def test_node_config_destinations_are_config_keys_not_declared_fields():
-    # `Node` deliberately keeps kind-specific fields in `config` (models.py: "Kind-specific fields
-    # live in `config` rather than in a subclass"), so these rows cannot be attribute-resolved —
-    # this pins the reason rather than leaving them unchecked.
-    assert any(f.name == "config" for f in fields(Node)), "Node no longer has a `config` field"
+    assert any(
+        f.name == "config" for f in fields(Node)
+    ), "Node no longer has a `config` field"
     rows = [r for r in LOOP_FIELD_MAP if r.dest_kind == NODE_CONFIG]
     assert rows, "no NODE_CONFIG rows — parser drift?"
     for row in rows:
@@ -224,12 +226,10 @@ def test_the_status_delta_is_computed_not_asserted():
         "STATUS_VOCABULARY_DELTA['run_only'] no longer matches RunStatus - LoopStatus: "
         f"{sorted(run_values - loop_values)}"
     )
-    # Vacuity floor: an empty delta would satisfy the equalities above if both enums converged, and
-    # that is exactly the day this map's status row stops being a decision — so say so out loud.
-    assert loop_values & run_values, "the two status vocabularies now share nothing — impossible?"
+    assert (
+        loop_values & run_values
+    ), "the two status vocabularies now share nothing — impossible?"
 
 
 def test_the_declaration_says_it_is_inert():
-    # The WF2LOO-12 honesty marker: a control with no caller must SAY it has no caller. If someone
-    # wires this map at runtime, this test is the reminder to delete the claim in the same change.
     assert "Deliberately inert" in (loop_run_map.__doc__ or "")

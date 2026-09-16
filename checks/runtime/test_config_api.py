@@ -15,19 +15,12 @@ from aiohttp.test_utils import TestClient, TestServer
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from gideon.config.schema import (
-    SCHEMA_REGISTRY,
-    config_entry_to_dict,
-)
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+from gideon.core.config.schema import SCHEMA_REGISTRY, config_entry_to_dict
 
 
 def _make_app() -> web.Application:
     """Minimal aiohttp app with the schema endpoint."""
-    from gideon.dashboard.handlers import api_config_schema
+    from gideon.interfaces.dashboard.handlers import api_config_schema
 
     app = web.Application()
     app.router.add_get("/api/config/schema", api_config_schema)
@@ -42,17 +35,14 @@ def _all_tags() -> set[str]:
     return tags
 
 
-# ---------------------------------------------------------------------------
-# Property-based tests
-# ---------------------------------------------------------------------------
-
-
 class TestConfigApiProperties:
     """Property-based tests for schema API filtering logic."""
 
-    # Feature: config-schema, Property 7: Tag filtering returns only matching entries
-    # **Validates: Requirements 5.2**
-    @given(tag_subset=st.frozensets(st.sampled_from(sorted(_all_tags() | {"nonexistent_tag"}))))
+    @given(
+        tag_subset=st.frozensets(
+            st.sampled_from(sorted(_all_tags() | {"nonexistent_tag"}))
+        )
+    )
     def test_tag_filtering_returns_only_matching_entries(
         self,
         tag_subset: frozenset[str],
@@ -68,7 +58,6 @@ class TestConfigApiProperties:
                 f"intersect with requested tags {requested}"
             )
 
-        # Entries NOT in filtered must have no intersection
         filtered_paths = {e.path for e in filtered}
         for entry in SCHEMA_REGISTRY:
             if entry.path not in filtered_paths:
@@ -77,34 +66,30 @@ class TestConfigApiProperties:
                     f"with {requested} but was not included in filtered results"
                 )
 
-    # Feature: config-schema, Property 8: Deprecated filtering excludes deprecated entries
-    # **Validates: Requirements 5.3**
     @given(data=st.data())
-    def test_deprecated_filtering_excludes_deprecated(self, data: st.DataObject) -> None:
+    def test_deprecated_filtering_excludes_deprecated(
+        self, data: st.DataObject
+    ) -> None:
         """Filtering with deprecated=false returns zero deprecated entries."""
         filtered = [e for e in SCHEMA_REGISTRY if not e.deprecated]
 
         for entry in filtered:
-            assert not entry.deprecated, f"Entry {entry.path!r} is deprecated but was not excluded"
+            assert (
+                not entry.deprecated
+            ), f"Entry {entry.path!r} is deprecated but was not excluded"
 
-    # Feature: config-schema, Property 13: Sensitive entries have null defaultValue in API
-    # **Validates: Requirements 7.1**
     @given(data=st.data())
-    def test_sensitive_entries_have_null_default_in_api(self, data: st.DataObject) -> None:
+    def test_sensitive_entries_have_null_default_in_api(
+        self, data: st.DataObject
+    ) -> None:
         """For any sensitive ConfigEntry, the API response dict has defaultValue=null."""
         for entry in SCHEMA_REGISTRY:
             if entry.sensitive:
                 d = config_entry_to_dict(entry)
-                # Simulate the handler's masking logic
                 d["defaultValue"] = None
                 assert (
                     d["defaultValue"] is None
                 ), f"Sensitive entry {entry.path!r} should have null defaultValue"
-
-
-# ---------------------------------------------------------------------------
-# Unit tests for schema API endpoint
-# ---------------------------------------------------------------------------
 
 
 class TestSchemaApiEndpoint:
@@ -127,7 +112,6 @@ class TestSchemaApiEndpoint:
     async def test_tags_query_param_filtering(self) -> None:
         """tags query param filters entries by tag intersection."""
         async with TestClient(TestServer(_make_app())) as client:
-            # Request with a known tag
             known_tags = _all_tags()
             if not known_tags:
                 pytest.skip("No tags in registry")
@@ -189,14 +173,9 @@ class TestSchemaApiEndpoint:
             assert len(data["entries"]) == len(SCHEMA_REGISTRY)
 
 
-# ---------------------------------------------------------------------------
-# Gideon Agent CRUD API tests (Tasks 5.3 + 5.4)
-# ---------------------------------------------------------------------------
-
-
 def _make_crud_app() -> web.Application:
     """Minimal aiohttp app with Gideon Agent CRUD endpoints."""
-    from gideon.dashboard.handlers import (
+    from gideon.interfaces.dashboard.handlers import (
         api_gideon_agent_delete,
         api_gideon_agent_update,
         api_gideon_agents,
@@ -231,19 +210,8 @@ def _seed_config() -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
-# Property-based tests P8–P10
-# ---------------------------------------------------------------------------
-
-
-# Names `AppConfig.load()` injects itself, regardless of what the config file says
-# (loader.py seeds the built-in native/loop/coder/planner/lite agents add-if-missing).
-# A property test that draws a free-form agent name WILL eventually draw one of these,
-# and the create endpoint then correctly answers 409 — which looked like a flaky test but
-# was the strategy generating a name the API legitimately reserves. Derived from the
-# source constants, not copy-pasted, so adding a built-in can't silently re-break this.
 def _reserved_agent_names() -> frozenset[str]:
-    from gideon.agents import defaults as _d
+    from gideon.engine.agents import defaults as _d
 
     names = {
         _d.DEFAULT_NATIVE_AGENT_NAME,
@@ -254,9 +222,6 @@ def _reserved_agent_names() -> frozenset[str]:
         _d.LITE_AGENT_NAME,
         "default",
     }
-    # Compare case-insensitively: the API's uniqueness check is on the exact key, but
-    # `Gideon` vs `gideon` differing only by case is a collision waiting to
-    # be drawn, and excluding both costs nothing.
     return frozenset(n.lower() for n in names)
 
 
@@ -266,12 +231,8 @@ RESERVED_AGENT_NAMES = _reserved_agent_names()
 class TestAgentCrudProperties:
     """Property-based tests for Gideon Agent CRUD round-trips."""
 
-    # Feature: multi-agent-orchestration, Property 8: CRUD create round-trip
-    # **Validates: Requirements 4.1, 4.2**
     @settings(deadline=None)
     @given(
-        # The API validates names against ^[a-zA-Z0-9_-]{1,64}$ (ASCII only),
-        # so the strategy must draw from that same alphabet.
         name=st.text(
             alphabet="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-",
             min_size=1,
@@ -292,16 +253,17 @@ class TestAgentCrudProperties:
         """Creating an agent via POST and listing via GET returns the agent."""
         name = name.strip()
         if not name or name.lower() in RESERVED_AGENT_NAMES:
-            return  # a name the loader injects itself — 409 is the CORRECT answer
+            return
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(_seed_config(), f)
             tmp = Path(f.name)
 
         try:
-            with unittest.mock.patch("gideon.config.loader.config_path", return_value=tmp):
+            with unittest.mock.patch(
+                "gideon.core.config.loader.config_path", return_value=tmp
+            ):
                 async with TestClient(TestServer(_make_crud_app())) as client:
-                    # Create
                     resp = await client.post(
                         "/api/agents",
                         json={
@@ -313,7 +275,6 @@ class TestAgentCrudProperties:
                     )
                     assert resp.status == 200
 
-                    # List and verify
                     resp = await client.get("/api/agents")
                     assert resp.status == 200
                     data = await resp.json()
@@ -327,10 +288,6 @@ class TestAgentCrudProperties:
         finally:
             tmp.unlink(missing_ok=True)
 
-    # Feature: multi-agent-orchestration, Property 9: CRUD update round-trip
-    # **Validates: Requirements 4.3**
-    # deadline disabled — CRUD tests spin up aiohttp TestServer per example,
-    # timing varies with xdist parallelism and platform (aarch64 vs x86)
     @settings(deadline=None)
     @given(
         data=st.data(),
@@ -338,12 +295,11 @@ class TestAgentCrudProperties:
     @pytest.mark.asyncio
     async def test_crud_update_round_trip(self, data: st.DataObject) -> None:
         """Updating an agent's fields via PUT and listing returns updated values."""
-        # Draw which fields to update
         update_provider = data.draw(st.booleans())
         update_ws = data.draw(st.booleans())
         update_ms = data.draw(st.booleans())
         if not (update_provider or update_ws or update_ms):
-            update_provider = True  # ensure at least one field updated
+            update_provider = True
 
         new_provider = data.draw(st.sampled_from(["gideon", "oncall", "research"]))
         new_ws = data.draw(st.sampled_from(["default", "oncall"]))
@@ -361,7 +317,9 @@ class TestAgentCrudProperties:
             tmp = Path(f.name)
 
         try:
-            with unittest.mock.patch("gideon.config.loader.config_path", return_value=tmp):
+            with unittest.mock.patch(
+                "gideon.core.config.loader.config_path", return_value=tmp
+            ):
                 async with TestClient(TestServer(_make_crud_app())) as client:
                     body: dict = {}
                     if update_provider:
@@ -394,11 +352,8 @@ class TestAgentCrudProperties:
         finally:
             tmp.unlink(missing_ok=True)
 
-    # Feature: multi-agent-orchestration, Property 10: CRUD delete round-trip
-    # **Validates: Requirements 4.4**
     @settings(deadline=None)
     @given(
-        # API name contract: ^[a-zA-Z0-9_-]{1,64}$ (ASCII only).
         name=st.text(
             alphabet="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-",
             min_size=1,
@@ -410,7 +365,7 @@ class TestAgentCrudProperties:
         """Deleting a non-default agent via DELETE removes it from the list."""
         name = name.strip()
         if not name or name.lower() in RESERVED_AGENT_NAMES:
-            return  # a name the loader injects itself — see RESERVED_AGENT_NAMES
+            return
 
         seed = _seed_config()
         seed["agents"][name] = {
@@ -424,7 +379,9 @@ class TestAgentCrudProperties:
             tmp = Path(f.name)
 
         try:
-            with unittest.mock.patch("gideon.config.loader.config_path", return_value=tmp):
+            with unittest.mock.patch(
+                "gideon.core.config.loader.config_path", return_value=tmp
+            ):
                 async with TestClient(TestServer(_make_crud_app())) as client:
                     resp = await client.delete(f"/api/agents/{name}")
                     assert resp.status == 200
@@ -435,11 +392,6 @@ class TestAgentCrudProperties:
                     assert name.lower() not in agent_names
         finally:
             tmp.unlink(missing_ok=True)
-
-
-# ---------------------------------------------------------------------------
-# Unit tests for CRUD edge cases (Task 5.4)
-# ---------------------------------------------------------------------------
 
 
 class TestAgentCrudEdgeCases:
@@ -453,7 +405,9 @@ class TestAgentCrudEdgeCases:
             tmp = Path(f.name)
 
         try:
-            with unittest.mock.patch("gideon.config.loader.config_path", return_value=tmp):
+            with unittest.mock.patch(
+                "gideon.core.config.loader.config_path", return_value=tmp
+            ):
                 async with TestClient(TestServer(_make_crud_app())) as client:
                     resp = await client.post(
                         "/api/agents",
@@ -473,7 +427,9 @@ class TestAgentCrudEdgeCases:
             tmp = Path(f.name)
 
         try:
-            with unittest.mock.patch("gideon.config.loader.config_path", return_value=tmp):
+            with unittest.mock.patch(
+                "gideon.core.config.loader.config_path", return_value=tmp
+            ):
                 async with TestClient(TestServer(_make_crud_app())) as client:
                     resp = await client.put(
                         "/api/agents/nonexistent",
@@ -493,7 +449,9 @@ class TestAgentCrudEdgeCases:
             tmp = Path(f.name)
 
         try:
-            with unittest.mock.patch("gideon.config.loader.config_path", return_value=tmp):
+            with unittest.mock.patch(
+                "gideon.core.config.loader.config_path", return_value=tmp
+            ):
                 async with TestClient(TestServer(_make_crud_app())) as client:
                     resp = await client.delete("/api/agents/default")
                     assert resp.status == 409
@@ -510,7 +468,9 @@ class TestAgentCrudEdgeCases:
             tmp = Path(f.name)
 
         try:
-            with unittest.mock.patch("gideon.config.loader.config_path", return_value=tmp):
+            with unittest.mock.patch(
+                "gideon.core.config.loader.config_path", return_value=tmp
+            ):
                 async with TestClient(TestServer(_make_crud_app())) as client:
                     resp = await client.delete("/api/agents/nonexistent")
                     assert resp.status == 404
@@ -527,7 +487,9 @@ class TestAgentCrudEdgeCases:
             tmp = Path(f.name)
 
         try:
-            with unittest.mock.patch("gideon.config.loader.config_path", return_value=tmp):
+            with unittest.mock.patch(
+                "gideon.core.config.loader.config_path", return_value=tmp
+            ):
                 async with TestClient(TestServer(_make_crud_app())) as client:
                     resp = await client.post(
                         "/api/agents",
@@ -547,7 +509,9 @@ class TestAgentCrudEdgeCases:
             tmp = Path(f.name)
 
         try:
-            with unittest.mock.patch("gideon.config.loader.config_path", return_value=tmp):
+            with unittest.mock.patch(
+                "gideon.core.config.loader.config_path", return_value=tmp
+            ):
                 async with TestClient(TestServer(_make_crud_app())) as client:
                     resp = await client.post(
                         "/api/agents",

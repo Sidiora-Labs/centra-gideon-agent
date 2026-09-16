@@ -25,8 +25,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from gideon.acp.client import AcpClient, AcpError, _make_unified_diff  # noqa: F401
-from gideon.acp.types import (
+from gideon.integrations.acp.client import _make_unified_diff  # noqa: F401
+from gideon.integrations.acp.client import AcpClient, AcpError
+from gideon.integrations.acp.types import (
     EVENT_COMPLETE,
     EVENT_TEXT_CHUNK,
     METHOD_SET_MODE,
@@ -36,7 +37,6 @@ from gideon.acp.types import (
 )
 
 
-# ── construction / config ─────────────────────────────────────────────────────
 class TestAcpClientInit:
     def test_defaults(self):
         client = AcpClient()
@@ -54,31 +54,28 @@ class TestAcpClientInit:
         assert client._channel_id == "C0ABC123"
 
     def test_make_unified_diff_reexport(self):
-        # Re-exported at module scope for importers; delegates to translate.
         out = _make_unified_diff("a\n", "b\n", "f.txt")
         assert "f.txt" in out and "-a" in out and "+b" in out
 
 
-# ── transport proxies (external code reaches through these names) ───────────────
 class TestTransportProxies:
     def test_pid_proxies_transport(self):
         client = AcpClient()
         client._transport._pid = 4321
-        assert client._pid == 4321  # session.py / session_pid.py read client._pid
+        assert client._pid == 4321
 
     def test_process_alive_and_exit_code_proxy(self):
         client = AcpClient()
-        assert client.is_process_alive() is False  # nothing spawned
+        assert client.is_process_alive() is False
         assert client.exit_code is None
 
     def test_is_responsive_delegates(self):
         client = AcpClient()
-        # No process → not responsive; must not raise.
         assert client.is_responsive() is False
 
     def test_touch_activity_delegates(self):
         client = AcpClient()
-        client.touch_activity()  # no-op without a process, must not raise
+        client.touch_activity()
 
     def test_rekey_updates_identity(self):
         client = AcpClient(session_key="a")
@@ -86,7 +83,6 @@ class TestTransportProxies:
         assert client._session_key == "b" and client._channel_id == "C9"
 
 
-# ── handshake orchestration (_initialize_session over a fake connection) ────────
 def _fake_conn(*, caps=None, sid="sess-1", snapshot=None):
     """A MagicMock AcpConnection recording send_request calls made during handshake."""
     conn = MagicMock()
@@ -126,7 +122,6 @@ class TestInitializeSession:
 
     @pytest.mark.asyncio
     async def test_activate_agent_and_model_ordered(self, tmp_path):
-        # set_model must be issued AFTER activate-agent; both via conn.send_request.
         client = AcpClient(work_dir=tmp_path, agent="ops", model="gpt-x")
         conn, _ = _fake_conn()
         client._connection = conn
@@ -137,8 +132,6 @@ class TestInitializeSession:
 
     @pytest.mark.asyncio
     async def test_load_session_resumes_when_available(self, tmp_path):
-        # A resume id + loadSession capability + an existing session file → session/load
-        # path; when it returns a session, we mark resumed and skip session/new.
         client = AcpClient(work_dir=tmp_path, session_files_dir=tmp_path)
         client.set_resume_session_id("old-sid")
         (tmp_path / "old-sid.json").write_text("{}")
@@ -164,7 +157,7 @@ class TestInitializeSession:
         unreachable on every provider. ``session/load`` needs only sessionId + cwd +
         mcpServers; the agent is the authority on whether the id still loads.
         """
-        client = AcpClient(work_dir=tmp_path)  # NO session_files_dir at all
+        client = AcpClient(work_dir=tmp_path)
         client.set_resume_session_id("old-sid")
         conn, _ = _fake_conn(caps={"loadSession": True})
         resumed_sess = MagicMock()
@@ -217,7 +210,7 @@ class TestInitializeSession:
         client = AcpClient(work_dir=tmp_path, session_files_dir=tmp_path)
         client.set_resume_session_id("old-sid")
         (tmp_path / "old-sid.json").write_text("{}")
-        conn, _sess = _fake_conn(caps={})  # no loadSession
+        conn, _sess = _fake_conn(caps={})
         conn.load_session = AsyncMock()
         client._connection = conn
         await client._initialize_session()
@@ -231,14 +224,13 @@ class TestInitializeSession:
         client.set_resume_session_id("old-sid")
         (tmp_path / "old-sid.json").write_text("{}")
         conn, sess = _fake_conn(caps={"loadSession": True})
-        conn.load_session = AsyncMock(return_value=None)  # load didn't take
+        conn.load_session = AsyncMock(return_value=None)
         client._connection = conn
         await client._initialize_session()
         assert client._resumed is False
         conn.new_session.assert_awaited_once()
 
 
-# ── turn/lifecycle delegation to the held session ───────────────────────────────
 def _client_with_session(events):
     """A client whose ensure_ready is stubbed and whose session yields *events*."""
     client = AcpClient()
@@ -274,13 +266,12 @@ class TestTurnDelegation:
         )
         events = [e async for e in client.stream_events("go")]
         assert [e.kind for e in events] == [EVENT_TEXT_CHUNK, EVENT_COMPLETE]
-        # telemetry stamped from the session's stats onto the terminal event
         assert events[-1].event_count == 3
         assert events[-1].tool_call_count == 1
 
     @pytest.mark.asyncio
     async def test_send_message_concatenates_text_excludes_thinking(self):
-        from gideon.acp.types import EVENT_THINKING_CHUNK
+        from gideon.integrations.acp.types import EVENT_THINKING_CHUNK
 
         client, _ = _client_with_session(
             [
@@ -291,7 +282,7 @@ class TestTurnDelegation:
             ]
         )
         result = await client.send_message("hi")
-        assert result == "Hello, world!"  # thinking excluded
+        assert result == "Hello, world!"
 
     @pytest.mark.asyncio
     async def test_approve_reject_delegate(self):
@@ -311,12 +302,11 @@ class TestTurnDelegation:
 
     @pytest.mark.asyncio
     async def test_approve_before_session_raises(self):
-        client = AcpClient()  # no session
+        client = AcpClient()
         with pytest.raises(AcpError):
             await client.approve_tool("r1")
 
 
-# ── set_* live reconfig issues session-scoped dialect requests on the connection ─
 class TestLiveReconfig:
     @pytest.mark.asyncio
     async def test_set_model_sends_and_records(self):
@@ -328,10 +318,33 @@ class TestLiveReconfig:
         client._connection = conn
         await client.set_model("new-model")
         assert client._model == "new-model"
-        assert any(c.args[0] == METHOD_SET_MODEL for c in conn.send_request.call_args_list)
+        assert any(
+            c.args[0] == METHOD_SET_MODEL for c in conn.send_request.call_args_list
+        )
 
     @pytest.mark.asyncio
     async def test_set_model_before_session_raises(self):
         client = AcpClient()
         with pytest.raises(AcpError):
             await client.set_model("m")
+
+
+def test_transport_identity_is_rebound_for_future_processes(tmp_path):
+    client = AcpClient(work_dir=tmp_path, session_key="first", channel_id="old")
+    client.rekey("second", "new")
+    assert client._transport._session_key == "second"
+    assert client._transport._channel_id == "new"
+    client._work_dir = tmp_path / "next"
+    assert client._transport._work_dir == tmp_path / "next"
+
+
+@pytest.mark.asyncio
+async def test_cancelled_configuration_receipt_is_consumed():
+    import asyncio
+
+    client = AcpClient()
+    receipt = asyncio.get_running_loop().create_future()
+    client._watch_dialect_reply("session/set_model", {"value": "auto"}, 1, receipt)
+    receipt.cancel()
+    await asyncio.sleep(0)
+    assert receipt.cancelled()

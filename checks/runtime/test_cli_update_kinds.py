@@ -19,8 +19,8 @@ import types
 
 import pytest
 
-from gideon import cli_server
-from gideon import self_update as su
+from gideon.interfaces.cli import server as cli_server
+from gideon.operations import self_update as su
 
 
 class _Git:
@@ -42,10 +42,10 @@ class _Git:
 def _fake_installer(monkeypatch: pytest.MonkeyPatch) -> None:
     """Stand in for uv/pip resolution, keeping the real ``install`` verb position."""
     monkeypatch.setattr(
-        "gideon._installer.install_argv",
+        "gideon.operations._installer.install_argv",
         lambda args: ["FAKE-INSTALLER", "install", *args],
     )
-    monkeypatch.setattr("gideon._installer.installer_name", lambda: "fake")
+    monkeypatch.setattr("gideon.operations._installer.installer_name", lambda: "fake")
 
 
 @pytest.fixture
@@ -83,9 +83,6 @@ def _as_git_checkout(monkeypatch: pytest.MonkeyPatch, tmp_path) -> str:
     return str(tmp_path)
 
 
-# ── the dispatch itself ─────────────────────────────────────────────────────
-
-
 def test_every_install_kind_has_a_cli_branch() -> None:
     """The dispatch is exhaustive over the taxonomy — adding a kind reds here.
 
@@ -98,7 +95,9 @@ def test_every_install_kind_has_a_cli_branch() -> None:
 def test_unmapped_kind_refuses_and_names_what_it_detected(
     monkeypatch: pytest.MonkeyPatch, capsys, spawns
 ) -> None:
-    monkeypatch.setattr(cli_server.self_update, "detect_install_kind", lambda: "flatpak")
+    monkeypatch.setattr(
+        cli_server.self_update, "detect_install_kind", lambda: "flatpak"
+    )
     git = _Git()
     monkeypatch.setattr(su, "_run_git", git)
 
@@ -107,12 +106,9 @@ def test_unmapped_kind_refuses_and_names_what_it_detected(
 
     assert exc.value.code == 1
     out = capsys.readouterr().out
-    assert "flatpak" in out  # says what it saw
+    assert "flatpak" in out
     assert "refusing to guess" in out
-    assert not git.calls and not spawns  # never fell through to the git pipeline
-
-
-# ── git ─────────────────────────────────────────────────────────────────────
+    assert not git.calls and not spawns
 
 
 def test_git_kind_fetches_and_resets_the_resolved_branch(
@@ -123,8 +119,8 @@ def test_git_kind_fetches_and_resets_the_resolved_branch(
     git = _Git(
         **{
             "rev-parse": (0, "main\n", ""),
-            "diff": (1, "", ""),  # HEAD != origin/main → there is something to apply
-            "status": (0, "", ""),  # clean tree → no confirmation needed
+            "diff": (1, "", ""),
+            "status": (0, "", ""),
         }
     )
     monkeypatch.setattr(su, "_run_git", git)
@@ -133,7 +129,6 @@ def test_git_kind_fetches_and_resets_the_resolved_branch(
 
     assert git.ran("fetch", "origin", "main")
     assert git.ran("reset", "--hard", "origin/main")
-    # The install runs, and the agent config is refreshed afterwards.
     assert any("install" in " ".join(a) for a in spawns)
     assert any(a[-2:] == ["setup", "--agent-only"] for a in spawns)
     assert proj in capsys.readouterr().out
@@ -182,7 +177,9 @@ def test_git_kind_fetch_failure_exits_nonzero_before_touching_the_tree(
 ) -> None:
     _as_git_checkout(monkeypatch, tmp_path)
     _dev_mode(monkeypatch, True)
-    git = _Git(**{"rev-parse": (0, "main\n", ""), "fetch": (128, "", "fatal: no such ref")})
+    git = _Git(
+        **{"rev-parse": (0, "main\n", ""), "fetch": (128, "", "fatal: no such ref")}
+    )
     monkeypatch.setattr(su, "_run_git", git)
 
     with pytest.raises(SystemExit) as exc:
@@ -193,15 +190,16 @@ def test_git_kind_fetch_failure_exits_nonzero_before_touching_the_tree(
     assert not git.ran("reset")
 
 
-# ── git: the destructive-change confirmation ────────────────────────────────
-
-
 def _dirty_git(monkeypatch: pytest.MonkeyPatch) -> _Git:
     git = _Git(
         **{
             "rev-parse": (0, "main\n", ""),
             "diff": (1, "", ""),
-            "status": (0, " M src/gideon/cli.py\n?? scratch.txt\n", ""),
+            "status": (
+                0,
+                " M runtime/gideon/interfaces/cli/main.py\n?? scratch.txt\n",
+                "",
+            ),
         }
     )
     monkeypatch.setattr(su, "_run_git", git)
@@ -221,8 +219,8 @@ def test_tracked_changes_confirmed_at_a_tty_proceeds(
 
     assert git.ran("reset", "--hard", "origin/main")
     out = capsys.readouterr().out
-    assert "src/gideon/cli.py" in out  # names the tracked file at risk
-    assert "scratch.txt" not in out  # untracked files survive a reset — don't cry wolf
+    assert "runtime/gideon/interfaces/cli/main.py" in out
+    assert "scratch.txt" not in out
 
 
 def test_tracked_changes_declined_at_a_tty_aborts_with_zero(
@@ -237,14 +235,15 @@ def test_tracked_changes_declined_at_a_tty_aborts_with_zero(
     with pytest.raises(SystemExit) as exc:
         cli_server._update()
 
-    # Declining is a deliberate choice, not a failure.
     assert exc.value.code == 0
     assert "Aborted." in capsys.readouterr().out
     assert not git.ran("reset")
     assert not spawns
 
 
-def test_eof_at_the_prompt_is_not_a_yes(monkeypatch: pytest.MonkeyPatch, tmp_path, spawns) -> None:
+def test_eof_at_the_prompt_is_not_a_yes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path, spawns
+) -> None:
     _as_git_checkout(monkeypatch, tmp_path)
     _dev_mode(monkeypatch, True)
     git = _dirty_git(monkeypatch)
@@ -285,12 +284,9 @@ def test_non_interactive_stdin_refuses_the_reset_without_prompting(
     assert exc.value.code == 1
     out = capsys.readouterr().out
     assert "stdin is not a terminal" in out
-    assert "git stash" in out  # names the remedy
+    assert "git stash" in out
     assert not git.ran("reset")
     assert not spawns
-
-
-# ── pip / pipx / uv tool ────────────────────────────────────────────────────
 
 
 def test_pip_kind_upgrades_without_a_source_tree(
@@ -305,12 +301,16 @@ def test_pip_kind_upgrades_without_a_source_tree(
     cli_server._update()
 
     out = capsys.readouterr().out
-    assert "GIDEON_PROJECT_DIR" not in out  # the old dead end is gone
-    assert ["FAKE-INSTALLER", "install", "-U", "gideon==9.9.9", "--quiet"] in [
-        a[:5] for a in spawns
-    ]
-    assert not git.calls  # a wheel install never touches git
-    assert "gideon restart" in out  # tells you how to run the new code
+    assert "GIDEON_PROJECT_DIR" not in out
+    assert [
+        "FAKE-INSTALLER",
+        "install",
+        "-U",
+        "gideon-agent-harness==9.9.9",
+        "--quiet",
+    ] in [a[:5] for a in spawns]
+    assert not git.calls
+    assert "gideon restart" in out
 
 
 def test_pip_kind_already_current_skips_the_installer(
@@ -325,14 +325,22 @@ def test_pip_kind_already_current_skips_the_installer(
     assert not spawns
 
 
-def test_pip_kind_unknown_latest_upgrades_unpinned(monkeypatch: pytest.MonkeyPatch, spawns) -> None:
+def test_pip_kind_unknown_latest_upgrades_unpinned(
+    monkeypatch: pytest.MonkeyPatch, spawns
+) -> None:
     """Offline (no latest tag) still tries: `-U gideon`, not a refusal."""
     monkeypatch.setattr(cli_server, "_latest_release_version", lambda: "")
     _fake_installer(monkeypatch)
 
     cli_server._update()
 
-    assert ["FAKE-INSTALLER", "install", "-U", "gideon", "--quiet"] in spawns
+    assert [
+        "FAKE-INSTALLER",
+        "install",
+        "-U",
+        "gideon-agent-harness",
+        "--quiet",
+    ] in spawns
 
 
 def test_pip_kind_install_failure_reports_one_clean_line(
@@ -354,20 +362,20 @@ def test_pip_kind_install_failure_reports_one_clean_line(
     assert exc.value.code == 1
     out = capsys.readouterr().out
     assert "No solution found when resolving dependencies" in out
-    assert "\x1b[" not in out  # no escape sequences leaked to the terminal
+    assert "\x1b[" not in out
 
 
 def test_pip_kind_no_installer_available_exits_one(
     monkeypatch: pytest.MonkeyPatch, capsys, spawns
 ) -> None:
-    from gideon._installer import NoInstallerError
+    from gideon.operations._installer import NoInstallerError
 
     monkeypatch.setattr(cli_server, "_latest_release_version", lambda: "9.9.9")
 
     def _none(args):  # type: ignore[no-untyped-def]
         raise NoInstallerError("no pip, no uv")
 
-    monkeypatch.setattr("gideon._installer.install_argv", _none)
+    monkeypatch.setattr("gideon.operations._installer.install_argv", _none)
 
     with pytest.raises(SystemExit) as exc:
         cli_server._update()
@@ -377,9 +385,6 @@ def test_pip_kind_no_installer_available_exits_one(
     assert not spawns
 
 
-# ── container / desktop: instructions, not pretending ───────────────────────
-
-
 def test_container_kind_prints_the_two_commands_and_exits_zero(
     monkeypatch: pytest.MonkeyPatch, capsys, spawns
 ) -> None:
@@ -387,7 +392,7 @@ def test_container_kind_prints_the_two_commands_and_exits_zero(
     git = _Git()
     monkeypatch.setattr(su, "_run_git", git)
 
-    cli_server._update()  # returns, i.e. exit status 0 — see _update's docstring
+    cli_server._update()
 
     out = capsys.readouterr().out
     for cmd in su.container_instructions():
@@ -404,12 +409,9 @@ def test_desktop_kind_delegates_to_the_app_and_exits_zero(
 
     cli_server._update()
 
-    # The delegation must name WHERE the new version comes from. "the app updates itself"
-    # (the wording this asserted before #2673) described the unbuilt electron-updater half
-    # of DC-1, so a reader followed an instruction with nothing behind it.
     out = capsys.readouterr().out
     assert "desktop install" in out
-    assert "https://github.com/Gideon/Gideon/releases" in out
+    assert "Ask your Gideon administrator for the current desktop release." in out
     assert not git.calls and not spawns
 
 

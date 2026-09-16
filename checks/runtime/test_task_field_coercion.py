@@ -51,27 +51,26 @@ from unittest.mock import patch
 
 import pytest
 
-from gideon.tasks.models import (
+from gideon.engine.tasks.models import (
     TASK_FIELD_COERCERS,
     Task,
     TaskPriority,
     TaskStatus,
     coerce_task_field,
 )
-from gideon.tasks.native import NativeTaskProvider
+from gideon.engine.tasks.native import NativeTaskProvider
 
 
 @pytest.fixture()
 def provider(tmp_path):
-    with patch("gideon.tasks.native.config_dir", return_value=tmp_path):
+    with patch("gideon.engine.tasks.native.config_dir", return_value=tmp_path):
         yield NativeTaskProvider()
 
 
 def _stored(tmp_path: Path, task_id: str) -> dict:
-    return json.loads((tmp_path / "tasks" / f"{task_id}.json").read_text(encoding="utf-8"))
-
-
-# ── 1. the table is exhaustive ────────────────────────────────────────────────
+    return json.loads(
+        (tmp_path / "tasks" / f"{task_id}.json").read_text(encoding="utf-8")
+    )
 
 
 def test_every_task_field_has_a_coercer():
@@ -97,9 +96,6 @@ def test_an_unknown_field_name_is_always_a_refusal():
             coerce_task_field("not_a_field", "x", strict=strict)
 
 
-# ── 2. read salvages, write refuses ──────────────────────────────────────────
-
-
 class TestReadSalvages:
     """`from_dict` must NEVER raise on a persisted value it cannot use.
 
@@ -113,7 +109,9 @@ class TestReadSalvages:
         assert task.order == 0.0
 
     def test_a_bare_string_labels_loads_as_one_label(self):
-        assert Task.from_dict({"id": "t1", "title": "T", "labels": "one"}).labels == ["one"]
+        assert Task.from_dict({"id": "t1", "title": "T", "labels": "one"}).labels == [
+            "one"
+        ]
 
     def test_an_object_inside_labels_cannot_reach_a_renderer(self):
         """`[{"a": 1}, 42]` produced React error #31 — an object rendered as a child."""
@@ -122,9 +120,9 @@ class TestReadSalvages:
 
     def test_a_numeric_description_loads_as_text(self):
         """This is what un-poisons search: the scorer's `.lower()` gets a string."""
-        assert Task.from_dict({"id": "t1", "title": "T", "description": 12345}).description == (
-            "12345"
-        )
+        assert Task.from_dict(
+            {"id": "t1", "title": "T", "description": 12345}
+        ).description == ("12345")
 
     def test_a_bare_string_exit_criteria_is_ONE_criterion_not_one_per_letter(self):
         task = Task.from_dict({"id": "t1", "title": "T", "exit_criteria": "tests pass"})
@@ -132,7 +130,8 @@ class TestReadSalvages:
 
     def test_an_unusable_status_loads_as_open(self):
         assert (
-            Task.from_dict({"id": "t1", "title": "T", "status": "nope"}).status is TaskStatus.OPEN
+            Task.from_dict({"id": "t1", "title": "T", "status": "nope"}).status
+            is TaskStatus.OPEN
         )
 
     def test_a_container_where_text_belongs_loads_as_empty_not_as_its_repr(self):
@@ -146,9 +145,9 @@ class TestWriteRefuses:
     )
     def test_order_accepts_only_a_number(self, value):
         if isinstance(value, (int, float)) and not isinstance(value, bool):
-            return  # nan IS a float; the type is what this guards
+            return
         if value in ("", None):
-            assert coerce_task_field("order", value) == 0.0  # an omitted order is the default
+            assert coerce_task_field("order", value) == 0.0
             return
         with pytest.raises(ValueError):
             coerce_task_field("order", value)
@@ -169,11 +168,11 @@ class TestWriteRefuses:
 
     def test_priority_normalizes_rather_than_refusing(self):
         """Priority has always had a total normalizer, and a wrong priority is not corrupting —
-        so this one coerces where the others refuse, and the table records that difference."""
-        assert coerce_task_field("priority", "nonsense") == TaskPriority.normalize("nonsense")
-
-
-# ── 3. both ends, create and update ──────────────────────────────────────────
+        so this one coerces where the others refuse, and the table records that difference.
+        """
+        assert coerce_task_field("priority", "nonsense") == TaskPriority.normalize(
+            "nonsense"
+        )
 
 
 class TestBothEndsAgree:
@@ -207,21 +206,25 @@ class TestBothEndsAgree:
         assert await provider.delete_task(created.id) is True
 
     @pytest.mark.asyncio
-    async def test_create_and_update_both_normalize_exit_criteria(self, provider, tmp_path):
+    async def test_create_and_update_both_normalize_exit_criteria(
+        self, provider, tmp_path
+    ):
         created = await provider.create_task(title="t", exit_criteria="tests pass")
-        assert [c["description"] for c in _stored(tmp_path, created.id)["exit_criteria"]] == [
-            "tests pass"
-        ]
+        assert [
+            c["description"] for c in _stored(tmp_path, created.id)["exit_criteria"]
+        ] == ["tests pass"]
         await provider.update_task(created.id, exit_criteria="via put")
-        assert [c["description"] for c in _stored(tmp_path, created.id)["exit_criteria"]] == [
-            "via put"
-        ]
+        assert [
+            c["description"] for c in _stored(tmp_path, created.id)["exit_criteria"]
+        ] == ["via put"]
 
     @pytest.mark.asyncio
     async def test_notes_are_normalized_on_both_ends(self, provider, tmp_path):
         """#818's third clause: the note channels were uncoerced even on create."""
         created = await provider.create_task(title="t", notes="a thought")
-        assert _stored(tmp_path, created.id)["notes"] == [{"content": "a thought", "timestamp": ""}]
+        assert _stored(tmp_path, created.id)["notes"] == [
+            {"content": "a thought", "timestamp": ""}
+        ]
         await provider.update_task(created.id, research_notes="found it")
         stored = _stored(tmp_path, created.id)["research_notes"]
         assert stored == [{"content": "found it", "timestamp": ""}]
@@ -286,9 +289,11 @@ class TestPoisonedRecordRecovery:
         assert await provider.delete_task("t-poison") is True
 
     @pytest.mark.asyncio
-    async def test_a_poisoned_task_does_not_break_search_for_every_query(self, provider, tmp_path):
+    async def test_a_poisoned_task_does_not_break_search_for_every_query(
+        self, provider, tmp_path
+    ):
         """#388: the query had nothing to do with the poisoned task. EVERY search 500'd."""
-        from gideon.tasks import registry
+        from gideon.engine.tasks import registry
 
         (tmp_path / "tasks").mkdir(parents=True, exist_ok=True)
         (tmp_path / "tasks" / "t-poison.json").write_text(
@@ -339,7 +344,7 @@ class TestTheEditFormStillSaves:
             execution_notes=[],
             agent_instructions_template="",
             dependencies=[],
-            project_id="p-123",  # not a Task field — must be ignored, not refused
+            project_id="p-123",
         )
         assert updated is not None
         assert updated.title == "renamed"
@@ -347,6 +352,8 @@ class TestTheEditFormStillSaves:
     @pytest.mark.asyncio
     async def test_an_immutable_field_is_ignored_not_written(self, provider):
         created = await provider.create_task(title="t")
-        updated = await provider.update_task(created.id, id="hijacked", provider="other")
+        updated = await provider.update_task(
+            created.id, id="hijacked", provider="other"
+        )
         assert updated is not None
         assert updated.id == created.id

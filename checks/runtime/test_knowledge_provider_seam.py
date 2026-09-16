@@ -8,8 +8,11 @@ from pathlib import Path
 
 import pytest
 
-from gideon.knowledge.store import KnowledgeStore
-from gideon.knowledge_providers.native import NATIVE_TYPES, create_native_provider
+from gideon.cognition.knowledge.store import KnowledgeStore
+from gideon.integrations.knowledge_providers.native import (
+    NATIVE_TYPES,
+    create_native_provider,
+)
 
 
 def _run(coro):
@@ -19,9 +22,6 @@ def _run(coro):
 @pytest.fixture
 def store():
     return KnowledgeStore(str(Path(tempfile.mkdtemp()) / "k.db"))
-
-
-# ── native provider ──
 
 
 def test_create_typed_registers_and_enqueues(store):
@@ -43,7 +43,10 @@ def test_create_typed_rejects_unknown_type(store):
 def test_create_typed_file_carries_path(store):
     prov = create_native_provider(store)
     iid = prov.create_typed(
-        item_type="pdf", title="doc", file_path="/tmp/x.pdf", mime_type="application/pdf"
+        item_type="pdf",
+        title="doc",
+        file_path="/tmp/x.pdf",
+        mime_type="application/pdf",
     )
     item = store.get_item(iid)
     assert item["file_path"] == "/tmp/x.pdf"
@@ -52,7 +55,9 @@ def test_create_typed_file_carries_path(store):
 
 def test_provider_search_and_get(store):
     prov = create_native_provider(store)
-    iid = prov.create_typed(item_type="note", title="Findable", content="unique haystack term")
+    iid = prov.create_typed(
+        item_type="note", title="Findable", content="unique haystack term"
+    )
     results = _run(prov.search("haystack"))
     assert any(r.id == iid for r in results)
     got = _run(prov.get_item(iid))
@@ -78,23 +83,17 @@ def test_provider_lists_single_library_source(store):
 
 
 def test_thirteen_native_types():
-    # 13 since PA-4 added `decision` (PROACTIVE-ASSISTANT §2.2). The count is a ratchet, so the
-    # named subset below is what actually pins membership — a count alone would pass if a type
-    # were swapped for another.
     assert len(NATIVE_TYPES) == 13
     assert {"note", "pdf", "video", "bookmark", "decision"} <= set(NATIVE_TYPES)
 
 
-# ── ingest queue ──
-
-
 def test_queue_enqueue_dedups(store):
-    from gideon.knowledge.ingest_queue import KnowledgeIngestQueue
+    from gideon.cognition.knowledge.ingest_queue import KnowledgeIngestQueue
 
     async def go():
         q = KnowledgeIngestQueue(store)
         q.enqueue("a")
-        q.enqueue("a")  # dup while pending → ignored
+        q.enqueue("a")
         q.enqueue("b")
         return q.qsize()
 
@@ -104,15 +103,18 @@ def test_queue_enqueue_dedups(store):
 def test_queue_recovers_pending_items_on_start(store):
     """Items left in queued/processing by a prior (crashed) process are re-enqueued
     on startup — the in-memory queue would otherwise strand them forever."""
-    from gideon.knowledge.ingest_queue import KnowledgeIngestQueue
+    from gideon.cognition.knowledge.ingest_queue import KnowledgeIngestQueue
 
     stuck_q = store.create_typed_item(
         item_type="note", title="Q", content="x", extra={"processing_status": "queued"}
     )
     stuck_p = store.create_typed_item(
-        item_type="note", title="P", content="y", extra={"processing_status": "processing"}
+        item_type="note",
+        title="P",
+        content="y",
+        extra={"processing_status": "processing"},
     )
-    assert stuck_q and stuck_p  # seeded the stuck rows recover_pending() must re-enqueue
+    assert stuck_q and stuck_p
     done = store.create_typed_item(
         item_type="note", title="D", content="z", extra={"processing_status": "done"}
     )
@@ -123,24 +125,26 @@ def test_queue_recovers_pending_items_on_start(store):
         return n, q.qsize()
 
     n, size = _run(go())
-    assert n == 2 and size == 2  # the queued + processing items, not the done one
-    assert done  # (referenced)
+    assert n == 2 and size == 2
+    assert done
 
 
 def test_queue_processes_item_end_to_end(store):
-    from gideon.knowledge.ingest_queue import KnowledgeIngestQueue
-    from gideon.knowledge.pipeline import ensure_nodes_registered
+    from gideon.cognition.knowledge.ingest_queue import KnowledgeIngestQueue
+    from gideon.cognition.knowledge.pipeline import ensure_nodes_registered
 
     ensure_nodes_registered()
 
     async def go():
         iid = store.create_typed_item(
-            item_type="note", title="N", content="queue body", extra={"processing_status": "queued"}
+            item_type="note",
+            title="N",
+            content="queue body",
+            extra={"processing_status": "queued"},
         )
         q = KnowledgeIngestQueue(store)
         q.start()
         q.enqueue(iid)
-        # let the drain loop pick it up
         for _ in range(50):
             await asyncio.sleep(0.05)
             if store.get_item(iid)["processing_status"] == "done":

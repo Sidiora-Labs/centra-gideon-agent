@@ -18,19 +18,18 @@ from pathlib import Path
 
 import pytest
 
-from gideon.durability import crypto as sc
-from gideon.durability.cursor import PAYLOAD_BAD, PREREQ_ABSENT
-from gideon.durability.registry import REGISTRY_KEY
-from gideon.net.guard import evaluate
-from gideon.net.policy import SYNC, SyncEndpointRefused, sync_egress_policy
-from gideon.sync_transports.base import (
+from gideon.integrations.sync_transports.base import (
     PushResult,
     RemoteRef,
     SyncObject,
     SyncTransportProvider,
 )
+from gideon.operations.durability import crypto as sc
+from gideon.operations.durability.cursor import PAYLOAD_BAD, PREREQ_ABSENT
+from gideon.operations.durability.registry import REGISTRY_KEY
+from gideon.security.net.guard import evaluate
+from gideon.security.net.policy import SYNC, SyncEndpointRefused, sync_egress_policy
 
-# A value that must never appear in a ciphertext, a log, an exception or a pushed object.
 CANARY_ROW = b"CANARY-ROW-alice@example.com-salary-142000"
 CANARY_PASSPHRASE = "CANARY-PASSPHRASE-do-not-log-2f7a1c"
 
@@ -42,12 +41,10 @@ def _master(passphrase: str = "a correct horse battery staple") -> bytes:
     return sc.derive_master(passphrase, SALT)
 
 
-# ── a REAL on-disk transport (the dir-sync algorithm), so proofs land on real bytes ──
-
-
 class FolderTransport(SyncTransportProvider):
     """Insert-only atomic writes into a shared folder — the same shape the convergence
-    e2e test uses, so "the remote" is a directory whose bytes a test can read directly."""
+    e2e test uses, so "the remote" is a directory whose bytes a test can read directly.
+    """
 
     name = "dir-sync"
 
@@ -82,7 +79,9 @@ class FolderTransport(SyncTransportProvider):
         out = []
         for ref in refs:
             try:
-                out.append(SyncObject(key=ref.key, data=(self._root / ref.key).read_bytes()))
+                out.append(
+                    SyncObject(key=ref.key, data=(self._root / ref.key).read_bytes())
+                )
             except OSError:
                 continue
         return out
@@ -94,26 +93,23 @@ class FolderTransport(SyncTransportProvider):
         return True
 
     def test(self):
-        from gideon.sync_transports.base import ConnectionResult
+        from gideon.integrations.sync_transports.base import ConnectionResult
 
         return ConnectionResult(ok=True)
-
-
-# ── the crypto claims, asserted on bytes ─────────────────────────────────────
 
 
 class TestCiphertextIsActuallyCiphertext:
     def test_plaintext_bytes_are_absent_from_the_encrypted_object(self):
         enc = sc.encrypt_object(SyncObject(key=SHARD_KEY, data=CANARY_ROW), _master())
-        assert CANARY_ROW not in enc.data, "the plaintext row survived into the ciphertext"
-        # ...and no non-trivial slice of it either (a partial leak is still a leak).
+        assert (
+            CANARY_ROW not in enc.data
+        ), "the plaintext row survived into the ciphertext"
         for size in (8, 16, 24):
             assert CANARY_ROW[:size] not in enc.data
         assert sc.is_ciphertext(enc.data)
 
     def test_the_object_key_stays_plaintext_because_it_is_routing(self):
         enc = sc.encrypt_object(SyncObject(key=SHARD_KEY, data=CANARY_ROW), _master())
-        # §4.4: the machine id and seq must be readable without the key.
         assert enc.key == SHARD_KEY
 
     def test_a_wrong_key_refuses_rather_than_returning_garbage(self):
@@ -125,7 +121,9 @@ class TestCiphertextIsActuallyCiphertext:
     def test_a_wrong_salt_refuses_too(self):
         enc = sc.encrypt_object(SyncObject(key=SHARD_KEY, data=CANARY_ROW), _master())
         with pytest.raises(sc.SyncEncryptionError):
-            sc.decrypt_object(enc, sc.derive_master("a correct horse battery staple", b"f" * 16))
+            sc.decrypt_object(
+                enc, sc.derive_master("a correct horse battery staple", b"f" * 16)
+            )
 
     @pytest.mark.parametrize("offset", [0, 4, 9, 14, 20, -1])
     def test_one_tampered_byte_is_detected(self, offset):
@@ -139,7 +137,9 @@ class TestCiphertextIsActuallyCiphertext:
         """The object key is authenticated, so whoever holds the bucket cannot replay
         machine A's shard as machine B's or an old seq's as a new one."""
         enc = sc.encrypt_object(SyncObject(key=SHARD_KEY, data=CANARY_ROW), _master())
-        moved = SyncObject(key="machines/B/seq-0009/tasks/entities.jsonl", data=enc.data)
+        moved = SyncObject(
+            key="machines/B/seq-0009/tasks/entities.jsonl", data=enc.data
+        )
         with pytest.raises(sc.SyncEncryptionError):
             sc.decrypt_object(moved, _master())
 
@@ -147,7 +147,9 @@ class TestCiphertextIsActuallyCiphertext:
         enc = sc.encrypt_object(SyncObject(key=SHARD_KEY, data=CANARY_ROW), _master())
         for cut in (4, len(sc.MAGIC), len(sc.MAGIC) + 5, len(enc.data) - 1):
             with pytest.raises(sc.SyncEncryptionError):
-                sc.decrypt_object(SyncObject(key=SHARD_KEY, data=enc.data[:cut]), _master())
+                sc.decrypt_object(
+                    SyncObject(key=SHARD_KEY, data=enc.data[:cut]), _master()
+                )
 
     def test_a_version_downgrade_is_refused(self):
         enc = sc.encrypt_object(SyncObject(key=SHARD_KEY, data=CANARY_ROW), _master())
@@ -172,22 +174,31 @@ class TestNonceUniqueness:
         n = 500
         for i in range(n):
             enc = sc.encrypt_object(
-                SyncObject(key=f"machines/A/seq-{i:04d}/tasks/entities.jsonl", data=CANARY_ROW), m
+                SyncObject(
+                    key=f"machines/A/seq-{i:04d}/tasks/entities.jsonl", data=CANARY_ROW
+                ),
+                m,
             )
             head = len(sc.MAGIC) + 1
             nonces.add(enc.data[head : head + sc.NONCE_BYTES])
-        assert len(nonces) == n, f"nonce reuse: only {len(nonces)} distinct nonces over {n} objects"
+        assert (
+            len(nonces) == n
+        ), f"nonce reuse: only {len(nonces)} distinct nonces over {n} objects"
 
     def test_the_same_object_encrypted_twice_gets_a_fresh_nonce(self):
         m = _master()
         obj = SyncObject(key=SHARD_KEY, data=CANARY_ROW)
         a, b = sc.encrypt_object(obj, m), sc.encrypt_object(obj, m)
-        assert a.data != b.data, "identical bytes produced identical ciphertext — nonce reused"
+        assert (
+            a.data != b.data
+        ), "identical bytes produced identical ciphertext — nonce reused"
 
     def test_nonce_is_the_declared_width(self):
         enc = sc.encrypt_object(SyncObject(key=SHARD_KEY, data=CANARY_ROW), _master())
         assert sc.NONCE_BYTES == 12
-        assert len(enc.data) == len(sc.MAGIC) + 1 + sc.NONCE_BYTES + len(CANARY_ROW) + 16
+        assert (
+            len(enc.data) == len(sc.MAGIC) + 1 + sc.NONCE_BYTES + len(CANARY_ROW) + 16
+        )
 
 
 class TestPerShardKeys:
@@ -228,7 +239,9 @@ class TestFirstWriteWinsSalt:
         remote = tmp_path / "remote"
         first = sc.ensure_salt(FolderTransport(remote))
         second = sc.ensure_salt(FolderTransport(remote))
-        assert first == second, "the second machine minted its own salt and forked the store"
+        assert (
+            first == second
+        ), "the second machine minted its own salt and forked the store"
 
     def test_the_salt_object_stays_plaintext_and_is_routing(self, tmp_path):
         t = FolderTransport(tmp_path / "remote")
@@ -237,12 +250,14 @@ class TestFirstWriteWinsSalt:
         on_disk = (tmp_path / "remote" / sc.SALT_KEY).read_bytes()
         assert not sc.is_ciphertext(on_disk)
 
-    def test_a_root_that_cannot_hold_a_salt_is_a_hard_error_never_a_fabrication(self, tmp_path):
+    def test_a_root_that_cannot_hold_a_salt_is_a_hard_error_never_a_fabrication(
+        self, tmp_path
+    ):
         """§4.4: never fabricate a salt. A fabricated one derives keys no peer can
         reproduce, silently forking the store into two unreadable halves."""
 
         class Amnesiac(FolderTransport):
-            def push(self, objects):  # accepts, stores nothing
+            def push(self, objects):
                 return PushResult(pushed=len(objects), outcome="delivered")
 
         with pytest.raises(sc.MissingSalt):
@@ -272,8 +287,12 @@ class TestRoutingFieldsStayPlaintext:
 class TestPlaintextRejectedBothDirections:
     def test_receive_side_skips_a_plaintext_object_permanently(self):
         codec = sc.SyncCodec(master=_master())
-        good = sc.encrypt_object(SyncObject(key=SHARD_KEY, data=CANARY_ROW), codec.master)
-        planted = SyncObject(key="machines/A/seq-0001/notifications/2026.jsonl", data=b"raw row")
+        good = sc.encrypt_object(
+            SyncObject(key=SHARD_KEY, data=CANARY_ROW), codec.master
+        )
+        planted = SyncObject(
+            key="machines/A/seq-0001/notifications/2026.jsonl", data=b"raw row"
+        )
         out, skipped = codec.decrypt_after_pull([good, planted])
         assert [o.key for o in out] == [SHARD_KEY]
         assert skipped.keys == [planted.key]
@@ -295,21 +314,34 @@ class TestPlaintextRejectedBothDirections:
         on the intention of the code above it."""
         codec = sc.SyncCodec(master=_master())
         monkeypatch.setattr(sc, "encrypt_object", lambda obj, master: obj)
-        out, skipped = codec.encrypt_for_push([SyncObject(key=SHARD_KEY, data=CANARY_ROW)])
+        out, skipped = codec.encrypt_for_push(
+            [SyncObject(key=SHARD_KEY, data=CANARY_ROW)]
+        )
         assert out == []
         assert skipped.keys == [SHARD_KEY]
         assert "plaintext" in skipped.reasons[0]
 
-    def test_a_plaintext_object_makes_the_seq_payload_bad_not_held(self, tmp_path, monkeypatch):
+    def test_a_plaintext_object_makes_the_seq_payload_bad_not_held(
+        self, tmp_path, monkeypatch
+    ):
         """A permanent skip must ADVANCE the cursor. Holding would be the error loop §4.4
-        forbids: the object can never become decryptable, so re-pulling it is the bug."""
-        from gideon.durability import pull_engine
+        forbids: the object can never become decryptable, so re-pulling it is the bug.
+        """
+        from gideon.operations.durability import pull_engine
 
         remote = tmp_path / "remote"
         t = FolderTransport(remote)
-        t.push([SyncObject(key="machines/P/seq-0001/tasks/entities.jsonl", data=b"raw row")])
+        t.push(
+            [
+                SyncObject(
+                    key="machines/P/seq-0001/tasks/entities.jsonl", data=b"raw row"
+                )
+            ]
+        )
         codec = sc.SyncCodec(master=_master())
-        outcome = pull_engine._pull_one_seq(t, tmp_path / "home", "P", 1, None, codec=codec)
+        outcome = pull_engine._pull_one_seq(
+            t, tmp_path / "home", "P", 1, None, codec=codec
+        )
         assert outcome.verdict == PAYLOAD_BAD, (
             f"a permanent skip must advance the cursor; got {outcome.verdict!r} "
             f"({PREREQ_ABSENT!r} would re-pull the same undecryptable object forever)"
@@ -322,7 +354,7 @@ class TestPlaintextRejectedBothDirections:
         peer seq — and storing the right passphrase afterwards did NOT bring them back. A
         failed tag is "wrong key OR tampering", which the user can fix; only PLAINTEXT is
         genuinely permanent."""
-        from gideon.durability import pull_engine
+        from gideon.operations.durability import pull_engine
 
         remote = tmp_path / "remote"
         t = FolderTransport(remote)
@@ -330,13 +362,17 @@ class TestPlaintextRejectedBothDirections:
         t.push(
             [
                 sc.encrypt_object(
-                    SyncObject(key="machines/P/seq-0001/tasks/entities.jsonl", data=CANARY_ROW),
+                    SyncObject(
+                        key="machines/P/seq-0001/tasks/entities.jsonl", data=CANARY_ROW
+                    ),
                     right,
                 )
             ]
         )
         wrong = sc.SyncCodec(master=_master("a typo passphrase"))
-        outcome = pull_engine._pull_one_seq(t, tmp_path / "home", "P", 1, None, codec=wrong)
+        outcome = pull_engine._pull_one_seq(
+            t, tmp_path / "home", "P", 1, None, codec=wrong
+        )
         assert outcome.verdict == PREREQ_ABSENT, (
             f"a wrong passphrase must HOLD, not advance; got {outcome.verdict!r} — advancing "
             "permanently loses every peer seq pulled during the typo"
@@ -352,11 +388,10 @@ class TestPlaintextRejectedBothDirections:
         )
         _out, skipped = codec.decrypt_after_pull([plaintext, undecryptable])
         assert skipped.keys == [plaintext.key], "plaintext must be the PERMANENT bucket"
-        assert skipped.unreadable == [undecryptable.key], "a failed tag must be the HOLD bucket"
+        assert skipped.unreadable == [
+            undecryptable.key
+        ], "a failed tag must be the HOLD bucket"
         assert len(skipped) == 2
-
-
-# ── the egress derivation ────────────────────────────────────────────────────
 
 
 def _fake_dns(host: str):
@@ -375,7 +410,9 @@ class TestSyncEgressPinning:
 
     def test_the_pinned_host_is_allowed(self):
         p = sync_egress_policy("https://s3.us-west-2.amazonaws.com")
-        d = evaluate("https://s3.us-west-2.amazonaws.com/bucket/obj", p, resolver=_fake_dns)
+        d = evaluate(
+            "https://s3.us-west-2.amazonaws.com/bucket/obj", p, resolver=_fake_dns
+        )
         assert d.allow is True, d.reason
 
     def test_a_non_pinned_host_is_REFUSED(self):
@@ -387,12 +424,18 @@ class TestSyncEgressPinning:
             "https://amazonaws.com/bucket/obj",
         ):
             d = evaluate(other, p, resolver=_fake_dns)
-            assert d.allow is False, f"{other} was reachable under a host-pinned SYNC policy"
+            assert (
+                d.allow is False
+            ), f"{other} was reachable under a host-pinned SYNC policy"
 
     def test_max_bytes_is_raised_deliberately_not_removed(self):
         p = sync_egress_policy("https://minio.example.com")
-        assert p.max_bytes == 200_000_000, "the sync cap must be a real number, not unbounded"
-        assert p.max_bytes > 5_000_000, "a whole-DB shard needs more than the STRICT page cap"
+        assert (
+            p.max_bytes == 200_000_000
+        ), "the sync cap must be a real number, not unbounded"
+        assert (
+            p.max_bytes > 5_000_000
+        ), "a whole-DB shard needs more than the STRICT page cap"
         assert p.timeout_s == 120.0
 
     def test_ip_pinning_and_redirect_recheck_survive_the_derivation(self):
@@ -405,7 +448,7 @@ class TestSyncEgressPinning:
         """`egress_policy_for` UNIONs the operator's allow_hosts into any base. For an
         exclusive policy that would let hosts listed for OTHER surfaces become valid S3
         endpoints, so the pin is applied last."""
-        from gideon.net import policy as np
+        from gideon.security.net import policy as np
 
         class _Eg:
             allow_hosts = ("evil.example.com", "lan.internal")
@@ -422,13 +465,18 @@ class TestSyncEgressPinning:
         )
         p = np.sync_egress_policy("https://minio.example.com")
         assert p.allow_hosts == ("minio.example.com",)
-        assert evaluate("https://evil.example.com/x", p, resolver=_fake_dns).allow is False
+        assert (
+            evaluate("https://evil.example.com/x", p, resolver=_fake_dns).allow is False
+        )
 
-    def test_operator_deny_hosts_still_wins_over_the_configured_endpoint(self, monkeypatch):
+    def test_operator_deny_hosts_still_wins_over_the_configured_endpoint(
+        self, monkeypatch
+    ):
         """An operator who banned a host has banned it as a sync target too. Refused at
         derivation rather than returned as a policy whose one permitted host the guard
-        rejects on every request — the same fact, said at the point a human can act on it."""
-        from gideon.net import policy as np
+        rejects on every request — the same fact, said at the point a human can act on it.
+        """
+        from gideon.security.net import policy as np
 
         monkeypatch.setattr(
             np,
@@ -438,19 +486,27 @@ class TestSyncEgressPinning:
         with pytest.raises(SyncEndpointRefused, match="deny list"):
             np.sync_egress_policy("https://minio.example.com")
 
-    def test_an_operator_deny_of_a_DIFFERENT_host_is_carried_into_the_policy(self, monkeypatch):
-        from gideon.net import policy as np
+    def test_an_operator_deny_of_a_DIFFERENT_host_is_carried_into_the_policy(
+        self, monkeypatch
+    ):
+        from gideon.security.net import policy as np
 
         monkeypatch.setattr(
             np,
             "egress_policy_for",
-            lambda base: base.with_overrides(deny_hosts=(*base.deny_hosts, "banned.example.com")),
+            lambda base: base.with_overrides(
+                deny_hosts=(*base.deny_hosts, "banned.example.com")
+            ),
         )
         p = np.sync_egress_policy("https://minio.example.com")
         assert "banned.example.com" in p.deny_hosts
-        assert "169.254.169.254" in p.deny_hosts, "the built-in metadata deny was dropped"
+        assert (
+            "169.254.169.254" in p.deny_hosts
+        ), "the built-in metadata deny was dropped"
 
-    @pytest.mark.parametrize("bad", ["", "   ", "https://", "file:///etc/passwd", "ftp://h/x"])
+    @pytest.mark.parametrize(
+        "bad", ["", "   ", "https://", "file:///etc/passwd", "ftp://h/x"]
+    )
     def test_an_unpinnable_endpoint_is_refused_not_widened(self, bad):
         with pytest.raises(SyncEndpointRefused):
             sync_egress_policy(bad)
@@ -483,22 +539,27 @@ class TestSyncEgressPinning:
         on record rather than a surprise."""
         p = sync_egress_policy("http://127.0.0.1:9000")
         assert p.allow_private is False, "the base stance is unchanged..."
-        d = evaluate("http://127.0.0.1:9000/bucket/obj", p, resolver=lambda h: ["127.0.0.1"])
-        assert d.allow is True, f"...yet the pinned private host is reachable: {d.reason}"
+        d = evaluate(
+            "http://127.0.0.1:9000/bucket/obj", p, resolver=lambda h: ["127.0.0.1"]
+        )
+        assert (
+            d.allow is True
+        ), f"...yet the pinned private host is reachable: {d.reason}"
         # And still nothing else on the private range.
-        other = evaluate("http://192.168.1.50:9000/b/o", p, resolver=lambda h: ["192.168.1.50"])
+        other = evaluate(
+            "http://192.168.1.50:9000/b/o", p, resolver=lambda h: ["192.168.1.50"]
+        )
         assert other.allow is False
 
     def test_a_bare_host_is_accepted_and_pinned(self):
-        assert sync_egress_policy("minio.example.com:9000").allow_hosts == ("minio.example.com",)
+        assert sync_egress_policy("minio.example.com:9000").allow_hosts == (
+            "minio.example.com",
+        )
 
     def test_the_profile_is_registered_by_name(self):
-        from gideon.net.policy import get_policy
+        from gideon.security.net.policy import get_policy
 
         assert get_policy("sync") is SYNC
-
-
-# ── credentials: where they come from, and that they do not leak ─────────────
 
 
 class TestPassphraseCustody:
@@ -509,7 +570,7 @@ class TestPassphraseCustody:
             seen["key"] = key
             return CANARY_PASSPHRASE
 
-        monkeypatch.setattr("gideon.config.credentials.get_credential", _fake_get)
+        monkeypatch.setattr("gideon.core.config.credentials.get_credential", _fake_get)
         assert sc.load_passphrase() == CANARY_PASSPHRASE
         assert seen["key"] == sc.PASSPHRASE_CREDENTIAL
 
@@ -518,17 +579,27 @@ class TestPassphraseCustody:
         export, and in the time-travel git history."""
         from dataclasses import fields
 
-        from gideon.config.loader import DurabilityConfig
+        from gideon.core.config.loader import DurabilityConfig
 
         names = {f.name for f in fields(DurabilityConfig)}
-        for suspicious in ("sync_passphrase", "passphrase", "sync_key", "encryption_key"):
+        for suspicious in (
+            "sync_passphrase",
+            "passphrase",
+            "sync_key",
+            "encryption_key",
+        ):
             assert suspicious not in names
         blob = json.dumps(
-            {f.name: getattr(DurabilityConfig(), f.name) for f in fields(DurabilityConfig)}
+            {
+                f.name: getattr(DurabilityConfig(), f.name)
+                for f in fields(DurabilityConfig)
+            }
         )
         assert "passphrase" not in blob.lower()
 
-    def test_the_passphrase_is_absent_from_every_failure_path_artifact(self, monkeypatch, caplog):
+    def test_the_passphrase_is_absent_from_every_failure_path_artifact(
+        self, monkeypatch, caplog
+    ):
         """Plant the canary, drive the failure, then sweep the exception text, the log
         records and the codec's repr for it."""
         monkeypatch.setattr(sc, "load_passphrase", lambda: CANARY_PASSPHRASE)
@@ -539,7 +610,6 @@ class TestPassphraseCustody:
             codec = sc.SyncCodec(master=master)
             artifacts.append(repr(codec))
             artifacts.append(str(codec))
-            # a wrong-key decrypt, a tampered object, and a plaintext skip
             enc = sc.encrypt_object(SyncObject(key=SHARD_KEY, data=CANARY_ROW), master)
             try:
                 sc.decrypt_object(enc, sc.derive_master("other passphrase", SALT))
@@ -554,11 +624,19 @@ class TestPassphraseCustody:
         artifacts.extend(r.getMessage() for r in caplog.records)
 
         blob = "\n".join(artifacts)
-        assert CANARY_PASSPHRASE not in blob, "the passphrase leaked into a failure artifact"
-        assert master.hex() not in blob, "the derived key leaked into a failure artifact"
-        assert CANARY_ROW.decode() not in blob, "a plaintext row leaked into a failure artifact"
+        assert (
+            CANARY_PASSPHRASE not in blob
+        ), "the passphrase leaked into a failure artifact"
+        assert (
+            master.hex() not in blob
+        ), "the derived key leaked into a failure artifact"
+        assert (
+            CANARY_ROW.decode() not in blob
+        ), "a plaintext row leaked into a failure artifact"
 
-    def test_encryption_on_without_a_passphrase_fails_closed(self, monkeypatch, tmp_path):
+    def test_encryption_on_without_a_passphrase_fails_closed(
+        self, monkeypatch, tmp_path
+    ):
         """Falling back to plaintext here is the exact failure the feature prevents."""
         monkeypatch.setattr(sc, "load_passphrase", lambda: "")
         with pytest.raises(sc.MissingPassphrase):
@@ -570,13 +648,15 @@ class TestPassphraseCustody:
         assert "withheld" in repr(codec)
 
 
-# ── per-transport defaults ───────────────────────────────────────────────────
-
-
 class TestPerTransportDefaults:
     @pytest.mark.parametrize(
         "transport,expected",
-        [("s3-sync", True), ("dir-sync", True), ("rsync-sync", True), ("git-sync", False)],
+        [
+            ("s3-sync", True),
+            ("dir-sync", True),
+            ("rsync-sync", True),
+            ("git-sync", False),
+        ],
     )
     def test_auto_takes_the_per_transport_default(self, transport, expected):
         assert sc.encryption_enabled_for(transport, "auto") is expected
@@ -623,23 +703,20 @@ class TestPerTransportDefaults:
 class _GitTransport(FolderTransport):
     name = "git-sync"
 
-    def __init__(self):  # never touches a remote — auto resolves to OFF before any I/O
+    def __init__(self):
         pass
-
-
-# ── config round-trip ────────────────────────────────────────────────────────
 
 
 class TestConfigRoundTrip:
     def test_default_is_auto(self):
-        from gideon.config.loader import DurabilityConfig
+        from gideon.core.config.loader import DurabilityConfig
 
         assert DurabilityConfig().sync_encrypt == "auto"
 
     def test_the_field_has_meta(self):
         from dataclasses import fields
 
-        from gideon.config.loader import DurabilityConfig
+        from gideon.core.config.loader import DurabilityConfig
 
         meta = {f.name: f.metadata for f in fields(DurabilityConfig)}["sync_encrypt"]
         assert meta.get("label") and meta.get("help")
@@ -661,44 +738,48 @@ class TestConfigRoundTrip:
     def test_load_coerces_to_the_closed_set_defaulting_safe(
         self, raw, expected, tmp_path, monkeypatch
     ):
-        from gideon.config import loader as cl
+        from gideon.core.config import loader as cl
 
         monkeypatch.setattr(cl, "config_dir", lambda: tmp_path)
-        (tmp_path / "config.json").write_text(json.dumps({"durability": {"sync_encrypt": raw}}))
+        (tmp_path / "config.json").write_text(
+            json.dumps({"durability": {"sync_encrypt": raw}})
+        )
         cfg = cl.AppConfig.load()
         assert cfg.durability.sync_encrypt == expected
 
     def test_to_dict_carries_the_field(self, tmp_path, monkeypatch):
-        from gideon.config import loader as cl
+        from gideon.core.config import loader as cl
 
         monkeypatch.setattr(cl, "config_dir", lambda: tmp_path)
-        (tmp_path / "config.json").write_text(json.dumps({"durability": {"sync_encrypt": "on"}}))
+        (tmp_path / "config.json").write_text(
+            json.dumps({"durability": {"sync_encrypt": "on"}})
+        )
         assert cl.AppConfig.load().to_dict()["durability"]["sync_encrypt"] == "on"
 
     def test_it_is_in_the_patch_allowlist_with_a_closed_value_set(self):
-        from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+        from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
         spec = _EDITABLE_CONFIG["durability.sync_encrypt"]
         assert spec["type"] == "str"
         assert set(spec["values"]) == {"auto", "on", "off"}
 
     def test_status_reports_the_resolved_verdict_not_the_tri_state(self, monkeypatch):
-        from gideon.config.loader import DurabilityConfig
-        from gideon.durability import service as svc
+        from gideon.core.config.loader import DurabilityConfig
+        from gideon.operations.durability import service as svc
 
         monkeypatch.setattr(
-            svc, "_cfg", lambda: DurabilityConfig(sync_transport="s3-sync", sync_encrypt="auto")
+            svc,
+            "_cfg",
+            lambda: DurabilityConfig(sync_transport="s3-sync", sync_encrypt="auto"),
         )
         assert svc._resolved_encryption(svc._cfg()) is True
         monkeypatch.setattr(
-            svc, "_cfg", lambda: DurabilityConfig(sync_transport="git-sync", sync_encrypt="auto")
+            svc,
+            "_cfg",
+            lambda: DurabilityConfig(sync_transport="git-sync", sync_encrypt="auto"),
         )
         assert svc._resolved_encryption(svc._cfg()) is False
-        # No transport chosen → nothing is being sent, so nothing is "encrypted".
         assert svc._resolved_encryption(DurabilityConfig(sync_encrypt="on")) is False
-
-
-# ── criterion 8, over a REAL on-disk transport ───────────────────────────────
 
 
 def _seed_task(home: Path, tid: str, title: str) -> None:
@@ -719,17 +800,27 @@ class TestCriterion8EndToEnd:
     """
 
     def _cycle(
-        self, home: Path, remote: Path, self_id: str, now: str, passphrase: str, monkeypatch
+        self,
+        home: Path,
+        remote: Path,
+        self_id: str,
+        now: str,
+        passphrase: str,
+        monkeypatch,
     ):
-        from gideon.durability import crypto as crypto_mod
-        from gideon.durability.shards import machine_id
-        from gideon.durability.sync_cycle import run_sync_cycle
+        from gideon.operations.durability import crypto as crypto_mod
+        from gideon.operations.durability.shards import machine_id
+        from gideon.operations.durability.sync_cycle import run_sync_cycle
 
         monkeypatch.setattr(crypto_mod, "load_passphrase", lambda: passphrase)
-        machine_id(home)  # materialise the id file before we pin self_id
-        return run_sync_cycle(FolderTransport(remote), home, self_id=self_id, now=now, encrypt="on")
+        machine_id(home)
+        return run_sync_cycle(
+            FolderTransport(remote), home, self_id=self_id, now=now, encrypt="on"
+        )
 
-    def test_the_remote_holds_only_ciphertext_and_plaintext_routing(self, tmp_path, monkeypatch):
+    def test_the_remote_holds_only_ciphertext_and_plaintext_routing(
+        self, tmp_path, monkeypatch
+    ):
         remote, home = tmp_path / "remote", tmp_path / "A"
         _seed_task(home, "task-a", CANARY_ROW.decode())
         report = self._cycle(home, remote, "A", "t1", "shared passphrase", monkeypatch)
@@ -740,12 +831,13 @@ class TestCriterion8EndToEnd:
             if not p.is_file():
                 continue
             key = p.relative_to(remote).as_posix()
-            (routing if sc.is_routing_key(key) else shard_objects).append((key, p.read_bytes()))
+            (routing if sc.is_routing_key(key) else shard_objects).append(
+                (key, p.read_bytes())
+            )
 
         assert shard_objects, "nothing was published — the proof would be vacuous"
         for key, data in shard_objects:
             assert sc.is_ciphertext(data), f"{key} landed on the remote as plaintext"
-        # Criterion 7 + 8: no plaintext row anywhere in the store's bytes.
         every_byte = b"".join(d for _k, d in shard_objects + routing)
         assert CANARY_ROW not in every_byte
         assert b"task-a" not in every_byte, "a task id leaked in plaintext"
@@ -755,21 +847,23 @@ class TestCriterion8EndToEnd:
         _seed_task(home, "task-a", "hello")
         self._cycle(home, remote, "A", "t1", "shared passphrase", monkeypatch)
 
-        # A keyless machine: no passphrase at all.
-        from gideon.durability.sync_cycle import read_registry
+        from gideon.operations.durability.sync_cycle import read_registry
 
         keyless = FolderTransport(remote)
         assert keyless.list_remote(""), "list_remote needed the key"
         registry = read_registry(keyless)
         assert registry.seq_of("A") >= 1, "the registry was unreadable without the key"
-        assert sc.read_salt(keyless) is not None, "the salt was unreadable without the key"
+        assert (
+            sc.read_salt(keyless) is not None
+        ), "the salt was unreadable without the key"
 
     def test_the_store_is_useless_to_the_wrong_passphrase(self, tmp_path, monkeypatch):
         remote, home_a, home_b = tmp_path / "remote", tmp_path / "A", tmp_path / "B"
         _seed_task(home_a, "task-a", "from A")
         self._cycle(home_a, remote, "A", "t1", "shared passphrase", monkeypatch)
-        # B has the WRONG passphrase: every pulled object fails its tag, so nothing merges.
-        report = self._cycle(home_b, remote, "B", "t2", "a different passphrase", monkeypatch)
+        report = self._cycle(
+            home_b, remote, "B", "t2", "a different passphrase", monkeypatch
+        )
         assert report.ok, report.error
         assert not (
             home_b / "tasks" / "task-a.json"
@@ -787,8 +881,12 @@ class TestCriterion8EndToEnd:
         ):
             r = self._cycle(home, remote, who, now, "shared passphrase", monkeypatch)
             assert r.ok, r.error
-        assert (home_b / "tasks" / "task-a.json").exists(), "A's task did not converge onto B"
-        assert (home_a / "tasks" / "task-b.json").exists(), "B's task did not converge onto A"
+        assert (
+            home_b / "tasks" / "task-a.json"
+        ).exists(), "A's task did not converge onto B"
+        assert (
+            home_a / "tasks" / "task-b.json"
+        ).exists(), "B's task did not converge onto A"
 
     def test_a_planted_plaintext_object_is_skipped_permanently_not_looped(
         self, tmp_path, monkeypatch, caplog
@@ -797,16 +895,16 @@ class TestCriterion8EndToEnd:
         _seed_task(home_a, "task-a", "from A")
         self._cycle(home_a, remote, "A", "t1", "shared passphrase", monkeypatch)
 
-        # An attacker (or a misconfigured peer) drops a PLAINTEXT object into A's seq.
         target = next(remote.glob("machines/A/seq-0001/**/*.jsonl"))
         target.write_bytes(b'{"id": "smuggled", "title": "plaintext"}\n')
 
-        from gideon.durability.cursor import Cursor
+        from gideon.operations.durability.cursor import Cursor
 
         with caplog.at_level(logging.WARNING):
-            r1 = self._cycle(home_b, remote, "B", "t2", "shared passphrase", monkeypatch)
+            r1 = self._cycle(
+                home_b, remote, "B", "t2", "shared passphrase", monkeypatch
+            )
         assert r1.ok, r1.error
-        # The cursor ADVANCED past it — the permanent-skip contract.
         assert Cursor(home_b / "sync").seen().get("A") == 1, (
             "the cursor did not advance past a permanently-skipped seq — this is the loop "
             "§4.4 forbids"
@@ -815,7 +913,6 @@ class TestCriterion8EndToEnd:
             "encrypt" in m.lower() or "skip" in m.lower()
             for m in (r.getMessage() for r in caplog.records)
         ), "the skip was not logged"
-        # A second cycle does not re-pull it (no loop).
         r2 = self._cycle(home_b, remote, "B", "t3", "shared passphrase", monkeypatch)
         assert r2.ok
         assert Cursor(home_b / "sync").seen().get("A") == 1
@@ -828,26 +925,29 @@ class TestCriterion8EndToEnd:
         report = self._cycle(home, remote, "A", "t1", "", monkeypatch)
         assert report.ok is False
         assert "encryption" in report.error
-        pushed = [p for p in remote.rglob("*") if p.is_file()] if remote.exists() else []
-        assert pushed == [], f"bytes reached the remote after a fail-closed refusal: {pushed}"
-
-
-# ── criterion 7: secrets never reach a transport, encrypted or not ───────────
+        pushed = (
+            [p for p in remote.rglob("*") if p.is_file()] if remote.exists() else []
+        )
+        assert (
+            pushed == []
+        ), f"bytes reached the remote after a fail-closed refusal: {pushed}"
 
 
 class TestCriterion7SecretsNeverTransported:
     @pytest.mark.parametrize("encrypt", ["on", "off"])
-    def test_no_secret_file_content_is_ever_pushed(self, tmp_path, monkeypatch, encrypt):
+    def test_no_secret_file_content_is_ever_pushed(
+        self, tmp_path, monkeypatch, encrypt
+    ):
         """`secret=True` entries are excluded BEFORE any transport sees bytes, independent
-        of encryption (§4.4's last line). Asserted on the pushed bytes, not on a list."""
-        from gideon.durability import crypto as crypto_mod
-        from gideon.durability.shards import machine_id
-        from gideon.durability.sync_cycle import run_sync_cycle
+        of encryption (§4.4's last line). Asserted on the pushed bytes, not on a list.
+        """
+        from gideon.operations.durability import crypto as crypto_mod
+        from gideon.operations.durability.shards import machine_id
+        from gideon.operations.durability.sync_cycle import run_sync_cycle
 
         remote, home = tmp_path / "remote", tmp_path / "A"
         _seed_task(home, "task-a", "ordinary row")
-        # Plant a real-shaped secret in every secret path the inventory declares.
-        from gideon.durability import inventory as inv
+        from gideon.operations.durability import inventory as inv
 
         planted = []
         for rel in inv.secret_paths():
@@ -873,15 +973,12 @@ class TestCriterion7SecretsNeverTransported:
             assert marker not in blob, f"{marker!r} named in a transported object"
 
 
-# ── the SDK boundary a transport app builds against ─────────────────────────
-
-
 class TestSdkSurface:
     """Drives each export the way a transport app would — through the facade, by name.
 
     Written as real USE rather than `hasattr` on purpose. The two transport apps that will
     consume these live in the sibling apps repo, so nothing in THIS repo would otherwise
-    exercise them, and `scripts/generate_inert_surface_baseline.py` would (correctly) report
+    exercise them, and `tooling/scripts/generate_inert_surface_baseline.py` would (correctly) report
     seven declared-but-inert `sdk_export` surfaces. The right answer to that gate is a real
     consumer, not a widened baseline.
     """
@@ -892,8 +989,12 @@ class TestSdkSurface:
         assert SYNC.allow_only is True and SYNC.allow_hosts == ()
         policy = sync_egress_policy("https://minio.example.com:9000")
         assert policy.allow_hosts == ("minio.example.com",)
-        assert evaluate("https://minio.example.com/b/o", policy, resolver=_fake_dns).allow
-        assert not evaluate("https://elsewhere.example.com/b/o", policy, resolver=_fake_dns).allow
+        assert evaluate(
+            "https://minio.example.com/b/o", policy, resolver=_fake_dns
+        ).allow
+        assert not evaluate(
+            "https://elsewhere.example.com/b/o", policy, resolver=_fake_dns
+        ).allow
         with pytest.raises(SyncEndpointRefused):
             sync_egress_policy("")
 
@@ -908,7 +1009,9 @@ class TestSdkSurface:
         from gideon.sdk.sync import PASSPHRASE_CREDENTIAL
 
         assert PASSPHRASE_CREDENTIAL == "GIDEON_SYNC_PASSPHRASE"
-        assert "passphrase" not in PASSPHRASE_CREDENTIAL.lower().replace("_passphrase", "")
+        assert "passphrase" not in PASSPHRASE_CREDENTIAL.lower().replace(
+            "_passphrase", ""
+        )
 
     def test_the_contract_types_are_importable_by_name(self):
         from gideon.sdk.sync import (

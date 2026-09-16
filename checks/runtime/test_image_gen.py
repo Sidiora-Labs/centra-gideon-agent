@@ -1,6 +1,6 @@
 """Image-generation capability — ABC contract, registry resolution, OpenAI adapter.
 
-Mirrors tests/test_remote_audio_providers.py (the STT/TTS template): a remote
+Mirrors checks/runtime/test_remote_audio_providers.py (the STT/TTS template): a remote
 image model selected in active_models.json resolves through the typed registry,
 which builds one adapter per OpenAI-family config provider keyed by config name.
 The ABC's load-bearing deviation is async generate()/edit() so a provider can hide
@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from gideon.image_gen.provider import (
+from gideon.integrations.image_gen.provider import (
     ImageGenError,
     ImageGenModel,
     ImageGenProvider,
@@ -20,7 +20,6 @@ from gideon.image_gen.provider import (
 )
 
 
-# ── A fake provider that proves the async-internally (submit->poll) contract ──
 class _FakePollProvider(ImageGenProvider):
     """Hides an internal poll loop behind async generate() — the FAL shape."""
 
@@ -42,18 +41,22 @@ class _FakePollProvider(ImageGenProvider):
         return [ImageGenModel(name="fake-1", sizes=["1024x1024"], supports_edit=True)]
 
     async def generate(self, prompt, *, model="", size="", n=1, **opts):
-        # simulate submit -> poll-until-ready, fully hidden from the caller
         for _ in range(3):
             self.polls += 1
             await asyncio.sleep(0)
         return [
-            ImageResult(local_path=f"/cache/{prompt[:4]}.png", mime="image/png") for _ in range(n)
+            ImageResult(local_path=f"/cache/{prompt[:4]}.png", mime="image/png")
+            for _ in range(n)
         ]
 
-    async def edit(self, prompt, *, source_image, mask="", model="", size="", n=1, **opts):
+    async def edit(
+        self, prompt, *, source_image, mask="", model="", size="", n=1, **opts
+    ):
         self.polls += 1
         return [
-            ImageResult(local_path="/cache/edited.png", mime="image/png", revised_prompt=prompt)
+            ImageResult(
+                local_path="/cache/edited.png", mime="image/png", revised_prompt=prompt
+            )
         ]
 
 
@@ -63,7 +66,7 @@ class TestImageGenABC:
         prov = _FakePollProvider()
         out = await prov.generate("a red cube", n=2)
         assert len(out) == 2
-        assert prov.polls == 3  # the loop ran internally; caller never saw it
+        assert prov.polls == 3
         assert all(r.local_path for r in out)
 
     @pytest.mark.asyncio
@@ -79,7 +82,6 @@ class TestImageGenABC:
         assert await prov.delete_model("x") is False
 
 
-# ── Registry resolves a remote selection (STT-pattern) ──
 class TestImageGenRegistry:
     @pytest.fixture(autouse=True)
     def _reset_registry(self, monkeypatch):
@@ -88,14 +90,14 @@ class TestImageGenRegistry:
         early-returns on the _auto_registered flag, so if an earlier test set it, the
         mocked providers never get registered and _providers stays empty (the flaky
         full-suite failure). Reset BOTH."""
-        from gideon.image_gen import registry as ir
+        from gideon.integrations.image_gen import registry as ir
 
         monkeypatch.setattr(ir, "_providers", {}, raising=False)
         monkeypatch.setattr(ir, "_auto_registered", False, raising=False)
 
     def test_active_image_gen_resolves_remote(self, monkeypatch):
-        from gideon.image_gen import registry as ir
-        from gideon.providers import use_cases as uc
+        from gideon.extensions.providers import use_cases as uc
+        from gideon.integrations.image_gen import registry as ir
 
         monkeypatch.setattr(ir, "_providers", {}, raising=False)
         monkeypatch.setattr(
@@ -116,8 +118,8 @@ class TestImageGenRegistry:
         assert model_id == "gpt-image-1"
 
     def test_no_selection_resolves_none(self, monkeypatch):
-        from gideon.image_gen import registry as ir
-        from gideon.providers import use_cases as uc
+        from gideon.extensions.providers import use_cases as uc
+        from gideon.integrations.image_gen import registry as ir
 
         monkeypatch.setattr(ir, "_providers", {}, raising=False)
         monkeypatch.setattr(uc, "openai_family_providers", lambda: [])
@@ -129,8 +131,8 @@ class TestImageGenRegistry:
         stub adapters so a config change re-reads, but PRESERVES a manifest-
         contributed bundle (FAL via ModelTypeHandler) — clearing it would orphan an
         enabled provider the lifecycle, not refresh, owns."""
-        from gideon.image_gen import registry as ir
-        from gideon.providers import use_cases as uc
+        from gideon.extensions.providers import use_cases as uc
+        from gideon.integrations.image_gen import registry as ir
 
         monkeypatch.setattr(
             uc,
@@ -145,16 +147,14 @@ class TestImageGenRegistry:
         )
         monkeypatch.setattr(ir, "_auto_registered", True, raising=False)
         ir.refresh_providers()
-        # remote (by config name) + stub gone; the bundle provider stays
         assert "MyOpenAI" not in ir._providers
         assert "stub" not in ir._providers
         assert "fal" in ir._providers
-        # re-armed so the next resolution rebuilds the transient set
         assert ir._auto_registered is False
 
     @pytest.mark.asyncio
     async def test_list_models_for_provider_shape(self, monkeypatch):
-        from gideon.image_gen import registry as ir
+        from gideon.integrations.image_gen import registry as ir
 
         prov = _FakePollProvider()
         monkeypatch.setattr(ir, "_providers", {"fake": prov}, raising=False)
@@ -171,30 +171,28 @@ class TestModelTypeHandlerImageGen:
     registry on enable/disable — the single source of truth for resolution."""
 
     def _ext(self):
-        from gideon.providers.registry import RegisteredProvider
+        from gideon.extensions.providers.registry import RegisteredProvider
 
         class _Cfg:
             capabilities = ["image_gen"]
 
-        # RegisteredProvider needs a provider_config with .capabilities; a tiny
-        # stand-in keeps the test independent of the full manifest schema.
         rp = RegisteredProvider.__new__(RegisteredProvider)
         rp.name = "fake-img"
         rp.provider_config = _Cfg()
         return rp
 
     def test_register_adds_to_image_gen_registry(self, monkeypatch):
-        from gideon.image_gen import registry as ir
-        from gideon.providers.registry import ModelTypeHandler
+        from gideon.extensions.providers.registry import ModelTypeHandler
+        from gideon.integrations.image_gen import registry as ir
 
         monkeypatch.setattr(ir, "_providers", {}, raising=False)
         prov = _FakePollProvider()
         ModelTypeHandler().register(self._ext(), prov)
-        assert ir.get_provider("fake") is prov  # _FakePollProvider.name == "fake"
+        assert ir.get_provider("fake") is prov
 
     def test_deregister_removes_from_image_gen_registry(self, monkeypatch):
-        from gideon.image_gen import registry as ir
-        from gideon.providers.registry import ModelTypeHandler
+        from gideon.extensions.providers.registry import ModelTypeHandler
+        from gideon.integrations.image_gen import registry as ir
 
         prov = _FakePollProvider()
         monkeypatch.setattr(ir, "_providers", {"fake": prov}, raising=False)
@@ -202,11 +200,10 @@ class TestModelTypeHandlerImageGen:
         assert ir.get_provider("fake") is None
 
 
-# ── OpenAI adapter behavior ──
 class TestOpenAIImageProvider:
     @pytest.mark.asyncio
     async def test_unavailable_without_key(self):
-        from gideon.image_gen.openai_provider import OpenAIImageProvider
+        from gideon.integrations.image_gen.openai_provider import OpenAIImageProvider
 
         prov = OpenAIImageProvider(provider_name="X", endpoint="", api_key="")
         with patch.dict("os.environ", {}, clear=True):
@@ -214,9 +211,11 @@ class TestOpenAIImageProvider:
 
     @pytest.mark.asyncio
     async def test_generate_parses_b64(self):
-        from gideon.image_gen.openai_provider import OpenAIImageProvider
+        from gideon.integrations.image_gen.openai_provider import OpenAIImageProvider
 
-        item = MagicMock(b64_json="aGVsbG8=", url=None, revised_prompt="a tidy red cube")
+        item = MagicMock(
+            b64_json="aGVsbG8=", url=None, revised_prompt="a tidy red cube"
+        )
         fake_client = MagicMock()
         fake_client.images.generate = AsyncMock(return_value=MagicMock(data=[item]))
         fake_client.close = AsyncMock()
@@ -225,7 +224,9 @@ class TestOpenAIImageProvider:
 
         prov = OpenAIImageProvider(provider_name="X", endpoint="", api_key="sk-x")
         with patch.dict("sys.modules", {"openai": fake_openai}):
-            out = await prov.generate("a red cube", model="gpt-image-1", size="1024x1024")
+            out = await prov.generate(
+                "a red cube", model="gpt-image-1", size="1024x1024"
+            )
         assert len(out) == 1
         assert out[0].b64 == "aGVsbG8="
         assert out[0].revised_prompt == "a tidy red cube"
@@ -235,7 +236,7 @@ class TestOpenAIImageProvider:
 
     @pytest.mark.asyncio
     async def test_generate_parses_url(self):
-        from gideon.image_gen.openai_provider import OpenAIImageProvider
+        from gideon.integrations.image_gen.openai_provider import OpenAIImageProvider
 
         item = MagicMock(b64_json=None, url="https://x/img.png", revised_prompt="")
         fake_client = MagicMock()
@@ -251,7 +252,7 @@ class TestOpenAIImageProvider:
 
     @pytest.mark.asyncio
     async def test_edit_sends_source_image(self, tmp_path):
-        from gideon.image_gen.openai_provider import OpenAIImageProvider
+        from gideon.integrations.image_gen.openai_provider import OpenAIImageProvider
 
         src = tmp_path / "src.png"
         src.write_bytes(b"\x89PNG\r\n")
@@ -264,13 +265,15 @@ class TestOpenAIImageProvider:
 
         prov = OpenAIImageProvider(provider_name="X", endpoint="", api_key="sk-x")
         with patch.dict("sys.modules", {"openai": fake_openai}):
-            out = await prov.edit("make it blue", source_image=str(src), model="gpt-image-1")
+            out = await prov.edit(
+                "make it blue", source_image=str(src), model="gpt-image-1"
+            )
         assert out[0].b64 == "ZWRpdA=="
         assert "image" in fake_client.images.edit.call_args.kwargs
 
     @pytest.mark.asyncio
     async def test_no_key_raises_clean_error(self):
-        from gideon.image_gen.openai_provider import OpenAIImageProvider
+        from gideon.integrations.image_gen.openai_provider import OpenAIImageProvider
 
         fake_openai = MagicMock()
         fake_openai.AsyncOpenAI = MagicMock()
@@ -284,7 +287,7 @@ class TestOpenAIImageProvider:
 
     @pytest.mark.asyncio
     async def test_empty_response_raises(self):
-        from gideon.image_gen.openai_provider import OpenAIImageProvider
+        from gideon.integrations.image_gen.openai_provider import OpenAIImageProvider
 
         fake_client = MagicMock()
         fake_client.images.generate = AsyncMock(return_value=MagicMock(data=[]))
@@ -298,13 +301,13 @@ class TestOpenAIImageProvider:
 
     @pytest.mark.asyncio
     async def test_list_models_marks_active(self, monkeypatch, _openai_image_catalog):
-        from gideon.image_gen.openai_provider import OpenAIImageProvider
+        from gideon.integrations.image_gen.openai_provider import OpenAIImageProvider
 
         prov = OpenAIImageProvider(
             provider_name="X", provider_type="openai", endpoint="", api_key="sk-x"
         )
         monkeypatch.setattr(
-            "gideon.image_gen.registry.active_image_gen",
+            "gideon.integrations.image_gen.registry.active_image_gen",
             lambda: (prov, "gpt-image-1"),
         )
         models = await prov.list_models()
@@ -318,25 +321,25 @@ class TestStubProvider:
     async def test_stub_generates_valid_png_deterministic(self):
         import base64
 
-        from gideon.image_gen.stub_provider import StubImageProvider
+        from gideon.integrations.image_gen.stub_provider import StubImageProvider
 
         prov = StubImageProvider()
         a = await prov.generate("a red leaf")
         b = await prov.generate("a red leaf")
         c = await prov.generate("a blue car")
         assert base64.b64decode(a[0].b64)[:8] == b"\x89PNG\r\n\x1a\n"
-        assert a[0].b64 == b[0].b64  # deterministic per prompt
-        assert a[0].b64 != c[0].b64  # distinct per prompt
+        assert a[0].b64 == b[0].b64
+        assert a[0].b64 != c[0].b64
         assert "stub render of: a red leaf" in a[0].revised_prompt
 
     @pytest.mark.asyncio
     async def test_stub_edit_differs_from_generate(self):
-        from gideon.image_gen.stub_provider import StubImageProvider
+        from gideon.integrations.image_gen.stub_provider import StubImageProvider
 
         prov = StubImageProvider()
         g = await prov.generate("x")
         e = await prov.edit("x", source_image="/tmp/x.png")
-        assert g[0].b64 != e[0].b64  # edit is a visibly distinct shade
+        assert g[0].b64 != e[0].b64
 
 
 @pytest.fixture
@@ -344,7 +347,7 @@ def _openai_image_catalog():
     """Contribute OpenAI's image catalog under the ``openai`` provider type (the
     openai-models app does this on load) so the core adapter — now catalog-driven,
     not host-sniffing — can resolve it. Cleaned up after the test."""
-    from gideon.media_catalogs import (
+    from gideon.integrations.media_catalogs import (
         MediaCatalog,
         MediaModel,
         register_media_catalog,
@@ -357,10 +360,16 @@ def _openai_image_catalog():
         MediaCatalog(
             models=(
                 MediaModel(
-                    name="gpt-image-1", extra={"sizes": ["1024x1024"], "supports_edit": True}
+                    name="gpt-image-1",
+                    extra={"sizes": ["1024x1024"], "supports_edit": True},
                 ),
-                MediaModel(name="dall-e-3", extra={"sizes": ["1024x1024"], "supports_edit": False}),
-                MediaModel(name="dall-e-2", extra={"sizes": ["256x256"], "supports_edit": True}),
+                MediaModel(
+                    name="dall-e-3",
+                    extra={"sizes": ["1024x1024"], "supports_edit": False},
+                ),
+                MediaModel(
+                    name="dall-e-2", extra={"sizes": ["256x256"], "supports_edit": True}
+                ),
             ),
             default_model="gpt-image-1",
         ),
@@ -371,7 +380,7 @@ def _openai_image_catalog():
 
 class TestOpenAIImageCatalogByType:
     """The image adapter serves a vendor's curated catalog by PROVIDER TYPE, from the
-    catalog that vendor's app contributed (gideon.media_catalogs) — no
+    catalog that vendor's app contributed (gideon.integrations.media_catalogs) — no
     api.openai.com host-sniff, no OpenAI model ids hard-coded in core. A provider type
     with a contributed catalog (``openai``) surfaces + defaults to it; a type with no
     contribution (``openai_compatible`` = a bring-your-own/other-vendor endpoint like
@@ -379,7 +388,7 @@ class TestOpenAIImageCatalogByType:
 
     @pytest.mark.asyncio
     async def test_openai_type_lists_curated_models(self, _openai_image_catalog):
-        from gideon.image_gen.openai_provider import OpenAIImageProvider
+        from gideon.integrations.image_gen.openai_provider import OpenAIImageProvider
 
         prov = OpenAIImageProvider(
             provider_name="OpenAI", provider_type="openai", endpoint="", api_key="sk-x"
@@ -391,20 +400,23 @@ class TestOpenAIImageCatalogByType:
     async def test_openai_type_lists_curated_models_regardless_of_endpoint(
         self, _openai_image_catalog
     ):
-        from gideon.image_gen.openai_provider import OpenAIImageProvider
+        from gideon.integrations.image_gen.openai_provider import OpenAIImageProvider
 
-        # Catalog is keyed by TYPE, not endpoint host — an explicit OpenAI host still works.
         prov = OpenAIImageProvider(
             provider_name="OpenAI",
             provider_type="openai",
             endpoint="https://api.openai.com/v1",
             api_key="sk-x",
         )
-        assert {m.name for m in await prov.list_models()} == {"gpt-image-1", "dall-e-3", "dall-e-2"}
+        assert {m.name for m in await prov.list_models()} == {
+            "gpt-image-1",
+            "dall-e-3",
+            "dall-e-2",
+        }
 
     @pytest.mark.asyncio
     async def test_uncontributed_type_lists_no_models(self):
-        from gideon.image_gen.openai_provider import OpenAIImageProvider
+        from gideon.integrations.image_gen.openai_provider import OpenAIImageProvider
 
         prov = OpenAIImageProvider(
             provider_name="Alibaba",
@@ -412,11 +424,11 @@ class TestOpenAIImageCatalogByType:
             endpoint="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
             api_key="sk-x",
         )
-        assert await prov.list_models() == []  # no contributed catalog for this type
+        assert await prov.list_models() == []
 
     @pytest.mark.asyncio
     async def test_uncontributed_type_unpinned_generate_raises(self):
-        from gideon.image_gen.openai_provider import OpenAIImageProvider
+        from gideon.integrations.image_gen.openai_provider import OpenAIImageProvider
 
         prov = OpenAIImageProvider(
             provider_name="Alibaba",
@@ -425,11 +437,11 @@ class TestOpenAIImageCatalogByType:
             api_key="sk-x",
         )
         with pytest.raises(ImageGenError) as exc:
-            await prov.generate("a cat")  # no model= → must NOT fall back to a bogus id
+            await prov.generate("a cat")
         assert "no contributed default" in str(exc.value)
 
     def test_pinned_model_wins_on_any_type(self):
-        from gideon.image_gen.openai_provider import OpenAIImageProvider
+        from gideon.integrations.image_gen.openai_provider import OpenAIImageProvider
 
         prov = OpenAIImageProvider(
             provider_name="Alibaba",
@@ -437,5 +449,4 @@ class TestOpenAIImageCatalogByType:
             endpoint="https://dashscope-intl.aliyuncs.com/v1",
             api_key="k",
         )
-        # An explicit model is honored even for an uncontributed type.
         assert prov._default_model("wan2.7-image") == "wan2.7-image"

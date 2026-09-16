@@ -1,6 +1,6 @@
 """Append-only guard for the WIRE error-code registry (`gideon.http_errors`).
 
-The peer of ``tests/test_error_codes_append_only.py``, which guards the *agent*
+The peer of ``checks/runtime/test_error_codes_append_only.py``, which guards the *agent*
 registry (``errors.ERROR_CODES``, ``ERR_UPPER_SNAKE``). This one guards the *wire*
 registry (``http_errors.HTTP_ERROR_CODES``, ``lowercase_snake``).
 
@@ -31,11 +31,9 @@ import re
 
 from test_wire_error_envelope_census import EMITTER_SITE_FLOOR, scan
 
-from gideon.errors import ERROR_CODES
+from gideon.core.errors import ERROR_CODES
 from gideon.http_errors import HTTP_ERROR_CODES, json_error
 
-# The wire codes released as of PL-8. APPEND a row here only when a code is actually
-# released; never edit or delete an existing row.
 _RELEASED: dict[str, str] = {
     "bad_request": "The request was malformed or carried an unusable parameter.",
     "invalid_request": "The request was well-formed JSON but failed validation.",
@@ -83,7 +81,9 @@ _RELEASED: dict[str, str] = {
     "prompt_card_failed": "Rendering the prompt card failed.",
     "prompt_card_rejected": "The submitted prompt card was rejected.",
     "rejection_incomplete": "A rejection must carry a reason.",
-    "research_reports_unavailable": ("Scheduled research reports are not available in this build."),
+    "research_reports_unavailable": (
+        "Scheduled research reports are not available in this build."
+    ),
     "consent_required": "The cloned voice's consent record is not verified.",
     "artifact_missing": "The addressed voice artifact does not exist.",
     "artifact_not_readable": "The voice artifact exists but is not readable.",
@@ -103,33 +103,15 @@ _RELEASED: dict[str, str] = {
 
 _CODE_RE = re.compile(r"^[a-z0-9]+(?:_[a-z0-9]+)*$")
 
-#: Emitter call sites whose code is an expression (``exc.reason``, an f-string, a
-#: local). A CEILING: an f-string is the one place a brand-new, unregistered wire
-#: code can enter without this rail noticing, so the number of such sites may not
-#: grow. Measured at PL-8: 13 in voice_profiles (``exc.reason``), 2 in packs
-#: (``f"pack_refused_{...}"``), 1 in devices (a local chosen from its constants).
-#:
-#: 17th (EA-2): ``inbound/openai_dialect.openai_error`` forwards a keyword-only ``code``
-#: parameter into :func:`json_error`. It is NOT the hazard this ceiling describes — no
-#: code is COMPUTED anywhere on that path; every one of its call sites passes a bare
-#: literal, so nothing can be minted that a static reader cannot see. The scanner's
-#: existing wrapper-following resolves ``json_response`` PAYLOAD wrappers and module-level
-#: string constants, neither of which covers a forwarded code parameter, so the site reads
-#: as dynamic despite being fully enumerable.
-#:
-#: The hole that indirection would otherwise open is closed one level up instead, by
-#: ``tests/test_ea2_openai_dialect.py::test_every_dialect_error_code_is_a_registered_literal``
-#: — it parses that module, asserts every ``openai_error`` call passes a literal, and
-#: asserts each of those literals is in ``HTTP_ERROR_CODES``. That is the same guarantee
-#: this ceiling protects, proven at the indirection level that actually exists. Raising
-#: this number for a computed code would still be wrong.
 _DYNAMIC_CODE_SITE_CEILING = 17
 
 
 def test_every_released_code_is_still_present():
     """No released wire code may be removed — a client branching on it must not break."""
     missing = [c for c in _RELEASED if c not in HTTP_ERROR_CODES]
-    assert not missing, f"released wire codes removed (append-only violation): {missing}"
+    assert (
+        not missing
+    ), f"released wire codes removed (append-only violation): {missing}"
 
 
 def test_released_meanings_are_unchanged():
@@ -155,7 +137,9 @@ def test_the_two_envelopes_stay_disjoint():
     NOT merged. An overlapping key would make the two indistinguishable.
     """
     overlap = set(HTTP_ERROR_CODES) & set(ERROR_CODES)
-    assert not overlap, f"a code appears in BOTH the wire and agent registries: {overlap}"
+    assert (
+        not overlap
+    ), f"a code appears in BOTH the wire and agent registries: {overlap}"
     assert all(c != c.upper() for c in HTTP_ERROR_CODES), "a wire code is UPPER_SNAKE"
 
 
@@ -167,7 +151,7 @@ def test_every_code_has_a_nonempty_meaning():
 def test_every_emitted_code_is_registered():
     """The registry cannot fall behind the emitter.
 
-    Walks every ``json_error`` call site in ``src/gideon`` and resolves its code
+    Walks every ``json_error`` call site in ``runtime/gideon`` and resolves its code
     statically (a literal, or one level of module-constant indirection). Every resolved
     code must have a registry row — that is what makes the registry the contract rather
     than a decorative list.
@@ -178,7 +162,9 @@ def test_every_emitted_code_is_registered():
         f"below the {EMITTER_SITE_FLOOR} the census counted — the matcher stopped "
         f"matching, so a clean result here means nothing. Fix the scan before trusting it."
     )
-    assert census.emitter_literal_codes, "no code resolved statically — the resolver is broken"
+    assert (
+        census.emitter_literal_codes
+    ), "no code resolved statically — the resolver is broken"
     unregistered = sorted(
         {
             (code, f"{f}:{ln}")
@@ -208,7 +194,8 @@ def test_dynamic_code_sites_do_not_grow():
     assert len(census.emitter_dynamic_sites) <= _DYNAMIC_CODE_SITE_CEILING, (
         f"{len(census.emitter_dynamic_sites)} json_error sites compute their code "
         f"(ceiling {_DYNAMIC_CODE_SITE_CEILING}). Pass a literal so the registry check "
-        f"can see it:\n  " + "\n  ".join(f"{f}:{ln}" for f, ln in census.emitter_dynamic_sites)
+        f"can see it:\n  "
+        + "\n  ".join(f"{f}:{ln}" for f, ln in census.emitter_dynamic_sites)
     )
 
 

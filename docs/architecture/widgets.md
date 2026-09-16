@@ -162,7 +162,7 @@ would let a button reach a read-only provider the tile never declared.
 
 | layer | what | removable by |
 | --- | --- | --- |
-| L0 core | the shipped `web/dist` bundle | nothing — the build owns it |
+| L0 core | the shipped `apps/console/dist` bundle | nothing — the build owns it |
 | L1 app | app pages + app-registered genui components | disabling the app |
 | L2 user/agent | user/agent surface overrides | deleting the override |
 
@@ -184,19 +184,19 @@ is part of L0, agent-written UI cannot brick the app.
 
 | concern | file |
 | --- | --- |
-| the wire: validator, consumers | `web/src/ui/widget/useWidgetActionBridge.ts` |
-| the `[UI]` turn dialect (prefix, clip, publisher) — a LEAF both paths import | `web/src/ui/widget/actionTurn.ts` |
-| genui dual payloads + producer routing | `web/src/ui/genui/actions.ts` |
-| the surface-layer ceiling + safe mode | `web/src/ui/surfaces/layers.ts`, `gideon/dashboard/surface_layers.py` |
+| the wire: validator, consumers | `apps/console/src/ui/widget/useWidgetActionBridge.ts` |
+| the `[UI]` turn dialect (prefix, clip, publisher) — a LEAF both paths import | `apps/console/src/ui/widget/actionTurn.ts` |
+| genui dual payloads + producer routing | `apps/console/src/ui/genui/actions.ts` |
+| the surface-layer ceiling + safe mode | `apps/console/src/ui/surfaces/layers.ts`, `gideon/dashboard/surface_layers.py` |
 | the tile re-fire fence | `gideon/dashboard/tile_actions.py` |
-| the child document + its `isTrusted` gates | `web/src/ui/widget/widgetSrcdoc.ts` |
-| HTML widget host (chat, tile band) | `web/src/ui/widget/WidgetFrame.tsx` |
-| React widget host (height + errors only) | `web/src/ui/widget/ReactWidgetFrame.tsx` |
-| artifact-library preview host | `web/src/ui/content/renderers.tsx` |
-| the EDITMODE block: parse + in-place rewrite | `web/src/ui/widget/editMode.ts` |
-| correction directives: validate + compose one | `web/src/ui/widget/annotate.ts` |
-| the parent half of iteration (batching, save, dispatch) | `web/src/ui/widget/useArtifactIteration.ts` |
-| the tweak/annotate rail | `web/src/ui/widget/ArtifactIterationRail.tsx` |
+| the child document + its `isTrusted` gates | `apps/console/src/ui/widget/widgetSrcdoc.ts` |
+| HTML widget host (chat, tile band) | `apps/console/src/ui/widget/WidgetFrame.tsx` |
+| React widget host (height + errors only) | `apps/console/src/ui/widget/ReactWidgetFrame.tsx` |
+| artifact-library preview host | `apps/console/src/ui/content/renderers.tsx` |
+| the EDITMODE block: parse + in-place rewrite | `apps/console/src/ui/widget/editMode.ts` |
+| correction directives: validate + compose one | `apps/console/src/ui/widget/annotate.ts` |
+| the parent half of iteration (batching, save, dispatch) | `apps/console/src/ui/widget/useArtifactIteration.ts` |
+| the tweak/annotate rail | `apps/console/src/ui/widget/ArtifactIterationRail.tsx` |
 
 ## Where a correction goes
 

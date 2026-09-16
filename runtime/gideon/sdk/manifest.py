@@ -6,7 +6,7 @@ construct these (the loader parses app.json for it), but they're the typed contr
 tooling that validates or generates a manifest.
 """
 
-from gideon.apps.manifest import (  # noqa: F401
+from gideon.extensions.apps.manifest import (
     AppManifest,
     BackendConfig,
     Permissions,
@@ -14,4 +14,10 @@ from gideon.apps.manifest import (  # noqa: F401
     SetupConfig,
 )
 
-__all__ = ["AppManifest", "ProviderConfig", "Permissions", "BackendConfig", "SetupConfig"]
+__all__ = [
+    "AppManifest",
+    "ProviderConfig",
+    "Permissions",
+    "BackendConfig",
+    "SetupConfig",
+]

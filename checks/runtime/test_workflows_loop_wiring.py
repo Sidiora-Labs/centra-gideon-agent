@@ -20,12 +20,12 @@ import json
 
 import pytest
 
-from gideon.workflows import controller as controller_mod
-from gideon.workflows import journal as J
-from gideon.workflows import judge_calibration as jc
-from gideon.workflows import store
-from gideon.workflows.controller import EngineServices, RunController
-from gideon.workflows.models import RunStatus, WorkflowRun
+from gideon.automation.workflows import controller as controller_mod
+from gideon.automation.workflows import journal as J
+from gideon.automation.workflows import judge_calibration as jc
+from gideon.automation.workflows import store
+from gideon.automation.workflows.controller import EngineServices, RunController
+from gideon.automation.workflows.models import RunStatus, WorkflowRun
 
 pytestmark = pytest.mark.anyio
 
@@ -39,13 +39,15 @@ def anyio_backend() -> str:
 def _isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
     return home
 
 
 def _make_run(spec: dict, inputs: dict | None = None, **kw) -> WorkflowRun:
     run = store.create(
-        WorkflowRun(id="", workflow_name=spec.get("name", "wf"), inputs=inputs or {}, **kw)
+        WorkflowRun(
+            id="", workflow_name=spec.get("name", "wf"), inputs=inputs or {}, **kw
+        )
     )
     store.write_spec(run.id, spec)
     return run
@@ -59,7 +61,9 @@ def _noop():
 
 
 class TestSteeringConsumedAtBoundary:
-    async def test_a_queued_instruction_reaches_the_next_iteration_and_is_journaled(self) -> None:
+    async def test_a_queued_instruction_reaches_the_next_iteration_and_is_journaled(
+        self,
+    ) -> None:
         """Criterion 8: a mid-run steer is consumed at the boundary, re-plans, and is recorded.
 
         A `fresh`-session counted loop runs 3 iterations. Before iteration 2 the second
@@ -70,14 +74,12 @@ class TestSteeringConsumedAtBoundary:
 
         async def recorder(prompt, *, use_case="background", output_type=None):
             prompts.append(prompt)
-            # Queue a steer while the first iteration is running, so it is pending at the boundary.
             if len(prompts) == 1:
                 store_run = store.get(run.id)
                 store_run.extra["steering_queue"] = [
                     {"text": "focus on the login flow", "queued_at": "t"}
                 ]
                 store.save(store_run)
-                # The live controller holds its own run object; write through to it too.
                 c.run.extra["steering_queue"] = [
                     {"text": "focus on the login flow", "queued_at": "t"}
                 ]
@@ -89,7 +91,11 @@ class TestSteeringConsumedAtBoundary:
                 "kind": "loop",
                 "id": "l",
                 "config": {"mode": "counted", "n": 3, "session": "fresh"},
-                "body": {"kind": "infer", "id": "b", "config": {"prompt": "work {{iter}}"}},
+                "body": {
+                    "kind": "infer",
+                    "id": "b",
+                    "config": {"prompt": "work {{iter}}"},
+                },
             },
         }
         run = _make_run(spec)
@@ -97,14 +103,14 @@ class TestSteeringConsumedAtBoundary:
         assert await c.run_to_completion(timeout=25) == RunStatus.COMPLETE
 
         steer_events = [r for r in J.ledger(run.id) if r["kind"] == J.STEERING]
-        assert len(steer_events) == 1, "exactly one steering event for one queued instruction"
+        assert (
+            len(steer_events) == 1
+        ), "exactly one steering event for one queued instruction"
         assert steer_events[0]["texts"] == ["focus on the login flow"]
 
-        # The re-plan block reached a later iteration's prompt (R14: re-rank, don't append).
         assert any("focus on the login flow" in p for p in prompts)
         assert any("re-rank your remaining sub-goals" in p for p in prompts)
 
-        # Single-use: the durable queue is empty after consumption.
         assert store.get(run.id).extra.get("steering_queue") == []
 
 
@@ -119,7 +125,9 @@ class TestJudgeVerdictLedger:
                     {
                         "kind": "transform",
                         "id": "work",
-                        "config": {"expr": "the deliverable is a complete and substantial report"},
+                        "config": {
+                            "expr": "the deliverable is a complete and substantial report"
+                        },
                     },
                     {
                         "kind": "gate",
@@ -136,12 +144,12 @@ class TestJudgeVerdictLedger:
 
     async def test_a_passing_judge_emits_a_verdict_with_evidence(self) -> None:
         async def judge(prompt, *, use_case="reasoning", output_type=None):
-            # The contract object, not a bare word (WF2LOO-13): a PASS must cite proof or the
-            # engine refuses it, and this stub is standing in for a judge that did the work.
             return '{"verdict": "PASS", "proof": "read the report; 4 sections present"}'
 
         run = _make_run(self._judge_spec())
-        c = RunController(run, self._judge_spec(), services=EngineServices(completion=judge))
+        c = RunController(
+            run, self._judge_spec(), services=EngineServices(completion=judge)
+        )
         assert await c.run_to_completion(timeout=25) == RunStatus.COMPLETE
         verdicts = [r for r in J.ledger(run.id) if r["kind"] == J.JUDGE_VERDICT]
         assert len(verdicts) == 1
@@ -157,7 +165,9 @@ class TestJudgeVerdictLedger:
             return '{"verdict": "REJECT", "reasoning": "section 3 cites nothing"}'
 
         run = _make_run(self._judge_spec())
-        c = RunController(run, self._judge_spec(), services=EngineServices(completion=judge))
+        c = RunController(
+            run, self._judge_spec(), services=EngineServices(completion=judge)
+        )
         await c.run_to_completion(timeout=25)
         verdicts = [r for r in J.ledger(run.id) if r["kind"] == J.JUDGE_VERDICT]
         assert verdicts, "a rejecting judge still records its verdict"
@@ -167,9 +177,12 @@ class TestJudgeVerdictLedger:
     async def test_a_human_override_records_a_divergence(self) -> None:
         """A judge PASS the human then rejects is a `false_pass` on the ledger (R3)."""
         run = _make_run(self._judge_spec())
-        c = RunController(run, self._judge_spec(), services=EngineServices(completion=_noop()))
-        # The judge already passed this node earlier in the run's history.
-        c.journal.write(J.JUDGE_VERDICT, instance_path="s/acc", node_id="acc", verdict="PASS")
+        c = RunController(
+            run, self._judge_spec(), services=EngineServices(completion=_noop())
+        )
+        c.journal.write(
+            J.JUDGE_VERDICT, instance_path="s/acc", node_id="acc", verdict="PASS"
+        )
         c._emit_judge_divergence("s/acc", "acc", human_approved=False)
         div = [r for r in J.ledger(run.id) if r["kind"] == J.JUDGE_DIVERGENCE]
         assert len(div) == 1
@@ -179,16 +192,22 @@ class TestJudgeVerdictLedger:
 
     async def test_agreement_records_no_divergence(self) -> None:
         run = _make_run(self._judge_spec())
-        c = RunController(run, self._judge_spec(), services=EngineServices(completion=_noop()))
-        c.journal.write(J.JUDGE_VERDICT, instance_path="s/acc", node_id="acc", verdict="PASS")
-        c._emit_judge_divergence("s/acc", "acc", human_approved=True)  # human agrees
+        c = RunController(
+            run, self._judge_spec(), services=EngineServices(completion=_noop())
+        )
+        c.journal.write(
+            J.JUDGE_VERDICT, instance_path="s/acc", node_id="acc", verdict="PASS"
+        )
+        c._emit_judge_divergence("s/acc", "acc", human_approved=True)
         assert not [r for r in J.ledger(run.id) if r["kind"] == J.JUDGE_DIVERGENCE]
 
 
 class TestNoddingLoopBlocksDefault:
     def _verdicts(self, verdict: str, n: int) -> list[jc.VerdictRecord]:
         return [
-            jc.VerdictRecord(run_id=f"r{i}", node_id="acc", template="cadence", verdict=verdict)
+            jc.VerdictRecord(
+                run_id=f"r{i}", node_id="acc", template="cadence", verdict=verdict
+            )
             for i in range(n)
         ]
 
@@ -200,14 +219,17 @@ class TestNoddingLoopBlocksDefault:
         assert "nodding" in reason.lower()
 
     def test_a_discriminating_gate_is_allowed(self) -> None:
-        records = self._verdicts("PASS", jc.NODDING_MIN_RUNS) + self._verdicts("REJECT", 1)
+        records = self._verdicts("PASS", jc.NODDING_MIN_RUNS) + self._verdicts(
+            "REJECT", 1
+        )
         allowed, reason = jc.may_become_default(records, template="cadence")
         assert allowed is True
         assert reason == ""
 
     def test_too_few_runs_is_not_blocked(self) -> None:
-        # A new template with only a couple of clean runs is UNPROVEN, not a nodder.
-        allowed, _ = jc.may_become_default(self._verdicts("PASS", 2), template="cadence")
+        allowed, _ = jc.may_become_default(
+            self._verdicts("PASS", 2), template="cadence"
+        )
         assert allowed is True
 
 
@@ -248,30 +270,30 @@ class TestBreakerNotDoubleRun:
         iters = [r for r in J.ledger(run.id) if r["kind"] == J.ITERATION]
         outcomes = [str(r.get("outcome", "")) for r in iters]
 
-        # The breaker DETECTED it, and it is the only detector that did.
         assert any("breaker:identical_output" in o for o in outcomes), outcomes
         assert not any(
             "max_iterations" in o for o in outcomes
         ), f"it drifted into its cap instead of surfacing — the ladder only delayed: {outcomes}"
 
-        # The response walked the ladder instead of spending a human on the first trip.
         entry = next(iter((run.extra.get("convergence") or {}).values()), {})
         rungs = [d.get("rung") for d in entry.get("log") or []]
         assert rungs, f"a tripped breaker produced no convergence decision: {run.extra}"
-        assert rungs[0] is None, f"the first trip cost a rung instead of a nudge: {rungs}"
-        assert rungs[-1] == "surface", f"the ladder never reached its terminal rung: {rungs}"
+        assert (
+            rungs[0] is None
+        ), f"the first trip cost a rung instead of a nudge: {rungs}"
+        assert (
+            rungs[-1] == "surface"
+        ), f"the ladder never reached its terminal rung: {rungs}"
         assert (
             len([r for r in rungs if r and r != "surface"]) >= 2
         ), f"the middle of the ladder is still unreachable: {rungs}"
 
-        # And it still ends where a human can act on it.
         assert run.status == RunStatus.ESCALATED, run.status
 
 
-# ── until_dry reads the DECLARED progress field (WF2LOO-14) ──
-
-
-def _progress_spec(*, field: str = "new_findings_count", streak: int = 2, cap: int = 6) -> dict:
+def _progress_spec(
+    *, field: str = "new_findings_count", streak: int = 2, cap: int = 6
+) -> dict:
     """A loop shaped like the two shipped templates that declare a progress field.
 
     The shape is the point: the field is emitted by the FIRST stage of a sequence body, and
@@ -338,7 +360,9 @@ def _cycles(values: list, *, field: str = "new_findings_count", emit: bool = Tru
 
 
 def _iteration_outcomes(run_id: str) -> list[str]:
-    return [str(r.get("outcome", "")) for r in J.ledger(run_id) if r["kind"] == J.ITERATION]
+    return [
+        str(r.get("outcome", "")) for r in J.ledger(run_id) if r["kind"] == J.ITERATION
+    ]
 
 
 class TestProgressFieldDecidesDryness:
@@ -356,7 +380,9 @@ class TestProgressFieldDecidesDryness:
         c = RunController(run, spec, services=services)
         assert await c.run_to_completion(timeout=25) == RunStatus.COMPLETE
         outcomes = _iteration_outcomes(run.id)
-        assert len(outcomes) == 2, f"streak 2 must stop at 2 iterations, not the cap: {outcomes}"
+        assert (
+            len(outcomes) == 2
+        ), f"streak 2 must stop at 2 iterations, not the cap: {outcomes}"
         assert outcomes[-1] == "dry_streak"
 
     async def test_reported_progress_does_not_end_the_loop(self) -> None:
@@ -366,7 +392,9 @@ class TestProgressFieldDecidesDryness:
         c = RunController(run, spec, services=services)
         await c.run_to_completion(timeout=25)
         outcomes = _iteration_outcomes(run.id)
-        assert len(outcomes) == 4, f"a loop reporting progress runs to its cap: {outcomes}"
+        assert (
+            len(outcomes) == 4
+        ), f"a loop reporting progress runs to its cap: {outcomes}"
         assert "dry_streak" not in outcomes
 
     async def test_progress_resets_the_streak(self) -> None:
@@ -382,7 +410,8 @@ class TestProgressFieldDecidesDryness:
 
     async def test_an_absent_field_does_not_cut_the_loop_short(self) -> None:
         """The body forgot the key. Falling back to the whole-output rule keeps working;
-        reading absence as dryness would end a productive run after `streak` iterations."""
+        reading absence as dryness would end a productive run after `streak` iterations.
+        """
         spec = _progress_spec(streak=2, cap=4)
         run = _make_run(spec)
         services = EngineServices(completion=_cycles([0, 0, 0, 0], emit=False))

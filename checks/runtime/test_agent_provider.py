@@ -15,13 +15,10 @@ from __future__ import annotations
 
 import asyncio
 
-from gideon.agents.provider import AgentProvider, ReadinessStatus
-from gideon.agents.registry import (
-    get_agent_provider_class,
-    list_agent_providers,
-)
-from gideon.llm.acp_agent import AcpAgentProvider
-from gideon.llm.base import ModelProvider
+from gideon.engine.agents.provider import AgentProvider, ReadinessStatus
+from gideon.engine.agents.registry import get_agent_provider_class, list_agent_providers
+from gideon.integrations.llm.acp_agent import AcpAgentProvider
+from gideon.integrations.llm.base import ModelProvider
 
 
 def test_acp_is_both_axes():
@@ -38,7 +35,6 @@ def test_provider_id_from_command_basename():
 
 def test_registry_resolves_acp_family():
     assert "acp" in list_agent_providers()
-    # Exact-id miss falls back to the prefix family.
     assert get_agent_provider_class("acp:claude-code") is AcpAgentProvider
     assert get_agent_provider_class("acp") is AcpAgentProvider
     assert get_agent_provider_class("does-not-exist") is None
@@ -54,7 +50,9 @@ def test_probe_readiness_no_command_is_error():
 
 def test_probe_readiness_missing_binary_is_not_found():
     status = asyncio.run(
-        AcpAgentProvider.probe_readiness({"command": ["__no_such_acp_bin_zzz__", "--acp"]})
+        AcpAgentProvider.probe_readiness(
+            {"command": ["__no_such_acp_bin_zzz__", "--acp"]}
+        )
     )
     assert status.state == "not_found"
     assert status.ready is False
@@ -68,20 +66,18 @@ def test_probe_timeout_is_timeout_not_needs_login(monkeypatch, tmp_path):
     login_command rides along only as an optional fallback action."""
     import stat
 
-    # Fake present binary so the which() gate passes and start() is attempted.
     bindir = tmp_path / "bin"
     bindir.mkdir()
     fake = bindir / "claude-agent-acp"
     fake.write_text("#!/bin/sh\nexit 0\n")
     fake.chmod(fake.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
-    async def _hang(self):  # start() never completes → wait_for times out
+    async def _hang(self):
         await asyncio.sleep(60)
 
     monkeypatch.setattr(AcpAgentProvider, "start", _hang)
     monkeypatch.setattr(AcpAgentProvider, "shutdown", lambda self: asyncio.sleep(0))
-    # Shrink the probe timeout so the test is fast.
-    import gideon.llm.acp_agent as _m
+    import gideon.integrations.llm.acp_agent as _m
 
     real_wait_for = asyncio.wait_for
 
@@ -98,7 +94,6 @@ def test_probe_timeout_is_timeout_not_needs_login(monkeypatch, tmp_path):
     status = asyncio.run(AcpAgentProvider.probe_readiness(options))
     assert status.state == "timeout"
     assert status.ready is False
-    # login_command attached as an optional fallback, not an assertion of auth.
     assert status.login_command == ["claude", "/login"]
 
 
@@ -118,7 +113,7 @@ def test_probe_timeout_without_declared_login_is_timeout(monkeypatch, tmp_path):
 
     monkeypatch.setattr(AcpAgentProvider, "start", _hang)
     monkeypatch.setattr(AcpAgentProvider, "shutdown", lambda self: asyncio.sleep(0))
-    import gideon.llm.acp_agent as _m
+    import gideon.integrations.llm.acp_agent as _m
 
     real_wait_for = asyncio.wait_for
 
@@ -128,7 +123,9 @@ def test_probe_timeout_without_declared_login_is_timeout(monkeypatch, tmp_path):
     monkeypatch.setattr(_m.asyncio, "wait_for", _fast_wait_for)
 
     status = asyncio.run(
-        AcpAgentProvider.probe_readiness({"command": [str(fake)], "dialect": "test-cli"})
+        AcpAgentProvider.probe_readiness(
+            {"command": [str(fake)], "dialect": "test-cli"}
+        )
     )
     assert status.state == "timeout"
     assert status.login_command == [str(fake)]
@@ -162,8 +159,7 @@ def test_probe_auth_signal_is_needs_login(monkeypatch, tmp_path):
 
 
 def test_agent_provider_abc_stateless_defaults_are_total():
-    # A minimal non-ACP AgentProvider only implements the abstractmethods; every
-    # capability accessor the SessionManager touches must have a working default.
+    # capability accessor the ConversationDirectory touches must have a working default.
     class _Tiny(AgentProvider):
         @property
         def provider_id(self) -> str:
@@ -185,9 +181,6 @@ def test_agent_provider_abc_stateless_defaults_are_total():
     assert t.agent_model == ""
     assert t.agent_name == ""
     assert t.resumed is False
-    # 2-arg set_session_key (warm-pool claim path) must not raise.
     t.set_session_key("k", "chan")
     t.set_resume("sid")
-    # Unknown, NOT 0.0: a provider that measures nothing must not report a number
-    # a consumer would then render as "context 0%".
     assert t.context_usage_pct() is None

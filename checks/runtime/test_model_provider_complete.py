@@ -27,14 +27,12 @@ from typing import Any
 
 import pytest
 
-from gideon.llm.base import (
+from gideon.integrations.llm.base import (
     EVENT_COMPLETE,
     EVENT_TEXT_CHUNK,
     EVENT_TOOL_CALL,
 )
-from gideon.llm.credentials import Credential
-
-# ── Fakes for the openai SDK (mirror tests/test_provider_openai.py) ──────
+from gideon.integrations.llm.credentials import Credential
 
 
 class _FakeStream:
@@ -61,7 +59,9 @@ class _FakeChoice:
 
 
 class _FakeDelta:
-    def __init__(self, content: str | None = None, tool_calls: list[Any] | None = None) -> None:
+    def __init__(
+        self, content: str | None = None, tool_calls: list[Any] | None = None
+    ) -> None:
         self.content = content
         self.tool_calls = tool_calls
 
@@ -145,9 +145,6 @@ def fake_openai(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
     return fake
 
 
-# ── Fakes for the anthropic SDK (mirror tests/test_provider_anthropic.py) ─
-
-
 class _FakeStreamIter:
     def __init__(self, events: list[Any]) -> None:
         self._events = events
@@ -212,21 +209,15 @@ def _cred() -> Credential:
     return Credential(name="x", kind="api_key", secret="sk-test", source="env")
 
 
-# ── supports_tools flags ────────────────────────────────────────────────
-
-
 def test_supports_tools_flags() -> None:
     """Each core-resident provider declares the supports_tools value the loop branches
     on. (Model-provider apps — ollama/bedrock/vllm — assert their supports_tools in
     their own apps/<name>-models/tests/.)"""
-    from gideon.llm.anthropic import AnthropicProvider
-    from gideon.llm.openai import OpenAIProvider
+    from gideon.integrations.llm.anthropic import AnthropicProvider
+    from gideon.integrations.llm.openai import OpenAIProvider
 
     assert OpenAIProvider.supports_tools is True
     assert AnthropicProvider.supports_tools is True
-
-
-# ── OpenAI complete() ───────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -234,7 +225,7 @@ async def test_openai_complete_sends_full_messages_and_tools(
     fake_openai: types.ModuleType,
 ) -> None:
     """complete() forwards the ENTIRE messages list + tools kwarg to the API."""
-    from gideon.llm.openai import OpenAIProvider
+    from gideon.integrations.llm.openai import OpenAIProvider
 
     chunks = [
         _FakeChunk(choices=[_FakeChoice(delta=_FakeDelta(content="Hi"))]),
@@ -262,18 +253,14 @@ async def test_openai_complete_sends_full_messages_and_tools(
 
     events = [e async for e in provider.complete(messages, tools=tools)]
 
-    # (a) the full messages list was sent, not just the last user message.
     sent = completions.calls[0]["messages"]
     assert sent == messages
     assert len(sent) == 4
-    # (b) tools kwarg forwarded.
     assert completions.calls[0]["tools"] == tools
-    # (d) terminal EVENT_COMPLETE carries usage.
     complete_events = [e for e in events if e.kind == EVENT_COMPLETE]
     assert len(complete_events) == 1
     assert complete_events[0].input_tokens == 12
     assert complete_events[0].output_tokens == 4
-    # stateless: history untouched.
     assert provider._history == []
 
 
@@ -282,10 +269,9 @@ async def test_openai_complete_emits_tool_call_from_streamed_deltas(
     fake_openai: types.ModuleType,
 ) -> None:
     """(c) A scripted streamed tool-call delta yields EVENT_TOOL_CALL with id/title/input."""
-    from gideon.llm.openai import OpenAIProvider
+    from gideon.integrations.llm.openai import OpenAIProvider
 
     chunks = [
-        # id + name on the first fragment; arguments streamed in pieces.
         _FakeChunk(
             choices=[
                 _FakeChoice(
@@ -294,7 +280,9 @@ async def test_openai_complete_emits_tool_call_from_streamed_deltas(
                             _FakeToolCallDelta(
                                 id="call_abc",
                                 index=0,
-                                function=_FakeFunction(name="get_weather", arguments='{"city":'),
+                                function=_FakeFunction(
+                                    name="get_weather", arguments='{"city":'
+                                ),
                             )
                         ]
                     )
@@ -306,21 +294,27 @@ async def test_openai_complete_emits_tool_call_from_streamed_deltas(
                 _FakeChoice(
                     delta=_FakeDelta(
                         tool_calls=[
-                            _FakeToolCallDelta(index=0, function=_FakeFunction(arguments='"sf"}'))
+                            _FakeToolCallDelta(
+                                index=0, function=_FakeFunction(arguments='"sf"}')
+                            )
                         ]
                     )
                 )
             ]
         ),
         _FakeChunk(
-            choices=[_FakeChoice(delta=_FakeDelta(content=None), finish_reason="tool_calls")],
+            choices=[
+                _FakeChoice(delta=_FakeDelta(content=None), finish_reason="tool_calls")
+            ],
             usage=_FakeUsage(prompt_tokens=20, completion_tokens=6),
         ),
     ]
     provider = OpenAIProvider(model="gpt-4o-mini", credential=_cred())
     provider._client.chat = _FakeChat(_FakeChatCompletions(chunks=chunks))
 
-    events = [e async for e in provider.complete([{"role": "user", "content": "weather?"}])]
+    events = [
+        e async for e in provider.complete([{"role": "user", "content": "weather?"}])
+    ]
 
     tool_events = [e for e in events if e.kind == EVENT_TOOL_CALL]
     assert len(tool_events) == 1
@@ -339,7 +333,7 @@ async def test_openai_complete_model_override_and_no_tools_kwarg(
     fake_openai: types.ModuleType,
 ) -> None:
     """model= overrides the configured model; absent tools → no tools kwarg sent."""
-    from gideon.llm.openai import OpenAIProvider
+    from gideon.integrations.llm.openai import OpenAIProvider
 
     chunks = [
         _FakeChunk(choices=[_FakeChoice(delta=_FakeDelta(content="x"))]),
@@ -352,7 +346,12 @@ async def test_openai_complete_model_override_and_no_tools_kwarg(
     provider = OpenAIProvider(model="gpt-4o-mini", credential=_cred())
     provider._client.chat = _FakeChat(completions)
 
-    _ = [e async for e in provider.complete([{"role": "user", "content": "hi"}], model="o3-mini")]
+    _ = [
+        e
+        async for e in provider.complete(
+            [{"role": "user", "content": "hi"}], model="o3-mini"
+        )
+    ]
 
     assert completions.calls[0]["model"] == "o3-mini"
     assert "tools" not in completions.calls[0]
@@ -363,7 +362,7 @@ async def test_openai_complete_retries_without_stream_options_on_bad_request(
     fake_openai: types.ModuleType,
 ) -> None:
     """A 400 mentioning stream_options triggers one retry without it (kept from stream())."""
-    from gideon.llm.openai import OpenAIProvider
+    from gideon.integrations.llm.openai import OpenAIProvider
 
     bad_request = fake_openai.BadRequestError  # type: ignore[attr-defined]
 
@@ -375,7 +374,9 @@ async def test_openai_complete_retries_without_stream_options_on_bad_request(
             return _FakeStream(self._chunks)
 
     chunks = [
-        _FakeChunk(choices=[_FakeChoice(delta=_FakeDelta(content="ok"), finish_reason="stop")]),
+        _FakeChunk(
+            choices=[_FakeChoice(delta=_FakeDelta(content="ok"), finish_reason="stop")]
+        ),
     ]
     completions = _PickyCompletions(chunks=chunks)
     provider = OpenAIProvider(model="gpt-4o-mini", credential=_cred())
@@ -383,7 +384,6 @@ async def test_openai_complete_retries_without_stream_options_on_bad_request(
 
     events = [e async for e in provider.complete([{"role": "user", "content": "hi"}])]
 
-    # Two attempts: first with stream_options (rejected), retry without it.
     assert len(completions.calls) == 2
     assert "stream_options" in completions.calls[0]
     assert "stream_options" not in completions.calls[1]
@@ -391,18 +391,21 @@ async def test_openai_complete_retries_without_stream_options_on_bad_request(
     assert any(e.kind == EVENT_COMPLETE for e in events)
 
 
-# ── Anthropic complete() ────────────────────────────────────────────────
-
-
 def _ms_event(input_tokens: int = 0, output_tokens: int = 0) -> types.SimpleNamespace:
-    usage = types.SimpleNamespace(input_tokens=input_tokens, output_tokens=output_tokens)
+    usage = types.SimpleNamespace(
+        input_tokens=input_tokens, output_tokens=output_tokens
+    )
     message = types.SimpleNamespace(usage=usage)
     return types.SimpleNamespace(type="message_start", message=message)
 
 
-def _content_block_start_tool(index: int, tool_id: str, name: str) -> types.SimpleNamespace:
+def _content_block_start_tool(
+    index: int, tool_id: str, name: str
+) -> types.SimpleNamespace:
     block = types.SimpleNamespace(type="tool_use", id=tool_id, name=name)
-    return types.SimpleNamespace(type="content_block_start", index=index, content_block=block)
+    return types.SimpleNamespace(
+        type="content_block_start", index=index, content_block=block
+    )
 
 
 def _text_delta(index: int, text: str) -> types.SimpleNamespace:
@@ -430,7 +433,7 @@ async def test_anthropic_complete_translates_messages_and_tools(
     fake_anthropic: types.ModuleType,
 ) -> None:
     """System → system= param; OpenAI tool_calls/tool → Anthropic blocks; tools mapped."""
-    from gideon.llm.anthropic import AnthropicProvider
+    from gideon.integrations.llm.anthropic import AnthropicProvider
 
     events = [
         _ms_event(input_tokens=15),
@@ -444,7 +447,6 @@ async def test_anthropic_complete_translates_messages_and_tools(
     provider = AnthropicProvider(model="claude-x", credential=_cred())
     provider._client.messages = msgs
 
-    # OpenAI-shaped conversation incl. a prior assistant tool call + tool result.
     messages = [
         {"role": "system", "content": "be terse"},
         {"role": "user", "content": "weather in sf?"},
@@ -467,7 +469,10 @@ async def test_anthropic_complete_translates_messages_and_tools(
             "function": {
                 "name": "get_weather",
                 "description": "Look up weather",
-                "parameters": {"type": "object", "properties": {"city": {"type": "string"}}},
+                "parameters": {
+                    "type": "object",
+                    "properties": {"city": {"type": "string"}},
+                },
             },
         }
     ]
@@ -475,23 +480,20 @@ async def test_anthropic_complete_translates_messages_and_tools(
     out = [e async for e in provider.complete(messages, tools=tools)]
 
     call = msgs.calls[0]
-    # System extracted to top-level param (not left in messages).
     assert call["system"] == "be terse"
     sent = call["messages"]
     assert all(m["role"] != "system" for m in sent)
-    # user / assistant-tool_use / tool_result(user) — 3 Anthropic messages.
     assert [m["role"] for m in sent] == ["user", "assistant", "user"]
-    # assistant turn carries a text block + a tool_use block with parsed input.
     asst_blocks = sent[1]["content"]
     assert {"type": "text", "text": "let me check"} in asst_blocks
     tool_use = [b for b in asst_blocks if b.get("type") == "tool_use"][0]
     assert tool_use["id"] == "toolu_prev"
     assert tool_use["name"] == "get_weather"
     assert tool_use["input"] == {"city": "sf"}
-    # tool result became a tool_result block in a user turn.
     tr_blocks = sent[2]["content"]
-    assert tr_blocks == [{"type": "tool_result", "tool_use_id": "toolu_prev", "content": "sunny"}]
-    # tools mapped to Anthropic input_schema shape.
+    assert tr_blocks == [
+        {"type": "tool_result", "tool_use_id": "toolu_prev", "content": "sunny"}
+    ]
     assert call["tools"] == [
         {
             "name": "get_weather",
@@ -503,7 +505,6 @@ async def test_anthropic_complete_translates_messages_and_tools(
         }
     ]
 
-    # Tool call emitted + terminal EVENT_COMPLETE with usage.
     tool_events = [e for e in out if e.kind == EVENT_TOOL_CALL]
     assert len(tool_events) == 1
     assert tool_events[0].tool_call_id == "toolu_1"
@@ -514,7 +515,6 @@ async def test_anthropic_complete_translates_messages_and_tools(
     assert len(complete_events) == 1
     assert complete_events[0].input_tokens == 15
     assert complete_events[0].output_tokens == 7
-    # stateless: history untouched.
     assert provider._history == []
 
 
@@ -523,7 +523,7 @@ async def test_anthropic_complete_model_override(
     fake_anthropic: types.ModuleType,
 ) -> None:
     """model= overrides the configured model id for the call."""
-    from gideon.llm.anthropic import AnthropicProvider
+    from gideon.integrations.llm.anthropic import AnthropicProvider
 
     events = [_ms_event(input_tokens=3), _message_delta(output_tokens=1)]
     msgs = _FakeMessages(stream_events=events)
@@ -538,7 +538,237 @@ async def test_anthropic_complete_model_override(
     ]
 
     assert msgs.calls[0]["model"] == "claude-override"
-    # No system message present → no system kwarg sent.
     assert "system" not in msgs.calls[0]
-    # No tools → no tools kwarg sent.
     assert "tools" not in msgs.calls[0]
+
+
+def test_chat_decoder_preserves_parallel_indices_thought_signatures_and_truncation():
+    from gideon.integrations.llm.openai import _ChatDecoder
+
+    decoder = _ChatDecoder()
+    frames = [
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "content": "<thi",
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "left",
+                                "function": {"name": "lookup", "arguments": '{"a":'},
+                            },
+                            {
+                                "index": 1,
+                                "id": "right",
+                                "function": {"name": "search", "arguments": '{"b":'},
+                                "extra_content": {
+                                    "google": {"thought_signature": "signature"}
+                                },
+                            },
+                        ],
+                    }
+                }
+            ]
+        },
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "content": "nk>reason</think>answer",
+                        "tool_calls": [
+                            {"index": 0, "function": {"arguments": "1}"}},
+                            {"index": 1, "function": {"arguments": "2"}},
+                        ],
+                    },
+                    "finish_reason": "length",
+                }
+            ]
+        },
+        {"choices": [], "usage": {"prompt_tokens": 12, "completion_tokens": 8}},
+    ]
+    events = [
+        event for frame in frames for event in decoder.feed(frame)
+    ] + decoder.finish()
+    calls = [event for event in events if event.kind == EVENT_TOOL_CALL]
+    assert [(call.tool_call_id, call.tool_input) for call in calls] == [
+        ("left", '{"a":1}'),
+        ("right", '{"b":2'),
+    ]
+    assert [call.stop_reason for call in calls] == ["length", "length"]
+    assert calls[1].tool_meta == {
+        "extra_content": {"google": {"thought_signature": "signature"}}
+    }
+    assert [(event.kind, event.text) for event in events if event.text] == [
+        ("thinking_chunk", "reason"),
+        ("text_chunk", "answer"),
+    ]
+    assert decoder.answer == ["answer"]
+    assert decoder.finish() == []
+    terminal = decoder.usage.terminal(None)
+    assert (
+        terminal.input_tokens,
+        terminal.output_tokens,
+        terminal.context_usage_pct,
+    ) == (12, 8, None)
+
+
+def test_chat_decoder_defensive_flush_keeps_partial_tag_and_call():
+    from gideon.integrations.llm.openai import _ChatDecoder
+
+    decoder = _ChatDecoder()
+    immediate = decoder.feed(
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "content": "text<thi",
+                        "tool_calls": [
+                            {
+                                "index": 3,
+                                "function": {"name": "pending", "arguments": "{"},
+                            }
+                        ],
+                    }
+                }
+            ]
+        }
+    )
+    final = decoder.finish()
+    assert "".join(event.text for event in immediate + final) == "text<thi"
+    assert final[-1].kind == EVENT_TOOL_CALL
+    assert (final[-1].tool_call_id, final[-1].tool_input, final[-1].stop_reason) == (
+        "call-3",
+        "{",
+        "",
+    )
+
+
+def test_messages_decoder_cache_usage_and_only_unclosed_tool_gets_stop_reason():
+    from gideon.integrations.llm.anthropic import _MessagesDecoder
+
+    decoder = _MessagesDecoder()
+    frames = [
+        {
+            "type": "message_start",
+            "message": {
+                "usage": {
+                    "input_tokens": 200,
+                    "output_tokens": 1,
+                    "cache_creation_input_tokens": 50,
+                    "cache_read_input_tokens": 100,
+                }
+            },
+        },
+        {
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": {"type": "tool_use", "id": "closed", "name": "first"},
+        },
+        {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "input_json_delta", "partial_json": "{}"},
+        },
+        {"type": "content_block_stop", "index": 0},
+        {"type": "content_block_stop", "index": 0},
+        {
+            "type": "content_block_start",
+            "index": 1,
+            "content_block": {"type": "tool_use", "id": "open", "name": "second"},
+        },
+        {
+            "type": "content_block_delta",
+            "index": 1,
+            "delta": {"type": "input_json_delta", "partial_json": "{"},
+        },
+        {
+            "type": "content_block_delta",
+            "index": 2,
+            "delta": {"type": "thinking_delta", "thinking": "reason"},
+        },
+        {
+            "type": "content_block_delta",
+            "index": 3,
+            "delta": {"type": "text_delta", "text": "answer"},
+        },
+        {
+            "type": "message_delta",
+            "delta": {"stop_reason": "max_tokens"},
+            "usage": {"output_tokens": 20},
+        },
+    ]
+    events = [
+        event for frame in frames for event in decoder.feed(frame)
+    ] + decoder.finish()
+    calls = [event for event in events if event.kind == EVENT_TOOL_CALL]
+    assert [(call.tool_call_id, call.stop_reason) for call in calls] == [
+        ("closed", ""),
+        ("open", "max_tokens"),
+    ]
+    terminal = decoder.usage.terminal(0.1)
+    assert (
+        terminal.input_tokens,
+        terminal.output_tokens,
+        terminal.cache_creation_tokens,
+        terminal.cache_read_tokens,
+    ) == (200, 20, 50, 100)
+    assert terminal.context_usage_pct == 0.1
+    assert decoder.answer == ["answer"]
+    assert decoder.finish() == []
+
+
+def test_request_option_precedence_and_reasoning_configuration_without_sdk():
+    from gideon.integrations.llm.anthropic import AnthropicProvider
+    from gideon.integrations.llm.openai import OpenAIProvider
+
+    messages = [{"role": "user", "content": "hello"}]
+    openai_provider = OpenAIProvider.__new__(OpenAIProvider)
+    openai_provider._initialize_conversation()
+    openai_provider._max_tokens = 99
+    openai_provider._extra_options = {"stream_options": None, "temperature": 0.4}
+    request = openai_provider._request(messages, model="gpt-5", reasoning_effort="max")
+    assert request["messages"] is messages
+    assert request["reasoning_effort"] == "high"
+    assert request["stream_options"] is None and request["temperature"] == 0.4
+    assert request["max_tokens"] == 99
+    assert "reasoning_effort" not in openai_provider._request(
+        messages, model="generic", reasoning_effort="high"
+    )
+
+    anthropic_provider = AnthropicProvider.__new__(AnthropicProvider)
+    anthropic_provider._initialize_conversation()
+    anthropic_provider._max_tokens = 4096
+    anthropic_provider._extra_options = {
+        "temperature": 0.3,
+        "max_tokens": 1,
+        "model": "ignored",
+    }
+    request = anthropic_provider._request(
+        messages, model="claude-x", reasoning_effort="high", translate=True
+    )
+    assert request["model"] == "claude-x" and request["max_tokens"] == 4096
+    assert request["thinking"] == {"type": "enabled", "budget_tokens": 3072}
+    assert "temperature" not in request
+    normal = anthropic_provider._request(messages, model="claude-x", translate=False)
+    assert normal["messages"] is messages and normal["temperature"] == 0.3
+    assert "thinking" not in normal
+
+
+def test_conversation_history_context_and_one_shot_images_stay_isolated():
+    from gideon.integrations.llm.openai import OpenAIProvider
+
+    provider = OpenAIProvider.__new__(OpenAIProvider)
+    provider._initialize_conversation()
+    for number in range(51):
+        provider._begin_message(str(number), 50)
+    assert len(provider._history) == 50 and provider._history[0]["content"] == "1"
+    assert provider._record_completion(["answer"], 3.0, remember=False) == 3.0
+    assert provider.context_usage_pct() is None and len(provider._history) == 50
+    assert provider._record_completion(["answer"], 4.0, remember=True) == 4.0
+    assert provider._record_completion([], None, remember=True) == 4.0
+    assert provider._history[-1] == {"role": "assistant", "content": "answer"}
+    assert provider.stage_image_part("data:image/png;base64,AAA")
+    no_user = [{"role": "assistant", "content": "old"}]
+    assert provider._with_pending_image(no_user) is no_user
+    assert provider._pending_image == ""

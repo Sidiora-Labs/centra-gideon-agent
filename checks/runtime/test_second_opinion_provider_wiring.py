@@ -19,8 +19,8 @@ from __future__ import annotations
 
 import asyncio
 
-from gideon.action_providers.base import ActionContext
-from gideon.action_providers.registry import (
+from gideon.integrations.action_providers.base import ActionContext
+from gideon.integrations.action_providers.registry import (
     _ensure_default_providers_registered,
     get_action_provider,
 )
@@ -34,19 +34,18 @@ def test_the_provider_is_registered_in_the_dispatch_registry() -> None:
     provider = get_action_provider(_NAME)
     assert provider is not None, "second-opinion is not in the dispatch registry"
     assert provider.name == _NAME
-    # Floor: the registry does not answer for an arbitrary name.
     assert get_action_provider(_ABSENT) is None
 
 
 def test_the_name_is_accepted_by_hook_validation() -> None:
-    from gideon.validation import ALLOWED_HOOK_PROVIDERS
+    from gideon.assurance.validation import ALLOWED_HOOK_PROVIDERS
 
     assert _NAME in ALLOWED_HOOK_PROVIDERS
     assert _ABSENT not in ALLOWED_HOOK_PROVIDERS
 
 
 def test_the_provider_has_an_autonomy_declaration() -> None:
-    from gideon.guardrails.rungs import CORE_ACTION_TYPES
+    from gideon.security.guardrails.rungs import CORE_ACTION_TYPES
 
     declared = {p for spec in CORE_ACTION_TYPES for p in spec.providers}
     assert _NAME in declared, "second-opinion has no autonomy declaration behind it"
@@ -54,21 +53,22 @@ def test_the_provider_has_an_autonomy_declaration() -> None:
 
 
 def test_the_provider_is_classified_write_capable() -> None:
-    from gideon.triggers.screen import provider_is_read_only
+    from gideon.automation.triggers.screen import provider_is_read_only
 
     assert not provider_is_read_only(_NAME)
-    # Floor: the classifier is not a constant — a genuinely read-only provider reads as one.
     assert provider_is_read_only("notify")
 
 
 def test_the_registry_and_the_hook_allowlist_agree_about_this_name() -> None:
     """The specific drift §4.1 warns about, asserted in both directions for this provider."""
-    from gideon.validation import ALLOWED_HOOK_PROVIDERS
+    from gideon.assurance.validation import ALLOWED_HOOK_PROVIDERS
 
     _ensure_default_providers_registered()
     registered = get_action_provider(_NAME) is not None
     allowed = _NAME in ALLOWED_HOOK_PROVIDERS
-    assert registered == allowed == True  # noqa: E712 — the point is the pair, not the value
+    assert (
+        registered == allowed == True
+    )  # noqa: E712 — the point is the pair, not the value
 
 
 def test_a_handoff_with_no_origin_runner_is_refused_before_anything_fires() -> None:
@@ -92,7 +92,9 @@ def test_missing_goal_or_stuck_at_is_refused() -> None:
     provider = get_action_provider(_NAME)
     assert provider is not None
     result = asyncio.run(
-        provider.execute({"origin_runner": "codex"}, ActionContext(event="loop_stalled"))
+        provider.execute(
+            {"origin_runner": "codex"}, ActionContext(event="loop_stalled")
+        )
     )
     assert not result.success
     assert "goal" in result.error

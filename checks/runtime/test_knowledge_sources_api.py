@@ -43,25 +43,25 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import make_mocked_request
 
-from gideon.dashboard.handlers import knowledge as H
-from gideon.knowledge.artifact_ingest import ARTIFACT_ITEM_TYPE
-from gideon.knowledge.store import KnowledgeStore
-from gideon.knowledge_providers import registry as prov_registry
-from gideon.knowledge_providers.base import (
+from gideon.cognition.knowledge.artifact_ingest import ARTIFACT_ITEM_TYPE
+from gideon.cognition.knowledge.store import KnowledgeStore
+from gideon.integrations.knowledge_providers import registry as prov_registry
+from gideon.integrations.knowledge_providers.base import (
     ENRICHMENT_RAW,
     HEALTH_DEGRADED,
     HEALTH_NEEDS_RENDER,
     SOURCE_HEALTH,
 )
-from gideon.knowledge_providers.dir_source import DirSourceProvider
-from gideon.knowledge_providers.feed_source import FeedSourceProvider
-from gideon.knowledge_providers.web_source import (
+from gideon.integrations.knowledge_providers.dir_source import DirSourceProvider
+from gideon.integrations.knowledge_providers.feed_source import FeedSourceProvider
+from gideon.integrations.knowledge_providers.web_source import (
     DETECTOR_ORDER,
     DETECTOR_SEMANTIC_HTML,
     LISTING_PAGE_GUIDANCE,
     RENDER_TIER_GUIDANCE,
     WebSourceProvider,
 )
+from gideon.interfaces.dashboard.handlers import knowledge as H
 
 PAGE_URL = "https://app.example.com/changelog"
 
@@ -123,7 +123,9 @@ def registered(store):
     for prov in (web_prov, feed_prov, dir_prov):
         prov_registry.register_provider(prov)
     try:
-        yield SimpleNamespace(web=web_prov, feed=feed_prov, dir=dir_prov, fetcher=fetcher)
+        yield SimpleNamespace(
+            web=web_prov, feed=feed_prov, dir=dir_prov, fetcher=fetcher
+        )
     finally:
         for prov in (web_prov, feed_prov, dir_prov):
             prov_registry.unregister_provider(prov.name)
@@ -138,7 +140,7 @@ class _NullQueue:
 
 
 def _cfg():
-    from gideon.config.loader import SourcesConfig
+    from gideon.core.config.loader import SourcesConfig
 
     return SourcesConfig(
         enabled=True,
@@ -172,7 +174,9 @@ def _get_sources(store):
 
 
 def _create(store, **body):
-    return _call(H.create_watched_source, store, "POST", "/api/knowledge/sources", body=body)
+    return _call(
+        H.create_watched_source, store, "POST", "/api/knowledge/sources", body=body
+    )
 
 
 def _patch(store, sid, **body):
@@ -188,11 +192,12 @@ def _patch(store, sid, **body):
 
 def _preview(store, **body):
     return _call(
-        H.preview_watched_source, store, "POST", "/api/knowledge/sources/preview", body=body
+        H.preview_watched_source,
+        store,
+        "POST",
+        "/api/knowledge/sources/preview",
+        body=body,
     )
-
-
-# ── the catalog: all kinds, and the preview asymmetry told honestly ─────────────────
 
 
 def test_the_catalog_lists_every_registered_kind_with_its_own_form(store, registered):
@@ -202,7 +207,6 @@ def test_the_catalog_lists_every_registered_kind_with_its_own_form(store, regist
     by_provider = {k["provider"]: k for k in body["kinds"]}
     assert set(by_provider) == {"watched-page", "watched-feed", "watched-dir"}
     assert {k["form"] for k in body["kinds"]} == {"web_page", "feed", "dir"}
-    # The detector list the tune step renders comes from the provider's own order.
     assert by_provider["watched-page"]["detectors"] == list(DETECTOR_ORDER)
     assert "hn_algolia" in by_provider["watched-feed"]["presets"]
     assert by_provider["watched-dir"]["default_include"]
@@ -212,11 +216,16 @@ def test_previewable_is_measured_per_provider_not_declared_uniformly(store, regi
     _, body = _get_sources(store)
     previewable = {k["provider"]: k["previewable"] for k in body["kinds"]}
 
-    # WS-3's deliberate asymmetry: only the web kind has a detect-then-tune loop.
-    assert previewable == {"watched-page": True, "watched-feed": False, "watched-dir": False}
+    assert previewable == {
+        "watched-page": True,
+        "watched-feed": False,
+        "watched-dir": False,
+    }
 
 
-def test_the_closed_vocabularies_ship_with_the_list_rather_than_being_retyped(store, registered):
+def test_the_closed_vocabularies_ship_with_the_list_rather_than_being_retyped(
+    store, registered
+):
     _, body = _get_sources(store)
 
     assert body["health_statuses"] == sorted(SOURCE_HEALTH)
@@ -224,18 +233,15 @@ def test_the_closed_vocabularies_ship_with_the_list_rather_than_being_retyped(st
 
 
 def test_a_kind_with_no_enrolled_provider_is_not_offered(store):
-    # No `registered` fixture: nothing is enrolled, so nothing may be offered — a create
-    # form listing a kind nothing polls is how an inert source gets made.
     _, body = _get_sources(store)
 
     assert body["kinds"] == []
 
 
-# ── create: the provider's own validator decides ───────────────────────────────────
-
-
 def test_creating_a_web_source_persists_it_and_returns_the_row(store, registered):
-    resp, body = _create(store, name="Changelog", provider="watched-page", spec={"url": PAGE_URL})
+    resp, body = _create(
+        store, name="Changelog", provider="watched-page", spec={"url": PAGE_URL}
+    )
 
     assert resp.status == 201
     assert body["source"]["provider"] == "watched-page"
@@ -243,63 +249,65 @@ def test_creating_a_web_source_persists_it_and_returns_the_row(store, registered
     assert body["source"]["kind"] == "web_page"
     assert body["source"]["item_type"] == "bookmark"
     assert body["source"]["enrolled"] is True
-    # …and it is genuinely in the store, which is the whole point of the atom.
     assert [s["name"] for s in store.list_sources()] == ["Changelog"]
 
 
 def test_a_bad_spec_is_refused_by_the_providers_own_validator(store, registered):
-    resp, body = _create(store, name="Bad", provider="watched-page", spec={"url": "ftp://x/y"})
+    resp, body = _create(
+        store, name="Bad", provider="watched-page", spec={"url": "ftp://x/y"}
+    )
 
     assert resp.status == 400
-    # The message is the provider's, not a second copy of its rules living in the handler.
     assert "url" in body["error"]
     assert store.list_sources() == []
 
 
-def test_a_dir_source_pointing_at_a_sensitive_path_is_refused(store, registered, tmp_path):
+def test_a_dir_source_pointing_at_a_sensitive_path_is_refused(
+    store, registered, tmp_path
+):
     resp, body = _create(
-        store, name="Keys", provider="watched-dir", spec={"path": str(Path.home() / ".ssh")}
+        store,
+        name="Keys",
+        provider="watched-dir",
+        spec={"path": str(Path.home() / ".ssh")},
     )
 
     assert resp.status == 400
     assert "sensitive" in body["error"] or "does not exist" in body["error"]
 
 
-def test_a_real_dir_saves_with_the_kinds_own_default_item_type(store, registered, tmp_path):
+def test_a_real_dir_saves_with_the_kinds_own_default_item_type(
+    store, registered, tmp_path
+):
     watched = tmp_path / "notes"
     watched.mkdir()
 
-    resp, body = _create(store, name="Notes", provider="watched-dir", spec={"path": str(watched)})
+    resp, body = _create(
+        store, name="Notes", provider="watched-dir", spec={"path": str(watched)}
+    )
 
     assert resp.status == 201
     assert body["source"]["item_type"] == "note"
     assert body["source"]["kind"] == "dir"
 
 
-# ── create: `item_type` is the third enum on the body, not a free string ─────────────
-#
-# `provider` and `enrichment` were already checked against their vocabularies; `item_type`
-# was not, and it is the one that OUTLIVES the request — the store persists it on the row
-# and `SourceEngine._persist` hands it to `create_typed_item` on every poll, so an
-# unvalidated body field became a permanent property of an unattended timer.
-
-
 def test_an_unknown_item_type_is_refused_and_never_reaches_the_row(store, registered):
     resp, body = _create(
-        store, name="Typo", provider="watched-page", spec={"url": PAGE_URL}, item_type="notes"
+        store,
+        name="Typo",
+        provider="watched-page",
+        spec={"url": PAGE_URL},
+        item_type="notes",
     )
 
     assert resp.status == 400
     assert body["error"] == "unknown type 'notes'"
-    # The point of the guard: nothing was persisted, so nothing polls under a bad type.
     assert store.list_sources() == []
 
 
-def test_the_synthesized_artifact_type_cannot_be_authored_through_the_api(store, registered):
-    # `artifact_ingest` documents that keeping ARTIFACT_ITEM_TYPE outside the twelve
-    # knowledge types is "what stops the create API from ever authoring one directly", and
-    # the aggregate mirror row is created by that module calling the store, not by this
-    # route. Before the guard the claim was unenforced here. Imported, not retyped.
+def test_the_synthesized_artifact_type_cannot_be_authored_through_the_api(
+    store, registered
+):
     resp, body = _create(
         store,
         name="Fake mirror",
@@ -317,9 +325,6 @@ def test_the_synthesized_artifact_type_cannot_be_authored_through_the_api(store,
 def test_a_media_type_no_poll_can_produce_is_refused_naming_the_pollable_set(
     store, registered, media_type
 ):
-    # A knowledge type, but not one a POLL can make: `SourceItem` has no file field and the
-    # engine sets no `file_path`, so these would mint file-less items forever — the same
-    # "broken item with no file" /api/knowledge/items refuses, except on a timer.
     resp, body = _create(
         store,
         name="Media",
@@ -330,18 +335,18 @@ def test_a_media_type_no_poll_can_produce_is_refused_naming_the_pollable_set(
 
     assert resp.status == 400
     assert media_type in body["error"]
-    # Like its two sibling enums, the refusal NAMES the accepted set.
     for pollable in H._AUTHORABLE_TYPES:
         assert pollable in body["error"]
     assert store.list_sources() == []
 
 
 def test_a_pollable_item_type_is_honoured_on_the_row(store, registered):
-    # The accept case: the guard admits a valid override and it reaches the row, so the
-    # rejections above are a vocabulary check rather than a blanket refusal. `note` also
-    # differs from the web kind's `bookmark` default, so this cannot pass by defaulting.
     resp, body = _create(
-        store, name="Notes feed", provider="watched-page", spec={"url": PAGE_URL}, item_type="note"
+        store,
+        name="Notes feed",
+        provider="watched-page",
+        spec={"url": PAGE_URL},
+        item_type="note",
     )
 
     assert resp.status == 201
@@ -349,7 +354,9 @@ def test_a_pollable_item_type_is_honoured_on_the_row(store, registered):
     assert [s["item_type"] for s in store.list_sources()] == ["note"]
 
 
-def test_every_declared_default_item_type_survives_the_guard(store, registered, tmp_path):
+def test_every_declared_default_item_type_survives_the_guard(
+    store, registered, tmp_path
+):
     """A guard that rejected a provider's OWN default would break source creation.
 
     Every `default_item_type` in `_kind_descriptor` is asserted admissible — including the
@@ -368,10 +375,9 @@ def test_every_declared_default_item_type_survives_the_guard(store, registered, 
     for prov in (registered.web, registered.feed, registered.dir):
         default = H._kind_descriptor(prov)["default_item_type"]
         declared[prov.name] = default
-        # …and it is admissible where it is actually consumed: with `item_type` OMITTED,
-        # which is how the shipped UI creates every source (`createKnowledgeSource` sends
-        # name/provider/spec/enrichment/poll_interval_secs/budget and no item_type).
-        resp, body = _create(store, name=prov.name, provider=prov.name, spec=specs[prov.name])
+        resp, body = _create(
+            store, name=prov.name, provider=prov.name, spec=specs[prov.name]
+        )
         assert resp.status == 201, body
         assert body["source"]["item_type"] == default
 
@@ -380,10 +386,11 @@ def test_every_declared_default_item_type_survives_the_guard(store, registered, 
         "watched-feed": "bookmark",
         "watched-dir": "note",
     }
-    # The fourth default: the generic descriptor for a provider matching none of the three.
     generic = H._kind_descriptor(SimpleNamespace(name="app-contributed"))
     assert generic["default_item_type"] == "bookmark"
-    assert set(declared.values()) | {generic["default_item_type"]} <= H._AUTHORABLE_TYPES
+    assert (
+        set(declared.values()) | {generic["default_item_type"]} <= H._AUTHORABLE_TYPES
+    )
 
 
 def test_an_unknown_provider_is_refused_and_names_the_known_ones(store, registered):
@@ -394,27 +401,32 @@ def test_an_unknown_provider_is_refused_and_names_the_known_ones(store, register
 
 
 def test_a_nameless_source_is_refused(store, registered):
-    resp, body = _create(store, name="  ", provider="watched-page", spec={"url": PAGE_URL})
+    resp, body = _create(
+        store, name="  ", provider="watched-page", spec={"url": PAGE_URL}
+    )
 
     assert resp.status == 400
     assert "name" in body["error"]
 
 
-def test_an_unknown_enrichment_is_refused_rather_than_defaulted_to_full(store, registered):
-    # A typo'd enrichment silently becoming `full` would send a no-AI source's content to a
-    # model — the exact failure the closed ENRICHMENTS vocabulary exists to prevent.
+def test_an_unknown_enrichment_is_refused_rather_than_defaulted_to_full(
+    store, registered
+):
     resp, body = _create(
-        store, name="X", provider="watched-page", spec={"url": PAGE_URL}, enrichment="rawish"
+        store,
+        name="X",
+        provider="watched-page",
+        spec={"url": PAGE_URL},
+        enrichment="rawish",
     )
 
     assert resp.status == 400
     assert "enrichment" in body["error"]
 
 
-# ── §6.3: the 'no AI' chip is a readout of the persisted field ──────────────────────
-
-
-def test_a_raw_source_round_trips_its_no_ai_enrichment_through_the_list(store, registered):
+def test_a_raw_source_round_trips_its_no_ai_enrichment_through_the_list(
+    store, registered
+):
     _create(
         store,
         name="Raw feed",
@@ -431,7 +443,6 @@ def test_a_raw_source_round_trips_its_no_ai_enrichment_through_the_list(store, r
 
 
 def test_a_full_source_is_not_reported_as_raw(store, registered):
-    # The vacuity counterpart: without it, a serializer hardcoding "raw" would pass above.
     _create(store, name="Full page", provider="watched-page", spec={"url": PAGE_URL})
 
     _, body = _get_sources(store)
@@ -439,19 +450,22 @@ def test_a_full_source_is_not_reported_as_raw(store, registered):
     assert [s["enrichment"] for s in body["sources"]] == ["full"]
 
 
-# ── §12/§2.3: the two remediations are OPPOSITE and must stay distinct ──────────────
-
-
 def _polled(store, sid, *, health, summary, budget=None):
     """Record a poll outcome the way the engine does — `record_poll` clips the summary to
     200 chars, which is exactly why the remediation match is a prefix test."""
     if budget is not None:
         store.update_source(sid, budget=budget)
-    store.record_poll(sid, cursor="", new_count=0, health_status=health, error_summary=summary)
+    store.record_poll(
+        sid, cursor="", new_count=0, health_status=health, error_summary=summary
+    )
 
 
-def test_a_js_shell_without_the_render_tier_offers_the_render_tier_fix(store, registered):
-    _, created = _create(store, name="SPA", provider="watched-page", spec={"url": PAGE_URL})
+def test_a_js_shell_without_the_render_tier_offers_the_render_tier_fix(
+    store, registered
+):
+    _, created = _create(
+        store, name="SPA", provider="watched-page", spec={"url": PAGE_URL}
+    )
     sid = created["source"]["id"]
     _polled(store, sid, health=HEALTH_NEEDS_RENDER, summary=RENDER_TIER_GUIDANCE)
 
@@ -464,7 +478,9 @@ def test_a_js_shell_without_the_render_tier_offers_the_render_tier_fix(store, re
 
 
 def test_a_wrong_url_offers_the_listing_page_fix_instead(store, registered):
-    _, created = _create(store, name="Homepage", provider="watched-page", spec={"url": PAGE_URL})
+    _, created = _create(
+        store, name="Homepage", provider="watched-page", spec={"url": PAGE_URL}
+    )
     sid = created["source"]["id"]
     _polled(store, sid, health=HEALTH_DEGRADED, summary=LISTING_PAGE_GUIDANCE)
 
@@ -472,20 +488,30 @@ def test_a_wrong_url_offers_the_listing_page_fix_instead(store, registered):
     rem = body["sources"][0]["remediation"]
 
     assert rem["kind"] == "listing_page"
-    # The FULL guidance, reconstituted: `record_poll` stored only the first 200 chars.
     assert rem["guidance"] == LISTING_PAGE_GUIDANCE
     assert len(rem["guidance"]) > 200
     assert rem["action"] == "edit_url"
 
 
-def test_the_two_remediations_never_share_a_kind_a_message_or_an_action(store, registered):
+def test_the_two_remediations_never_share_a_kind_a_message_or_an_action(
+    store, registered
+):
     """The anti-collapse assertion. WS-3's whole JS-shell/wrong-URL discrimination exists
     because the fixes are opposite; one shared message would send half the users the wrong
     way, and that is a defect no per-case test above would catch on its own."""
     _, a = _create(store, name="SPA", provider="watched-page", spec={"url": PAGE_URL})
-    _, b = _create(store, name="Homepage", provider="watched-page", spec={"url": PAGE_URL})
-    _polled(store, a["source"]["id"], health=HEALTH_NEEDS_RENDER, summary=RENDER_TIER_GUIDANCE)
-    _polled(store, b["source"]["id"], health=HEALTH_DEGRADED, summary=LISTING_PAGE_GUIDANCE)
+    _, b = _create(
+        store, name="Homepage", provider="watched-page", spec={"url": PAGE_URL}
+    )
+    _polled(
+        store,
+        a["source"]["id"],
+        health=HEALTH_NEEDS_RENDER,
+        summary=RENDER_TIER_GUIDANCE,
+    )
+    _polled(
+        store, b["source"]["id"], health=HEALTH_DEGRADED, summary=LISTING_PAGE_GUIDANCE
+    )
 
     _, body = _get_sources(store)
     rems = {s["name"]: s["remediation"] for s in body["sources"]}
@@ -493,8 +519,6 @@ def test_the_two_remediations_never_share_a_kind_a_message_or_an_action(store, r
     assert rems["SPA"]["kind"] != rems["Homepage"]["kind"]
     assert rems["SPA"]["guidance"] != rems["Homepage"]["guidance"]
     assert rems["SPA"]["action"] != rems["Homepage"]["action"]
-    # And each names its OWN fix: the render one talks about the knob, the URL one about
-    # listing pages. A generic "nothing found" for both would satisfy the inequalities.
     assert "allow_render" in rems["SPA"]["guidance"]
     assert "LISTING" in rems["Homepage"]["guidance"]
 
@@ -519,10 +543,7 @@ def test_an_already_allowed_render_tier_is_advice_not_a_button(store, registered
     rem = body["sources"][0]["remediation"]
 
     assert rem["kind"] == "render_tier"
-    # No knob to flip — it is already on. Offering the button would be a lie about what
-    # pressing it would do.
     assert rem["action"] == ""
-    # …and the REASON survives, because "install the extra" is not what the guidance says.
     assert "install" in rem["detail"]
 
 
@@ -530,12 +551,16 @@ def test_a_failing_source_still_says_when_it_will_be_retried(store, registered):
     """Found by driving the real thing: `record_poll`'s `next_poll_at` was written on the
     SUCCESS path only, so the two rows carrying a remediation were exactly the two with no
     "next check" to show — the same shape WS-3 fixed for `last_escalations`."""
-    from gideon.knowledge.source_engine import SourceEngine
+    from gideon.cognition.knowledge.source_engine import SourceEngine
 
-    _, created = _create(store, name="SPA", provider="watched-page", spec={"url": PAGE_URL})
+    _, created = _create(
+        store, name="SPA", provider="watched-page", spec={"url": PAGE_URL}
+    )
     sid = created["source"]["id"]
     registered.fetcher.resp = _Resp("<html><body><script>x</script></body></html>")
-    engine = SourceEngine(store, _NullQueue(), providers_lister=lambda: [registered.web])
+    engine = SourceEngine(
+        store, _NullQueue(), providers_lister=lambda: [registered.web]
+    )
 
     _run(engine.poll_source(store.get_source(sid), _cfg()))
 
@@ -545,15 +570,14 @@ def test_a_failing_source_still_says_when_it_will_be_retried(store, registered):
 
 
 def test_a_healthy_source_offers_no_remediation(store, registered):
-    _, created = _create(store, name="OK", provider="watched-page", spec={"url": PAGE_URL})
+    _, created = _create(
+        store, name="OK", provider="watched-page", spec={"url": PAGE_URL}
+    )
     _polled(store, created["source"]["id"], health="ok", summary="")
 
     _, body = _get_sources(store)
 
     assert body["sources"][0]["remediation"]["kind"] == ""
-
-
-# ── PATCH: what makes the guidance actionable ───────────────────────────────────────
 
 
 def test_allowing_the_render_tier_flips_only_that_knob(store, registered):
@@ -575,7 +599,9 @@ def test_allowing_the_render_tier_flips_only_that_knob(store, registered):
 
 
 def test_a_url_fix_is_revalidated_by_the_provider(store, registered):
-    _, created = _create(store, name="Page", provider="watched-page", spec={"url": PAGE_URL})
+    _, created = _create(
+        store, name="Page", provider="watched-page", spec={"url": PAGE_URL}
+    )
     sid = created["source"]["id"]
 
     bad, bad_body = _patch(store, sid, spec={"url": "not-a-url"})
@@ -584,23 +610,25 @@ def test_a_url_fix_is_revalidated_by_the_provider(store, registered):
     assert bad.status == 400 and "url" in bad_body["error"]
     assert good.status == 200
     assert good_body["source"]["spec"] == {"url": "https://app.example.com/blog"}
-    # The refused edit really did not land.
     assert store.get_source(sid)["spec"]["url"] == "https://app.example.com/blog"
 
 
 def test_disabling_a_source_stops_it_being_enrolled_for_polling(store, registered):
-    _, created = _create(store, name="Page", provider="watched-page", spec={"url": PAGE_URL})
+    _, created = _create(
+        store, name="Page", provider="watched-page", spec={"url": PAGE_URL}
+    )
     sid = created["source"]["id"]
 
     resp, body = _patch(store, sid, enabled=False)
 
     assert resp.status == 200 and body["source"]["enabled"] is False
-    # `enabled_only` is the filter the engine's tick uses to pick due sources.
     assert store.list_sources(enabled_only=True) == []
 
 
 def test_patching_nothing_is_refused_rather_than_reported_as_a_save(store, registered):
-    _, created = _create(store, name="Page", provider="watched-page", spec={"url": PAGE_URL})
+    _, created = _create(
+        store, name="Page", provider="watched-page", spec={"url": PAGE_URL}
+    )
 
     resp, body = _patch(store, created["source"]["id"])
 
@@ -614,10 +642,9 @@ def test_patching_a_missing_source_is_a_404(store, registered):
     assert resp.status == 404
 
 
-# ── §2.4: the paste-URL preview ─────────────────────────────────────────────────────
-
-
-def test_a_paste_url_preview_returns_items_and_names_the_winning_detector(store, registered):
+def test_a_paste_url_preview_returns_items_and_names_the_winning_detector(
+    store, registered
+):
     resp, body = _preview(store, provider="watched-page", spec={"url": PAGE_URL})
 
     assert resp.status == 200
@@ -626,16 +653,18 @@ def test_a_paste_url_preview_returns_items_and_names_the_winning_detector(store,
         "Release 2.1 ships dark mode",
         "Release 2.0 rewrites the editor",
     ]
-    # The user tunes a NAMED detector, not a black box.
     assert body["detector"] == DETECTOR_SEMANTIC_HTML
     assert body["requests_used"] == 1
     assert body["guidance"] == ""
-    # A dry run: nothing persisted.
     assert store.list_sources() == []
 
 
-def test_a_preview_that_finds_nothing_carries_the_listing_page_guidance(store, registered):
-    registered.fetcher.resp = _Resp("<html><body><p>" + "prose " * 200 + "</p></body></html>")
+def test_a_preview_that_finds_nothing_carries_the_listing_page_guidance(
+    store, registered
+):
+    registered.fetcher.resp = _Resp(
+        "<html><body><p>" + "prose " * 200 + "</p></body></html>"
+    )
 
     _, body = _preview(store, provider="watched-page", spec={"url": PAGE_URL})
 
@@ -691,26 +720,34 @@ def test_a_preview_snippet_is_plain_text_not_the_items_markup(store, registered)
     _, body = _preview(store, provider="watched-page", spec={"url": PAGE_URL})
 
     snippet = body["items"][0]["snippet"]
-    assert "<p>" not in snippet, "the client renders this as text, so markup would show up raw"
+    assert (
+        "<p>" not in snippet
+    ), "the client renders this as text, so markup would show up raw"
     assert "&#8217;" not in snippet
     assert "Dark mode arrives" in snippet
     assert "\n" not in snippet
 
 
-def test_a_provider_without_a_preview_says_so_instead_of_returning_nothing(store, registered):
+def test_a_provider_without_a_preview_says_so_instead_of_returning_nothing(
+    store, registered
+):
     resp, body = _preview(
-        store, provider="watched-feed", spec={"kind": "rss", "url": "https://f.example.com/f"}
+        store,
+        provider="watched-feed",
+        spec={"kind": "rss", "url": "https://f.example.com/f"},
     )
 
     assert resp.status == 400
-    # Honest about the asymmetry rather than faking a uniform dry run.
     assert "no preview" in body["error"]
     assert "first poll" in body["error"]
 
 
 def test_a_preview_spends_the_specs_request_budget(store, registered):
     resp, body = _preview(
-        store, provider="watched-page", spec={"url": PAGE_URL}, budget={"max_requests": 0}
+        store,
+        provider="watched-page",
+        spec={"url": PAGE_URL},
+        budget={"max_requests": 0},
     )
 
     assert resp.status == 200
@@ -719,7 +756,9 @@ def test_a_preview_spends_the_specs_request_budget(store, registered):
     assert registered.fetcher.requests == []
 
 
-def test_a_preview_runs_under_the_engines_own_egress_posture(store, registered, monkeypatch):
+def test_a_preview_runs_under_the_engines_own_egress_posture(
+    store, registered, monkeypatch
+):
     """Not a second posture resolved in the handler: the preview fetches the same targets a
     poll does, and two postures for one act is the hole in the SOURCE profile."""
     seen: list[object] = []
@@ -729,7 +768,7 @@ def test_a_preview_runs_under_the_engines_own_egress_posture(store, registered, 
         return _Resp(LISTING_HTML)
 
     registered.web._fetch_fn = _capture
-    from gideon.knowledge.source_engine import SourceEngine
+    from gideon.cognition.knowledge.source_engine import SourceEngine
 
     _preview(store, provider="watched-page", spec={"url": PAGE_URL})
 
@@ -738,21 +777,19 @@ def test_a_preview_runs_under_the_engines_own_egress_posture(store, registered, 
     assert seen[0].max_bytes == SourceEngine.egress_policy().max_bytes
 
 
-# ── store-level: the editable-field allowlist ───────────────────────────────────────
-
-
 def test_update_source_refuses_a_field_outside_its_allowlist(store):
     sid = store.create_source(name="s", provider="p", kind="k")
 
     with pytest.raises(KeyError, match="editable"):
         store.update_source(sid, health_status="ok")
 
-    # The engine's rollup is untouched — a client cannot overwrite a poll's verdict.
     assert store.get_source(sid)["health_status"] == "ok"
 
 
 def test_update_source_is_partial_and_leaves_unsent_fields_alone(store):
-    sid = store.create_source(name="s", provider="p", kind="k", spec={"url": "https://x/y"})
+    sid = store.create_source(
+        name="s", provider="p", kind="k", spec={"url": "https://x/y"}
+    )
 
     store.update_source(sid, name="renamed")
 
@@ -765,9 +802,9 @@ def test_update_source_on_a_missing_row_is_none_not_a_silent_insert(store):
     assert store.update_source("src-ghost", name="x") is None
 
 
-# ── FE/BE parity: the UI cannot fall through a default branch ───────────────────────
-
-_WEB = Path(__file__).resolve().parents[1] / "web" / "src" / "pages" / "knowledge"
+_WEB = (
+    Path(__file__).resolve().parents[2] / "apps/console" / "src" / "pages" / "knowledge"
+)
 
 
 def test_the_ui_status_map_covers_exactly_the_python_health_vocabulary():
@@ -775,7 +812,9 @@ def test_the_ui_status_map_covers_exactly_the_python_health_vocabulary():
     silently, and for the one status that most needed a specific message. Read from source
     because the assertion is about two LISTS, not about rendering."""
     src = (_WEB / "sourceMeta.ts").read_text()
-    block = re.search(r"HEALTH_META: Record<string, HealthMeta> = \{(.*?)\n\}", src, re.S)
+    block = re.search(
+        r"HEALTH_META: Record<string, HealthMeta> = \{(.*?)\n\}", src, re.S
+    )
     assert block, "could not locate HEALTH_META in sourceMeta.ts"
     keys = set(re.findall(r"^\s*'([^']+)':", block.group(1), re.M))
 
@@ -805,4 +844,6 @@ def test_the_ui_has_a_form_for_every_kind_the_catalog_can_offer(store, registere
 
     assert forms, "the catalog parsed empty — the assertion below would be vacuous"
     for form in forms:
-        assert f"'{form}'" in src, f"SourceCreatePage.tsx has no branch for form {form!r}"
+        assert (
+            f"'{form}'" in src
+        ), f"SourceCreatePage.tsx has no branch for form {form!r}"

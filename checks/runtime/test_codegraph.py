@@ -11,30 +11,17 @@ import os
 
 import pytest
 
-from gideon.codegraph import CodeGraphIndex, workspace_key
-from gideon.codegraph.index import default_db_path
-from gideon.codegraph.parse import (
+from gideon.assurance.codegraph import CodeGraphIndex, workspace_key
+from gideon.assurance.codegraph.index import default_db_path
+from gideon.assurance.codegraph.parse import (
     LANGUAGE_BY_SUFFIX,
     language_for,
     parse_source,
     parser_available,
     parser_status,
 )
-from gideon.tool_providers.code_map import CodeMapToolProvider
+from gideon.integrations.tool_providers.code_map import CodeMapToolProvider
 
-# ── the grammar capability gate (CRE-9) ─────────────────────────────────────
-#
-# 🔴 MEASURED, twice, on 2026-08-12: PRs #1144 and #1162 went red in CI with 2 and 21
-# failures respectively, ALL in this file and all rooted in one grammar load. The
-# product treats a missing grammar as normal — `parser_available`'s docstring says
-# "False is a normal answer, not an error" — but this file ASSERTED it was True, so an
-# optional capability failing on a runner turned into a suite-wide red on two unrelated
-# changes, and a manual re-run was the only fix.
-#
-# So the capability is PROBED here and the parse-dependent tests skip on its absence,
-# naming the recorded reason. What must NEVER skip is the dependency itself: the parser
-# wheels are declared in pyproject, so an unimportable `tree_sitter_language_pack` is a
-# packaging regression, and `test_the_parser_dependency_is_installed` fails for it.
 _PY_STATUS = parser_status("python")
 needs_grammar = pytest.mark.skipif(
     not _PY_STATUS.available,
@@ -113,12 +100,11 @@ def workspace(tmp_path):
     """A small multi-language workspace on disk."""
     root = tmp_path / "ws"
     (root / "pkg").mkdir(parents=True)
-    (root / "web").mkdir()
+    (root / "apps/console").mkdir()
     (root / "pkg" / "widget.py").write_bytes(PY_SOURCE)
-    (root / "web" / "Panel.tsx").write_bytes(TS_SOURCE)
+    (root / "apps/console" / "Panel.tsx").write_bytes(TS_SOURCE)
     (root / "pkg" / "config.rs").write_bytes(RUST_SOURCE)
     (root / "pkg" / "server.go").write_bytes(GO_SOURCE)
-    # Noise that must be ignored.
     (root / "README.md").write_text("not code")
     (root / "node_modules").mkdir()
     (root / "node_modules" / "dep.js").write_text("function shouldNotBeIndexed() {}")
@@ -131,16 +117,12 @@ def _index(workspace) -> CodeGraphIndex:
     return index
 
 
-# ── Parsing ──
-
-
 class TestParse:
     @needs_grammar
     def test_python_definitions_and_owners(self):
         result = parse_source("a.py", PY_SOURCE)
         by_name = {d.name: d for d in result.definitions}
         assert by_name["Widget"].kind == "class"
-        # A function inside a class body is recorded as its method.
         assert by_name["render"].kind == "method"
         assert by_name["render"].owner == "Widget"
         assert by_name["render"].qualified == "Widget.render"
@@ -171,9 +153,8 @@ class TestParse:
         result = parse_source("a.py", PY_SOURCE)
         names = {r.name for r in result.references}
         assert "helper" in names
-        # Noise words are excluded, or "references" would mean nothing.
         assert "self" not in names
-        assert "join" not in names or True  # attribute noise is filtered by _NOISE_NAMES
+        assert "join" not in names or True
 
     @needs_grammar
     def test_typescript(self):
@@ -189,7 +170,6 @@ class TestParse:
         result = parse_source("config.rs", RUST_SOURCE)
         by_name = {d.name: d for d in result.definitions}
         assert by_name["Config"].kind == "struct"
-        # `load` lives in `impl Config`, so it belongs to Config.
         assert by_name["load"].owner == "Config"
         assert by_name["parse_file"].owner == ""
         assert by_name["Store"].kind == "trait"
@@ -261,7 +241,7 @@ class TestParse:
         from. A monkeypatched loader is the only way to reach the failure path on a
         machine whose grammars load.
         """
-        import gideon.codegraph.parse as parse_mod
+        import gideon.assurance.codegraph.parse as parse_mod
 
         def _boom(language):
             raise RuntimeError("grammar shared library missing")
@@ -273,12 +253,11 @@ class TestParse:
         assert status.available is False
         assert "RuntimeError" in status.reason
         assert "grammar shared library missing" in status.reason
-        # And the file-level path names it too rather than failing mutely.
         assert parse_mod.parse_source("x.py", b"def f(): pass\n").definitions == ()
 
     def test_missing_parser_degrades_to_no_definitions(self, monkeypatch):
         """A stripped environment without the parser wheels simply gets no graph."""
-        import gideon.codegraph.parse as parse_mod
+        import gideon.assurance.codegraph.parse as parse_mod
 
         def _boom(language):
             raise ImportError("no tree_sitter here")
@@ -287,9 +266,6 @@ class TestParse:
         result = parse_source("a.py", PY_SOURCE)
         assert result.definitions == ()
         assert result.language == "python"
-
-
-# ── Workspace identity ──
 
 
 class TestWorkspaceKey:
@@ -309,9 +285,6 @@ class TestWorkspaceKey:
         path = default_db_path("/tmp/project")
         assert path.parent.name == "codegraph"
         assert path.name.endswith(".db")
-
-
-# ── Indexing ──
 
 
 class TestIndexing:
@@ -337,7 +310,7 @@ class TestIndexing:
         index = _index(workspace)
         target = workspace / "pkg" / "widget.py"
         target.write_bytes(PY_SOURCE + b"\n\ndef added():\n    return 1\n")
-        os.utime(target, (0, 0))  # force a different mtime
+        os.utime(target, (0, 0))
         stats = index.index()
         assert stats.files_indexed == 1
         assert index.definitions_of("added")
@@ -346,7 +319,7 @@ class TestIndexing:
     def test_deleted_file_is_forgotten(self, workspace):
         index = _index(workspace)
         assert index.definitions_of("mount")
-        (workspace / "web" / "Panel.tsx").unlink()
+        (workspace / "apps/console" / "Panel.tsx").unlink()
         stats = index.index()
         assert stats.files_removed == 1
         assert index.definitions_of("mount") == []
@@ -406,33 +379,39 @@ class TestIndexing:
 
         monkeypatch.setattr(type(workspace), "read_bytes", _selective)
         stats = index.index()
-        assert stats.files_indexed == 3  # the other three still land
+        assert stats.files_indexed == 3
 
     @needs_grammar
     def test_stats_shape(self, workspace):
         stats = _index(workspace).stats()
-        for key in ("workspace", "db_path", "files", "definitions", "references", "indexed_at"):
+        for key in (
+            "workspace",
+            "db_path",
+            "files",
+            "definitions",
+            "references",
+            "indexed_at",
+        ):
             assert key in stats
 
     def test_index_workspace_helper_never_raises(self, tmp_path):
-        from gideon.codegraph import index_workspace
+        from gideon.assurance.codegraph import index_workspace
 
         index, stats = index_workspace(str(tmp_path / "missing"))
         assert index is not None
         assert stats.files_indexed == 0
 
 
-# ── Queries ──
-
-
 class TestQueries:
     @needs_grammar
     def test_definition_lookup_is_exact_first(self, workspace):
         index = _index(workspace)
-        (workspace / "pkg" / "more.py").write_bytes(b"def helper_extended():\n    pass\n")
+        (workspace / "pkg" / "more.py").write_bytes(
+            b"def helper_extended():\n    pass\n"
+        )
         index.index()
         rows = index.definitions_of("helper")
-        assert rows[0]["name"] == "helper"  # exact match leads
+        assert rows[0]["name"] == "helper"
         assert any(r["name"] == "helper_extended" for r in rows)
 
     @needs_grammar
@@ -460,8 +439,9 @@ class TestQueries:
         assert "import os" in outline["imports"]
         names = [d["name"] for d in outline["definitions"]]
         assert names == sorted(
-            names, key=lambda n: [d["line"] for d in outline["definitions"]][names.index(n)]
-        )  # line order
+            names,
+            key=lambda n: [d["line"] for d in outline["definitions"]][names.index(n)],
+        )
         assert "Widget" in names
 
     @needs_grammar
@@ -475,8 +455,6 @@ class TestQueries:
     def test_centrality_counts_referring_files(self, workspace):
         index = _index(workspace)
         ranks = index.centrality()
-        # widget.py defines `helper`, referenced from within itself only, so no
-        # cross-file referrer; the measure counts DISTINCT other files.
         assert isinstance(ranks, dict)
         for value in ranks.values():
             assert value >= 1
@@ -487,8 +465,9 @@ class TestQueries:
         root = tmp_path / "central"
         root.mkdir()
         (root / "hub.py").write_bytes(b"def uniquely_named_hub():\n    return 1\n")
-        # A file whose only definition is a name everything defines.
-        (root / "generic.py").write_bytes(b"class A:\n    def name(self):\n        return 1\n")
+        (root / "generic.py").write_bytes(
+            b"class A:\n    def name(self):\n        return 1\n"
+        )
         for i in range(6):
             (root / f"caller{i}.py").write_bytes(
                 b"class B:\n    def name(self):\n        pass\n\n"
@@ -510,7 +489,9 @@ class TestQueries:
     def test_module_summary_hides_private_names(self, tmp_path):
         root = tmp_path / "priv"
         root.mkdir()
-        (root / "m.py").write_bytes(b"def _internal():\n    pass\n\ndef public_api():\n    pass\n")
+        (root / "m.py").write_bytes(
+            b"def _internal():\n    pass\n\ndef public_api():\n    pass\n"
+        )
         (root / "c.py").write_bytes(b"def go():\n    return public_api()\n")
         index = CodeGraphIndex(str(root))
         index.index()
@@ -523,9 +504,6 @@ class TestQueries:
         assert index.module_summary() == ""
 
 
-# ── The code_map tool ──
-
-
 def _invoke(tool: str, arguments: dict):
     provider = CodeMapToolProvider()
     return asyncio.run(provider.invoke(tool, arguments))
@@ -533,7 +511,7 @@ def _invoke(tool: str, arguments: dict):
 
 class TestCodeMapTool:
     def test_lands_in_the_workflows_group(self):
-        from gideon.tool_providers.groups import group_name_for_provider
+        from gideon.integrations.tool_providers.groups import group_name_for_provider
 
         assert group_name_for_provider(CodeMapToolProvider().name) == "workflows"
 
@@ -577,8 +555,9 @@ class TestCodeMapTool:
         assert "symbol" in result.error and "file" in result.error
 
     def test_unknown_symbol_succeeds_with_an_honest_answer(self, workspace):
-        result = _invoke("code_map", {"symbol": "nope_zzz", "workspace": str(workspace)})
-        # Not an error: "it isn't there" is a real answer, and grep is named.
+        result = _invoke(
+            "code_map", {"symbol": "nope_zzz", "workspace": str(workspace)}
+        )
         assert result.success is True
         assert "grep" in result.output.lower()
 
@@ -595,7 +574,7 @@ class TestCodeMapTool:
         assert "grep" in " ".join(result.recovery_hints).lower()
 
     def test_no_workspace_resolvable_fails_soft(self, monkeypatch):
-        import gideon.tool_providers.code_map as mod
+        import gideon.integrations.tool_providers.code_map as mod
 
         monkeypatch.setattr(mod, "resolve_workspace", lambda a: "")
         result = _invoke("code_map", {"symbol": "x"})
@@ -606,7 +585,7 @@ class TestCodeMapTool:
         assert _invoke("code_nope", {}).error == "Unknown tool: code_nope"
 
     def test_an_internal_failure_never_raises(self, workspace, monkeypatch):
-        import gideon.tool_providers.code_map as mod
+        import gideon.integrations.tool_providers.code_map as mod
 
         def _boom(arguments):
             raise RuntimeError("index exploded")
@@ -622,13 +601,15 @@ class TestCodeMapTool:
         root = tmp_path / "big"
         root.mkdir()
         for i in range(60):
-            (root / f"m{i}.py").write_bytes(b"def shared_name():\n    return shared_name()\n")
+            (root / f"m{i}.py").write_bytes(
+                b"def shared_name():\n    return shared_name()\n"
+            )
         result = _invoke("code_map", {"symbol": "shared_name", "workspace": str(root)})
         assert result.success
         assert len(result.output) <= 12_000
 
     def test_provider_factory_is_registered(self):
-        from gideon.tool_providers.registry import create_code_map_provider
+        from gideon.integrations.tool_providers.registry import create_code_map_provider
 
         assert create_code_map_provider().name == "workflows-tools"
 
@@ -651,32 +632,32 @@ class TestCodeMapTool:
         assert data["native"] is True
 
 
-# ── Consumers ──
-
-
 class TestPlanningContext:
     @needs_grammar
     def test_brief_carries_the_code_map_when_indexed(self, workspace):
-        from gideon.loop.code_plan_briefs import build_design_brief
+        from gideon.automation.loop.code_plan_briefs import build_design_brief
 
         _index(workspace)
         brief = build_design_brief("Add a widget", str(workspace))
         assert "[code map:" in brief
 
     def test_brief_is_unchanged_without_an_index(self, tmp_path):
-        from gideon.loop.code_plan_briefs import build_design_brief
+        from gideon.automation.loop.code_plan_briefs import build_design_brief
 
         brief = build_design_brief("Add a widget", str(tmp_path / "unindexed"))
         assert "[code map:" not in brief
 
     def test_brief_without_a_workspace_has_no_map(self):
-        from gideon.loop.code_plan_briefs import build_design_brief
+        from gideon.automation.loop.code_plan_briefs import build_design_brief
 
         assert "[code map:" not in build_design_brief("Add a widget", "")
 
     @needs_grammar
     def test_map_block_is_budget_bounded(self, tmp_path):
-        from gideon.loop.code_plan_briefs import _CODE_MAP_BUDGET_CHARS, _code_map_block
+        from gideon.automation.loop.code_plan_briefs import (
+            _CODE_MAP_BUDGET_CHARS,
+            _code_map_block,
+        )
 
         root = tmp_path / "wide"
         root.mkdir()
@@ -690,7 +671,7 @@ class TestPlanningContext:
         assert len(block) <= _CODE_MAP_BUDGET_CHARS + 400
 
     def test_map_block_never_raises(self):
-        from gideon.loop.code_plan_briefs import _code_map_block
+        from gideon.automation.loop.code_plan_briefs import _code_map_block
 
         assert _code_map_block("/definitely/not/a/path") == ""
 
@@ -698,19 +679,25 @@ class TestPlanningContext:
 class TestMentionCentrality:
     @needs_grammar
     def test_boost_reorders_near_ties(self, tmp_path):
-        from gideon.dashboard.handlers.files import _apply_centrality
+        from gideon.interfaces.dashboard.handlers.files import _apply_centrality
 
         root = tmp_path / "ws"
         root.mkdir()
         (root / "hub.py").write_bytes(b"def uniquely_named_hub():\n    return 1\n")
         (root / "hub_unused.py").write_bytes(b"def something_else():\n    return 2\n")
         for i in range(5):
-            (root / f"c{i}.py").write_bytes(b"def go():\n    return uniquely_named_hub()\n")
+            (root / f"c{i}.py").write_bytes(
+                b"def go():\n    return uniquely_named_hub()\n"
+            )
         index = CodeGraphIndex(str(root))
         index.index()
 
         results = [
-            {"path": str(root / "hub_unused.py"), "name": "hub_unused.py", "_score": 30.0},
+            {
+                "path": str(root / "hub_unused.py"),
+                "name": "hub_unused.py",
+                "_score": 30.0,
+            },
             {"path": str(root / "hub.py"), "name": "hub.py", "_score": 30.0},
         ]
         ordered = _apply_centrality(results, str(root), 10)
@@ -718,25 +705,31 @@ class TestMentionCentrality:
 
     @needs_grammar
     def test_boost_never_overrides_a_better_text_match(self, tmp_path):
-        from gideon.dashboard.handlers.files import _apply_centrality
+        from gideon.interfaces.dashboard.handlers.files import _apply_centrality
 
         root = tmp_path / "ws2"
         root.mkdir()
         (root / "hub.py").write_bytes(b"def uniquely_named_hub():\n    return 1\n")
         for i in range(5):
-            (root / f"c{i}.py").write_bytes(b"def go():\n    return uniquely_named_hub()\n")
+            (root / f"c{i}.py").write_bytes(
+                b"def go():\n    return uniquely_named_hub()\n"
+            )
         index = CodeGraphIndex(str(root))
         index.index()
 
         results = [
-            {"path": str(root / "c0.py"), "name": "c0.py", "_score": 100.0},  # exact match
+            {
+                "path": str(root / "c0.py"),
+                "name": "c0.py",
+                "_score": 100.0,
+            },
             {"path": str(root / "hub.py"), "name": "hub.py", "_score": 30.0},
         ]
         ordered = _apply_centrality(results, str(root), 10)
         assert ordered[0]["name"] == "c0.py"
 
     def test_no_index_leaves_the_order_untouched(self, tmp_path):
-        from gideon.dashboard.handlers.files import _apply_centrality
+        from gideon.interfaces.dashboard.handlers.files import _apply_centrality
 
         results = [
             {"path": "/a/x.py", "name": "x.py", "_score": 10.0},
@@ -746,15 +739,16 @@ class TestMentionCentrality:
         assert [r["name"] for r in ordered] == ["x.py", "y.py"]
 
     def test_empty_results_are_returned_as_is(self, tmp_path):
-        from gideon.dashboard.handlers.files import _apply_centrality
+        from gideon.interfaces.dashboard.handlers.files import _apply_centrality
 
         assert _apply_centrality([], str(tmp_path), 10) == []
 
     @needs_grammar
     def test_respects_max_results(self, tmp_path):
-        from gideon.dashboard.handlers.files import _apply_centrality
+        from gideon.interfaces.dashboard.handlers.files import _apply_centrality
 
         results = [
-            {"path": f"/a/f{i}.py", "name": f"f{i}.py", "_score": float(10 - i)} for i in range(8)
+            {"path": f"/a/f{i}.py", "name": f"f{i}.py", "_score": float(10 - i)}
+            for i in range(8)
         ]
         assert len(_apply_centrality(results, str(tmp_path / "none"), 3)) == 3

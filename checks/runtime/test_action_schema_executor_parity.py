@@ -27,16 +27,24 @@ from pathlib import Path
 
 import pytest
 
-_REPO = Path(__file__).resolve().parents[2]
-# apps/native/<provider>-action/app.json  ↔  action_providers/<module>.py
-_NATIVE_APPS = Path(__file__).resolve().parents[1] / "src" / "gideon" / "apps" / "native"
-_ACTION_PKG = Path(__file__).resolve().parents[1] / "src" / "gideon" / "action_providers"
-# The webhook action moved to a standalone workspace app (apps/webhook-action) —
-# NOT native. Kept in the parity sweep because it was the original drift bug (#13).
+_REPO = Path(__file__).resolve().parents[3]
+_NATIVE_APPS = (
+    Path(__file__).resolve().parents[2]
+    / "runtime"
+    / "gideon"
+    / "extensions"
+    / "apps"
+    / "native"
+)
+_ACTION_PKG = (
+    Path(__file__).resolve().parents[2]
+    / "runtime"
+    / "gideon"
+    / "integrations"
+    / "action_providers"
+)
 _WORKSPACE_APPS = _REPO / "apps"
 
-# provider key → (manifest app.json path, executor .py path). Native providers live
-# under apps/native/<key>-action; webhook is a workspace app.
 _NATIVE_KEYS = {
     "bash": "bash_provider.py",
     "create-task": "create_task_provider.py",
@@ -51,13 +59,16 @@ _NATIVE_KEYS = {
 def _provider_paths(key: str) -> tuple[Path, Path]:
     """Return (manifest, executor) paths for a provider key."""
     if key == "webhook":
-        if not _WORKSPACE_APPS.is_dir():  # standalone core clone — workspace app absent
+        if not _WORKSPACE_APPS.is_dir():
             pytest.skip("webhook-action app dir not present (standalone clone)")
         return (
             _WORKSPACE_APPS / "webhook-action" / "app.json",
             _WORKSPACE_APPS / "webhook-action" / "provider.py",
         )
-    return (_NATIVE_APPS / f"{key}-action" / "app.json", _ACTION_PKG / _NATIVE_KEYS[key])
+    return (
+        _NATIVE_APPS / f"{key}-action" / "app.json",
+        _ACTION_PKG / _NATIVE_KEYS[key],
+    )
 
 
 _PROVIDERS = {**{k: None for k in _NATIVE_KEYS}, "webhook": None}
@@ -77,7 +88,6 @@ def _executor_config_reads(path: Path) -> set[str]:
     keys: set[str] = set()
 
     for node in ast.walk(tree):
-        # action_config.get("key") / config.get("key")
         if (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
@@ -89,7 +99,6 @@ def _executor_config_reads(path: Path) -> set[str]:
             and isinstance(node.args[0].value, str)
         ):
             keys.add(node.args[0].value)
-        # action_config["key"] subscript
         if (
             isinstance(node, ast.Subscript)
             and isinstance(node.value, ast.Name)
@@ -101,9 +110,6 @@ def _executor_config_reads(path: Path) -> set[str]:
     return keys
 
 
-# Keys an executor reads from action_config that are intentionally NOT
-# user-configurable form fields (internal/threaded elsewhere). Empty for now —
-# add here with a justification if a real exception arises.
 _NON_SCHEMA_KEYS: dict[str, set[str]] = {}
 
 

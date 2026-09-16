@@ -42,7 +42,7 @@ control has not landed. Each says so in its own section.
 
 ## The five high-risk paths
 
-Every module path below is relative to `src/gideon/`. Entry points are
+Every module path below is relative to `runtime/gideon/`. Entry points are
 named as `module.py::symbol` so they resolve by grep.
 
 ### 1. Webhook authentication — the one unauthenticated-by-default door

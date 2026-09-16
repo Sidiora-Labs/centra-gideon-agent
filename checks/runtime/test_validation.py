@@ -1,8 +1,8 @@
-"""Tests for gideon.validation — tool input/output validation."""
+"""Tests for gideon.assurance.validation — tool input/output validation."""
 
 import pytest
 
-from gideon.validation import (
+from gideon.assurance.validation import (
     CHANNEL_ID_RE,
     LEARN_ADD_SCHEMA,
     MCP_AUTOMATION_SCHEMAS,
@@ -23,8 +23,6 @@ from gideon.validation import (
     validate_string_field,
     validate_tool_args,
 )
-
-# ── String Sanitization ──
 
 
 class TestStripHiddenUnicode:
@@ -58,7 +56,6 @@ class TestStripHiddenUnicode:
 
 class TestNormalizeUnicode:
     def test_nfc_normalization(self):
-        # é as combining sequence → single codepoint
         assert normalize_unicode("e\u0301") == "\u00e9"
 
     def test_already_nfc(self):
@@ -67,7 +64,6 @@ class TestNormalizeUnicode:
 
 class TestSanitizeString:
     def test_full_pipeline(self):
-        # BOM + zero-width + combining + trailing space
         result = sanitize_string("\ufeffhe\u200bllo\u0301 ")
         assert result == "helló"
 
@@ -76,9 +72,6 @@ class TestSanitizeString:
 
     def test_only_hidden_chars(self):
         assert sanitize_string("\u200b\u200c\u200d") == ""
-
-
-# ── Response Sanitization ──
 
 
 class TestSanitizeResponse:
@@ -93,9 +86,6 @@ class TestSanitizeResponse:
 
     def test_strips_hidden_chars(self):
         assert sanitize_response("a\u200bb") == "ab"
-
-
-# ── Field Validation ──
 
 
 class TestValidateField:
@@ -117,8 +107,6 @@ class TestValidateField:
     def test_string_allowed(self):
         allowed = frozenset({"a", "b"})
         assert validate_field("a", FieldSpec("x", str, allowed=allowed)) == "a"
-        # PLATFORM-LEGIBILITY §2: an out-of-set value now raises a WHAT/WHY/FIX
-        # envelope naming the value + the allowed set as did-you-mean suggestions.
         with pytest.raises(ValidationError, match="not allowed") as ei:
             validate_field("c", FieldSpec("x", str, allowed=allowed))
         assert ei.value.agent_error is not None
@@ -149,14 +137,10 @@ class TestValidateField:
         assert validate_field(1.5, FieldSpec("x", (int, float))) == 1.5
 
     def test_int_field_coerces_integral_float(self):
-        # Models/ACP often emit a JSON number that deserializes to float; an
-        # int-typed field must accept an integral float (300.0 → 300) rather than
-        # rejecting it ("expected int, got float") — this broke the `wait` tool.
         result = validate_field(300.0, FieldSpec("x", int, min_val=60))
         assert result == 300 and isinstance(result, int)
 
     def test_int_field_coerces_numeric_string(self):
-        # Some models quote numeric args; accept "300" for an int field.
         assert validate_field("300", FieldSpec("x", int)) == 300
         assert validate_field("300.0", FieldSpec("x", int)) == 300
 
@@ -165,14 +149,10 @@ class TestValidateField:
             validate_field("abc", FieldSpec("x", int))
 
     def test_int_coercion_still_enforces_bounds(self):
-        # Coercion happens BEFORE bound checks, so a coerced value below min still fails.
         with pytest.raises(ValidationError, match=">= 60"):
             validate_field("5", FieldSpec("x", int, min_val=60))
         with pytest.raises(ValidationError, match=">= 60"):
             validate_field(5.0, FieldSpec("x", int, min_val=60))
-
-
-# ── Tool Schema Validation ──
 
 
 class TestValidateToolArgs:
@@ -185,8 +165,6 @@ class TestValidateToolArgs:
         assert result["tasks"] == ["a", "b"]
 
     def test_spawn_run_no_args_passes(self):
-        # Neither task nor tasks is required at schema level;
-        # _call_tool_inner validates at runtime
         result = validate_tool_args({}, SPAWN_RUN_SCHEMA)
         assert "task" not in result or result.get("task") is None
 
@@ -211,8 +189,6 @@ class TestValidateToolArgs:
         assert result["category"] == "knowledge"
 
     def test_learn_add_bad_category(self):
-        # §2: the rejection is a coded envelope naming the bad value; its render()
-        # is the exception string, so match on the WHAT line's content.
         with pytest.raises(ValidationError, match="not allowed") as ei:
             validate_tool_args(
                 {"rule": "x", "category": "invalid"},
@@ -221,11 +197,6 @@ class TestValidateToolArgs:
         assert ei.value.agent_error is not None
         assert ei.value.agent_error.code == "ERR_TOOL_ARG_INVALID"
 
-    # These exercise the generic validator; `schedule_add`'s schema was only the vehicle, and it
-    # retired with the alias (S109). Re-pointed at `automation_create`, the live equivalent. The
-    # interval-floor case moved with the floor itself — it is now a store-level WARNING rather than
-    # a schema rejection (R1 makes it overridable), asserted in
-    # `test_validation_user_actions.py::test_a_sub_floor_interval_is_flagged`.
     def test_automation_create_valid(self):
         result = validate_tool_args(
             {"name": "check", "message": "check pipeline", "when": "every 5 minutes"},
@@ -267,15 +238,17 @@ class TestValidateToolArgs:
         assert result["task"] == "do stuff"
 
 
-# ── JSON-RPC Validation ──
-
-
 class TestValidateJsonrpcRequest:
     def test_valid_request(self):
         method, rid, params = validate_jsonrpc_request(
-            {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "x"}}
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tooling/call",
+                "params": {"name": "x"},
+            }
         )
-        assert method == "tools/call"
+        assert method == "tooling/call"
         assert rid == 1
         assert params == {"name": "x"}
 
@@ -294,9 +267,6 @@ class TestValidateJsonrpcRequest:
     def test_non_dict_params_defaults(self):
         _, _, params = validate_jsonrpc_request({"method": "x", "params": "bad"})
         assert params == {}
-
-
-# ── Response Schema ──
 
 
 class TestBuildToolResponse:
@@ -329,7 +299,9 @@ class TestMcpTextContent:
 
 class TestValidateJsonrpcResponse:
     def test_valid_result(self):
-        resp = validate_jsonrpc_response({"jsonrpc": "2.0", "id": 1, "result": {"ok": True}})
+        resp = validate_jsonrpc_response(
+            {"jsonrpc": "2.0", "id": 1, "result": {"ok": True}}
+        )
         assert resp["id"] == 1
         assert resp["result"] == {"ok": True}
 
@@ -356,9 +328,6 @@ class TestValidateJsonrpcResponse:
             validate_jsonrpc_response("bad")  # type: ignore[arg-type]
 
 
-# ── API Body Validation ──
-
-
 class TestValidateApiBody:
     def test_valid_body(self):
         assert validate_api_body({"key": "val"}) == {"key": "val"}
@@ -374,7 +343,9 @@ class TestValidateApiBody:
 
 class TestValidateStringField:
     def test_valid(self):
-        assert validate_string_field({"name": "hello"}, "name", required=True) == "hello"
+        assert (
+            validate_string_field({"name": "hello"}, "name", required=True) == "hello"
+        )
 
     def test_missing_required(self):
         with pytest.raises(ValidationError, match="required"):
@@ -400,20 +371,17 @@ class TestValidateStringField:
             validate_string_field({"x": "c"}, "x", allowed=allowed)
 
 
-# ── Channel ID Regex ──
-
-
 @pytest.mark.parametrize(
     "channel_id,valid",
     [
-        ("C01ABC23DEF", True),  # standard channel
-        ("G01JWUKTY10", True),  # legacy private channel
-        ("D01ABC23DEF", True),  # DM channel
-        ("W01ABC23DEF", True),  # cross-org shared channel
-        ("X01ABC23DEF", False),  # invalid prefix
-        ("C", False),  # too short
-        ("c01abc", False),  # lowercase rejected
-        ("", False),  # empty
+        ("C01ABC23DEF", True),
+        ("G01JWUKTY10", True),
+        ("D01ABC23DEF", True),
+        ("W01ABC23DEF", True),
+        ("X01ABC23DEF", False),
+        ("C", False),
+        ("c01abc", False),
+        ("", False),
     ],
 )
 def test_channel_id_re(channel_id, valid):
@@ -429,7 +397,9 @@ class TestSendMessageSchema:
 
     def test_thread_ts_rejects_garbage(self):
         with pytest.raises(ValidationError):
-            validate_tool_args({"text": "hi", "thread_ts": "not-a-ts"}, SEND_MESSAGE_SCHEMA)
+            validate_tool_args(
+                {"text": "hi", "thread_ts": "not-a-ts"}, SEND_MESSAGE_SCHEMA
+            )
 
     def test_reply_broadcast_valid(self):
         result = validate_tool_args(
@@ -440,4 +410,6 @@ class TestSendMessageSchema:
 
     def test_reply_broadcast_rejects_non_bool(self):
         with pytest.raises(ValidationError):
-            validate_tool_args({"text": "hi", "reply_broadcast": "yes"}, SEND_MESSAGE_SCHEMA)
+            validate_tool_args(
+                {"text": "hi", "reply_broadcast": "yes"}, SEND_MESSAGE_SCHEMA
+            )

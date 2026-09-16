@@ -3,8 +3,8 @@
 import asyncio
 import json
 
-from gideon.dashboard.chat_utils import _prepare_messages
-from gideon.dashboard.state import _ChatSession
+from gideon.interfaces.dashboard.chat_utils import _prepare_messages
+from gideon.interfaces.dashboard.state import _ChatSession
 
 
 def _session(*messages: dict) -> _ChatSession:
@@ -15,7 +15,9 @@ def _session(*messages: dict) -> _ChatSession:
 
 
 def test_options_from_assistant():
-    s = _session({"role": "assistant", "content": "Pick one.\n[OPTIONS: A | B | C]", "ts": "t1"})
+    s = _session(
+        {"role": "assistant", "content": "Pick one.\n[OPTIONS: A | B | C]", "ts": "t1"}
+    )
     d = s.to_dict()
     assert d["has_options"] is True
     assert d["options"] == ["A", "B", "C"]
@@ -34,7 +36,6 @@ def test_no_options_when_user_last():
 
 def test_waiting_for_input_assistant_last():
     s = _session({"role": "assistant", "content": "Done. What next?", "ts": "t1"})
-    # task=None means not running
     d = s.to_dict()
     assert d["waiting_for_input"] is True
 
@@ -51,7 +52,6 @@ def test_not_waiting_when_user_last():
 def test_not_waiting_when_running():
     s = _session({"role": "assistant", "content": "Working on it.", "ts": "t1"})
     loop = asyncio.new_event_loop()
-    # Create a non-done future to simulate running
     s.task = loop.create_future()
     d = s.to_dict()
     assert d["waiting_for_input"] is False
@@ -102,14 +102,11 @@ def test_prompt_preview_truncation():
     long_text = "x" * 300 + "\n[OPTIONS: A | B]"
     s = _session({"role": "assistant", "content": long_text, "ts": "t1"})
     d = s.to_dict()
-    assert len(d["prompt_preview"]) == 241  # 240 + "…"
+    assert len(d["prompt_preview"]) == 241
     assert d["prompt_preview"].endswith("…")
 
 
 def test_message_count_excludes_done_sentinel():
-    # A completed 2-turn chat carries a `role: "done"` sentinel per streamed turn.
-    # The list count (to_dict) must exclude those, matching the detail/transcript
-    # view — a 2-turn chat is 4 messages, not 6 (#2862).
     s = _session(
         {"role": "user", "content": "hi", "ts": "t1"},
         {"role": "assistant", "content": "hello", "ts": "t2"},
@@ -118,12 +115,11 @@ def test_message_count_excludes_done_sentinel():
         {"role": "assistant", "content": "sure", "ts": "t5"},
         {"role": "done", "content": "", "ts": "t6"},
     )
-    assert len(s.messages) == 6  # raw in-memory list still carries the sentinels
+    assert len(s.messages) == 6
     assert s.to_dict()["messages"] == 4
 
 
 def test_message_count_single_turn():
-    # A single-turn chat shows 2, not 3 (raw list has one `done` sentinel).
     s = _session(
         {"role": "user", "content": "hi", "ts": "t1"},
         {"role": "assistant", "content": "hello", "ts": "t2"},
@@ -133,11 +129,6 @@ def test_message_count_single_turn():
 
 
 def test_message_count_agrees_with_detail_view():
-    # The list count and the detail endpoint must never diverge on the same
-    # session: both go through _prepare_messages' exclusion/collapse rule. Cover a
-    # mid-stream (running) session with `chunk` entries too — the detail view
-    # collapses each chunk run into one streaming message, and the list count must
-    # match that, not the raw entry count.
     msgs = [
         {"role": "user", "content": "hi", "ts": "t1"},
         {"role": "chunk", "content": "hel", "ts": "t2"},
@@ -149,7 +140,7 @@ def test_message_count_agrees_with_detail_view():
     ]
     s = _session(*msgs)
     loop = asyncio.new_event_loop()
-    s.task = loop.create_future()  # running: chunk buffer surfaces as a streaming msg
+    s.task = loop.create_future()
     d = s.to_dict()
     assert d["messages"] == len(_prepare_messages(s.messages, s.running))
     loop.close()

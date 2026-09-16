@@ -1,4 +1,4 @@
-"""Tests for gideon.snapshot — snapshot and restore."""
+"""Tests for gideon.workspace.snapshot — snapshot and restore."""
 
 import argparse
 import json
@@ -9,15 +9,13 @@ from pathlib import Path
 
 import pytest
 
-from gideon.snapshot import restore_main, snapshot_main
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
+from gideon.workspace.snapshot import restore_main, snapshot_main
 
 
 @pytest.fixture(autouse=True)
 def _no_gateway(monkeypatch):
     """Prevent gateway-running check from blocking restore in tests."""
-    monkeypatch.setattr("gideon.snapshot._is_gateway_running", lambda: False)
+    monkeypatch.setattr("gideon.workspace.snapshot._is_gateway_running", lambda: False)
 
 
 def _setup_fake_gideon(d: Path) -> None:
@@ -29,7 +27,6 @@ def _setup_fake_gideon(d: Path) -> None:
     ):
         (d / sub).mkdir(parents=True, exist_ok=True)
 
-    # memory.db with all tables
     conn = sqlite3.connect(str(d / "memory.db"))
     conn.executescript("""
         CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
@@ -94,11 +91,8 @@ def _setup_fake_gideon(d: Path) -> None:
     (d / "workspace/hygiene_data/week1.json").write_text("big data")
     (d / "skills/my-skill/SKILL.md").write_text("# My Skill")
 
-    # The unified trigger store + an event trigger (S113). The fake home carried `crons.json`
-    # ALONE, so every snapshot test passed while the component backed up a legacy relic nothing
-    # writes and dropped the automations the user actually has.
-    from gideon.triggers.models import Trigger
-    from gideon.triggers.store import TriggerStore
+    from gideon.automation.triggers.models import Trigger
+    from gideon.automation.triggers.store import TriggerStore
 
     TriggerStore(base_dir=d).upsert(
         Trigger(
@@ -129,7 +123,9 @@ def _make_snapshot(src: Path, out: Path, extra_args: list[str] | None = None) ->
     args = [str(out)] + (extra_args or [])
     snapshot_main(args)
     tarballs = sorted(
-        out.glob("gideon-snapshot-*.tar.gz"), key=lambda p: p.stat().st_mtime, reverse=True
+        out.glob("gideon-snapshot-*.tar.gz"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
     )
     assert tarballs, "No tarball created"
     return tarballs[0]
@@ -146,9 +142,6 @@ def env(tmp_path, monkeypatch):
     return src, out, tarball, tmp_path
 
 
-# ── Snapshot Tests ────────────────────────────────────────────────────────────
-
-
 class TestSnapshot:
     def test_creates_valid_tarball(self, env):
         """TEST 1"""
@@ -163,10 +156,6 @@ class TestSnapshot:
         snap = snaps[0]
         assert (snap / "memory.db").is_file()
         assert (snap / "crons.json").is_file()
-        # 🔴 S113: the `crons` component held `crons.json` alone — the legacy file nothing has
-        # written since S108 — so `gideon snapshot` backed up an empty relic and dropped every
-        # automation the user had. `triggers.json` is the store; `event_triggers.json` was named in
-        # the plan's own recon note as missing alongside it.
         assert (snap / "triggers.json").is_file(), "the automation store must travel"
         assert (snap / "event_triggers.json").is_file()
         assert (snap / "config.json").is_file()
@@ -176,8 +165,6 @@ class TestSnapshot:
         assert (snap / "skills/my-skill/SKILL.md").is_file()
         assert not (snap / "workspace/hygiene_data/week1.json").exists()
         m = json.loads((snap / "MANIFEST.json").read_text())
-        # v3 since DAS-10 — the manifest gained the per-domain `domains` block the §6
-        # archive browser reads. `contents` is unchanged for existing readers.
         assert m["version"] == 3
         assert isinstance(m["domains"], dict)
 
@@ -187,7 +174,9 @@ class TestSnapshot:
         extract.mkdir()
         with tarfile.open(str(tarball)) as tar:
             tar.extractall(extract, filter=lambda t, _d="": t)
-        snap = next(d for d in extract.iterdir() if d.name.startswith("gideon-snapshot-"))
+        snap = next(
+            d for d in extract.iterdir() if d.name.startswith("gideon-snapshot-")
+        )
         conn = sqlite3.connect(str(snap / "memory.db"))
         assert conn.execute("SELECT count(*) FROM semantic_memory").fetchone()[0] == 2
         conn.close()
@@ -198,7 +187,9 @@ class TestSnapshot:
         extract.mkdir()
         with tarfile.open(str(tarball)) as tar:
             tar.extractall(extract, filter=lambda t, _d="": t)
-        snap = next(d for d in extract.iterdir() if d.name.startswith("gideon-snapshot-"))
+        snap = next(
+            d for d in extract.iterdir() if d.name.startswith("gideon-snapshot-")
+        )
         for f in (
             "sel_hmac.key",
             "telemetry_salt",
@@ -213,7 +204,6 @@ class TestSnapshot:
         src, _, _, tmp_path = env
         out2 = tmp_path / "out2"
         out2.mkdir()
-        # Create 3 fake old snapshots
         for i in range(3):
             (out2 / f"gideon-snapshot-2026010{i}T000000Z.tar.gz").write_text("fake")
         monkeypatch.setenv("GIDEON_HOME", str(src))
@@ -232,14 +222,9 @@ class TestSnapshot:
         """TEST 29 partial"""
         src, _, _, tmp_path = env
         monkeypatch.setenv("GIDEON_HOME", str(src))
-        # argparse will raise SystemExit for --keep 0 since we validate > 0
-        # But our validation is post-parse, so it returns 1
         ret = snapshot_main([str(tmp_path / "x"), "--keep", "0"])
         assert ret == 1
         assert "positive integer" in capsys.readouterr().out
-
-
-# ── Restore Tests ─────────────────────────────────────────────────────────────
 
 
 class TestRestoreDryRun:
@@ -284,12 +269,13 @@ class TestRestoreReplace:
         monkeypatch.setenv("GIDEON_HOME", str(existing))
         restore_main([str(tarball), "--mode", "replace"])
         backups = [
-            d for d in existing.iterdir() if d.is_dir() and d.name.startswith("pre-restore-")
+            d
+            for d in existing.iterdir()
+            if d.is_dir() and d.name.startswith("pre-restore-")
         ]
         assert backups
         assert (backups[0] / "memory.db").is_file()
         assert (backups[0] / "sel_hmac.key").is_file()
-        # original.md should be gone (replaced by snapshot content)
         assert not (existing / "workspace/original.md").exists()
 
     def test_replace_backs_up_directories(self, env, monkeypatch):
@@ -301,7 +287,9 @@ class TestRestoreReplace:
         monkeypatch.setenv("GIDEON_HOME", str(existing))
         restore_main([str(tarball), "--mode", "replace"])
         backups = [
-            d for d in existing.iterdir() if d.is_dir() and d.name.startswith("pre-restore-")
+            d
+            for d in existing.iterdir()
+            if d.is_dir() and d.name.startswith("pre-restore-")
         ]
         assert backups
         assert (backups[0] / "workspace/local_only.md").is_file()
@@ -320,7 +308,8 @@ class TestRestoreMerge:
             "'test', '2026-02-01', '2026-02-01')"
         )
         conn.execute(
-            "UPDATE semantic_memory SET value_json='\"modified\"' " "WHERE key='test.key1'"
+            "UPDATE semantic_memory SET value_json='\"modified\"' "
+            "WHERE key='test.key1'"
         )
         conn.commit()
         conn.close()
@@ -341,12 +330,11 @@ class TestRestoreMerge:
     def test_merge_restores_automations_from_the_store(self, env, monkeypatch):
         """🔴 S113. The `crons` component restored `crons.json` only — the legacy file — so a
         restore gave the user back an empty relic and none of their automations."""
-        from gideon.triggers.store import TriggerStore
+        from gideon.automation.triggers.store import TriggerStore
 
         _, _, tarball, tmp_path = env
         dst = tmp_path / "dst-auto"
         _setup_fake_gideon(dst)
-        # The destination renames its own copy, so the snapshot's row is a NEW name.
         store = TriggerStore(base_dir=dst)
         row = store.get("clock:nightly")
         row.trigger.name = "My own backup"
@@ -358,23 +346,26 @@ class TestRestoreMerge:
         rows = TriggerStore(base_dir=dst).load()
         names = sorted(r.trigger.name for r in rows)
         assert names == ["My own backup", "Nightly backup"], names
-        # The home's own automation keeps firing; the imported one arrives paused.
         by_name = {r.trigger.name: r.trigger for r in rows}
         assert by_name["My own backup"].enabled is True
         assert by_name["Nightly backup"].enabled is False
 
-    def test_merge_skips_an_automation_name_the_home_already_has(self, env, monkeypatch):
-        from gideon.triggers.store import TriggerStore
+    def test_merge_skips_an_automation_name_the_home_already_has(
+        self, env, monkeypatch
+    ):
+        from gideon.automation.triggers.store import TriggerStore
 
         _, _, tarball, tmp_path = env
         dst = tmp_path / "dst-dupe"
-        _setup_fake_gideon(dst)  # already holds "Nightly backup"
+        _setup_fake_gideon(dst)
         monkeypatch.setenv("GIDEON_HOME", str(dst))
         assert restore_main([str(tarball), "--mode", "merge"]) == 0
 
         rows = TriggerStore(base_dir=dst).load()
         assert [r.trigger.name for r in rows] == ["Nightly backup"]
-        assert rows[0].trigger.enabled is True, "the home's own row must not be paused by a restore"
+        assert (
+            rows[0].trigger.enabled is True
+        ), "the home's own row must not be paused by a restore"
 
     def test_merge_cron_dedup(self, env, monkeypatch):
         """TEST 8"""
@@ -492,7 +483,6 @@ class TestRestoreMerge:
         _, _, tarball, tmp_path = env
         dst = tmp_path / "dst25"
         _setup_fake_gideon(dst)
-        # Same ts as snapshot
         (dst / "notifications.jsonl").write_text('{"ts":"2026-01-01","msg":"test"}\n')
         monkeypatch.setenv("GIDEON_HOME", str(dst))
         restore_main([str(tarball), "--mode", "merge", "--components", "notifications"])
@@ -526,7 +516,15 @@ class TestComponents:
         """TEST 18"""
         restore_main(["--list-components"])
         out = capsys.readouterr().out
-        for c in ("memory", "crons", "config", "skills", "workspace", "notifications", "security"):
+        for c in (
+            "memory",
+            "crons",
+            "config",
+            "skills",
+            "workspace",
+            "notifications",
+            "security",
+        ):
             assert c in out
 
     def test_memory_only(self, env, monkeypatch):
@@ -548,7 +546,9 @@ class TestComponents:
         fresh = tmp_path / "fresh20"
         fresh.mkdir()
         monkeypatch.setenv("GIDEON_HOME", str(fresh))
-        restore_main([str(tarball), "--mode", "replace", "--components", "crons,skills"])
+        restore_main(
+            [str(tarball), "--mode", "replace", "--components", "crons,skills"]
+        )
         assert (fresh / "crons.json").is_file()
         assert (fresh / "skills/my-skill/SKILL.md").is_file()
         assert not (fresh / "memory.db").exists()
@@ -607,10 +607,8 @@ class TestIntegrity:
         fresh.mkdir()
         monkeypatch.setenv("GIDEON_HOME", str(fresh))
         restore_main([str(tarball), "--mode", "replace", "--components", "memory"])
-        capsys.readouterr()  # discard first call's output
-        # Remove index db
+        capsys.readouterr()
         (fresh / "memory_index.db").unlink(missing_ok=True)
-        # Re-run merge to trigger warning
         restore_main([str(tarball), "--mode", "merge", "--components", "memory"])
         assert "memory_index.db is missing" in capsys.readouterr().out
 
@@ -624,12 +622,13 @@ class TestSecurity:
         monkeypatch.setenv("GIDEON_HOME", str(src))
         tarball = _make_snapshot(src, out)
 
-        # Extract, inject symlink, re-tar
         extract = tmp_path / "sym_extract"
         extract.mkdir()
         with tarfile.open(str(tarball)) as tar:
             tar.extractall(extract, filter=lambda t, _d="": t)
-        snap = next(d for d in extract.iterdir() if d.name.startswith("gideon-snapshot-"))
+        snap = next(
+            d for d in extract.iterdir() if d.name.startswith("gideon-snapshot-")
+        )
         os.symlink("/etc/passwd", str(snap / "evil_link"))
         evil_tar = tmp_path / "evil.tar.gz"
         with tarfile.open(str(evil_tar), "w:gz") as tar:
@@ -639,14 +638,12 @@ class TestSecurity:
         fresh.mkdir()
         monkeypatch.setenv("GIDEON_HOME", str(fresh))
         ret = restore_main([str(evil_tar), "--mode", "replace"])
-        # Symlink is filtered out by _data_filter, restore succeeds
         assert ret == 0
         assert not (fresh / "evil_link").exists()
 
     def test_mode_without_value(self, env, monkeypatch):
         """TEST 28"""
         _, _, tarball, _ = env
-        # argparse handles this — --mode without value raises SystemExit
         with pytest.raises(SystemExit):
             restore_main([str(tarball), "--mode"])
 
@@ -654,11 +651,9 @@ class TestSecurity:
         _, _, _, tmp_path = env
         evil_tar = tmp_path / "traversal.tar.gz"
         with tarfile.open(str(evil_tar), "w:gz") as tar:
-            # Add a valid snapshot dir so extraction finds something
             info = tarfile.TarInfo(name="gideon-snapshot-20260101T000000Z/")
             info.type = tarfile.DIRTYPE
             tar.addfile(info)
-            # Add traversal entry — will be filtered
             info2 = tarfile.TarInfo(
                 name="gideon-snapshot-20260101T000000Z/../../../etc/passwd"
             )
@@ -668,11 +663,8 @@ class TestSecurity:
         fresh.mkdir()
         monkeypatch.setenv("GIDEON_HOME", str(fresh))
         ret = restore_main([str(evil_tar), "--mode", "replace"])
-        # Traversal entry filtered out, restore proceeds
         assert ret == 0
-        # Verify no "passwd" file anywhere under restore dir
         assert not any(p.name == "passwd" for p in fresh.rglob("*"))
-        # Also verify it didn't escape to tmp_path
         assert not (tmp_path / "etc" / "passwd").exists()
 
     def test_absolute_path_filtered(self, env, capsys, monkeypatch):
@@ -696,7 +688,6 @@ class TestSecurity:
         _, _, _, tmp_path = env
         evil_tar = tmp_path / "hardlink.tar.gz"
         with tarfile.open(str(evil_tar), "w:gz") as tar:
-            # Add valid snapshot dir
             info = tarfile.TarInfo(name="gideon-snapshot-20260101T000000Z/")
             info.type = tarfile.DIRTYPE
             tar.addfile(info)
@@ -719,7 +710,9 @@ class TestIntegrityFailure:
         extract.mkdir()
         with tarfile.open(str(tarball)) as tar:
             tar.extractall(extract, filter=lambda t, _d="": t)
-        snap = next(d for d in extract.iterdir() if d.name.startswith("gideon-snapshot-"))
+        snap = next(
+            d for d in extract.iterdir() if d.name.startswith("gideon-snapshot-")
+        )
         (snap / "memory.db").write_bytes(b"not a valid sqlite database")
         corrupt_tar = tmp_path / "corrupt.tar.gz"
         with tarfile.open(str(corrupt_tar), "w:gz") as tar:
@@ -762,16 +755,12 @@ class TestParsedNamespace:
         assert (fresh / "memory.db").is_file()
 
 
-# ── Comment 8: New edge-case tests ───────────────────────────────────────────
-
-
 class TestSchemaIncompatibleMerge:
     def test_merge_incompatible_schema(self, env, capsys, monkeypatch):
         """Merge gracefully skips tables that don't exist in source."""
         _, _, tarball, tmp_path = env
         dst = tmp_path / "dst_schema"
         _setup_fake_gideon(dst)
-        # Drop a table from destination to simulate schema mismatch
         conn = sqlite3.connect(str(dst / "memory.db"))
         conn.execute("DROP TABLE knowledge_edges")
         conn.commit()
@@ -792,12 +781,13 @@ class TestCorruptSourceDB:
         monkeypatch.setenv("GIDEON_HOME", str(src))
         tarball = _make_snapshot(src, out)
 
-        # Extract, corrupt memory.db, re-tar
         extract = tmp_path / "corrupt_src_extract"
         extract.mkdir()
         with tarfile.open(str(tarball)) as tar:
             tar.extractall(extract, filter=lambda t, _d="": t)
-        snap = next(d for d in extract.iterdir() if d.name.startswith("gideon-snapshot-"))
+        snap = next(
+            d for d in extract.iterdir() if d.name.startswith("gideon-snapshot-")
+        )
         (snap / "memory.db").write_bytes(b"corrupt data here")
         corrupt_tar = tmp_path / "corrupt_src.tar.gz"
         with tarfile.open(str(corrupt_tar), "w:gz") as tar:
@@ -819,7 +809,9 @@ class TestGatewayRunningRefusal:
         fresh = tmp_path / "fresh_gw"
         fresh.mkdir()
         monkeypatch.setenv("GIDEON_HOME", str(fresh))
-        monkeypatch.setattr("gideon.snapshot._is_gateway_running", lambda: True)
+        monkeypatch.setattr(
+            "gideon.workspace.snapshot._is_gateway_running", lambda: True
+        )
         ret = restore_main([str(tarball), "--mode", "replace"])
         assert ret == 1
         assert "Gateway is running" in capsys.readouterr().out
@@ -830,12 +822,14 @@ class TestGatewayRunningRefusal:
         fresh = tmp_path / "fresh_gw_force"
         fresh.mkdir()
         monkeypatch.setenv("GIDEON_HOME", str(fresh))
-        monkeypatch.setattr("gideon.snapshot._is_gateway_running", lambda: True)
+        monkeypatch.setattr(
+            "gideon.workspace.snapshot._is_gateway_running", lambda: True
+        )
         ret = restore_main([str(tarball), "--mode", "replace", "--force"])
         assert ret == 0
 
 
-class TestEmptyPersonalclawDir:
+class TestEmptyGideonDir:
     def test_snapshot_empty_dir(self, tmp_path, monkeypatch):
         """Snapshot succeeds on an empty ~/.gideon directory."""
         empty = tmp_path / "empty_pc"
@@ -855,7 +849,6 @@ class TestConcurrentSnapshot:
         out.mkdir()
         monkeypatch.setenv("GIDEON_HOME", str(src))
         snapshot_main([str(out)])
-        # Ensure different timestamp by creating a second one
         import time
 
         time.sleep(1.1)
@@ -863,9 +856,6 @@ class TestConcurrentSnapshot:
         tarballs = list(out.glob("gideon-snapshot-*.tar.gz"))
         assert len(tarballs) == 2
         assert tarballs[0].name != tarballs[1].name
-
-
-# ── DURABILITY §1: safe live-database capture + inventory-driven gap closure ──
 
 
 class TestLiveDatabaseSafety:
@@ -889,14 +879,19 @@ class TestLiveDatabaseSafety:
         for i in range(rows):
             conn.execute("INSERT INTO probe(v) VALUES (?)", (f"row-{i}" * 20,))
         conn.commit()
-        # Deliberately keep the handle OPEN with un-checkpointed WAL content —
-        # this is the state a real snapshot runs against.
         return home, conn
 
     @pytest.mark.parametrize(
-        "rel", ["workspace/knowledge/knowledge.db", "loop/loops.db", "workspace/lexicon/lexicon.db"]
+        "rel",
+        [
+            "workspace/knowledge/knowledge.db",
+            "loop/loops.db",
+            "workspace/lexicon/lexicon.db",
+        ],
     )
-    def test_declared_db_captured_completely_while_open(self, tmp_path, monkeypatch, rel):
+    def test_declared_db_captured_completely_while_open(
+        self, tmp_path, monkeypatch, rel
+    ):
         home, conn = self._home_with_live_db(tmp_path, rel)
         try:
             monkeypatch.setenv("GIDEON_HOME", str(home))
@@ -920,7 +915,9 @@ class TestLiveDatabaseSafety:
     def test_wal_sidecars_never_ride_along(self, tmp_path, monkeypatch):
         """Sidecars are checkpointed/backed-up state, not files to copy — shipping
         them alongside a backup-API copy risks a mismatched pair on restore."""
-        home, conn = self._home_with_live_db(tmp_path, "workspace/knowledge/knowledge.db")
+        home, conn = self._home_with_live_db(
+            tmp_path, "workspace/knowledge/knowledge.db"
+        )
         try:
             monkeypatch.setenv("GIDEON_HOME", str(home))
             tarball = _make_snapshot(home, tmp_path / "out")
@@ -937,7 +934,6 @@ class TestInventoryGapClosure:
     def test_previously_missing_stores_are_captured(self, tmp_path, monkeypatch):
         home = tmp_path / "src"
         _setup_fake_gideon(home)
-        # Seed one real file in each formerly-uncovered store.
         seeded = {
             "tasks/t-1.json": '{"id": "t-1", "title": "keep me"}',
             "projects/p-1/project.json": '{"id": "p-1"}',
@@ -960,30 +956,30 @@ class TestInventoryGapClosure:
         snap = next(extract.glob("gideon-snapshot-*"))
         for rel, body in seeded.items():
             staged = snap / rel
-            assert staged.is_file(), f"{rel} was NOT captured — the backup is incomplete"
+            assert (
+                staged.is_file()
+            ), f"{rel} was NOT captured — the backup is incomplete"
             assert staged.read_text() == body, f"{rel} content differs"
 
     def test_default_output_dir_honors_the_active_home(self, tmp_path, monkeypatch):
         """The fallback used to hardcode ~/.gideon/snapshots, so snapshotting
         an isolated home wrote its archive into the REAL one."""
-        from gideon.snapshot import _default_snapshot_dir
+        from gideon.workspace.snapshot import _default_snapshot_dir
 
         home = tmp_path / "isolated"
         home.mkdir()
         monkeypatch.setenv("GIDEON_HOME", str(home))
-        # No config file → the fallback path is what we're pinning.
         monkeypatch.setattr(
-            "gideon.config.loader.AppConfig.load",
+            "gideon.core.config.loader.AppConfig.load",
             classmethod(lambda cls: (_ for _ in ()).throw(RuntimeError("no config"))),
         )
         assert _default_snapshot_dir() == str(home / "snapshots")
 
 
-# ── 🔴 the run history's declared merge had no executor (S176) ──
-
-
 def _hist_row(run_id: str, job_id: str = "clock:backup") -> str:
-    return json.dumps({"run_id": run_id, "job_id": job_id, "started_at": 1.0, "status": "success"})
+    return json.dumps(
+        {"run_id": run_id, "job_id": job_id, "started_at": 1.0, "status": "success"}
+    )
 
 
 def _hist(root: Path, shard: str, run_ids: list[str]) -> Path:
@@ -1010,7 +1006,7 @@ def test_a_MERGE_restore_recovers_the_run_history(tmp_path: Path) -> None:
     `LIVE-run`. A declared strategy with no executor, in the durability layer — where the whole
     promise is that a restore returns what the snapshot holds.
     """
-    from gideon.snapshot import _merge_run_history
+    from gideon.workspace.snapshot import _merge_run_history
 
     snap, pc = tmp_path / "snap", tmp_path / "home"
     _hist(snap, "clock:backup.jsonl", ["FROM-SNAPSHOT"])
@@ -1027,7 +1023,7 @@ def test_the_merge_DEDUPES_on_run_id(tmp_path: Path) -> None:
     """Deduped on `run_id`, not a whole-line compare: the same run round-trips through `to_dict()`,
     so key ordering or a re-serialised float could make an identical run look new and double it.
     Mirrors `_merge_notifications`, which dedupes on `ts` for the same reason."""
-    from gideon.snapshot import _merge_run_history
+    from gideon.workspace.snapshot import _merge_run_history
 
     snap, pc = tmp_path / "snap", tmp_path / "home"
     _hist(snap, "j.jsonl", ["a", "b"])
@@ -1039,8 +1035,9 @@ def test_the_merge_DEDUPES_on_run_id(tmp_path: Path) -> None:
 
 def test_the_merge_is_IDEMPOTENT(tmp_path: Path) -> None:
     """A restore drill re-run must not grow the history. `_do_merge` is the path a user reaches by
-    re-running a restore, so a non-idempotent merge would double every row each attempt."""
-    from gideon.snapshot import _merge_run_history
+    re-running a restore, so a non-idempotent merge would double every row each attempt.
+    """
+    from gideon.workspace.snapshot import _merge_run_history
 
     snap, pc = tmp_path / "snap", tmp_path / "home"
     _hist(snap, "j.jsonl", ["a", "b"])
@@ -1054,8 +1051,9 @@ def test_the_merge_is_IDEMPOTENT(tmp_path: Path) -> None:
 
 def test_a_SNAPSHOT_ONLY_shard_is_copied_whole(tmp_path: Path) -> None:
     """The store is one file per job. A job that exists only in the snapshot — an automation the
-    live home has never run — must come back, not be skipped for having no local counterpart."""
-    from gideon.snapshot import _merge_run_history
+    live home has never run — must come back, not be skipped for having no local counterpart.
+    """
+    from gideon.workspace.snapshot import _merge_run_history
 
     snap, pc = tmp_path / "snap", tmp_path / "home"
     _hist(snap, "j.jsonl", ["x"])
@@ -1068,8 +1066,9 @@ def test_a_SNAPSHOT_ONLY_shard_is_copied_whole(tmp_path: Path) -> None:
 
 def test_a_MALFORMED_line_does_not_abort_the_merge(tmp_path: Path) -> None:
     """One bad line must not cost the rest of the restore. The same call `count_since` makes about a
-    malformed ledger row: skip it, keep going — a partial recovery beats an aborted one."""
-    from gideon.snapshot import _merge_run_history
+    malformed ledger row: skip it, keep going — a partial recovery beats an aborted one.
+    """
+    from gideon.workspace.snapshot import _merge_run_history
 
     snap, pc = tmp_path / "snap", tmp_path / "home"
     d = snap / "cron-history"
@@ -1086,8 +1085,9 @@ def test_a_MALFORMED_line_does_not_abort_the_merge(tmp_path: Path) -> None:
 
 def test_an_ABSENT_snapshot_history_is_a_NO_OP(tmp_path: Path) -> None:
     """A snapshot taken before the store existed (or from a home that never scheduled anything) must
-    not create an empty directory or raise — the restore has to stay usable either way."""
-    from gideon.snapshot import _merge_run_history
+    not create an empty directory or raise — the restore has to stay usable either way.
+    """
+    from gideon.workspace.snapshot import _merge_run_history
 
     pc = tmp_path / "home"
     pc.mkdir()
@@ -1096,12 +1096,12 @@ def test_an_ABSENT_snapshot_history_is_a_NO_OP(tmp_path: Path) -> None:
 
 
 def test_the_merge_does_NOT_re_apply_retention(tmp_path: Path) -> None:
-    """`ScheduleRunStore.rotate_all()` owns retention and runs at gateway boot (S175). Trimming here
+    """`ExecutionJournal.rotate_all()` owns retention and runs at gateway boot (S175). Trimming here
     would be a second copy of that policy — the exact duplication S175 removed, which had silently
     reverted S173."""
     import inspect
 
-    from gideon import snapshot
+    from gideon.workspace import snapshot
 
     source = inspect.getsource(snapshot._merge_run_history)
     body = source.split('"""')[-1]
@@ -1117,7 +1117,7 @@ def test_the_run_history_merge_is_WIRED_into_do_merge(tmp_path: Path) -> None:
 
     Drives `_do_merge`, the function a real restore reaches.
     """
-    from gideon.snapshot import _do_merge
+    from gideon.workspace.snapshot import _do_merge
 
     snap, pc = tmp_path / "snap", tmp_path / "home"
     snap.mkdir()
@@ -1132,9 +1132,15 @@ def test_the_run_history_merge_is_WIRED_into_do_merge(tmp_path: Path) -> None:
     assert "LIVE-run" in got
 
 
-# ── 🔴 the capture side was widened and the RESTORE side was not (S177) ──
-
-_STORES = ("tasks", "projects", "agents", "prompts", "workflows", "artifacts", "uploads")
+_STORES = (
+    "tasks",
+    "projects",
+    "agents",
+    "prompts",
+    "workflows",
+    "artifacts",
+    "uploads",
+)
 
 
 def _seeded_snapshot(root: Path, *, secrets: bool = False) -> Path:
@@ -1146,12 +1152,16 @@ def _seeded_snapshot(root: Path, *, secrets: bool = False) -> Path:
         (snap / d).mkdir(parents=True, exist_ok=True)
         (snap / d / "x.json").write_text('{"v":"FROM-SNAPSHOT"}', encoding="utf-8")
     (snap / "entity_settings").mkdir(exist_ok=True)
-    (snap / "entity_settings" / "e.json").write_text('{"v":"FROM-SNAPSHOT"}', encoding="utf-8")
+    (snap / "entity_settings" / "e.json").write_text(
+        '{"v":"FROM-SNAPSHOT"}', encoding="utf-8"
+    )
     if secrets:
         (snap / ".env").write_text("OPENAI_API_KEY=sk-FROM-SNAPSHOT", encoding="utf-8")
         (snap / ".local_secret").write_text("FROM-SNAPSHOT", encoding="utf-8")
         (snap / "credentials").mkdir(exist_ok=True)
-        (snap / "credentials" / "c.json").write_text('{"tok":"FROM-SNAPSHOT"}', encoding="utf-8")
+        (snap / "credentials" / "c.json").write_text(
+            '{"tok":"FROM-SNAPSHOT"}', encoding="utf-8"
+        )
     return snap
 
 
@@ -1164,7 +1174,7 @@ def test_a_MERGE_restore_recovers_the_task_board(tmp_path: Path) -> None:
     Driven: 8 stores in the snapshot, 8 absent from the restored home. The asymmetry IS the bug — a
     snapshot is only as good as its restore, and widening one side made the archive look complete.
     """
-    from gideon.snapshot import _do_merge
+    from gideon.workspace.snapshot import _do_merge
 
     snap = _seeded_snapshot(tmp_path)
     pc = tmp_path / "home"
@@ -1180,7 +1190,7 @@ def test_a_MERGE_restore_recovers_the_task_board(tmp_path: Path) -> None:
 def test_a_REPLACE_restore_recovers_the_task_board(tmp_path: Path) -> None:
     """The same gap in replace mode. Both are reachable from `--mode`, and a user recovering onto a
     wiped machine picks replace — the shape where losing the board is total."""
-    from gideon.snapshot import _do_replace
+    from gideon.workspace.snapshot import _do_replace
 
     snap = _seeded_snapshot(tmp_path)
     pc = tmp_path / "home"
@@ -1202,7 +1212,7 @@ def test_the_restore_does_NOT_re_plant_SECRETS(tmp_path: Path) -> None:
     warrant the same default, so the generic path excludes `secret_paths()` and the named `security`
     component stays the deliberate route (copy-if-missing, chmod 0600).
     """
-    from gideon.snapshot import _do_merge
+    from gideon.workspace.snapshot import _do_merge
 
     snap = _seeded_snapshot(tmp_path, secrets=True)
     pc = tmp_path / "home"
@@ -1211,14 +1221,16 @@ def test_the_restore_does_NOT_re_plant_SECRETS(tmp_path: Path) -> None:
     _do_merge(snap, pc, None)
 
     for leaked in (".env", ".local_secret", "credentials/c.json"):
-        assert not (pc / leaked).exists(), f"restore re-planted secret material: {leaked}"
+        assert not (
+            pc / leaked
+        ).exists(), f"restore re-planted secret material: {leaked}"
 
 
 def test_MERGE_leaves_an_existing_file_ALONE(tmp_path: Path) -> None:
     """Merge mode's contract is that local state wins. These entries have no field-level merge
     executor yet, so copy-if-missing is the honest half — overwriting a live task board with an
     older snapshot's copy is the data loss a merge restore exists to avoid."""
-    from gideon.snapshot import _do_merge
+    from gideon.workspace.snapshot import _do_merge
 
     snap = _seeded_snapshot(tmp_path)
     pc = tmp_path / "home"
@@ -1234,7 +1246,7 @@ def test_REPLACE_keeps_the_overwritten_copy_RECOVERABLE(tmp_path: Path) -> None:
     """Replace mode is destructive by design, and its existing contract is that the previous state
     lands in `pre-restore-<ts>/`. Widening it without extending that backup would make the new
     coverage the one unrecoverable path in the function."""
-    from gideon.snapshot import _do_replace
+    from gideon.workspace.snapshot import _do_replace
 
     snap = _seeded_snapshot(tmp_path)
     pc = tmp_path / "home"
@@ -1254,8 +1266,9 @@ def test_REPLACE_keeps_the_overwritten_copy_RECOVERABLE(tmp_path: Path) -> None:
 def test_a_TARGETED_restore_stays_targeted(tmp_path: Path) -> None:
     """`--components memory` must not drag in the whole state. The new coverage is gated on
     `everything`, which is also what `components is None` selects — so the default (the invocation a
-    user in a recovery actually types) is complete, and an explicit narrow ask is still narrow."""
-    from gideon.snapshot import _do_merge
+    user in a recovery actually types) is complete, and an explicit narrow ask is still narrow.
+    """
+    from gideon.workspace.snapshot import _do_merge
 
     snap = _seeded_snapshot(tmp_path)
     pc = tmp_path / "home"
@@ -1271,7 +1284,7 @@ def test_EVERYTHING_is_a_valid_component(tmp_path: Path) -> None:
     `~/.gideon` and restoring reproduces … including tasks, projects, entity_settings" — and
     the CLI answered **"❌ Unknown component: everything"**. Without it there is no way to ask for
     the task board at all."""
-    from gideon.snapshot import COMPONENT_HELP, VALID_COMPONENTS
+    from gideon.workspace.snapshot import COMPONENT_HELP, VALID_COMPONENTS
 
     assert "everything" in VALID_COMPONENTS
     assert "everything" in COMPONENT_HELP, "--list-components must advertise it"
@@ -1281,7 +1294,7 @@ def test_DERIVED_entries_are_not_restored(tmp_path: Path) -> None:
     """`backup_entries()` skips derived indexes because "a stale index paired with a newer store is
     worse than none". The restore projection reuses that same call rather than re-deciding, so the
     reasoning cannot drift between the two directions."""
-    from gideon.snapshot import _extra_restore_paths
+    from gideon.workspace.snapshot import _extra_restore_paths
 
     snap = tmp_path / "snap"
     (snap / "models").mkdir(parents=True)
@@ -1299,7 +1312,7 @@ def test_the_restore_projection_MIRRORS_the_capture_one(tmp_path: Path) -> None:
     `backup_entries()` and exclude the same named components, so a store added to the inventory
     later is captured AND restored without editing either function. Asserted structurally, because
     the failure mode is the two drifting apart again — not a wrong value today."""
-    from gideon.snapshot import _everything_paths, _extra_restore_paths
+    from gideon.workspace.snapshot import _everything_paths, _extra_restore_paths
 
     home = tmp_path / "home"
     for d in (*_STORES, "entity_settings"):
@@ -1308,13 +1321,14 @@ def test_the_restore_projection_MIRRORS_the_capture_one(tmp_path: Path) -> None:
 
     captured = set(_everything_paths(home))
     restorable = set(_extra_restore_paths(home))
-    # Restore excludes secrets by design; nothing else may differ.
     assert restorable <= captured
-    from gideon.durability import inventory as inv
+    from gideon.operations.durability import inventory as inv
 
     secret = inv.secret_paths()
     unexplained = {p for p in captured - restorable if p.split("/", 1)[0] not in secret}
-    assert unexplained == set(), f"captured but not restorable, for no stated reason: {unexplained}"
+    assert (
+        unexplained == set()
+    ), f"captured but not restorable, for no stated reason: {unexplained}"
 
 
 def test_EVERYTHING_selects_the_NAMED_components_too(tmp_path: Path) -> None:
@@ -1329,12 +1343,19 @@ def test_EVERYTHING_selects_the_NAMED_components_too(tmp_path: Path) -> None:
 
     `everything` is a superset marker, not a peer.
     """
-    from gideon.snapshot import _want
+    from gideon.workspace.snapshot import _want
 
-    for named in ("memory", "crons", "config", "skills", "workspace", "notifications", "security"):
+    for named in (
+        "memory",
+        "crons",
+        "config",
+        "skills",
+        "workspace",
+        "notifications",
+        "security",
+    ):
         assert _want(["everything"], named), f"'everything' must select '{named}'"
     assert _want(["everything"], "everything")
-    # and a narrow ask stays narrow
     assert _want(["memory"], "memory")
     assert not _want(["memory"], "everything")
     assert not _want(["memory"], "crons")
@@ -1344,7 +1365,7 @@ def test_a_WIPE_and_restore_returns_every_named_component(tmp_path: Path) -> Non
     """Criterion 1 end to end, at the `_do_replace` level: the drill is "wipe `~/.gideon` and
     restore", so the test that matters drives an EMPTY home rather than a partially-populated one —
     the state a user recovering onto a new machine actually has."""
-    from gideon.snapshot import _do_replace
+    from gideon.workspace.snapshot import _do_replace
 
     snap = _seeded_snapshot(tmp_path)
     (snap / "notifications.jsonl").write_text('{"ts":1}\n', encoding="utf-8")
@@ -1372,8 +1393,8 @@ def test_the_widened_restore_is_BOUNDED_by_the_inventory(tmp_path: Path) -> None
     be steered into the home no matter what the tree contains. Asserted with an archive carrying
     `evil/`, `.ssh/authorized_keys` and credential files: only `tasks` is selected.
     """
-    from gideon.durability import inventory as inv
-    from gideon.snapshot import _extra_restore_paths
+    from gideon.operations.durability import inventory as inv
+    from gideon.workspace.snapshot import _extra_restore_paths
 
     snap = tmp_path / "snap"
     (snap / "tasks").mkdir(parents=True)
@@ -1386,24 +1407,24 @@ def test_the_widened_restore_is_BOUNDED_by_the_inventory(tmp_path: Path) -> None
     got = _extra_restore_paths(snap)
 
     declared = {e.path for e in inv.INVENTORY}
-    assert [p for p in got if p not in declared] == [], "restore must copy only declared paths"
+    assert [
+        p for p in got if p not in declared
+    ] == [], "restore must copy only declared paths"
     for hostile in ("evil", ".ssh", ".env"):
         assert hostile not in got
 
 
-# ── 🔴 the remaining append_dedup entries, and the one that must NOT merge (S178) ──
-
-
 def _sel_home(root: Path, tools: list[str], *, key: bytes | None = None) -> Path:
     """A home with a real HMAC-signed SEL log. Signed through the real writer, because the whole
-    question is whether imported rows verify — a hand-built fixture could not answer it."""
+    question is whether imported rows verify — a hand-built fixture could not answer it.
+    """
     import importlib
 
     root.mkdir(parents=True, exist_ok=True)
     if key is not None:
         (root / "sel_hmac.key").write_bytes(key)
     os.environ["GIDEON_HOME"] = str(root)
-    from gideon import sel as sel_mod
+    from gideon.security import sel as sel_mod
 
     importlib.reload(sel_mod)
     sel_mod.SecurityEventLog._instance = None
@@ -1418,7 +1439,7 @@ def _sel_verify(root: Path) -> tuple[int, int]:
     import importlib
 
     os.environ["GIDEON_HOME"] = str(root)
-    from gideon import sel as sel_mod
+    from gideon.security import sel as sel_mod
 
     importlib.reload(sel_mod)
     sel_mod.SecurityEventLog._instance = None
@@ -1436,7 +1457,9 @@ def _restore_home():
         os.environ["GIDEON_HOME"] = prev
 
 
-def test_the_SEL_merge_is_SKIPPED_when_the_HMAC_KEY_DIFFERS(tmp_path, _restore_home) -> None:
+def test_the_SEL_merge_is_SKIPPED_when_the_HMAC_KEY_DIFFERS(
+    tmp_path, _restore_home
+) -> None:
     """🔴 SECURITY, and the reason a generic `append_dedup` executor would have been wrong.
 
     `inventory.py` declares `security_events.jsonl` with `merge=append_dedup`. Appending the
@@ -1449,10 +1472,10 @@ def test_the_SEL_merge_is_SKIPPED_when_the_HMAC_KEY_DIFFERS(tmp_path, _restore_h
     Fail-CLOSED here, unlike the other merges: a missing row is strictly better than an
     unverifiable one, because an audit trail's whole value is that a mismatch means something.
     """
-    from gideon.snapshot import _merge_security_events
+    from gideon.workspace.snapshot import _merge_security_events
 
     snap = _sel_home(tmp_path / "snap", ["snapX", "snapY", "snapZ"])
-    live = _sel_home(tmp_path / "live", ["liveX"])  # its own, different key
+    live = _sel_home(tmp_path / "live", ["liveX"])
 
     _merge_security_events(snap, live)
 
@@ -1461,14 +1484,16 @@ def test_the_SEL_merge_is_SKIPPED_when_the_HMAC_KEY_DIFFERS(tmp_path, _restore_h
     assert "snapX" not in (live / "security_events.jsonl").read_text()
 
 
-def test_the_SEL_merge_RECOVERS_history_when_the_KEY_MATCHES(tmp_path, _restore_home) -> None:
+def test_the_SEL_merge_RECOVERS_history_when_the_KEY_MATCHES(
+    tmp_path, _restore_home
+) -> None:
     """The case worth merging, and why the guard is a key comparison rather than a blanket refusal.
 
     `security`'s key restore is copy-if-missing, so a WIPED home takes the snapshot's key — and then
     the snapshot's rows verify under it. Skipping unconditionally would discard recoverable audit
     history in exactly the scenario a restore exists for.
     """
-    from gideon.snapshot import _merge_security_events
+    from gideon.workspace.snapshot import _merge_security_events
 
     snap = _sel_home(tmp_path / "snap", ["snapA", "snapB", "snapC"])
     key = (snap / "sel_hmac.key").read_bytes()
@@ -1484,7 +1509,7 @@ def test_the_SEL_merge_RECOVERS_history_when_the_KEY_MATCHES(tmp_path, _restore_
 
 def test_the_SEL_merge_is_IDEMPOTENT(tmp_path, _restore_home) -> None:
     """Deduped on `event_id`, so a repeated restore drill cannot double the audit log."""
-    from gideon.snapshot import _merge_security_events
+    from gideon.workspace.snapshot import _merge_security_events
 
     snap = _sel_home(tmp_path / "snap", ["a", "b"])
     key = (snap / "sel_hmac.key").read_bytes()
@@ -1500,7 +1525,7 @@ def test_the_FEEDBACK_merge_recovers_rows_and_dedupes_on_id(tmp_path: Path) -> N
     """🔴 The third `append_dedup` entry with no executor. Carries no HMAC, so plain dedup is
     safe — keyed on `FeedbackRecord.id` rather than the whole line, because the record round-trips
     through a serializer on both sides."""
-    from gideon.snapshot import _merge_feedback
+    from gideon.workspace.snapshot import _merge_feedback
 
     snap, pc = tmp_path / "s", tmp_path / "p"
     snap.mkdir()
@@ -1514,11 +1539,23 @@ def test_the_FEEDBACK_merge_recovers_rows_and_dedupes_on_id(tmp_path: Path) -> N
 
     _merge_feedback(snap / "feedback.jsonl", pc / "feedback.jsonl")
 
-    ids = [json.loads(ln)["id"] for ln in (pc / "feedback.jsonl").read_text().splitlines() if ln]
-    assert ids == ["f1", "live", "f2"], "f1 must dedupe, f2 must arrive, live must survive"
+    ids = [
+        json.loads(ln)["id"]
+        for ln in (pc / "feedback.jsonl").read_text().splitlines()
+        if ln
+    ]
+    assert ids == [
+        "f1",
+        "live",
+        "f2",
+    ], "f1 must dedupe, f2 must arrive, live must survive"
 
     _merge_feedback(snap / "feedback.jsonl", pc / "feedback.jsonl")
-    ids2 = [json.loads(ln)["id"] for ln in (pc / "feedback.jsonl").read_text().splitlines() if ln]
+    ids2 = [
+        json.loads(ln)["id"]
+        for ln in (pc / "feedback.jsonl").read_text().splitlines()
+        if ln
+    ]
     assert ids2 == ids, "a repeated restore must not grow the log"
 
 
@@ -1528,7 +1565,7 @@ def test_the_feedback_merge_does_NOT_re_apply_its_CAP(tmp_path: Path) -> None:
     the other."""
     import inspect
 
-    from gideon import snapshot
+    from gideon.workspace import snapshot
 
     body = inspect.getsource(snapshot._merge_feedback).split('"""')[-1]
     assert "_CAP" not in body
@@ -1558,66 +1595,41 @@ def test_every_declared_APPEND_DEDUP_entry_now_has_a_path(tmp_path: Path) -> Non
     """
     import inspect
 
-    from gideon import snapshot
-    from gideon.durability import inventory as inv
+    from gideon.operations.durability import inventory as inv
+    from gideon.workspace import snapshot
 
-    # Scope the ratchet to the entries that actually flow through `_do_merge`. A
-    # DERIVED append_dedup entry is excluded from `backup_entries()` (snapshot.py's
-    # merge loop is `for e in backup_entries() ... and not e.derived`), so it never
-    # reaches a merge executor — demanding one for it would be demanding dead code.
-    # `derived` telemetry-of-self (e.g. the CATO usage ledger) rebuilds from the SEL
-    # rather than merging, so its `append_dedup` is a declared identity, not a merge
-    # path. Non-derived append_dedup is still the pinned set the ratchet guards.
     declared = {
-        e.path: e for e in inv.INVENTORY if e.merge == inv.MERGE_APPEND_DEDUP and not e.derived
+        e.path: e
+        for e in inv.INVENTORY
+        if e.merge == inv.MERGE_APPEND_DEDUP and not e.derived
     }
     assert set(declared) == {
         "cron-history",
         "notifications.jsonl",
         "security_events.jsonl",
         "feedback.jsonl",
-        # Added by S179 and demanded by THIS test the moment the entry was declared — which is what
-        # the ratchet is for. Keyed on `AttemptRecord.audit_id` via `_merge_keyed_jsonl`.
         "model_calls.jsonl",
         "crashes",
         "sessions",
-        # AS-2's per-tile refresh ledger. A DIRECTORY per tile on disk, so it joins `crashes`
-        # and `sessions` on the generic per-file tree pass: a line-dedup executor across a
-        # directory-per-tile store would be the wrong shape, and the tree copy already gives
-        # entity-level union.
         "dashboard_tiles",
     }, "a new NON-DERIVED append_dedup entry appeared — give it an executor, not copy-if-missing"
 
-    # Named explicitly rather than derived from the path: `cron-history`'s executor is
-    # `_merge_run_history`, so a stem-to-symbol guess would pass for the wrong reason.
     merge_src = inspect.getsource(snapshot._do_merge)
     executors = {
         "cron-history": "_merge_run_history",
         "notifications.jsonl": "_merge_notifications",
         "security_events.jsonl": "_merge_security_events",
         "feedback.jsonl": "_merge_feedback",
-        # Shares `_merge_keyed_jsonl` with feedback, so the call site is matched by its ARGUMENT —
-        # the symbol alone would pass even if this path were dropped from `_do_merge`.
         "model_calls.jsonl": "_merge_keyed_jsonl",
     }
     for path, symbol in executors.items():
         assert symbol in merge_src, f"{path} has no executor reachable from _do_merge"
         assert hasattr(snapshot, symbol), f"{symbol} is not defined"
-    # `_merge_keyed_jsonl` is SHARED (feedback + model calls), so the symbol alone cannot prove both
-    # call sites exist — each is pinned by its filename argument. The dedicated executors take their
-    # paths internally, so there is nothing to pin at their call site.
     for path in ("feedback.jsonl", "model_calls.jsonl"):
         assert path in merge_src, f"{path} is not passed at any _do_merge call site"
-    # The two directory-shaped ones ride the generic tree pass. `sessions` declares
-    # `jsonl_append` while being a tree on disk (see the docstring) — pinned as-is so the
-    # discrepancy stays visible.
     assert declared["crashes"].kind == "json_entity_dir"
     assert declared["sessions"].kind == "jsonl_append"
-    # Declared `tree` from the start — the shape `sessions` mis-declared as its leaf kind.
     assert declared["dashboard_tiles"].kind == "tree"
-
-
-# ── 🔴 six declared sqlite stores had no ATTACH executor (S180) ──
 
 
 def _kb_db(path: Path, tag: str, n: int = 40) -> Path:
@@ -1645,7 +1657,7 @@ def test_a_MERGE_recovers_every_declared_sqlite_store(tmp_path: Path) -> None:
     Driven across all six: a snapshot row and a live row went in, only the live row came out. Six
     stores silently half-restored, including `learning.db` and both knowledge stores.
     """
-    from gideon.snapshot import _do_merge
+    from gideon.workspace.snapshot import _do_merge
 
     dbs = [
         "learning.db",
@@ -1688,7 +1700,7 @@ def test_the_FTS_index_is_REBUILT_not_merged(tmp_path: Path) -> None:
     So virtual tables and their shadow tables are skipped and `rebuild` is issued instead. Asserted
     over THREE consecutive merges, since the defect only appears from the second.
     """
-    from gideon.snapshot import _merge_sqlite_attach
+    from gideon.workspace.snapshot import _merge_sqlite_attach
 
     src = _kb_db(tmp_path / "snap.db", "snap")
     dst = _kb_db(tmp_path / "live.db", "live")
@@ -1697,14 +1709,20 @@ def test_the_FTS_index_is_REBUILT_not_merged(tmp_path: Path) -> None:
         _merge_sqlite_attach(src, dst, "kb")
         conn = sqlite3.connect(str(dst))
         assert conn.execute("SELECT count(*) FROM items").fetchone()[0] == 80
-        hits = conn.execute("SELECT rowid FROM items_fts WHERE items_fts MATCH 'snap'").fetchall()
-        assert len(hits) == 40, f"merge #{attempt}: {len(hits)} search rows for 40 documents"
+        hits = conn.execute(
+            "SELECT rowid FROM items_fts WHERE items_fts MATCH 'snap'"
+        ).fetchall()
+        assert (
+            len(hits) == 40
+        ), f"merge #{attempt}: {len(hits)} search rows for 40 documents"
         orphans = [
             r[0]
             for r in hits
             if not conn.execute("SELECT 1 FROM items WHERE rowid=?", (r[0],)).fetchone()
         ]
-        assert orphans == [], f"merge #{attempt}: index points at {len(orphans)} missing rows"
+        assert (
+            orphans == []
+        ), f"merge #{attempt}: index points at {len(orphans)} missing rows"
         conn.execute("INSERT INTO items_fts(items_fts) VALUES('integrity-check')")
         conn.close()
 
@@ -1713,7 +1731,7 @@ def test_a_CORRUPT_source_leaves_the_live_store_untouched(tmp_path: Path) -> Non
     """A restore reads a file that has travelled: a truncated archive or a bad disk must cost that
     one store, not the database the user still has. Mirrors `_merge_memory`'s integrity pre-check.
     """
-    from gideon.snapshot import _merge_sqlite_attach
+    from gideon.workspace.snapshot import _merge_sqlite_attach
 
     bad = tmp_path / "bad.db"
     bad.write_bytes(b"not a database at all")
@@ -1734,7 +1752,7 @@ def test_SCHEMA_DRIFT_skips_the_table_and_keeps_the_rest(tmp_path: Path) -> None
     * a column-count mismatch skips that table and keeps going, the same call `_merge_memory` makes
       about its opportunistic `contributor` column: a partial restore beats an aborted one.
     """
-    from gideon.snapshot import _merge_sqlite_attach
+    from gideon.workspace.snapshot import _merge_sqlite_attach
 
     src, dst = tmp_path / "s.db", tmp_path / "d.db"
     conn = sqlite3.connect(str(src))
@@ -1748,7 +1766,7 @@ def test_SCHEMA_DRIFT_skips_the_table_and_keeps_the_rest(tmp_path: Path) -> None
     conn.close()
     conn = sqlite3.connect(str(dst))
     conn.execute("CREATE TABLE shared(id TEXT PRIMARY KEY, v TEXT)")
-    conn.execute("CREATE TABLE drifted(id TEXT PRIMARY KEY, v TEXT)")  # narrower
+    conn.execute("CREATE TABLE drifted(id TEXT PRIMARY KEY, v TEXT)")
     conn.execute("INSERT INTO shared VALUES('l','live')")
     conn.commit()
     conn.close()
@@ -1758,7 +1776,10 @@ def test_SCHEMA_DRIFT_skips_the_table_and_keeps_the_rest(tmp_path: Path) -> None
     conn = sqlite3.connect(str(dst))
     assert sorted(r[0] for r in conn.execute("SELECT id FROM shared")) == ["l", "s"]
     assert (
-        conn.execute("SELECT 1 FROM sqlite_master WHERE name='only_in_snapshot'").fetchone() is None
+        conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE name='only_in_snapshot'"
+        ).fetchone()
+        is None
     )
     conn.close()
 
@@ -1774,13 +1795,14 @@ def test_MEMORY_DB_keeps_its_own_executor(tmp_path: Path) -> None:
     """
     import inspect
 
-    from gideon import snapshot
+    from gideon.workspace import snapshot
 
-    # S183 moved the path list into `_attach_merge_paths()` so `_do_merge` and `merge_plan` cannot
-    # disagree. Assert on the SHARED helper's output, which is the behaviour, rather than on a
-    # substring of one caller's source.
-    assert "memory.db" not in snapshot._attach_merge_paths(), "memory.db must not be routed here"
-    assert "_merge_memory(" in inspect.getsource(snapshot._do_merge), "its own executor must run"
+    assert (
+        "memory.db" not in snapshot._attach_merge_paths()
+    ), "memory.db must not be routed here"
+    assert "_merge_memory(" in inspect.getsource(
+        snapshot._do_merge
+    ), "its own executor must run"
 
 
 def test_the_attach_merge_is_driven_by_the_INVENTORY(tmp_path: Path) -> None:
@@ -1789,15 +1811,19 @@ def test_the_attach_merge_is_driven_by_the_INVENTORY(tmp_path: Path) -> None:
     list is how this whole class of defect started."""
     import inspect
 
-    from gideon import snapshot
-    from gideon.durability import inventory as inv
+    from gideon.operations.durability import inventory as inv
+    from gideon.workspace import snapshot
 
     helper_src = inspect.getsource(snapshot._attach_merge_paths)
     assert "sqlite_entries()" in helper_src
     assert "MERGE_SQLITE_ATTACH_IGNORE" in helper_src
     assert "_attach_merge_paths()" in inspect.getsource(snapshot._do_merge)
 
-    declared = {e.path for e in inv.sqlite_entries() if e.merge == inv.MERGE_SQLITE_ATTACH_IGNORE}
+    declared = {
+        e.path
+        for e in inv.sqlite_entries()
+        if e.merge == inv.MERGE_SQLITE_ATTACH_IGNORE
+    }
     assert (
         "memory.db" in declared
     ), "memory.db still declares the strategy; it just has its own path"
@@ -1815,7 +1841,7 @@ def test_the_FTS_SKIP_avoids_importing_foreign_segment_state(tmp_path: Path) -> 
 
     Asserted on the row COUNT the merge reports, which is the observable difference.
     """
-    from gideon.snapshot import _merge_sqlite_attach
+    from gideon.workspace.snapshot import _merge_sqlite_attach
 
     src = _kb_db(tmp_path / "snap.db", "snap")
     dst = _kb_db(tmp_path / "live.db", "live")
@@ -1828,7 +1854,9 @@ def test_the_FTS_SKIP_avoids_importing_foreign_segment_state(tmp_path: Path) -> 
     )
 
 
-def test_a_source_sqlite_calls_DAMAGED_is_refused_before_any_import(tmp_path, monkeypatch) -> None:
+def test_a_source_sqlite_calls_DAMAGED_is_refused_before_any_import(
+    tmp_path, monkeypatch
+) -> None:
     """The integrity pre-check's own contract, isolated.
 
     🔴 Found by unwiring it: the corrupt-source test above passes WITHOUT the pre-check, because a
@@ -1845,14 +1873,8 @@ def test_a_source_sqlite_calls_DAMAGED_is_refused_before_any_import(tmp_path, mo
     either still reports `ok` (damage in free space) or fails to open, so neither reaches this
     branch.
     """
-    # Patch the sqlite3 the MODULE bound, not this test's stdlib import. On CI (Linux x86_64)
-    # `pysqlite3-binary` is installed, so `snapshot.py` does `import pysqlite3 as sqlite3` — a
-    # DIFFERENT module object from the test's stdlib `sqlite3`. Patching `sq.connect` there left
-    # the code's real connections unpatched, the integrity check ran for real and passed on a
-    # valid db, and the merge imported the row → `assert 1 == 0` on CI while passing locally
-    # (where pysqlite3 is absent and the two happen to be the same object).
-    from gideon import snapshot as snap_mod
-    from gideon.snapshot import _merge_sqlite_attach
+    from gideon.workspace import snapshot as snap_mod
+    from gideon.workspace.snapshot import _merge_sqlite_attach
 
     sq = snap_mod.sqlite3
 
@@ -1875,7 +1897,9 @@ def test_a_source_sqlite_calls_DAMAGED_is_refused_before_any_import(tmp_path, mo
 
                 class _Row:
                     def fetchone(self):
-                        return ("*** in database main ***\nPage 3: btreeInitPage() error",)
+                        return (
+                            "*** in database main ***\nPage 3: btreeInitPage() error",
+                        )
 
                 return _Row()
             return self._inner.execute(sql, *args)
@@ -1910,9 +1934,14 @@ def test_one_UNREADABLE_store_does_not_cost_the_others(tmp_path: Path) -> None:
     only. Driven with a poisoned `knowledge.db`: the other three databases merged, and the `skills`
     component still restored afterwards.
     """
-    from gideon.snapshot import _do_merge
+    from gideon.workspace.snapshot import _do_merge
 
-    dbs = ["learning.db", "knowledge/knowledge.db", "loop/loops.db", "workflows/runs.db"]
+    dbs = [
+        "learning.db",
+        "knowledge/knowledge.db",
+        "loop/loops.db",
+        "workflows/runs.db",
+    ]
     snap, pc = tmp_path / "snap", tmp_path / "home"
     for root, tag in ((snap, "SNAP"), (pc, "LIVE")):
         root.mkdir(exist_ok=True)
@@ -1932,7 +1961,10 @@ def test_one_UNREADABLE_store_does_not_cost_the_others(tmp_path: Path) -> None:
 
     for rel in ("learning.db", "loop/loops.db", "workflows/runs.db"):
         conn = sqlite3.connect(str(pc / rel))
-        assert sorted(r[0] for r in conn.execute("SELECT id FROM r")) == ["LIVE", "SNAP"], rel
+        assert sorted(r[0] for r in conn.execute("SELECT id FROM r")) == [
+            "LIVE",
+            "SNAP",
+        ], rel
         conn.close()
     conn = sqlite3.connect(str(pc / "knowledge/knowledge.db"))
     assert [r[0] for r in conn.execute("SELECT id FROM r")] == ["LIVE"]
@@ -1950,12 +1982,8 @@ def test_a_LOCKED_destination_degrades_to_a_skip(tmp_path: Path) -> None:
     exactly as it was — the same shape `_merge_memory` uses for a per-table failure, not a crash and
     not a partial write.
     """
-    # Hold the lock with the SAME sqlite the code uses. On CI (Linux x86_64) `snapshot.py` binds
-    # `pysqlite3`, and a holder opened via the test's stdlib `sqlite3` is a different SQLite build
-    # whose lock the code's pysqlite3 connection need not observe — so the merge acquired the lock
-    # and imported, giving `assert 1 == 0` on CI while passing locally (one build, shared locking).
-    from gideon import snapshot as snap_mod
-    from gideon.snapshot import _merge_sqlite_attach
+    from gideon.workspace import snapshot as snap_mod
+    from gideon.workspace.snapshot import _merge_sqlite_attach
 
     sq = snap_mod.sqlite3
 
@@ -1983,9 +2011,6 @@ def test_a_LOCKED_destination_degrades_to_a_skip(tmp_path: Path) -> None:
     conn.close()
 
 
-# ── 🔴 nine file-shaped union/lww entries had no executor (S181) ──
-
-
 def test_a_MERGE_recovers_every_file_shaped_store(tmp_path: Path) -> None:
     """🔴 THE DEFECT. Nine file-shaped entries declare `union_by_id` or `lww_by_updated_at` and none
     had an executor. S177 made them reachable, but reachably copy-if-missing — so a file the live
@@ -1995,7 +2020,7 @@ def test_a_MERGE_recovers_every_file_shaped_store(tmp_path: Path) -> None:
     Driven with each file's REAL shape, read out of a long-lived home: **8 of 8 lost the snapshot
     side**, including `hooks.json` (the message-pipeline hooks a user configured) and `inbox.json`.
     """
-    from gideon.snapshot import _do_merge
+    from gideon.workspace.snapshot import _do_merge
 
     shapes = {
         "hooks.json": ({"hooks": [{"id": "snap-h"}]}, {"hooks": [{"id": "live-h"}]}),
@@ -2051,18 +2076,24 @@ def test_DURABILITY_STATE_is_deliberately_NOT_merged(tmp_path: Path) -> None:
     Copy-if-missing (the generic pass) is the correct semantic: a wiped home gets its marks back, a
     live home keeps the ones that describe what actually ran.
     """
-    from gideon.snapshot import _do_merge
+    from gideon.workspace.snapshot import _do_merge
 
     snap, pc = tmp_path / "snap", tmp_path / "home"
     snap.mkdir()
     pc.mkdir()
     (snap / "config.json").write_text("{}", encoding="utf-8")
-    (snap / "durability_state.json").write_text('{"last_snapshot": 1}', encoding="utf-8")
-    (pc / "durability_state.json").write_text('{"last_snapshot": 999}', encoding="utf-8")
+    (snap / "durability_state.json").write_text(
+        '{"last_snapshot": 1}', encoding="utf-8"
+    )
+    (pc / "durability_state.json").write_text(
+        '{"last_snapshot": 999}', encoding="utf-8"
+    )
 
     _do_merge(snap, pc, None)
 
-    assert json.loads((pc / "durability_state.json").read_text())["last_snapshot"] == 999
+    assert (
+        json.loads((pc / "durability_state.json").read_text())["last_snapshot"] == 999
+    )
 
 
 def test_a_snapshots_SPEND_never_moves_the_live_counter(tmp_path: Path) -> None:
@@ -2074,10 +2105,12 @@ def test_a_snapshots_SPEND_never_moves_the_live_counter(tmp_path: Path) -> None:
     So the map merge is per-key with live winning: a day the live home lacks is pure recovery, a day
     it has is authoritative.
     """
-    from gideon.snapshot import _merge_json_map
+    from gideon.workspace.snapshot import _merge_json_map
 
     src, dst = tmp_path / "s.json", tmp_path / "d.json"
-    src.write_text(json.dumps({"2026-08-05": 99.0, "2026-08-01": 1.0}), encoding="utf-8")
+    src.write_text(
+        json.dumps({"2026-08-05": 99.0, "2026-08-01": 1.0}), encoding="utf-8"
+    )
     dst.write_text(json.dumps({"2026-08-05": 2.5}), encoding="utf-8")
 
     _merge_json_map(src, dst)
@@ -2090,11 +2123,15 @@ def test_a_snapshots_SPEND_never_moves_the_live_counter(tmp_path: Path) -> None:
 def test_LIVE_ROWS_WIN_on_a_key_collision(tmp_path: Path) -> None:
     """Merge mode's contract is that local state wins; the snapshot only fills gaps. A hook the user
     has since edited must not revert to the archived version."""
-    from gideon.snapshot import _merge_json_collection
+    from gideon.workspace.snapshot import _merge_json_collection
 
     src, dst = tmp_path / "s.json", tmp_path / "d.json"
-    src.write_text(json.dumps({"hooks": [{"id": "same", "cmd": "SNAPSHOT"}]}), encoding="utf-8")
-    dst.write_text(json.dumps({"hooks": [{"id": "same", "cmd": "LIVE"}]}), encoding="utf-8")
+    src.write_text(
+        json.dumps({"hooks": [{"id": "same", "cmd": "SNAPSHOT"}]}), encoding="utf-8"
+    )
+    dst.write_text(
+        json.dumps({"hooks": [{"id": "same", "cmd": "LIVE"}]}), encoding="utf-8"
+    )
 
     _merge_json_collection(src, dst, wrapper="hooks", key="id")
 
@@ -2105,7 +2142,7 @@ def test_LIVE_ROWS_WIN_on_a_key_collision(tmp_path: Path) -> None:
 def test_the_json_merges_are_IDEMPOTENT(tmp_path: Path) -> None:
     """A restore drill is run twice. Both executors must import on the first pass and nothing
     after."""
-    from gideon.snapshot import _merge_json_collection, _merge_json_map
+    from gideon.workspace.snapshot import _merge_json_collection, _merge_json_map
 
     src, dst = tmp_path / "c_s.json", tmp_path / "c_d.json"
     src.write_text(json.dumps({"hooks": [{"id": "s"}]}), encoding="utf-8")
@@ -2123,7 +2160,7 @@ def test_the_json_merges_are_IDEMPOTENT(tmp_path: Path) -> None:
 def test_a_MALFORMED_json_file_leaves_the_live_copy_untouched(tmp_path: Path) -> None:
     """These are hand-editable files, so a truncated or half-written one is reachable. Overwriting
     real state with a parse of something we do not understand is the worse direction."""
-    from gideon.snapshot import _merge_json_collection, _merge_json_map
+    from gideon.workspace.snapshot import _merge_json_collection, _merge_json_map
 
     bad, live = tmp_path / "bad.json", tmp_path / "live.json"
     bad.write_text("{not json", encoding="utf-8")
@@ -2137,10 +2174,12 @@ def test_a_MALFORMED_json_file_leaves_the_live_copy_untouched(tmp_path: Path) ->
 def test_a_row_with_NO_ID_is_skipped(tmp_path: Path) -> None:
     """A row carrying no identity cannot be deduplicated, so importing it would double on the next
     drill — the exact non-idempotence the FTS shadow tables showed in S180."""
-    from gideon.snapshot import _merge_json_collection
+    from gideon.workspace.snapshot import _merge_json_collection
 
     src, dst = tmp_path / "s.json", tmp_path / "d.json"
-    src.write_text(json.dumps({"hooks": [{"cmd": "no-id"}, {"id": "ok"}]}), encoding="utf-8")
+    src.write_text(
+        json.dumps({"hooks": [{"cmd": "no-id"}, {"id": "ok"}]}), encoding="utf-8"
+    )
     dst.write_text(json.dumps({"hooks": []}), encoding="utf-8")
 
     _merge_json_collection(src, dst, wrapper="hooks", key="id")
@@ -2151,8 +2190,9 @@ def test_a_row_with_NO_ID_is_skipped(tmp_path: Path) -> None:
 def test_a_WRAPPER_MISMATCH_is_a_no_op(tmp_path: Path) -> None:
     """The wrapper key is read from the owning module's real shape (`{"hooks": [...]}`,
     `{"items": [...]}`, `{"rows": {...}}`). If a future version changes the envelope, the merge must
-    do nothing rather than guess — a wrong guess writes a document the owning module cannot read."""
-    from gideon.snapshot import _merge_json_collection
+    do nothing rather than guess — a wrong guess writes a document the owning module cannot read.
+    """
+    from gideon.workspace.snapshot import _merge_json_collection
 
     src, dst = tmp_path / "s.json", tmp_path / "d.json"
     src.write_text(json.dumps({"entries": [{"id": "s"}]}), encoding="utf-8")
@@ -2162,7 +2202,9 @@ def test_a_WRAPPER_MISMATCH_is_a_no_op(tmp_path: Path) -> None:
     assert json.loads(dst.read_text()) == {"entries": [{"id": "l"}]}
 
 
-def test_every_declared_MERGE_STRATEGY_has_an_executor_or_a_reason(tmp_path: Path) -> None:
+def test_every_declared_MERGE_STRATEGY_has_an_executor_or_a_reason(
+    tmp_path: Path,
+) -> None:
     """The sweep's closing assertion (S176-S181). Each of the five `MERGE_*` strategies must be
     satisfied, and `replace_only` was checked entry-by-entry rather than waved through:
 
@@ -2178,8 +2220,8 @@ def test_every_declared_MERGE_STRATEGY_has_an_executor_or_a_reason(tmp_path: Pat
     Pinned because the failure mode is a SIXTH strategy, or a new entry declaring an existing one,
     silently inheriting copy-if-missing — which is exactly how this six-session run started.
     """
-    from gideon import snapshot
-    from gideon.durability import inventory as inv
+    from gideon.operations.durability import inventory as inv
+    from gideon.workspace import snapshot
 
     strategies = {v for k, v in vars(inv).items() if k.startswith("MERGE_")}
     assert strategies == {
@@ -2202,9 +2244,6 @@ def test_every_declared_MERGE_STRATEGY_has_an_executor_or_a_reason(tmp_path: Pat
     ):
         assert hasattr(snapshot, executor), f"{executor} is missing"
 
-    # `replace_only` per entry: each must fall in exactly one group that already reaches a
-    # copy-if-missing path. An `or True` here would make the assertion vacuous, so the groups are
-    # enumerated and the entry must match one — a NEW plain entry that no component copies fails.
     secret = inv.secret_paths()
     core_files = {f for files in snapshot.CORE_FILES.values() for f in files}
     generic_reach = set(snapshot._extra_restore_paths_for_test_paths())
@@ -2214,21 +2253,18 @@ def test_every_declared_MERGE_STRATEGY_has_an_executor_or_a_reason(tmp_path: Pat
             continue
         top = entry.path.split("/")[0]
         if entry.derived:
-            continue  # backup_entries() excludes it, so there is nothing to merge
+            continue
         if entry.path in secret or top in secret:
-            continue  # the `security` component restores these copy-if-missing at 0600
+            continue
         if entry.path in core_files:
-            continue  # the `config`/`security` components copy only when the target is missing
+            continue
         if entry.path in generic_reach:
-            continue  # the generic store pass, which is copy-if-missing by construction
+            continue
         unexplained.append(entry.path)
     assert unexplained == [], (
         f"these replace_only entries reach no copy-if-missing path: {unexplained}. "
         "Give them a restore path or a recorded reason."
     )
-
-
-# ── 🔴 `--dry-run` printed a file list, not a merge plan (S183, plan gap 2) ──
 
 
 def test_the_DRY_RUN_prints_a_PLAN_not_a_file_list(tmp_path, capsys) -> None:
@@ -2241,14 +2277,16 @@ def test_the_DRY_RUN_prints_a_PLAN_not_a_file_list(tmp_path, capsys) -> None:
     notification and one store and left `config.json` untouched. The preview answered a different
     question from the one a user about to merge into their own home is asking.
     """
-    from gideon.snapshot import merge_plan
+    from gideon.workspace.snapshot import merge_plan
 
     snap, pc = tmp_path / "snap", tmp_path / "home"
     snap.mkdir()
     pc.mkdir()
     (snap / "config.json").write_text('{"a":1}', encoding="utf-8")
     (pc / "config.json").write_text('{"a":2}', encoding="utf-8")
-    (snap / "notifications.jsonl").write_text('{"ts":"1"}\n{"ts":"2"}\n', encoding="utf-8")
+    (snap / "notifications.jsonl").write_text(
+        '{"ts":"1"}\n{"ts":"2"}\n', encoding="utf-8"
+    )
     (pc / "notifications.jsonl").write_text('{"ts":"1"}\n', encoding="utf-8")
     (snap / "tasks").mkdir()
     (snap / "tasks" / "x.json").write_text('{"id":"SNAP"}', encoding="utf-8")
@@ -2258,7 +2296,6 @@ def test_the_DRY_RUN_prints_a_PLAN_not_a_file_list(tmp_path, capsys) -> None:
     assert rows["notifications.jsonl"]["action"] == "merge"
     assert rows["notifications.jsonl"]["strategy"] == "append_dedup"
     assert rows["tasks"]["action"] == "copy"
-    # gap (3): the config contract was true but UNSTATED, so a user could not know it.
     assert rows["config.json"]["action"] == "keep-local"
     assert "never overwritten" in rows["config.json"]["detail"]
 
@@ -2272,22 +2309,22 @@ def test_the_PLAN_and_the_ACT_name_the_same_sqlite_stores(tmp_path) -> None:
     """
     import inspect
 
-    from gideon import snapshot
+    from gideon.workspace import snapshot
 
     merge_src = inspect.getsource(snapshot._do_merge)
     plan_src = inspect.getsource(snapshot.merge_plan)
     assert "_attach_merge_paths()" in merge_src
     assert "_attach_merge_paths()" in plan_src
-    # and the shared helper excludes memory.db, which has its own executor
     assert "memory.db" not in snapshot._attach_merge_paths()
 
 
 def test_the_dry_run_WRITES_NOTHING(tmp_path, monkeypatch, capsys) -> None:
     """The plan's own done-when for this task: "nothing written in plan mode (dir hash unchanged)".
-    A preview that mutates the thing it previews is the one failure mode a dry run cannot have."""
+    A preview that mutates the thing it previews is the one failure mode a dry run cannot have.
+    """
     import hashlib
 
-    from gideon.snapshot import restore_main, snapshot_main
+    from gideon.workspace.snapshot import restore_main, snapshot_main
 
     home = tmp_path / "home"
     home.mkdir()
@@ -2301,7 +2338,7 @@ def test_the_dry_run_WRITES_NOTHING(tmp_path, monkeypatch, capsys) -> None:
 
     live = tmp_path / "live"
     live.mkdir()
-    (live / "memory.db").write_bytes(b"")  # merge mode is the default when this exists
+    (live / "memory.db").write_bytes(b"")
     (live / "config.json").write_text('{"a":2}', encoding="utf-8")
     monkeypatch.setenv("GIDEON_HOME", str(live))
 
@@ -2328,7 +2365,7 @@ def test_REPLACE_mode_previews_where_the_current_state_GOES(tmp_path) -> None:
     makes replace mode safe is the part a user needs told."""
     import inspect
 
-    from gideon import snapshot
+    from gideon.workspace import snapshot
 
     src = inspect.getsource(snapshot.restore_main)
     assert "pre-restore-<timestamp>" in src
@@ -2337,7 +2374,7 @@ def test_REPLACE_mode_previews_where_the_current_state_GOES(tmp_path) -> None:
 def test_the_plan_respects_the_COMPONENT_filter(tmp_path) -> None:
     """A plan for `--components memory` must not list the whole home, or the preview overstates what
     a targeted restore will touch."""
-    from gideon.snapshot import merge_plan
+    from gideon.workspace.snapshot import merge_plan
 
     snap, pc = tmp_path / "snap", tmp_path / "home"
     snap.mkdir()
@@ -2355,7 +2392,7 @@ def test_the_plan_respects_the_COMPONENT_filter(tmp_path) -> None:
 def test_an_ABSENT_entry_is_not_in_the_plan(tmp_path) -> None:
     """Only what the archive actually holds. Listing every declared entry would make the plan a
     manifest of the inventory rather than of this snapshot."""
-    from gideon.snapshot import merge_plan
+    from gideon.workspace.snapshot import merge_plan
 
     snap, pc = tmp_path / "snap", tmp_path / "home"
     snap.mkdir()
@@ -2370,10 +2407,9 @@ def test_an_ABSENT_entry_is_not_in_the_plan(tmp_path) -> None:
     )
 
 
-# ── 🔴 restore mode auto-detected on memory.db alone (S184, T2-M3) ──
-
-
-def test_a_POPULATED_home_without_memory_db_proposes_MERGE(tmp_path, monkeypatch) -> None:
+def test_a_POPULATED_home_without_memory_db_proposes_MERGE(
+    tmp_path, monkeypatch
+) -> None:
     """🔴 THE DEFECT. Mode auto-detected as `"merge" if (pc / "memory.db").is_file() else "replace"`.
     A home that has never embedded anything has no `memory.db`, so a home FULL of real state read as
     empty and defaulted to REPLACE.
@@ -2385,7 +2421,7 @@ def test_a_POPULATED_home_without_memory_db_proposes_MERGE(tmp_path, monkeypatch
     data loss — but the plan's own framing is that "the restore people actually perform is onto a
     machine that already has state … and replace-mode restores there destroy the newer half".
     """
-    from gideon.snapshot import home_is_populated
+    from gideon.workspace.snapshot import home_is_populated
 
     home = tmp_path / "home"
     home.mkdir()
@@ -2404,7 +2440,7 @@ def test_a_FRESH_install_still_takes_the_REPLACE_path(tmp_path, monkeypatch) -> 
     """The other direction, and why `config.json` is not counted: it is written at first boot,
     so treating it as state would make every fresh install look populated and push a genuine
     first-time restore onto the merge path."""
-    from gideon.snapshot import home_is_populated
+    from gideon.workspace.snapshot import home_is_populated
 
     home = tmp_path / "home"
     home.mkdir()
@@ -2420,7 +2456,7 @@ def test_the_populated_list_names_NO_SECRET(tmp_path, monkeypatch) -> None:
     EXISTENCE would be disclosed, and the caller is already authenticated — but naming a credential
     file in an API response is needless, and a key says nothing about whether the home holds work
     worth protecting, which is the question being asked."""
-    from gideon.snapshot import home_is_populated
+    from gideon.workspace.snapshot import home_is_populated
 
     home = tmp_path / "home"
     home.mkdir()
@@ -2436,16 +2472,20 @@ def test_the_populated_list_names_NO_SECRET(tmp_path, monkeypatch) -> None:
     assert home_is_populated(home) == ["tasks"]
 
 
-def test_a_MERGE_restore_into_a_populated_home_keeps_local_work(tmp_path, monkeypatch) -> None:
+def test_a_MERGE_restore_into_a_populated_home_keeps_local_work(
+    tmp_path, monkeypatch
+) -> None:
     """The behaviour the default now produces, end to end through `restore_main`."""
-    from gideon.snapshot import restore_main, snapshot_main
+    from gideon.workspace.snapshot import restore_main, snapshot_main
 
     src = tmp_path / "src"
     src.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(src))
     (src / "config.json").write_text('{"a":1}', encoding="utf-8")
     (src / "tasks").mkdir()
-    (src / "tasks" / "from-snap.json").write_text('{"id":"FROM-SNAP"}', encoding="utf-8")
+    (src / "tasks" / "from-snap.json").write_text(
+        '{"id":"FROM-SNAP"}', encoding="utf-8"
+    )
     out = tmp_path / "snaps"
     snapshot_main([str(out)])
     archive = sorted(out.glob("*.tar.gz"))[0]
@@ -2459,13 +2499,19 @@ def test_a_MERGE_restore_into_a_populated_home_keeps_local_work(tmp_path, monkey
 
     assert restore_main([str(archive), "--force"]) == 0
 
-    assert (live / "tasks" / "mine.json").is_file(), "local work must survive the default restore"
+    assert (
+        live / "tasks" / "mine.json"
+    ).is_file(), "local work must survive the default restore"
     assert (live / "triggers.json").is_file(), "the user's automation must survive"
-    assert (live / "tasks" / "from-snap.json").is_file(), "the snapshot's row must arrive too"
+    assert (
+        live / "tasks" / "from-snap.json"
+    ).is_file(), "the snapshot's row must arrive too"
     assert [p for p in live.iterdir() if p.name.startswith("pre-restore-")] == []
 
 
-def test_RESTORE_PLAN_writes_nothing_and_shares_the_CLI_plan(tmp_path, monkeypatch) -> None:
+def test_RESTORE_PLAN_writes_nothing_and_shares_the_CLI_plan(
+    tmp_path, monkeypatch
+) -> None:
     """The API's read-only half. Omitting `mode` returns the plan and changes nothing — the safe
     default for an endpoint that can overwrite a home, so `mode=replace` is always deliberate.
 
@@ -2474,7 +2520,7 @@ def test_RESTORE_PLAN_writes_nothing_and_shares_the_CLI_plan(tmp_path, monkeypat
     """
     import hashlib
 
-    from gideon.snapshot import restore_plan, snapshot_main
+    from gideon.workspace.snapshot import restore_plan, snapshot_main
 
     home = tmp_path / "home"
     home.mkdir()
@@ -2511,7 +2557,7 @@ def test_RESTORE_APPLY_refuses_while_the_gateway_runs(tmp_path, monkeypatch) -> 
     """The CLI's guard, mirrored. This handler IS the gateway, so a restore under it would rewrite
     state the running process holds open. There is no `force` mirror on purpose: overriding is a
     local operator decision at a terminal, not something to expose over HTTP."""
-    from gideon import snapshot as snap_mod
+    from gideon.workspace import snapshot as snap_mod
 
     home = tmp_path / "home"
     home.mkdir()

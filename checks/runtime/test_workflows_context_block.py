@@ -21,10 +21,10 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.workflows import context_block as CB
-from gideon.workflows import store
-from gideon.workflows.controller import EngineServices, RunController
-from gideon.workflows.models import RunStatus, WorkflowRun
+from gideon.automation.workflows import context_block as CB
+from gideon.automation.workflows import store
+from gideon.automation.workflows.controller import EngineServices, RunController
+from gideon.automation.workflows.models import RunStatus, WorkflowRun
 
 pytestmark = pytest.mark.anyio
 
@@ -38,7 +38,7 @@ def anyio_backend() -> str:
 def _isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
     return home
 
 
@@ -49,7 +49,11 @@ SPEC = {
         "id": "main",
         "children": [
             {"kind": "transform", "id": "seed", "config": {"expr": {"n": 1}}},
-            {"kind": "infer", "id": "think", "config": {"prompt": "on {{nodes.seed.output.n}}"}},
+            {
+                "kind": "infer",
+                "id": "think",
+                "config": {"prompt": "on {{nodes.seed.output.n}}"},
+            },
         ],
     },
 }
@@ -59,9 +63,6 @@ def _run(status: RunStatus, name: str = "ctx", **kw) -> WorkflowRun:
     run = store.create(WorkflowRun(id="", workflow_name=name, status=status, **kw))
     store.write_spec(run.id, SPEC)
     return run
-
-
-# ── the [ACTIVE WORKFLOWS] block ─────────────────────────────────────────────
 
 
 class TestActiveWorkflowsBlock:
@@ -126,20 +127,16 @@ class TestActiveWorkflowsBlock:
         def boom() -> list:
             raise RuntimeError("db gone")
 
-        monkeypatch.setattr("gideon.workflows.store.active_runs", boom)
+        monkeypatch.setattr("gideon.automation.workflows.store.active_runs", boom)
         assert CB.active_workflows_block() == ""
 
     def test_a_corrupt_attention_payload_does_not_raise(self, monkeypatch) -> None:
         run = _run(RunStatus.NEEDS_INPUT)
-        # attention is typed dict|None; a string is corruption from an older writer.
         raw = store.get(run.id)
         raw.attention = "not-a-dict"  # type: ignore[assignment]
         store.save(raw)
         block = CB.active_workflows_block()
-        assert run.id in block  # rendered, just without an ask
-
-
-# ── the staged-turn echo ─────────────────────────────────────────────────────
+        assert run.id in block
 
 
 class TestStagedEcho:
@@ -180,7 +177,9 @@ class TestStagedEcho:
 
     def test_credentials_are_stripped_from_the_echo(self) -> None:
         """It lands in a chat turn; a credential here has leaked to the transcript."""
-        run = store.create(WorkflowRun(id="", workflow_name="sec", status=RunStatus.RUNNING))
+        run = store.create(
+            WorkflowRun(id="", workflow_name="sec", status=RunStatus.RUNNING)
+        )
         store.write_spec(
             run.id,
             {
@@ -192,7 +191,10 @@ class TestStagedEcho:
                         {
                             "kind": "action",
                             "id": "a",
-                            "config": {"provider": "x", "api_key": "sk-real-secret-value"},
+                            "config": {
+                                "provider": "x",
+                                "api_key": "sk-real-secret-value",
+                            },
                         }
                     ],
                 },
@@ -207,7 +209,9 @@ class TestStagedEcho:
 
     def test_an_oversized_spec_degrades_with_an_instruction(self) -> None:
         """Truncating silently would have the model edit a node it never saw."""
-        run = store.create(WorkflowRun(id="", workflow_name="big", status=RunStatus.RUNNING))
+        run = store.create(
+            WorkflowRun(id="", workflow_name="big", status=RunStatus.RUNNING)
+        )
         store.write_spec(
             run.id,
             {
@@ -229,16 +233,20 @@ class TestStagedEcho:
         echo = CB.staged_spec_echo(run.id)
         assert "Source truncated" in echo and "workflow_get_def" in echo
 
-    def test_a_broken_store_echoes_nothing_rather_than_raising(self, monkeypatch) -> None:
+    def test_a_broken_store_echoes_nothing_rather_than_raising(
+        self, monkeypatch
+    ) -> None:
         def boom(run_id: str):
             raise RuntimeError("gone")
 
-        monkeypatch.setattr("gideon.workflows.store.get", boom)
+        monkeypatch.setattr("gideon.automation.workflows.store.get", boom)
         assert CB.staged_spec_echo("abc") == ""
 
     def test_an_unparseable_tree_still_echoes_its_source(self) -> None:
         """The source is the half that matters for editing; losing both would be worse."""
-        run = store.create(WorkflowRun(id="", workflow_name="bad", status=RunStatus.RUNNING))
+        run = store.create(
+            WorkflowRun(id="", workflow_name="bad", status=RunStatus.RUNNING)
+        )
         store.write_spec(run.id, {"name": "bad", "root": {"kind": "nonsense-kind"}})
         echo = CB.staged_spec_echo(run.id)
         assert "Source:" in echo and "nonsense-kind" in echo
@@ -281,20 +289,17 @@ class TestStagingTools:
             assert not CB.needs_staging(name), name
 
     def test_the_tool_surface_appends_the_echo(self) -> None:
-        from gideon import mcp_workflows as T
+        from gideon.integrations import mcp_workflows as T
 
         run = _run(RunStatus.RUNNING)
         out = T._call_tool("workflow_status", {"run_id": run.id})
         assert "WORKFLOW SPEC" in out and "expect_version" in out
 
     def test_a_non_staging_tool_appends_nothing(self) -> None:
-        from gideon import mcp_workflows as T
+        from gideon.integrations import mcp_workflows as T
 
         out = T._call_tool("workflow_manifest", {})
         assert "WORKFLOW SPEC" not in out
-
-
-# ── blocking mode ────────────────────────────────────────────────────────────
 
 
 class TestBlockingMode:
@@ -335,7 +340,9 @@ class TestBlockingMode:
 
         run = _run(RunStatus.DRAFT)
         c = RunController(run, SPEC, services=EngineServices(completion=slow))
-        status = await c.wait_for_terminal(timeout=20, progress_every=0.2, on_progress=ticks.append)
+        status = await c.wait_for_terminal(
+            timeout=20, progress_every=0.2, on_progress=ticks.append
+        )
         assert status == RunStatus.COMPLETE
         assert ticks, "expected at least one progress tick during a slow run"
         assert ticks[0]["run_id"] == run.id and "nodes" in ticks[0]
@@ -352,7 +359,9 @@ class TestBlockingMode:
 
         run = _run(RunStatus.DRAFT)
         c = RunController(run, SPEC, services=EngineServices(completion=slow))
-        status = await c.wait_for_terminal(timeout=20, progress_every=0.2, on_progress=boom)
+        status = await c.wait_for_terminal(
+            timeout=20, progress_every=0.2, on_progress=boom
+        )
         assert status == RunStatus.COMPLETE
 
     async def test_the_snapshot_is_cheap_and_shaped(self) -> None:
@@ -370,8 +379,8 @@ class TestBlockingMode:
     async def test_a_blocking_start_hands_back_the_resume_token(self) -> None:
         """Otherwise the model must guess that a second call is needed AND which token —
         the ask is useless without a way to answer it."""
-        from gideon.workflows import defs as defs_mod
-        from gideon.workflows import service
+        from gideon.automation.workflows import defs as defs_mod
+        from gideon.automation.workflows import service
 
         class Mem(defs_mod.WorkflowDefProvider):
             def __init__(self) -> None:
@@ -435,15 +444,12 @@ class TestBlockingMode:
             defs_mod.unregister_provider("ctx-mem")
 
 
-# ── the context.py injection ─────────────────────────────────────────────────
-
-
 class TestContextInjection:
     def test_context_py_injects_the_block(self) -> None:
         """The wiring itself: an unwired block is invisible no matter how good it is."""
         import inspect
 
-        from gideon import context
+        from gideon.cognition import context
 
         source = inspect.getsource(context)
         assert "active_workflows_block" in source
@@ -452,11 +458,9 @@ class TestContextInjection:
         """NEVER BREAK A TURN — asserted on the CALL SITE, not just the helper."""
         import inspect
 
-        from gideon import context
+        from gideon.cognition import context
 
         source = inspect.getsource(context)
-        # The import sits inside the guarded block, so measure from the CALL and look for
-        # the enclosing try/except around it.
         idx = source.index("active_workflows_block(")
         before, after = source[:idx], source[idx:]
         assert before.rstrip().endswith("=") or "try:" in before[-800:]
@@ -467,7 +471,7 @@ class TestContextInjection:
         block must not have side effects."""
         import inspect
 
-        from gideon import context
+        from gideon.cognition import context
 
         source = inspect.getsource(context)
         idx = source.index("active_workflows_block(")

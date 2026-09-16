@@ -6,13 +6,13 @@ renderings. This suite is what keeps the checked-in copy honest: it renders fres
 and byte-compares, so a tool/route added without its ``TOOL_META`` / route entry
 (or a manual edit to the generated files) reddens the build. When it fires, the
 failure message spells out the remedy — see :data:`_STALE_REMEDY`, which pins
-``PYTHONPATH`` because a bare ``python -m gideon.manifest_reference`` run from
+``PYTHONPATH`` because a bare ``python -m gideon.extensions.manifest_reference`` run from
 a worktree regenerates the MAIN checkout instead, and which says that drift on a
 branch touching no route is usually ``main``'s from a merge-train union.
 
 It also asserts the two operator-facing contracts the reference exists to serve:
-the `pclaw-api` skill points at a reference that actually exists and cross-links
-`pclaw-features`, and ``doctor --paths`` resolves the reference dir the skill tells
+the `gideon-api` skill points at a reference that actually exists and cross-links
+`gideon-features`, and ``doctor --paths`` resolves the reference dir the skill tells
 agents to find.
 """
 
@@ -22,32 +22,15 @@ import re
 import time
 from pathlib import Path
 
-import gideon.manifest_reference as ref_mod
-from gideon.manifest_reference import reference_dir, render_reference
+import gideon.extensions.manifest_reference as ref_mod
+from gideon.extensions.manifest_reference import reference_dir, render_reference
 
-#: What to do when the drift guard fires. Spelled out here rather than as a bare
-#: `python -m …` because both ways of getting this wrong have really happened:
-#:
-#: 1. **Run from a git worktree and the regeneration lands in the MAIN checkout.** The
-#:    repo's `.venv` is an editable install of the main tree, so `-m` resolves
-#:    `gideon` there no matter where you stand; the generator prints absolute
-#:    paths and writes four files into a checkout you are not working in — on `main`,
-#:    where a concurrent commit can sweep them into someone else's diff — while your
-#:    own `git status` stays empty and this test keeps failing. Pinning `PYTHONPATH`
-#:    is what makes the write land where you are.
-#: 2. **Assume the drift belongs to your branch.** It often does not. These files are
-#:    a pure function of the tree, so two PRs can each regenerate correctly against
-#:    their own base and still be wrong in the union the merge train builds: the
-#:    aggregate count line in `index.md` is not something a three-way merge can get
-#:    right, and neither side of that conflict is correct. The consequence is drift on
-#:    `main` with no commit touching the file, and then EVERY open PR inherits this
-#:    failure — so check `origin/main` before hunting through your own diff.
 _STALE_REMEDY = (
     "Offline reference is stale. Regenerate it with the path PINNED to this checkout:\n"
     '    PYTHONPATH="$(git rev-parse --show-toplevel)/src" \\\n'
-    "        .venv/bin/python -m gideon.manifest_reference\n"
+    "        .venv/bin/python -m gideon.extensions.manifest_reference\n"
     "Then confirm the write landed HERE and not in the main checkout:\n"
-    "    git status --porcelain -- src/gideon/reference/\n"
+    "    git status --porcelain -- runtime/gideon/reference/\n"
     "If that comes back empty, the generator wrote to the main checkout instead "
     "(its output names the absolute paths it wrote) — restore those and re-run with "
     "PYTHONPATH set.\n"
@@ -91,9 +74,6 @@ def test_checked_in_reference_matches_a_fresh_render():
                 mismatches.append(f"{filename}: differs from a fresh render")
         return mismatches
 
-    # A quiescent render matches; a render that raced a sibling's transient tree
-    # write does not. Re-render until one comes back clean — real drift never does,
-    # so this loop cannot turn a stale reference green, it can only outlast a race.
     mismatches = _drifted()
     for _ in range(5):
         if not mismatches:
@@ -105,16 +85,25 @@ def test_checked_in_reference_matches_a_fresh_render():
 
 def test_reference_has_the_four_expected_files():
     """index/tools/routes/providers all render (a dropped section would be a regression)."""
-    assert set(render_reference()) == {"index.md", "tools.md", "routes.md", "providers.md"}
+    assert set(render_reference()) == {
+        "index.md",
+        "tools.md",
+        "routes.md",
+        "providers.md",
+    }
 
 
 def test_route_signature_prefix_is_stripped():
     """A docstring that restates the route signature is de-duplicated in the summary."""
     assert ref_mod._clean_summary("GET /api/foo — does a thing") == "does a thing"
-    assert ref_mod._clean_summary("GET/PUT /api/agent/config — read or write") == "read or write"
+    assert (
+        ref_mod._clean_summary("GET/PUT /api/agent/config — read or write")
+        == "read or write"
+    )
     assert ref_mod._clean_summary("POST /api/x/:id/activate") == ""
-    # A plain sentence with no route signature is left untouched.
-    assert ref_mod._clean_summary("List all scheduled jobs.") == "List all scheduled jobs."
+    assert (
+        ref_mod._clean_summary("List all scheduled jobs.") == "List all scheduled jobs."
+    )
 
 
 def test_tools_reference_lists_every_provider():
@@ -122,8 +111,6 @@ def test_tools_reference_lists_every_provider():
     tools_md = render_reference()["tools.md"]
     providers = {
         "gideon-core",
-        # `gideon-automation` replaces the retired `gideon-schedule` (S109) — the
-        # `automation_*` namespace over the unified trigger store.
         "gideon-automation",
         "gideon-artifacts",
         "gideon-memory",
@@ -147,35 +134,33 @@ def test_reference_examples_carry_no_invented_params():
     blocks = re.findall(r"```json\n(.*?)\n```", tools_md, re.DOTALL)
     assert blocks, "expected at least one example json block"
     for b in blocks:
-        json.loads(b)  # raises on malformed JSON → test fails
+        json.loads(b)
 
 
 def _skill_path() -> Path:
-    return Path(ref_mod.__file__).parent / "skills" / "bundled" / "pclaw-api" / "SKILL.md"
+    return (
+        Path(ref_mod.__file__).parent / "skills" / "bundled" / "gideon-api" / "SKILL.md"
+    )
 
 
-def test_pclaw_api_skill_ships_and_cross_references_features():
+def test_gideon_api_skill_ships_and_cross_references_features():
     """The operator skill exists, points at the reference + doctor --paths, and
     cross-references its prose twin (§3.1)."""
     text = _skill_path().read_text(encoding="utf-8")
     assert "reference/index.md" in text
     assert "doctor --paths" in text
-    assert "pclaw-features" in text
-    # The verify-loop and never-guess disciplines are the skill's reason to exist.
+    assert "gideon-features" in text
     assert "verify" in text.lower()
     assert "reference" in text.lower()
 
 
 def test_doctor_paths_resolves_the_reference_dir():
     """``doctor --paths`` prints the reference dir the skill tells agents to find."""
-    from gideon.skills.loader import skills_dir
+    from gideon.extensions.skills.loader import skills_dir
 
-    # Mirror _doctor_paths' resolution without capturing stdout: the contract is
-    # that the reference dir it prints exists and holds the rendered files.
     rd = reference_dir()
     assert rd.is_dir()
     assert (rd / "index.md").is_file()
-    # skills_dir is one of the other printed anchors — assert it's importable/callable.
     assert isinstance(skills_dir(), Path)
 
 

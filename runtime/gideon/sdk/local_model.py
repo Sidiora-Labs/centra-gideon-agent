@@ -8,6 +8,7 @@ models it introduces; core hardcodes none. The app ALSO subclasses its use-case 
 inference. Import these from the SDK so core internals can evolve underneath the app.
 """
 
-from gideon.local_models.provider import LocalModel, LocalModelProvider  # noqa: F401
+from gideon.integrations.local_models.provider import LocalModelProvider  # noqa: F401
+from gideon.integrations.local_models.provider import LocalModel
 
 __all__ = ["LocalModel", "LocalModelProvider"]

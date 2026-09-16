@@ -15,12 +15,10 @@ from pathlib import Path
 
 import pytest
 
-from gideon import turn_checkpoints as tc
+from gideon.engine import turn_checkpoints as tc
 
 SESSION = "dashboard:chat-ei8"
 
-# A real-SHAPED secret (not a real one): long, high-entropy, and unique enough that a
-# substring search over the whole store is a meaningful test.
 PLANTED_SECRET = "AKIA7SDFJK23LKJ4POIU-sk_live_9f8e7d6c5b4a3928176054-EI8CANARY"
 
 
@@ -69,9 +67,6 @@ def _mangle_three(ws: Path) -> dict[str, str]:
     return originals
 
 
-# ── SC8: preview names exactly the mangled files; restore is byte-identical ────────
-
-
 def test_rewind_previews_exactly_the_mangled_files_and_restores_them_byte_identical(ws):
     assert tc.begin_turn(SESSION, cwd=ws) == 1
     assert tc.begin_turn(SESSION, cwd=ws) == 2
@@ -79,10 +74,10 @@ def test_rewind_previews_exactly_the_mangled_files_and_restores_them_byte_identi
 
     pv = tc.preview_rewind(SESSION, 1)
     previewed = {f.path for f in pv.files if f.action == "restore"}
-    # BOTH directions: no omissions and no extras. A preview that named a fourth file
-    # would be as wrong as one that missed the third.
     assert previewed == set(originals), previewed
-    assert all(f.diff for f in pv.files if f.action == "restore"), "each restore needs a diff"
+    assert all(
+        f.diff for f in pv.files if f.action == "restore"
+    ), "each restore needs a diff"
     for f in pv.files:
         if f.action == "restore":
             assert f.current_sha256 != f.restored_sha256
@@ -118,26 +113,21 @@ def test_a_file_created_after_the_target_turn_rewinds_to_deleted(ws):
     assert not new.exists()
 
 
-# ── the secrecy claim, measured on the stored bytes ───────────────────────────────
-
-
 def test_the_planted_env_secret_is_absent_from_every_byte_of_the_store(ws):
     tc.begin_turn(SESSION, cwd=ws)
     env = ws / ".env"
-    # Sanity: the secret really is on disk where a naive capture would find it. Without
-    # this the byte assertion below could pass on an empty fixture.
     assert PLANTED_SECRET in env.read_text(encoding="utf-8")
 
     status = tc.capture_pre_edit(SESSION, env, cwd=ws)
     assert status == "secret"
-    # ...and mangle it, so a "restore" would have had something to restore.
     env.write_text("API_TOKEN=clobbered\n", encoding="utf-8")
 
     blob = _all_store_bytes(tc.store_root())
-    assert PLANTED_SECRET.encode() not in blob, "the .env body reached the checkpoint store"
+    assert (
+        PLANTED_SECRET.encode() not in blob
+    ), "the .env body reached the checkpoint store"
     assert b"API_TOKEN" not in blob, "even the variable name should not be copied"
 
-    # And the user is TOLD, rather than silently getting nothing back.
     pv = tc.preview_rewind(SESSION, 0)
     entry = [f for f in pv.files if f.path == str(env)]
     assert entry and entry[0].action == "not_captured" and entry[0].reason == "secret"
@@ -181,26 +171,23 @@ def test_an_ordinary_file_is_captured_so_the_floor_is_not_vacuous(tmp_path):
     assert b"x = 1" in _all_store_bytes(tc.store_root())
 
 
-# ── the caps, measured at the boundary ────────────────────────────────────────────
-
-
 def _set_bounds(monkeypatch, **kw):
     base = {"enabled": True, "max_mb": 200, "max_turns": 50, "max_file_mb": 8}
     base.update(kw)
     monkeypatch.setattr(tc, "_bounds", lambda: tc._Bounds(**base))
 
 
-def test_the_byte_cap_prunes_the_oldest_turn_rather_than_growing_past_it(tmp_path, monkeypatch):
+def test_the_byte_cap_prunes_the_oldest_turn_rather_than_growing_past_it(
+    tmp_path, monkeypatch
+):
     _set_bounds(monkeypatch, max_mb=1, max_file_mb=0)
-    body = b"A" * (400 * 1024)  # 400KB — three do not fit under a 1MB cap
+    body = b"A" * (400 * 1024)
     for i in range(3):
         tc.begin_turn(SESSION, cwd=None)
         f = tmp_path / f"f{i}.bin"
-        f.write_bytes(body + bytes([i]))  # unique content, so no dedupe masks the cap
+        f.write_bytes(body + bytes([i]))
         assert tc.capture_pre_edit(SESSION, f, cwd=tmp_path) == "captured"
     assert tc.store_bytes(SESSION) <= 1024 * 1024, tc.store_bytes(SESSION)
-    # Enforcement is by EVICTION, not refusal: the newest turn kept its body and an
-    # older one is gone.
     assert len(tc._turn_numbers(SESSION)) < 3
 
 
@@ -215,7 +202,6 @@ def test_the_cap_boundary_at_exactly_the_limit_does_not_prune(tmp_path, monkeypa
     b = tmp_path / "b.bin"
     b.write_bytes(half.replace(b"B", b"C"))
     assert tc.capture_pre_edit(SESSION, b, cwd=tmp_path) == "captured"
-    # Exactly 1MB stored, cap 1MB → both turns survive. One byte more must evict.
     assert tc.store_bytes(SESSION) == 1024 * 1024
     assert tc._turn_numbers(SESSION) == [1, 2]
 
@@ -224,10 +210,14 @@ def test_the_cap_boundary_at_exactly_the_limit_does_not_prune(tmp_path, monkeypa
     c.write_bytes(b"D")
     assert tc.capture_pre_edit(SESSION, c, cwd=tmp_path) == "captured"
     assert tc.store_bytes(SESSION) <= 1024 * 1024
-    assert 1 not in tc._turn_numbers(SESSION), "the oldest turn should have been evicted"
+    assert 1 not in tc._turn_numbers(
+        SESSION
+    ), "the oldest turn should have been evicted"
 
 
-def test_a_body_bigger_than_the_whole_cap_is_recorded_manifest_only(tmp_path, monkeypatch):
+def test_a_body_bigger_than_the_whole_cap_is_recorded_manifest_only(
+    tmp_path, monkeypatch
+):
     _set_bounds(monkeypatch, max_mb=1, max_file_mb=0)
     tc.begin_turn(SESSION, cwd=None)
     big = tmp_path / "big.bin"
@@ -258,12 +248,13 @@ def test_the_turn_cap_drops_the_oldest_turns(tmp_path, monkeypatch):
         tc.capture_pre_edit(SESSION, f, cwd=tmp_path)
     turns = tc._turn_numbers(SESSION)
     assert len(turns) == 3 and turns == [4, 5, 6], turns
-    # ...and the evicted turns' blobs were garbage-collected, not orphaned.
     store = _all_store_bytes(tc.store_root())
     assert b"body 0" not in store and b"body 5" in store
 
 
-def test_a_pruned_turn_makes_the_preview_say_so_instead_of_pretending(tmp_path, monkeypatch):
+def test_a_pruned_turn_makes_the_preview_say_so_instead_of_pretending(
+    tmp_path, monkeypatch
+):
     _set_bounds(monkeypatch, max_turns=2)
     for i in range(4):
         tc.begin_turn(SESSION, cwd=None)
@@ -274,7 +265,9 @@ def test_a_pruned_turn_makes_the_preview_say_so_instead_of_pretending(tmp_path, 
     assert any("were pruned" in w for w in pv.warnings), pv.warnings
 
 
-def test_dedupe_means_a_second_write_in_the_same_turn_keeps_the_original_bytes(tmp_path):
+def test_dedupe_means_a_second_write_in_the_same_turn_keeps_the_original_bytes(
+    tmp_path,
+):
     tc.begin_turn(SESSION, cwd=None)
     f = tmp_path / "twice.txt"
     f.write_text("first\n", encoding="utf-8")
@@ -283,10 +276,9 @@ def test_dedupe_means_a_second_write_in_the_same_turn_keeps_the_original_bytes(t
     assert tc.capture_pre_edit(SESSION, f, cwd=tmp_path) == "deduped"
     f.write_text("third\n", encoding="utf-8")
     tc.apply_rewind(SESSION, 0)
-    assert f.read_text(encoding="utf-8") == "first\n", "the turn's FIRST state is the checkpoint"
-
-
-# ── pruning with the session ───────────────────────────────────────────────────────
+    assert (
+        f.read_text(encoding="utf-8") == "first\n"
+    ), "the turn's FIRST state is the checkpoint"
 
 
 def test_prune_session_removes_the_whole_tree(tmp_path):
@@ -314,7 +306,7 @@ def test_the_hard_delete_handler_purges_the_checkpoint_tree(tmp_path):
     import ast
     import inspect
 
-    from gideon.dashboard import chat_handlers
+    from gideon.interfaces.dashboard import chat_handlers
 
     src = inspect.getsource(chat_handlers.api_chat_session_delete)
     tree = ast.parse(src.lstrip())
@@ -323,10 +315,9 @@ def test_the_hard_delete_handler_purges_the_checkpoint_tree(tmp_path):
         for n in ast.walk(tree)
         if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
     }
-    assert "prune_session" in calls, "session hard-delete must prune the checkpoint store"
-
-
-# ── the unhappy path: a death between the two restore phases ───────────────────────
+    assert (
+        "prune_session" in calls
+    ), "session hard-delete must prune the checkpoint store"
 
 
 def test_a_death_between_staging_and_commit_leaves_a_resumable_journal(ws, monkeypatch):
@@ -345,9 +336,6 @@ def test_a_death_between_staging_and_commit_leaves_a_resumable_journal(ws, monke
     targets = set(originals)
 
     def flaky(src, dst):
-        # Scoped to the COMMIT renames only. `os.replace` is also how `atomic_write`
-        # lands the store's own manifests, so an unscoped patch fails `begin_turn`
-        # instead of the commit — a harness artifact that fakes this finding.
         if str(dst) in targets:
             calls["n"] += 1
             if calls["n"] == 2:
@@ -357,10 +345,8 @@ def test_a_death_between_staging_and_commit_leaves_a_resumable_journal(ws, monke
     monkeypatch.setattr(tc.os, "replace", flaky)
     res = tc.apply_rewind(SESSION, 1)
     assert not res.ok and res.errors, "a partial commit must be reported, not swallowed"
-    # The journal is still there — the plan for the remaining files was not lost.
     tokens = tc.pending_rewinds(SESSION)
     assert tokens, "a failed commit must leave its journal for resume"
-    # Exactly one file did NOT come back yet: the honest half-restored state.
     unrestored = [p for p, want in originals.items() if _sha(Path(p)) != want]
     assert len(unrestored) == 1, unrestored
 
@@ -372,7 +358,9 @@ def test_a_death_between_staging_and_commit_leaves_a_resumable_journal(ws, monke
     assert tc.pending_rewinds(SESSION) == [], "a completed journal must be removed"
 
 
-def test_a_staging_failure_leaves_the_working_tree_completely_untouched(ws, monkeypatch):
+def test_a_staging_failure_leaves_the_working_tree_completely_untouched(
+    ws, monkeypatch
+):
     tc.begin_turn(SESSION, cwd=ws)
     tc.begin_turn(SESSION, cwd=ws)
     _mangle_three(ws)
@@ -404,14 +392,9 @@ def test_the_rewind_is_itself_rewindable_via_the_safety_turn(ws):
     mangled = _sha(ws / "alpha.py")
     res = tc.apply_rewind(SESSION, 1)
     assert res.safety_turn > 0
-    # Rewinding to just before the safety turn returns the MANGLED state — proving the
-    # rewind captured what it overwrote rather than destroying it.
     res2 = tc.apply_rewind(SESSION, res.safety_turn - 1)
     assert res2.ok, res2.errors
     assert _sha(ws / "alpha.py") == mangled
-
-
-# ── guards ─────────────────────────────────────────────────────────────────────────
 
 
 def test_rewinding_to_the_current_or_a_future_turn_is_refused(ws):
@@ -443,17 +426,12 @@ def test_the_identity_set_records_paths_without_copying_bytes(ws):
     names = {e["path"] for e in man["identity"]}
     assert {"alpha.py", "beta.txt", "gamma.json"} <= names
     assert all("size" in e and "mtime" in e for e in man["identity"])
-    # Phase 1 is a manifest, not a copy: no blob directory exists yet.
     assert not (tc.session_dir(SESSION) / "blobs").exists()
-    # ...and the identity set is metadata only — it must not contain file CONTENT.
     assert b"def alpha" not in _all_store_bytes(tc.store_root())
 
 
-# ── the interception point: the real tool handlers ─────────────────────────────────
-
-
 def _provider(cwd: Path):
-    from gideon.agents.native.builtin_tools import NativeBuiltinToolProvider
+    from gideon.engine.agents.native.builtin_tools import NativeBuiltinToolProvider
 
     return NativeBuiltinToolProvider(cwd=cwd, session_key=SESSION)
 
@@ -473,7 +451,9 @@ def test_the_real_write_file_tool_checkpoints_before_it_writes(ws):
     p = _provider(ws)
     original = _sha(ws / "alpha.py")
     _observe(p, "alpha.py")
-    r = asyncio.run(p.invoke("write_file", {"path": "alpha.py", "content": "WRECKED\n"}))
+    r = asyncio.run(
+        p.invoke("write_file", {"path": "alpha.py", "content": "WRECKED\n"})
+    )
     assert "Wrote" in str(r) or getattr(r, "success", True)
     assert _sha(ws / "alpha.py") != original
     res = tc.apply_rewind(SESSION, 0)
@@ -487,7 +467,10 @@ def test_the_real_edit_file_tool_checkpoints_before_it_writes(ws):
     original = _sha(ws / "beta.txt")
     _observe(p, "beta.txt")
     asyncio.run(
-        p.invoke("edit_file", {"path": "beta.txt", "old_str": "beta original", "new_str": "RUINED"})
+        p.invoke(
+            "edit_file",
+            {"path": "beta.txt", "old_str": "beta original", "new_str": "RUINED"},
+        )
     )
     assert _sha(ws / "beta.txt") != original
     res = tc.apply_rewind(SESSION, 0)
@@ -499,7 +482,9 @@ def test_the_real_write_file_tool_never_stores_a_dotenv_body(ws):
     tc.begin_turn(SESSION, cwd=ws)
     p = _provider(ws)
     _observe(p, ".env")
-    asyncio.run(p.invoke("write_file", {"path": ".env", "content": "API_TOKEN=replaced\n"}))
+    asyncio.run(
+        p.invoke("write_file", {"path": ".env", "content": "API_TOKEN=replaced\n"})
+    )
     assert PLANTED_SECRET.encode() not in _all_store_bytes(tc.store_root())
 
 
@@ -507,15 +492,18 @@ def test_three_files_mangled_through_the_real_tools_restore_byte_identical(ws):
     """SC8 end to end through the tool surface an agent actually calls."""
     tc.begin_turn(SESSION, cwd=ws)
     tc.begin_turn(SESSION, cwd=ws)
-    originals = {str(ws / n): _sha(ws / n) for n in ("alpha.py", "beta.txt", "gamma.json")}
+    originals = {
+        str(ws / n): _sha(ws / n) for n in ("alpha.py", "beta.txt", "gamma.json")
+    }
     p = _provider(ws)
     _observe(p, "alpha.py", "beta.txt", "gamma.json", ".env")
     asyncio.run(p.invoke("write_file", {"path": "alpha.py", "content": "no\n"}))
     asyncio.run(
-        p.invoke("edit_file", {"path": "beta.txt", "old_str": "line two", "new_str": "nope"})
+        p.invoke(
+            "edit_file", {"path": "beta.txt", "old_str": "line two", "new_str": "nope"}
+        )
     )
     asyncio.run(p.invoke("write_file", {"path": "gamma.json", "content": "{}\n"}))
-    # ...and touch the .env in the same turn, so the secrecy leg rides the same drive.
     asyncio.run(p.invoke("write_file", {"path": ".env", "content": "API_TOKEN=x\n"}))
 
     pv = tc.preview_rewind(SESSION, 1)
@@ -528,9 +516,6 @@ def test_three_files_mangled_through_the_real_tools_restore_byte_identical(ws):
         assert _sha(Path(path)) == want
 
 
-# ── the secrecy floor is about what will be READ, not what the path is called ──────
-
-
 def test_a_symlinked_dotenv_is_never_captured(ws):
     """A basename list is defeated by a symlink. Measured on ``main`` before the fix:
     ``ws/config.txt -> ws/.env`` returned ``"captured"`` and the dotenv body landed in a
@@ -538,7 +523,6 @@ def test_a_symlinked_dotenv_is_never_captured(ws):
     link. ``is_sensitive_path`` does not cover it either — it is ``$HOME``-anchored, so a
     workspace ``.env`` is invisible to it.
     """
-    # Vacuity: the search below is only meaningful if the secret is really in the file.
     assert PLANTED_SECRET in (ws / ".env").read_text(encoding="utf-8")
     tc.begin_turn(SESSION, cwd=ws)
 
@@ -548,14 +532,9 @@ def test_a_symlinked_dotenv_is_never_captured(ws):
 
     assert tc.capture_pre_edit(SESSION, ws / "config.txt") == "secret"
     assert tc.capture_pre_edit(SESSION, ws / "deep" / "notes.md") == "secret"
-    # VACUITY FLOOR: a check that simply refused everything would satisfy both assertions
-    # above while breaking the store. An ordinary file must still be captured.
     assert tc.capture_pre_edit(SESSION, ws / "alpha.py") == "captured"
 
     assert PLANTED_SECRET.encode() not in _all_store_bytes(tc.store_root())
-
-
-# ── a restore writes inside the session's roots, or it refuses ─────────────────────
 
 
 def test_a_rewind_refuses_a_target_outside_the_sessions_roots(ws, tmp_path):
@@ -578,7 +557,12 @@ def test_a_rewind_refuses_a_target_outside_the_sessions_roots(ws, tmp_path):
     good = next(f for f in man["files"] if f.get("sha256"))
     traversal = str(ws / ".." / "outside.txt")
     man["files"].append(
-        {"path": traversal, "existed": True, "sha256": good["sha256"], "size": good["size"]}
+        {
+            "path": traversal,
+            "existed": True,
+            "sha256": good["sha256"],
+            "size": good["size"],
+        }
     )
     man_path.write_text(json.dumps(man), encoding="utf-8")
 
@@ -587,14 +571,8 @@ def test_a_rewind_refuses_a_target_outside_the_sessions_roots(ws, tmp_path):
 
     res = tc.apply_rewind(SESSION, 0)
 
-    # The refusal is REPORTED, and it makes the whole rewind not-ok. Reporting `ok=True`
-    # here would be the swallowed-write shape: the user is told a restore happened while a
-    # file they asked about was never written.
     assert res.refused == [traversal], res.refused
     assert not res.ok
     assert any("outside the session" in e for e in res.errors), res.errors
     assert _sha(outside) == outside_sha, "a rewind must not write outside its roots"
-    # VACUITY FLOOR: the guard must refuse the traversal WITHOUT refusing the legitimate
-    # restore in the same plan — a guard that blocked everything would also pass the
-    # assertion above.
     assert _sha(ws / "alpha.py") == original

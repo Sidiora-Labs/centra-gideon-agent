@@ -18,15 +18,17 @@ import json
 
 import pytest
 
-from gideon.triggers import tools as T
+from gideon.automation.triggers import tools as T
 
 
 @pytest.fixture()
 def store(tmp_path, monkeypatch):
     """A real TriggerStore over tmp_path — never the operator's home."""
-    from gideon.triggers.store import TriggerStore
+    from gideon.automation.triggers.store import TriggerStore
 
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path, raising=False)
+    monkeypatch.setattr(
+        "gideon.core.config.loader.config_dir", lambda: tmp_path, raising=False
+    )
     return TriggerStore(tmp_path / "triggers.json")
 
 
@@ -52,16 +54,18 @@ def _no_model(monkeypatch):
 class TestTheBoundIsConfigurable:
     def test_the_default_is_the_historical_twenty(self):
         """The clean break must not change behaviour for anyone who set nothing."""
-        from gideon.config.loader import AppConfig
+        from gideon.core.config.loader import AppConfig
 
         assert AppConfig.load().workflows.self_schedule_max_outstanding == 20
         assert T.DEFAULT_MAX_AGENT_TRIGGERS == 20
 
-    def test_an_unreadable_config_keeps_the_cap_rather_than_removing_it(self, monkeypatch):
+    def test_an_unreadable_config_keeps_the_cap_rather_than_removing_it(
+        self, monkeypatch
+    ):
         """The fail-safe direction. An unreadable config must not silently uncap a self-scheduling
         agent — and must not read as 0 either, which would look like the operator disabled the
         feature when they had not."""
-        import gideon.config.loader as loader
+        import gideon.core.config.loader as loader
 
         def _boom(*a, **k):
             raise RuntimeError("config unreadable")
@@ -72,7 +76,7 @@ class TestTheBoundIsConfigurable:
     def test_the_bound_is_read_per_call_not_captured_at_import(self, monkeypatch):
         """A value captured at import cannot be changed by a PATCH without a restart — the same
         defect the mcp.json resolvers had."""
-        import gideon.config.loader as loader
+        import gideon.core.config.loader as loader
 
         seen: list[int] = []
 
@@ -87,12 +91,14 @@ class TestTheBoundIsConfigurable:
         monkeypatch.setattr(loader.AppConfig, "load", _load)
         assert T.max_agent_triggers() == 7
         assert T.max_agent_triggers() == 7
-        assert len(seen) == 2, "the config was consulted once and cached — a PATCH would not apply"
+        assert (
+            len(seen) == 2
+        ), "the config was consulted once and cached — a PATCH would not apply"
 
     def test_the_config_field_round_trips(self):
         """The repo's config contract: dataclass + _meta, load(), to_dict(), PATCH allowlist."""
-        from gideon.config.loader import AppConfig
-        from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+        from gideon.core.config.loader import AppConfig
+        from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
         cfg = AppConfig.load()
         assert "self_schedule_max_outstanding" in cfg.to_dict()["workflows"]
@@ -104,7 +110,7 @@ class TestTheBoundIsConfigurable:
         """A knob with no `_meta` cannot be rendered, so it is a knob only a source-reader has."""
         import dataclasses
 
-        from gideon.config.loader import WorkflowsConfig
+        from gideon.core.config.loader import WorkflowsConfig
 
         f = next(
             f
@@ -120,7 +126,11 @@ class TestTheToolsHonourTheBound:
         _cap(monkeypatch, 5)
         out = _call(
             "set_onetime_task",
-            {"name": "check build", "when": "in 20 minutes", "message": "check the build"},
+            {
+                "name": "check build",
+                "when": "in 20 minutes",
+                "message": "check the build",
+            },
             store,
         )
         assert out["ok"] is True, out
@@ -132,13 +142,19 @@ class TestTheToolsHonourTheBound:
         _cap(monkeypatch, 5)
         out = _call(
             "set_recurring_task",
-            {"name": "daily sweep", "cadence": "every weekday at 9", "message": "sweep"},
+            {
+                "name": "daily sweep",
+                "cadence": "every weekday at 9",
+                "message": "sweep",
+            },
             store,
         )
         assert out["ok"] is True, out
         assert len(store.load()) == 1
 
-    def test_the_bound_refuses_the_next_task_and_names_the_number(self, store, monkeypatch):
+    def test_the_bound_refuses_the_next_task_and_names_the_number(
+        self, store, monkeypatch
+    ):
         """The refusal must carry the count and the cap: "limit reached" with no number leaves the
         user unable to tell what to pause."""
         _cap(monkeypatch, 2)
@@ -152,7 +168,9 @@ class TestTheToolsHonourTheBound:
                 is True
             )
         blocked = _call(
-            "set_onetime_task", {"name": "t3", "when": "in 1 hour", "message": "x"}, store
+            "set_onetime_task",
+            {"name": "t3", "when": "in 1 hour", "message": "x"},
+            store,
         )
         assert blocked["ok"] is False
         assert "2" in blocked["text"], blocked["text"]
@@ -161,27 +179,39 @@ class TestTheToolsHonourTheBound:
     def test_a_cap_of_zero_turns_self_scheduling_off(self, store, monkeypatch):
         """0 is a legitimate operator choice, and the reason the fallback cannot be 0."""
         _cap(monkeypatch, 0)
-        out = _call("set_onetime_task", {"name": "t", "when": "in 1 hour", "message": "x"}, store)
+        out = _call(
+            "set_onetime_task",
+            {"name": "t", "when": "in 1 hour", "message": "x"},
+            store,
+        )
         assert out["ok"] is False
         assert store.load() == []
 
     def test_pausing_frees_a_slot_without_deleting_history(self, store, monkeypatch):
         """The cap counts ENABLED rows, so the recovery path is pause — not delete."""
         _cap(monkeypatch, 1)
-        first = _call("set_onetime_task", {"name": "a", "when": "in 1 hour", "message": "x"}, store)
+        first = _call(
+            "set_onetime_task",
+            {"name": "a", "when": "in 1 hour", "message": "x"},
+            store,
+        )
         assert first["ok"] is True
         assert (
-            _call("set_onetime_task", {"name": "b", "when": "in 1 hour", "message": "x"}, store)[
-                "ok"
-            ]
+            _call(
+                "set_onetime_task",
+                {"name": "b", "when": "in 1 hour", "message": "x"},
+                store,
+            )["ok"]
             is False
         )
         tid = store.load()[0].trigger.id
         T.set_paused(store, trigger_id=tid, paused=True)
         assert (
-            _call("set_onetime_task", {"name": "b", "when": "in 1 hour", "message": "x"}, store)[
-                "ok"
-            ]
+            _call(
+                "set_onetime_task",
+                {"name": "b", "when": "in 1 hour", "message": "x"},
+                store,
+            )["ok"]
             is True
         )
         assert len(store.load()) == 2, "the paused row is still there"
@@ -189,7 +219,7 @@ class TestTheToolsHonourTheBound:
 
 class TestTheToolsAreWiredWhereAgentsLook:
     def test_both_tools_are_declared(self):
-        import gideon.mcp_automation as M
+        import gideon.integrations.mcp_automation as M
 
         names = {t["name"] for t in M._list_tools()}
         assert {"set_onetime_task", "set_recurring_task"} <= names, sorted(names)
@@ -202,16 +232,19 @@ class TestTheToolsAreWiredWhereAgentsLook:
         `mcp_automation` and delegate into it. Adding them to TOOL_NAMES broke two of its own
         rails — the tuple means "handlers here", not "names an agent may call".
         """
-        import gideon.mcp_automation as M
+        import gideon.integrations.mcp_automation as M
 
         for tool in M._list_tools():
             out = _call(tool["name"], {}, store)
             text = str(out.get("text", "")) + str(out)
-            assert "unknown tool" not in text.lower(), f"{tool['name']} has no dispatch branch"
+            assert (
+                "unknown tool" not in text.lower()
+            ), f"{tool['name']} has no dispatch branch"
 
     def test_the_tools_route_through_create_not_the_store(self, store, monkeypatch):
         """The routing IS the inheritance. A tool that wrote to the store directly would skip the
-        bound, the screening and the announcement — and would look identical until it mattered."""
+        bound, the screening and the announcement — and would look identical until it mattered.
+        """
         calls: list[dict] = []
 
         def _spy(st, **kw):
@@ -219,18 +252,25 @@ class TestTheToolsAreWiredWhereAgentsLook:
             return T.ToolResult(True, "ok", {})
 
         monkeypatch.setattr(T, "create", _spy)
-        _call("set_onetime_task", {"name": "a", "when": "in 1 hour", "message": "m"}, store)
-        _call("set_recurring_task", {"name": "b", "cadence": "hourly", "message": "m"}, store)
+        _call(
+            "set_onetime_task",
+            {"name": "a", "when": "in 1 hour", "message": "m"},
+            store,
+        )
+        _call(
+            "set_recurring_task",
+            {"name": "b", "cadence": "hourly", "message": "m"},
+            store,
+        )
         assert len(calls) == 2, "a tool bypassed triggers.tools.create"
         assert all(c["created_by"] == "agent" for c in calls), calls
-        # the recurring tool's caller-facing `cadence` must reach the router's `when`
         assert calls[1]["when"] == "hourly", calls[1]
 
     def test_no_tool_description_hardcodes_the_configurable_number(self):
         """`automation_create` said "capped at 20", which is wrong the moment an operator changes
         the config — a description that states a stale number is worse than one that names the
         knob."""
-        import gideon.mcp_automation as M
+        import gideon.integrations.mcp_automation as M
 
         for tool in M._list_tools():
             desc = tool["description"]
@@ -239,7 +279,7 @@ class TestTheToolsAreWiredWhereAgentsLook:
 
 def _call(name: str, args: dict, store) -> dict:
     """Drive the real dispatcher with `_store` pointed at the test store."""
-    import gideon.mcp_automation as M
+    import gideon.integrations.mcp_automation as M
 
     orig = M._store
     M._store = lambda: store  # type: ignore[assignment]

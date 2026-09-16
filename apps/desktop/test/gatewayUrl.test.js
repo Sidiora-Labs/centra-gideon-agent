@@ -1,10 +1,3 @@
-/**
- * Where the shell will and will not point itself (`CA-8`).
- *
- * This file is the security surface of connect-mode, so the cases are written as the attack they
- * refuse rather than as the branch they cover: a name that resolves to loopback, an IPv4 address
- * spelled as IPv6, a decimal integer host, a URL carrying credentials, plaintext to a public host.
- */
 
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
@@ -23,7 +16,7 @@ const {
   transportPolicy,
   resolveHostTrust,
   addressFingerprint,
-} = require("../gatewayUrl");
+} = require("../src/connection/address");
 
 const lookupOf = (map) => async (host) => {
   if (!Object.prototype.hasOwnProperty.call(map, host)) {
@@ -42,8 +35,6 @@ describe("parseIPv4 — canonical dotted quad only", () => {
   });
 
   it("rejects leading zeros, short forms and out-of-range octets", () => {
-    // `0177.0.0.1` is 127.0.0.1 to inet_aton. Accepting it would make the loopback branch
-    // reachable through a spelling the classifier does not recognise as loopback.
     assert.strictEqual(parseIPv4("0177.0.0.1"), null);
     assert.strictEqual(parseIPv4("010.0.0.1"), null);
     assert.strictEqual(parseIPv4("127.1"), null);
@@ -76,9 +67,7 @@ describe("isNonCanonicalIpShape — the SSRF spellings", () => {
   });
 
   it("does NOT catch ordinary short domains whose labels are hex digits", () => {
-    // The naive "any hex character" test refuses these, which would make a real hostname
-    // unreachable in the name of a threat that does not apply to it.
-    for (const host of ["de.ee", "face.dead", "ab.cd", "claw.local"]) {
+    for (const host of ["de.ee", "face.dead", "ab.cd", "gideon.local"]) {
       assert.strictEqual(isNonCanonicalIpShape(host), false, host);
     }
   });
@@ -93,14 +82,12 @@ describe("classifyHost — three classes, plus refusal", () => {
   });
 
   it("classifies RFC1918, CGNAT/Tailscale, mDNS and MagicDNS as private", () => {
-    for (const host of ["10.1.2.3", "172.16.0.1", "172.31.255.254", "192.168.1.5", "100.101.102.103", "claw.local", "brain.ts.net", "fd00::5"]) {
+    for (const host of ["10.1.2.3", "172.16.0.1", "172.31.255.254", "192.168.1.5", "100.101.102.103", "gideon.local", "brain.ts.net", "fd00::5"]) {
       assert.strictEqual(classifyHost(host).trust, TRUST_PRIVATE, host);
     }
   });
 
   it("keeps 172.15 and 172.32 out of RFC1918, and 100.0-63 out of CGNAT", () => {
-    // The `172.*` and `100.*` globs a shell is tempted to write hand most of a public /8 to the
-    // private class. Spelled as ranges here, so these three are public.
     assert.strictEqual(classifyHost("172.15.0.1").trust, TRUST_PUBLIC);
     assert.strictEqual(classifyHost("172.32.0.1").trust, TRUST_PUBLIC);
     assert.strictEqual(classifyHost("100.63.0.1").trust, TRUST_PUBLIC);
@@ -137,7 +124,7 @@ describe("classifyHost — three classes, plus refusal", () => {
   });
 
   it("answers `public` for a name it cannot classify by spelling", () => {
-    const v = classifyHost("pc.example.com");
+    const v = classifyHost("gideon.example.com");
     assert.strictEqual(v.trust, TRUST_PUBLIC);
     assert.strictEqual(v.reason, "name_unresolved");
   });
@@ -145,9 +132,9 @@ describe("classifyHost — three classes, plus refusal", () => {
 
 describe("parseGatewayUrl", () => {
   it("returns an origin and drops any path, query or fragment", () => {
-    const r = parseGatewayUrl("http://claw.local:10000/dashboard?x=1#/chat");
+    const r = parseGatewayUrl("http://gideon.local:10000/dashboard?x=1#/chat");
     assert.ok(r.ok);
-    assert.strictEqual(r.origin, "http://claw.local:10000");
+    assert.strictEqual(r.origin, "http://gideon.local:10000");
   });
 
   it("accepts a bare host:port and says it assumed http", () => {
@@ -204,20 +191,20 @@ describe("parseGatewayUrl", () => {
 
 describe("parsePairingUrl — the preferred input, because the gateway composed it", () => {
   it("splits a pairing URL into an origin, a code and a target", () => {
-    const r = parsePairingUrl("http://claw.local:10000/pair?code=ABCD-2345");
+    const r = parsePairingUrl("http://gideon.local:10000/pair?code=ABCD-2345");
     assert.ok(r.ok, r.code);
-    assert.strictEqual(r.origin, "http://claw.local:10000");
+    assert.strictEqual(r.origin, "http://gideon.local:10000");
     assert.strictEqual(r.pairingCode, "ABCD-2345");
-    assert.strictEqual(r.pairTarget, "http://claw.local:10000/pair?code=ABCD-2345");
+    assert.strictEqual(r.pairTarget, "http://gideon.local:10000/pair?code=ABCD-2345");
   });
 
   it("refuses a link that is not the pairing page", () => {
-    assert.strictEqual(parsePairingUrl("http://claw.local:10000/login?code=ABCD-2345").code, "NOT_PAIRING");
+    assert.strictEqual(parsePairingUrl("http://gideon.local:10000/login?code=ABCD-2345").code, "NOT_PAIRING");
   });
 
   it("refuses a pairing link with no code, and one whose code is not code-shaped", () => {
-    assert.strictEqual(parsePairingUrl("http://claw.local:10000/pair").code, "NO_CODE");
-    assert.strictEqual(parsePairingUrl("http://claw.local:10000/pair?code=%3Cscript%3E").code, "BAD_CODE");
+    assert.strictEqual(parsePairingUrl("http://gideon.local:10000/pair").code, "NO_CODE");
+    assert.strictEqual(parsePairingUrl("http://gideon.local:10000/pair?code=%3Cscript%3E").code, "BAD_CODE");
   });
 
   it("applies the same host refusals as a typed address", () => {
@@ -271,8 +258,6 @@ describe("resolveHostTrust — the DNS half", () => {
   });
 
   it("a NAME that resolves to loopback is private, NEVER loopback", async () => {
-    // This is the whole rebinding guard: `lh.0x41.pw` really does resolve to 127.0.0.1, and
-    // loopback is the one class that earns the capability bridge.
     const r = await resolveHostTrust("lh.0x41.pw", { lookup: lookupOf({ "lh.0x41.pw": ["127.0.0.1"] }) });
     assert.ok(r.ok);
     assert.strictEqual(r.resolved, TRUST_LOOPBACK);

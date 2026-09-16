@@ -13,21 +13,15 @@ from pathlib import Path
 
 import pytest
 
-import gideon.schedule_script as ss
-from gideon import gateway_base
-from gideon.schedule import (
+import gideon.automation.schedule_script as ss
+from gideon.automation.schedule import (
     ScheduleJob,
     make_agent_action,
     make_command_action,
     make_script_action,
 )
+from gideon.engine import gateway_base
 
-# The test scripts return instantly; the timeout is only a hung-script safety
-# net. It must clear worst-case latency, though: each run spawns a fresh
-# interpreter through the sandbox, and under full-suite xdist load (10 workers
-# all forking at once) a spawn that takes 0.3s in isolation can take 40-50s of
-# wall time from pure CPU contention. Give wide headroom over that — still well
-# under pytest's 120s per-test ceiling, and a genuinely hung script is caught.
 _SCRIPT_TIMEOUT = 90
 
 
@@ -44,34 +38,34 @@ def _a_gateway_to_address(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(gateway_base.PORT_ENV, "7777")
 
 
-# ── exec_mode strategy axis ───────────────────────────────────────────
-
-
 def test_exec_mode_axis() -> None:
     assert (
-        ScheduleJob(id="a", name="n", action=make_command_action("echo x")).exec_mode == "command"
+        ScheduleJob(id="a", name="n", action=make_command_action("echo x")).exec_mode
+        == "command"
     )
     assert (
-        ScheduleJob(id="b", name="n", action=make_script_action("crons/x.py:run")).exec_mode
+        ScheduleJob(
+            id="b", name="n", action=make_script_action("crons/x.py:run")
+        ).exec_mode
         == "script"
     )
-    assert ScheduleJob(id="c", name="n", action=make_agent_action(message="m")).exec_mode == "agent"
-
-
-# ── resolve_script_path guards ────────────────────────────────────────
+    assert (
+        ScheduleJob(id="c", name="n", action=make_agent_action(message="m")).exec_mode
+        == "agent"
+    )
 
 
 def _fake_crons(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     crons = tmp_path / "crons"
     crons.mkdir()
     monkeypatch.setattr(ss, "_crons_dir", lambda: crons)
-    # validate_file_path must accept paths under tmp; patch it to a thin guard
-    # so the test doesn't depend on the global sensitive-path config.
     monkeypatch.setattr(ss, "validate_file_path", lambda p: p)
     return crons
 
 
-def test_resolve_script_path_ok(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_resolve_script_path_ok(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     crons = _fake_crons(monkeypatch, tmp_path)
     script = crons / "mon.py"
     script.write_text("def run(ctx):\n    return 'ok'\n")
@@ -85,7 +79,7 @@ def test_resolve_script_path_rejects_missing_func(
 ) -> None:
     _fake_crons(monkeypatch, tmp_path)
     with pytest.raises(ValueError):
-        ss.resolve_script_path("crons/x.py")  # no :func
+        ss.resolve_script_path("crons/x.py")
 
 
 def test_resolve_script_path_rejects_escape(
@@ -95,7 +89,7 @@ def test_resolve_script_path_rejects_escape(
     outside = tmp_path / "evil.py"
     outside.write_text("def run(ctx): pass\n")
     with pytest.raises(ValueError):
-        ss.resolve_script_path(f"{outside}:run")  # not under crons/
+        ss.resolve_script_path(f"{outside}:run")
 
 
 def test_resolve_script_path_rejects_non_py(
@@ -106,9 +100,6 @@ def test_resolve_script_path_rejects_non_py(
     f.write_text("echo hi")
     with pytest.raises(ValueError):
         ss.resolve_script_path(f"{f}:run")
-
-
-# ── script mode (ok / skip / done / report / error) ───────────────────
 
 
 def _write_script(crons: Path, name: str, body: str) -> str:
@@ -137,7 +128,7 @@ def test_run_script_skip(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
         crons,
         "skip.py",
         """
-        from gideon.schedule_script import Skip
+        from gideon.automation.schedule_script import Skip
         def run(ctx):
             raise Skip()
     """,
@@ -146,13 +137,15 @@ def test_run_script_skip(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
     assert r["status"] == "skip"
 
 
-def test_run_script_done_and_report(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_run_script_done_and_report(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     crons = _fake_crons(monkeypatch, tmp_path)
     done_spec = _write_script(
         crons,
         "done.py",
         """
-        from gideon.schedule_script import Done
+        from gideon.automation.schedule_script import Done
         def run(ctx):
             raise Done("all finished")
     """,
@@ -165,7 +158,7 @@ def test_run_script_done_and_report(monkeypatch: pytest.MonkeyPatch, tmp_path: P
         crons,
         "report.py",
         """
-        from gideon.schedule_script import Report
+        from gideon.automation.schedule_script import Report
         def run(ctx):
             raise Report("status update")
     """,
@@ -190,7 +183,9 @@ def test_run_script_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> No
     assert "kaboom" in r["error"]
 
 
-def test_run_script_receives_message(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_run_script_receives_message(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     crons = _fake_crons(monkeypatch, tmp_path)
     spec = _write_script(
         crons,
@@ -205,7 +200,9 @@ def test_run_script_receives_message(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     assert r["message"] == "msg=hello-args"
 
 
-def test_secret_not_in_script_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_secret_not_in_script_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """The internal secret must not be readable from the script's environment."""
     crons = _fake_crons(monkeypatch, tmp_path)
     spec = _write_script(

@@ -25,7 +25,7 @@ from aiohttp.test_utils import make_mocked_request
 
 @pytest.fixture()
 def store(tmp_path):
-    from gideon.knowledge.store import KnowledgeStore
+    from gideon.cognition.knowledge.store import KnowledgeStore
 
     return KnowledgeStore(tmp_path / "k.db")
 
@@ -42,7 +42,9 @@ def _collections_of(store, item_id) -> set[str]:
 
 
 def _tag_ids_of(store, item_id) -> set[int]:
-    rows = store.db.execute("SELECT tag_id FROM item_tags WHERE item_id = ?", (item_id,)).fetchall()
+    rows = store.db.execute(
+        "SELECT tag_id FROM item_tags WHERE item_id = ?", (item_id,)
+    ).fetchall()
     return {r["tag_id"] for r in rows}
 
 
@@ -51,9 +53,6 @@ def _mention_entities(store, item_id) -> set[str]:
         "SELECT entity_id FROM mentions WHERE item_id = ?", (item_id,)
     ).fetchall()
     return {r["entity_id"] for r in rows}
-
-
-# ── Guard rails ─────────────────────────────────────────────────────────
 
 
 def test_self_merge_is_refused(store):
@@ -77,9 +76,6 @@ def test_unknown_item_is_refused(store):
     with pytest.raises(ValueError, match="no such item"):
         store.merge_items("nope", a)
     assert store.get_item(a) is not None
-
-
-# ── What the survivor inherits ──────────────────────────────────────────
 
 
 def test_the_loser_is_deleted_and_the_survivor_kept(store):
@@ -114,15 +110,23 @@ def test_a_shared_collection_does_not_duplicate(store):
 
 
 def test_survivor_inherits_tags(store):
-    keep = store.create_typed_item(item_type="note", title="Keep", content="x", tags=["rust"])
-    merge = store.create_typed_item(item_type="note", title="Merge", content="y", tags=["async"])
+    keep = store.create_typed_item(
+        item_type="note", title="Keep", content="x", tags=["rust"]
+    )
+    merge = store.create_typed_item(
+        item_type="note", title="Merge", content="y", tags=["async"]
+    )
     store.merge_items(keep, merge)
     assert len(_tag_ids_of(store, keep)) == 2
 
 
 def test_a_shared_tag_does_not_duplicate(store):
-    keep = store.create_typed_item(item_type="note", title="Keep", content="x", tags=["rust"])
-    merge = store.create_typed_item(item_type="note", title="Merge", content="y", tags=["rust"])
+    keep = store.create_typed_item(
+        item_type="note", title="Keep", content="x", tags=["rust"]
+    )
+    merge = store.create_typed_item(
+        item_type="note", title="Merge", content="y", tags=["rust"]
+    )
     store.merge_items(keep, merge)
     assert len(_tag_ids_of(store, keep)) == 1
 
@@ -144,7 +148,9 @@ def test_a_shared_mention_does_not_duplicate(store):
     store.add_mention(keep, eid)
     store.add_mention(merge, eid)
     store.merge_items(keep, merge)
-    rows = store.db.execute("SELECT COUNT(*) c FROM mentions WHERE item_id = ?", (keep,)).fetchone()
+    rows = store.db.execute(
+        "SELECT COUNT(*) c FROM mentions WHERE item_id = ?", (keep,)
+    ).fetchone()
     assert rows["c"] == 1
 
 
@@ -153,13 +159,12 @@ def test_relations_discovered_from_the_loser_are_reattributed(store):
     keep, merge = _item(store, "Keep"), _item(store, "Merge")
     a = store.add_entity(name="Sparrow", entity_type="project")
     b = store.add_entity(name="Kestrel", entity_type="project")
-    store.add_entity_relation(source_id=a, target_id=b, relation_type="uses", source_item_id=merge)
+    store.add_entity_relation(
+        source_id=a, target_id=b, relation_type="uses", source_item_id=merge
+    )
     store.merge_items(keep, merge)
     rows = store.db.execute("SELECT source_item_id FROM entity_relations").fetchall()
     assert [r["source_item_id"] for r in rows] == [keep]
-
-
-# ── The stronger signal wins ────────────────────────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -194,9 +199,6 @@ def test_favorited_survives_from_either_copy(store, keep_fav, merge_fav, expecte
     assert (store.get_item(keep)["favorited"] or 0) == expected
 
 
-# ── The search index ────────────────────────────────────────────────────
-
-
 def test_search_no_longer_finds_the_merged_item(store):
     """`items_fts` is external-content: a plain DELETE is a silent no-op.
 
@@ -228,10 +230,9 @@ def test_a_failed_merge_leaves_both_items(store, monkeypatch):
     with pytest.raises(RuntimeError):
         store.merge_items(keep, merge)
     assert store.get_item(keep) is not None
-    assert store.get_item(merge) is not None, "the loser must survive a rolled-back merge"
-
-
-# ── Duplicate surfacing ─────────────────────────────────────────────────
+    assert (
+        store.get_item(merge) is not None
+    ), "the loser must survive a rolled-back merge"
 
 
 def test_no_duplicates_without_an_embedding(store):
@@ -267,16 +268,15 @@ def test_a_real_near_duplicate_pair_IS_surfaced(store):
     """
     a = _item(store, "Rust async book notes")
     b = _item(store, "Rust async book notes")
-    # Same title ⇒ filename_sim 1.0; near-parallel unit vectors ⇒ cosine ≈ 0.995 (floor 0.90);
-    # no series-date token in either title ⇒ the date gate abstains. All three clauses agree.
     _embed(store, a, [1.0, 0.0])
     _embed(store, b, [0.995, 0.0999])
 
     found = store.find_duplicates(a)
     assert len(found) == 1, "the pair satisfies filename + cosine + date-gate"
     assert found[0]["id"] == b
-    # The reason travels: it is what makes a destructive merge reviewable in the UI.
-    assert found[0]["reason"], "a candidate must carry the scorer's account of the match"
+    assert found[0][
+        "reason"
+    ], "a candidate must carry the scorer's account of the match"
 
 
 def test_a_genuinely_different_item_is_not_surfaced(store):
@@ -310,7 +310,9 @@ def test_duplicates_never_return_the_embedding(store):
 
 def _dated(store, item_id, created_at):
     """Pin `created_at` — the recency ORDER is the whole subject of the next test."""
-    store.db.execute("UPDATE items SET created_at = ? WHERE id = ?", (created_at, item_id))
+    store.db.execute(
+        "UPDATE items SET created_at = ? WHERE id = ?", (created_at, item_id)
+    )
     store.db.commit()
 
 
@@ -334,8 +336,6 @@ def test_a_duplicate_OLDER_than_the_result_limit_is_still_surfaced(store):
     _dated(store, old, "2020-01-01T00:00:00")
     _embed(store, old, [1.0, 0.0])
 
-    # A library that has grown well past the default result limit since. Same type and embedded,
-    # so every one of these outranks `old` in the old recency-ordered candidate window.
     filler = []
     for i in range(30):
         n = _item(store, f"Unrelated note {i}")
@@ -347,8 +347,6 @@ def test_a_duplicate_OLDER_than_the_result_limit_is_still_surfaced(store):
     _dated(store, new, "2026-08-01T00:00:00")
     _embed(store, new, [0.995, 0.0999])
 
-    # 🪤 VACUITY FLOOR — without this the test stops testing the window the moment the default
-    # limit rises above the corpus size, and would then pass for the wrong reason forever.
     default_limit = 25
     eligible = store.db.execute(
         "SELECT COUNT(*) AS c FROM items WHERE item_type = 'note' AND embedding IS NOT NULL"
@@ -375,15 +373,17 @@ def test_duplicates_are_ordered_STRONGEST_first_not_newest(store):
     _embed(store, anchor, [1.0, 0.0, 0.0])
 
     strong = _item(store, "Kubernetes operator guide")
-    _dated(store, strong, "2020-01-01T00:00:00")  # oldest
-    _embed(store, strong, [0.9999, 0.0141, 0.0])  # cosine ≈ 0.9999
+    _dated(store, strong, "2020-01-01T00:00:00")
+    _embed(store, strong, [0.9999, 0.0141, 0.0])
 
     weak = _item(store, "Kubernetes operator guide")
-    _dated(store, weak, "2026-02-01T00:00:00")  # newer than `strong`
-    _embed(store, weak, [0.91, 0.4146, 0.0])  # cosine ≈ 0.910, just over the 0.90 floor
+    _dated(store, weak, "2026-02-01T00:00:00")
+    _embed(store, weak, [0.91, 0.4146, 0.0])
 
     found = store.find_duplicates(anchor)
-    assert len(found) == 2, "both must clear the gates or the ordering claim is untested"
+    assert (
+        len(found) == 2
+    ), "both must clear the gates or the ordering claim is untested"
     assert [r["id"] for r in found] == [strong, weak]
     assert found[0]["similarity"] > found[1]["similarity"]
 
@@ -408,12 +408,14 @@ def test_each_candidate_carries_its_OWN_measured_similarity(store):
     found = store.find_duplicates(anchor)
     assert len(found) == 2
     reasons = [r["reason"] for r in found]
-    assert len(set(reasons)) == 2, f"one constant for every row reviews nothing: {reasons}"
-    # Both share the anchor's title exactly — the defining case, so it is named, not scored 1.00.
-    assert all(r.startswith("Same title · content similarity ") for r in reasons), reasons
+    assert (
+        len(set(reasons)) == 2
+    ), f"one constant for every row reviews nothing: {reasons}"
+    assert all(
+        r.startswith("Same title · content similarity ") for r in reasons
+    ), reasons
     assert reasons[0] == "Same title · content similarity 0.99"
     assert reasons[1] == "Same title · content similarity 0.91"
-    # TRUNCATED, never rounded: 0.9999 must not print as 1.00 next to a delete button.
     assert found[0]["similarity"] > 0.999
 
 
@@ -428,7 +430,9 @@ def test_limit_caps_RESULTS_and_keeps_the_strongest(store):
         _embed(store, d, vec)
         ranked.append(d)
 
-    assert len(store.find_duplicates(anchor)) == 3, "all three must qualify, or the cap is untested"
+    assert (
+        len(store.find_duplicates(anchor)) == 3
+    ), "all three must qualify, or the cap is untested"
     top2 = store.find_duplicates(anchor, limit=2)
     assert [r["id"] for r in top2] == ranked[:2]
 
@@ -440,30 +444,14 @@ def test_a_dissimilar_title_is_never_scored_however_close_the_vectors(store):
     and every close vector into a proposed deletion."""
     anchor = _item(store, "Rust async book notes")
     _embed(store, anchor, [1.0, 0.0])
-    twin = _item(store, "Sourdough starter log")  # identical vector, unrelated title
+    twin = _item(store, "Sourdough starter log")
     _embed(store, twin, [1.0, 0.0])
 
     assert store.find_duplicates(anchor) == []
-    # Vacuity floor: the vectors really are identical, so only the title leg can be refusing.
-    from gideon.knowledge.dedup import cosine_similarity
+    from gideon.cognition.knowledge.dedup import cosine_similarity
 
     assert cosine_similarity([1.0, 0.0], [1.0, 0.0]) == pytest.approx(1.0)
-    assert twin  # the candidate exists and is embedded; it is gated, not absent
-
-
-# ── The HTTP routes the UI drives (KL-6) ────────────────────────────────
-#
-# Everything above proves the STORE. The frontend cannot call the store — it calls
-# `GET /api/knowledge/items/{id}/duplicates` and `POST …/merge`, and until KL-6 there was no
-# consumer of either, so neither route had a test. These cover the layer the merge button
-# actually crosses:
-#
-#   * The survivor is the PATH id and the loser is the BODY id, in that direction. Swapping them
-#     deletes the document the user was looking at, and a store-level test cannot catch it
-#     because the store's own argument order would still be honoured.
-#   * `confirm: true` is REQUIRED and its refusal is total — a 400 that had already deleted the
-#     item would be worse than no gate at all.
-#   * The loser 404s afterwards, read back through the same route the UI navigates to.
+    assert twin
 
 
 def _call(store, handler_name, method, path, *, match_info=None, body=None):
@@ -476,7 +464,7 @@ def _call(store, handler_name, method, path, *, match_info=None, body=None):
             return body
 
         req.json = _json
-    from gideon.dashboard.handlers import knowledge as H
+    from gideon.interfaces.dashboard.handlers import knowledge as H
 
     resp = asyncio.new_event_loop().run_until_complete(getattr(H, handler_name)(req))
     return resp, json.loads(resp.body)
@@ -511,9 +499,7 @@ def test_the_route_merge_keeps_the_path_item_and_moves_both_sides_curation(store
 
     assert resp.status == 200 and data["ok"] is True
     assert (data["kept"], data["merged"]) == (keep, loser)
-    # Collection MEMBERSHIPS: both shelves, not just the survivor's own.
     assert _collections_of(store, keep) == {kept_shelf, loser_shelf}
-    # MENTIONS: both entities.
     assert _mention_entities(store, keep) == {kept_ent, loser_ent}
     assert data["moved"]["collections"] == 1 and data["moved"]["mentions"] == 1
 
@@ -531,7 +517,6 @@ def test_the_route_leaves_the_loser_404ing(store):
         match_info={"id": loser},
     )
     assert resp.status == 404
-    # …and the survivor is still readable, so a 404 above means "the loser" not "both".
     resp, _ = _call(
         store,
         "get_item",
@@ -554,7 +539,7 @@ def test_the_route_refuses_a_merge_without_confirm_and_deletes_nothing(store):
         "POST",
         f"/api/knowledge/items/{keep}/merge",
         match_info={"id": keep},
-        body={"merge_id": loser},  # no confirm
+        body={"merge_id": loser},
     )
 
     assert resp.status == 400 and "confirm" in data["error"]

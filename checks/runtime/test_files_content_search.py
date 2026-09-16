@@ -13,7 +13,7 @@ from unittest.mock import MagicMock
 import pytest
 from aiohttp.test_utils import make_mocked_request
 
-from gideon.dashboard.handlers import files as F
+from gideon.interfaces.dashboard.handlers import files as F
 
 
 @pytest.fixture
@@ -30,9 +30,6 @@ def search_root(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(F, "_sel", lambda: MagicMock())
     return tmp_path
-
-
-# ── Python fallback (unit) ──
 
 
 def test_python_search_finds_matches(search_root):
@@ -58,10 +55,9 @@ def test_python_search_reports_line_and_col(search_root):
     assert r["line"] == 2 and r["col"] >= 1
 
 
-# ── HTTP handler ──
-
-
-def _call(path: str, q: str = "", include: str = "", *, force_python=True, monkeypatch=None):
+def _call(
+    path: str, q: str = "", include: str = "", *, force_python=True, monkeypatch=None
+):
     from urllib.parse import urlencode
 
     if force_python and monkeypatch is not None:
@@ -104,4 +100,7 @@ def test_handler_redacts_secrets_in_preview(tmp_path, monkeypatch):
     monkeypatch.setattr(F, "_sel", lambda: MagicMock())
     status, body = _call(str(tmp_path), "needle", monkeypatch=monkeypatch)
     assert status == 200
-    assert all("AKIAIOSFODNN7EXAMPLEKEY1234567890abcd" not in r["preview"] for r in body["results"])
+    assert all(
+        "AKIAIOSFODNN7EXAMPLEKEY1234567890abcd" not in r["preview"]
+        for r in body["results"]
+    )

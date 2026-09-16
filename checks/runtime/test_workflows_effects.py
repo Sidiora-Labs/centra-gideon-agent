@@ -18,9 +18,9 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.workflows import store
-from gideon.workflows.controller import EngineServices, RunController
-from gideon.workflows.effects import (
+from gideon.automation.workflows import store
+from gideon.automation.workflows.controller import EngineServices, RunController
+from gideon.automation.workflows.effects import (
     CallerDedupe,
     EffectRecord,
     EffectStatus,
@@ -32,8 +32,8 @@ from gideon.workflows.effects import (
     redo_blocked,
     run_teardown,
 )
-from gideon.workflows.journal import EFFECT
-from gideon.workflows.models import (
+from gideon.automation.workflows.journal import EFFECT
+from gideon.automation.workflows.models import (
     InstanceState,
     NodeInstance,
     RunStatus,
@@ -52,7 +52,7 @@ def anyio_backend() -> str:
 def _isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
     return home
 
 
@@ -100,21 +100,19 @@ def _action_spec(config: dict | None = None) -> dict:
     }
 
 
-# ── key + pure helpers ───────────────────────────────────────────────────────
-
-
 class TestIdentity:
     def test_key_is_deterministic_and_epoch_sensitive(self) -> None:
         a = idempotency_key("r1", "root.children[0]", 0)
         assert a == idempotency_key("r1", "root.children[0]", 0)
-        # A rewound region re-executes deliberately — it must present a NEW identity.
         assert a != idempotency_key("r1", "root.children[0]", 1)
         assert a != idempotency_key("r2", "root.children[0]", 0)
 
     def test_committed_effect_is_the_standing_commitment(self) -> None:
         recs = [
             EffectRecord(idempotency_key="k1", effect_status=EffectStatus.ATTEMPTED),
-            EffectRecord(idempotency_key="k1", effect_status=EffectStatus.COMMITTED, epoch=0),
+            EffectRecord(
+                idempotency_key="k1", effect_status=EffectStatus.COMMITTED, epoch=0
+            ),
         ]
         found = committed_effect(recs)
         assert found is not None and found.idempotency_key == "k1"
@@ -123,14 +121,15 @@ class TestIdentity:
         """Teardown ran: the resource is gone, so re-execution is no longer a
         double-fire and the boundary must clear."""
         recs = [
-            EffectRecord(idempotency_key="k1", effect_status=EffectStatus.COMMITTED, epoch=0),
+            EffectRecord(
+                idempotency_key="k1", effect_status=EffectStatus.COMMITTED, epoch=0
+            ),
             EffectRecord(idempotency_key="k1", effect_status=EffectStatus.COMPENSATED),
         ]
         assert committed_effect(recs) is None
 
     def test_redo_blocked_only_across_epochs(self) -> None:
         committed = EffectRecord(idempotency_key="k", epoch=0)
-        # Same epoch: same key, receiver dedupes — the retry contract, not a double-fire.
         assert not redo_blocked({}, committed, epoch=0)
         assert redo_blocked({}, committed, epoch=1)
         assert not redo_blocked({"redo_effects": True}, committed, epoch=1)
@@ -139,7 +138,10 @@ class TestIdentity:
 
 class TestByoiContract:
     def test_exactly_one_json_object_parses(self) -> None:
-        assert parse_byoi_output('{"id": "vm-1", "host": "x"}') == {"id": "vm-1", "host": "x"}
+        assert parse_byoi_output('{"id": "vm-1", "host": "x"}') == {
+            "id": "vm-1",
+            "host": "x",
+        }
 
     def test_two_objects_are_ambiguous_and_rejected(self) -> None:
         """Two objects = which id does the teardown get? Guessing wrong orphans a
@@ -176,10 +178,14 @@ class TestTeardownRunner:
         ok, detail = await run_teardown("destroy-vm", "vm-1", runner=runner)
         assert not ok and "boom" in detail
 
-    async def test_subprocess_teardown_receives_id_as_argv_and_env(self, tmp_path) -> None:
+    async def test_subprocess_teardown_receives_id_as_argv_and_env(
+        self, tmp_path
+    ) -> None:
         marker = tmp_path / "seen.txt"
         script = tmp_path / "teardown.sh"
-        script.write_text('#!/bin/sh\necho "$1|$EFFECT_OUTPUT_ID" > ' + str(marker) + "\n")
+        script.write_text(
+            '#!/bin/sh\necho "$1|$EFFECT_OUTPUT_ID" > ' + str(marker) + "\n"
+        )
         script.chmod(0o755)
         ok, _ = await run_teardown(str(script), "vm-42")
         assert ok
@@ -190,9 +196,6 @@ class TestTeardownRunner:
         assert not ok and "not found" in detail
 
 
-# ── controller integration ───────────────────────────────────────────────────
-
-
 class TestEffectLifecycle:
     async def test_attempted_then_committed_on_success(self) -> None:
         spec = _action_spec()
@@ -200,7 +203,9 @@ class TestEffectLifecycle:
         c = RunController(
             run,
             spec,
-            services=EngineServices(get_provider=_provider(_Result(stdout='{"id": "msg-1"}'))),
+            services=EngineServices(
+                get_provider=_provider(_Result(stdout='{"id": "msg-1"}'))
+            ),
         )
         assert await c.run_to_completion(timeout=20) == RunStatus.COMPLETE
         history = effect_history(run.id)
@@ -217,10 +222,14 @@ class TestEffectLifecycle:
         c = RunController(
             run,
             spec,
-            services=EngineServices(get_provider=_provider(_Result(success=False, error="down"))),
+            services=EngineServices(
+                get_provider=_provider(_Result(success=False, error="down"))
+            ),
         )
         await c.run_to_completion(timeout=20)
-        statuses = [r.effect_status for r in effect_history(run.id).get("root.children[0]", [])]
+        statuses = [
+            r.effect_status for r in effect_history(run.id).get("root.children[0]", [])
+        ]
         assert statuses == [EffectStatus.ATTEMPTED]
 
     async def test_a_skip_outcome_is_ledgered_skipped(self) -> None:
@@ -234,7 +243,6 @@ class TestEffectLifecycle:
         assert await c.run_to_completion(timeout=20) == RunStatus.COMPLETE
         statuses = [r.effect_status for r in effect_history(run.id)["root.children[0]"]]
         assert statuses == [EffectStatus.ATTEMPTED, EffectStatus.SKIPPED]
-        # Nothing fired, so nothing stands committed and a redo needs no gate.
         assert committed_effect(effect_history(run.id)["root.children[0]"]) is None
 
     async def test_a_retry_records_retried_between_attempts(self) -> None:
@@ -254,7 +262,9 @@ class TestEffectLifecycle:
         flaky = Flaky()
         spec = _action_spec({"retry": {"max_attempts": 2}})
         run = _make_run(spec)
-        c = RunController(run, spec, services=EngineServices(get_provider=lambda name: flaky))
+        c = RunController(
+            run, spec, services=EngineServices(get_provider=lambda name: flaky)
+        )
         assert await c.run_to_completion(timeout=20) == RunStatus.COMPLETE
         recs = effect_history(run.id)["root.children[0]"]
         statuses = [r.effect_status for r in recs]
@@ -264,15 +274,13 @@ class TestEffectLifecycle:
             EffectStatus.ATTEMPTED,
             EffectStatus.COMMITTED,
         ]
-        # Same epoch throughout: every record carries the SAME idempotency key, which is
-        # what lets an idempotent receiver collapse the two dispatches into one effect.
         assert len({r.idempotency_key for r in recs}) == 1
 
 
 class TestRedoBoundary:
     def _completed_with_effect(self, run_id: str, spec: dict) -> None:
         """Simulate a prior epoch-0 completion whose effect committed."""
-        from gideon.workflows.journal import Journal
+        from gideon.automation.workflows.journal import Journal
 
         j = Journal(run_id)
         key = idempotency_key(run_id, "root.children[0]", 0)
@@ -287,13 +295,14 @@ class TestRedoBoundary:
             compensation_ref="destroy-vm",
         )
 
-    async def test_reexecution_across_epochs_is_blocked_without_redo_effects(self) -> None:
+    async def test_reexecution_across_epochs_is_blocked_without_redo_effects(
+        self,
+    ) -> None:
         """The heart of WF2-R1: a rewind that crosses a committed effect refuses to
         silently re-fire it."""
         spec = _action_spec()
         run = _make_run(spec)
         self._completed_with_effect(run.id, spec)
-        # Epoch bumped to 1 (a rewind happened); node back to pending.
         store.write_state(
             run.id,
             {"root.children[0]": NodeInstance(path="root.children[0]", epoch=1)},
@@ -307,7 +316,7 @@ class TestRedoBoundary:
             ),
         )
         status = await c.run_to_completion(timeout=20)
-        assert fired == []  # the provider was NEVER dispatched
+        assert fired == []
         assert status == RunStatus.FAILED
         inst = store.read_state(run.id)["root.children[0]"]
         assert inst.state == InstanceState.BLOCKED
@@ -338,12 +347,11 @@ class TestRedoBoundary:
             ),
         )
         assert await c.run_to_completion(timeout=20) == RunStatus.COMPLETE
-        # Teardown got the COMMITTED resource's id, then the node re-fired.
         assert torn == [("destroy-vm", "vm-7")]
         assert len(fired) == 1
         recs = effect_history(run.id)["root.children[0]"]
         statuses = [r.effect_status for r in recs]
-        assert statuses[0] == EffectStatus.COMMITTED  # the simulated prior epoch
+        assert statuses[0] == EffectStatus.COMMITTED
         assert EffectStatus.COMPENSATED in statuses
         new_commit = committed_effect(recs)
         assert new_commit.epoch == 1 and new_commit.output_id == "vm-8"
@@ -370,7 +378,7 @@ class TestRedoBoundary:
             ),
         )
         status = await c.run_to_completion(timeout=20)
-        assert fired == []  # unknown external state: do NOT provision a second resource
+        assert fired == []
         assert status == RunStatus.FAILED
         inst = store.read_state(run.id)["root.children[0]"]
         assert inst.failure.terminal_reason == "teardown_failed"
@@ -385,9 +393,10 @@ class TestRedoBoundary:
             run.id,
             {"root.children[0]": NodeInstance(path="root.children[0]", epoch=1)},
         )
-        # Brand-new controller, nothing shared with any prior one.
         c = RunController(
-            run, spec, services=EngineServices(get_provider=_provider(_Result(stdout="{}")))
+            run,
+            spec,
+            services=EngineServices(get_provider=_provider(_Result(stdout="{}"))),
         )
         assert await c.run_to_completion(timeout=20) == RunStatus.FAILED
         inst = store.read_state(run.id)["root.children[0]"]
@@ -401,7 +410,9 @@ class TestRedoBoundary:
             "root": {
                 "kind": "sequence",
                 "id": "s",
-                "children": [{"kind": "transform", "id": "t", "config": {"expr": {"v": 1}}}],
+                "children": [
+                    {"kind": "transform", "id": "t", "config": {"expr": {"v": 1}}}
+                ],
             },
         }
         run = _make_run(spec)
@@ -419,21 +430,24 @@ class TestEffectEventShape:
         c = RunController(
             run,
             spec,
-            services=EngineServices(get_provider=_provider(_Result(stdout='{"id": "m-1"}'))),
+            services=EngineServices(
+                get_provider=_provider(_Result(stdout='{"id": "m-1"}'))
+            ),
         )
         await c.run_to_completion(timeout=20)
-        from gideon.workflows.journal import EVENTS_FILE
+        from gideon.automation.workflows.journal import EVENTS_FILE
 
-        events = [r for r in store.read_jsonl(run.id, EVENTS_FILE) if r.get("kind") == EFFECT]
+        events = [
+            r for r in store.read_jsonl(run.id, EVENTS_FILE) if r.get("kind") == EFFECT
+        ]
         assert len(events) == 2
         for e in events:
-            assert e["idempotency_key"] == idempotency_key(run.id, "root.children[0]", 0)
+            assert e["idempotency_key"] == idempotency_key(
+                run.id, "root.children[0]", 0
+            )
             assert e["node_id"] == "send"
             assert e["provider"] == "notify"
-            assert e["event_id"]  # deterministic id — replays dedupe
-
-
-# ── caller dedupe ────────────────────────────────────────────────────────────
+            assert e["event_id"]
 
 
 class TestCallerDedupe:

@@ -12,15 +12,15 @@ import json
 
 import pytest
 
-from gideon import after_turn_review as atr
-from gideon.skills import loader as loader_mod
-from gideon.skills import proposals
+from gideon.cognition import after_turn_review as atr
+from gideon.extensions.skills import loader as loader_mod
+from gideon.extensions.skills import proposals
 
 
 @pytest.fixture
 def home(tmp_path, monkeypatch):
     monkeypatch.setattr(loader_mod, "config_dir", lambda: tmp_path)
-    import gideon.skills.marketplace as mp
+    import gideon.extensions.skills.marketplace as mp
 
     monkeypatch.setattr(mp, "SKILL_DISCOVERY_PATHS", [])
     return tmp_path
@@ -37,7 +37,9 @@ def _run(**kw):
     return asyncio.run(
         atr.run_skill_ladder_review(
             session_key=kw.get("session_key", "sess:1"),
-            user_message=kw.get("user_message", "always deploy via the staging gate first"),
+            user_message=kw.get(
+                "user_message", "always deploy via the staging gate first"
+            ),
             assistant_text=kw.get(
                 "assistant_text", "Understood — I'll gate deploys through staging."
             ),
@@ -45,9 +47,6 @@ def _run(**kw):
             completion=kw["completion"],
         )
     )
-
-
-# ── prompt + parse ───────────────────────────────────────────────────────────
 
 
 def test_parse_tolerates_code_fence():
@@ -63,9 +62,6 @@ def test_parse_extracts_embedded_object():
 def test_parse_returns_none_on_garbage():
     assert atr._parse_ladder_json("not json at all") is None
     assert atr._parse_ladder_json("") is None
-
-
-# ── action routing (all through the propose-only queue) ──────────────────────
 
 
 def test_create_enqueues_proposal(home):
@@ -113,13 +109,12 @@ def test_action_none_enqueues_nothing(home):
 
 
 def test_missing_fields_enqueues_nothing(home):
-    summary = _run(completion=_completion({"action": "create", "slug": "x"}))  # no desc/procedure
+    summary = _run(completion=_completion({"action": "create", "slug": "x"}))
     assert summary is None
     assert proposals.list_pending() == []
 
 
 def test_guardrail_blocks_env_failure_turn(home):
-    # An environment-failure turn can't teach a skill — blocked before the LLM call.
     called = {"n": 0}
 
     async def _c(prompt: str) -> str:
@@ -128,9 +123,11 @@ def test_guardrail_blocks_env_failure_turn(home):
             {"action": "create", "slug": "x", "description": "d", "procedure_md": "p"}
         )
 
-    summary = _run(user_message="the deploy tool is broken and permission denied", completion=_c)
+    summary = _run(
+        user_message="the deploy tool is broken and permission denied", completion=_c
+    )
     assert summary is None
-    assert called["n"] == 0  # never even called the model
+    assert called["n"] == 0
     assert proposals.list_pending() == []
 
 
@@ -144,7 +141,6 @@ def test_completion_failure_is_safe(home):
 
 
 def test_never_writes_live_skill(home):
-    # The whole point: the ladder proposes, it does not install.
     _run(
         completion=_completion(
             {
@@ -156,22 +152,17 @@ def test_never_writes_live_skill(home):
             }
         )
     )
-    from gideon.skills.loader import SkillsLoader
+    from gideon.extensions.skills.loader import ProcedureLibrary
 
-    assert SkillsLoader(install_builtins=False).load_skill("auto/should-not-be-live") is None
-    assert SkillsLoader(install_builtins=False).load_skill("should-not-be-live") is None
-    # …but it IS in the review queue.
+    assert (
+        ProcedureLibrary(install_builtins=False).load_skill("auto/should-not-be-live")
+        is None
+    )
+    assert (
+        ProcedureLibrary(install_builtins=False).load_skill("should-not-be-live")
+        is None
+    )
     assert any(p.slug == "should-not-be-live" for p in proposals.list_pending())
-
-
-# ── the last-run marker (`G44`) ───────────────────────────────────────────────
-#
-# The defect: `GET /api/skills/proposals` answering `{"proposals": []}` is two
-# different facts wearing one face — "the ladder ran and had nothing to propose"
-# and "the ladder never ran". Every test below holds the proposals list EMPTY and
-# asserts on the marker instead, because that is the exact condition under which
-# the two were indistinguishable. A rail that only checked the filing case would
-# be testing the observation that was never ambiguous.
 
 
 def test_last_review_is_none_before_any_pass(home):
@@ -185,10 +176,12 @@ def test_a_pass_that_proposes_nothing_is_still_observable(home):
     """THE rail. Same empty proposals list as `test_action_none_enqueues_nothing`,
     but now the two worlds are distinguishable from the marker alone."""
     assert _run(completion=_completion({"action": "none"})) is None
-    assert proposals.list_pending() == []  # indistinguishable half, unchanged
+    assert proposals.list_pending() == []
 
     rec = proposals.last_review()
-    assert rec is not None, "a pass that proposed nothing recorded nothing — `G44` is back"
+    assert (
+        rec is not None
+    ), "a pass that proposed nothing recorded nothing — `G44` is back"
     assert rec["verdict"] == "no_action"
     assert rec["session_key"] == "sess:1"
     assert isinstance(rec["elapsed_ms"], int) and rec["elapsed_ms"] >= 0
@@ -220,7 +213,7 @@ def test_marker_is_not_mistaken_for_a_proposal(home):
     """The sentinel-collision floor: the marker must not live in the directory
     `list_pending()` globs, or a working ladder would grow a phantom proposal."""
     _run(completion=_completion({"action": "none"}))
-    assert proposals.last_review() is not None  # it really was written
+    assert proposals.last_review() is not None
     assert proposals.list_pending() == []
 
 
@@ -229,10 +222,10 @@ def test_route_reports_the_marker_and_its_absence(home):
     a recorded marker no route exposes would be the same observation as before."""
     import asyncio
 
-    from gideon.dashboard.handlers import skills as skills_handlers
+    from gideon.interfaces.dashboard.handlers import skills as skills_handlers
 
     async def _payload():
-        resp = await skills_handlers.api_skill_proposals_list(object())  # request unused
+        resp = await skills_handlers.api_skill_proposals_list(object())
         return json.loads(resp.text)
 
     before = asyncio.run(_payload())

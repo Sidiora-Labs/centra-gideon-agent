@@ -13,9 +13,9 @@ from pathlib import Path
 
 import pytest
 
-from gideon.apps import manager
-from gideon.apps.manifest import Permissions
-from gideon.apps.permissions import PermissionChecker
+from gideon.extensions.apps import manager
+from gideon.extensions.apps.manifest import Permissions
+from gideon.extensions.apps.permissions import PermissionChecker
 
 
 def _install_app(
@@ -54,14 +54,11 @@ def _install_app(
 @pytest.fixture
 def app_env(tmp_path, monkeypatch):
     """Point config_dir at a tmp tree so apps + crons live in isolation."""
-    from gideon.config import loader
+    from gideon.core.config import loader
 
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(manager, "config_dir", lambda: tmp_path)
     return tmp_path
-
-
-# ── can_use_cron: reconcile registers only permitted app crons ──
 
 
 class TestAppCronReconcile:
@@ -74,7 +71,7 @@ class TestAppCronReconcile:
     """
 
     def _store(self, tmp_path):
-        from gideon.triggers.store import TriggerStore
+        from gideon.automation.triggers.store import TriggerStore
 
         return TriggerStore(base_dir=tmp_path)
 
@@ -82,7 +79,7 @@ class TestAppCronReconcile:
         return {row.trigger.id for row in store.load()}
 
     def test_registers_crons_only_with_permission(self, app_env):
-        from gideon.apps.app_crons import reconcile_app_crons
+        from gideon.extensions.apps.app_crons import reconcile_app_crons
 
         _install_app(
             app_env,
@@ -93,27 +90,23 @@ class TestAppCronReconcile:
         _install_app(
             app_env,
             "no-cron",
-            permissions={},  # cron NOT declared
+            permissions={},
             crons=[{"name": "daily", "every": 3600, "agent": "x", "message": "go"}],
         )
         store = self._store(app_env)
         reconcile_app_crons(store)
         ids = self._ids(store)
         assert "app:with-cron:daily" in ids
-        assert "app:no-cron:daily" not in ids  # gated out
+        assert "app:no-cron:daily" not in ids
         row = store.get("app:with-cron:daily")
-        # Headless app crons are always silent — no owner conversation to deliver to; otherwise
-        # every run logs a channel-delivery failure. `delivery: none` is the store's spelling.
         assert row.trigger.delivery == "none"
-        # 🔴 And it must be ARMED, which is the whole difference between a registered cron and a
-        # running one: `service.due_ids` only surfaces rows that carry a `next_fire_at`.
         assert row.trigger.next_fire_at
         assert row.ok, row.errors
 
     def test_the_registered_action_matches_what_the_migration_produces(self, app_env):
         """An app cron written here and one imported from `crons.json` must be the SAME row, or the
         two paths would produce triggers that fire differently."""
-        from gideon.apps.app_crons import reconcile_app_crons
+        from gideon.extensions.apps.app_crons import reconcile_app_crons
 
         _install_app(
             app_env,
@@ -126,13 +119,12 @@ class TestAppCronReconcile:
         inline = (store.get("app:shape:j").trigger.workflow or {}).get("inline") or {}
         assert inline.get("provider") == "invoke-agent"
         config = inline.get("config") or {}
-        # `task_template`, NOT `message` — the key `invoke-agent` actually reads.
         assert config.get("task_template") == "do it"
         assert config.get("agent") == "helper"
-        assert config.get("approval_mode") == "auto"  # unattended: cannot wedge on a human
+        assert config.get("approval_mode") == "auto"
 
     def test_prunes_when_permission_revoked(self, app_env):
-        from gideon.apps.app_crons import reconcile_app_crons
+        from gideon.extensions.apps.app_crons import reconcile_app_crons
 
         _install_app(
             app_env,
@@ -143,7 +135,6 @@ class TestAppCronReconcile:
         store = self._store(app_env)
         reconcile_app_crons(store)
         assert "app:app1:j" in self._ids(store)
-        # Revoke the permission + reconcile again → the app trigger is pruned.
         _install_app(
             app_env,
             "app1",
@@ -154,7 +145,7 @@ class TestAppCronReconcile:
         assert "app:app1:j" not in self._ids(store)
 
     def test_prunes_when_app_disabled(self, app_env):
-        from gideon.apps.app_crons import reconcile_app_crons
+        from gideon.extensions.apps.app_crons import reconcile_app_crons
 
         _install_app(
             app_env,
@@ -178,8 +169,8 @@ class TestAppCronReconcile:
     def test_a_users_own_trigger_is_never_pruned(self, app_env):
         """The diff is scoped to the `app:` prefix. A reconcile that swept anything else would
         delete the user's automations whenever an app was disabled."""
-        from gideon.apps.app_crons import reconcile_app_crons
-        from gideon.triggers.models import Trigger
+        from gideon.automation.triggers.models import Trigger
+        from gideon.extensions.apps.app_crons import reconcile_app_crons
 
         store = self._store(app_env)
         store.upsert(
@@ -190,14 +181,15 @@ class TestAppCronReconcile:
                 spec={"kind": "interval", "interval_secs": 600},
             )
         )
-        reconcile_app_crons(store)  # no apps installed at all → desired set is empty
+        reconcile_app_crons(store)
         assert "clock:mine" in self._ids(store)
 
     def test_reconcile_converges_silent_on_existing_trigger(self, app_env):
         """A row persisted with a channel must be corrected on the next reconcile (silent is
-        manifest-driven, not a user toggle) — else it keeps trying to DM the app pseudo-id."""
-        from gideon.apps.app_crons import reconcile_app_crons
-        from gideon.triggers.models import Trigger
+        manifest-driven, not a user toggle) — else it keeps trying to DM the app pseudo-id.
+        """
+        from gideon.automation.triggers.models import Trigger
+        from gideon.extensions.apps.app_crons import reconcile_app_crons
 
         _install_app(
             app_env,
@@ -206,7 +198,6 @@ class TestAppCronReconcile:
             crons=[{"name": "j", "every": 3600, "agent": "a", "message": "m"}],
         )
         store = self._store(app_env)
-        # Simulate a legacy row: registered loud (the pre-fix behavior).
         store.upsert(
             Trigger(
                 id="app:loud:j",
@@ -218,20 +209,22 @@ class TestAppCronReconcile:
             )
         )
         reconcile_app_crons(store)
-        assert store.get("app:loud:j").trigger.delivery == "none"  # converged
+        assert store.get("app:loud:j").trigger.delivery == "none"
 
     def test_reconcile_is_idempotent(self, app_env):
-        from gideon.apps.app_crons import reconcile_app_crons
+        from gideon.extensions.apps.app_crons import reconcile_app_crons
 
         _install_app(
             app_env,
             "app3",
             permissions={"cron": True},
-            crons=[{"name": "j", "cron_expr": "0 9 * * *", "agent": "a", "message": "m"}],
+            crons=[
+                {"name": "j", "cron_expr": "0 9 * * *", "agent": "a", "message": "m"}
+            ],
         )
         store = self._store(app_env)
         reconcile_app_crons(store)
-        reconcile_app_crons(store)  # second run must not duplicate
+        reconcile_app_crons(store)
         matching = [row for row in store.load() if row.trigger.id == "app:app3:j"]
         assert len(matching) == 1
 
@@ -240,18 +233,18 @@ class TestAppCronReconcile:
         to block either one."""
         from unittest.mock import MagicMock
 
-        from gideon.apps.app_crons import reconcile_app_crons
+        from gideon.extensions.apps.app_crons import reconcile_app_crons
 
         broken = MagicMock()
         broken.load.side_effect = OSError("triggers.json is gibberish")
-        reconcile_app_crons(broken)  # must not raise
+        reconcile_app_crons(broken)
         broken.upsert.assert_not_called()
 
     def test_lifecycle_handler_reconciles_on_transition(self, app_env, monkeypatch):
         """The reconcile is otherwise only run at gateway startup; the app lifecycle HANDLERS must
         re-run it so a disabled/uninstalled app's cron stops firing (and an enabled one starts)
         without a restart. Exercises the handler's ``_reconcile_app_crons`` seam."""
-        from gideon.dashboard.handlers.apps import _reconcile_app_crons
+        from gideon.interfaces.dashboard.handlers.apps import _reconcile_app_crons
 
         _install_app(
             app_env,
@@ -272,10 +265,9 @@ class TestAppCronReconcile:
             app = _AppMap()
 
         req = _Req()
-        _reconcile_app_crons(req)  # simulate post-install/enable
+        _reconcile_app_crons(req)
         assert "app:lc-app:beat" in self._ids(store)
 
-        # Disable the app on disk, then the handler reconcile must prune its cron.
         _install_app(
             app_env,
             "lc-app",
@@ -293,7 +285,7 @@ class TestAppCronReconcile:
         is a FILE, not a service, so the old presence check stopped answering the question — it
         would have reconciled happily in a `--no-crons` gateway.
         """
-        from gideon.dashboard.handlers.apps import _reconcile_app_crons
+        from gideon.interfaces.dashboard.handlers.apps import _reconcile_app_crons
 
         _install_app(
             app_env,
@@ -317,27 +309,24 @@ class TestAppCronReconcile:
 
     def test_reconcile_helper_survives_a_stateless_request(self, app_env):
         """A request with no "state" at all must not raise from the handler seam."""
-        from gideon.dashboard.handlers.apps import _reconcile_app_crons
+        from gideon.interfaces.dashboard.handlers.apps import _reconcile_app_crons
 
         class _AppMap:
             def get(self, key, default=None):
-                return default  # no "state"
+                return default
 
         class _Req:
             app = _AppMap()
 
-        _reconcile_app_crons(_Req())  # must not raise
-
-
-# ── can_use_storage: DATA_DIR handed only when held ──
+        _reconcile_app_crons(_Req())
 
 
 class TestStorageGate:
     def test_data_dir_only_when_permitted(self, app_env, monkeypatch):
         import subprocess
 
-        from gideon.apps.backend_runtime import BackendSupervisor
-        from gideon.apps.manifest import AppManifest, BackendConfig
+        from gideon.extensions.apps.backend_runtime import BackendSupervisor
+        from gideon.extensions.apps.manifest import AppManifest, BackendConfig
 
         _install_app(app_env, "store-yes", permissions={"storage": True})
         _install_app(app_env, "store-no", permissions={})
@@ -352,7 +341,6 @@ class TestStorageGate:
             return _FakeProc()
 
         monkeypatch.setattr(subprocess, "Popen", _fake_popen)
-        # A backend that will "launch" (entryPoint set); the launcher builds env.
         sup = BackendSupervisor()
 
         def _manifest(name):
@@ -370,16 +358,13 @@ class TestStorageGate:
             assert ("GIDEON_APP_DATA_DIR" in env) is expect_dir, nm
 
 
-# ── can_use_mcp_tool: checker logic ──
-
-
 class TestMcpToolChecker:
     def test_declared_tool_allowed_undeclared_denied(self):
         c = PermissionChecker(
             app_name="x", permissions=Permissions(mcpTools=["read_file", "grep*"])
         )
         assert c.can_use_mcp_tool("read_file")
-        assert c.can_use_mcp_tool("grep")  # wildcard prefix
+        assert c.can_use_mcp_tool("grep")
         assert c.can_use_mcp_tool("grep_dir")
         assert not c.can_use_mcp_tool("bash")
         assert not c.can_use_mcp_tool("write_file")

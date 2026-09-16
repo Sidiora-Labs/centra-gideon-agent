@@ -1,4 +1,4 @@
-"""Additional tests for gideon.sandbox — wrap_argv, profiles, env scrubbing."""
+"""Additional tests for gideon.security.sandbox — wrap_argv, profiles, env scrubbing."""
 
 import os
 import sys
@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from gideon.sandbox import (
+from gideon.security.sandbox import (
     _CC_FILES,
     _SENSITIVE_ENV_PREFIXES,
     _STRICT_DIRS,
@@ -36,40 +36,38 @@ class TestDetectBackend:
         result = detect_backend(config_mode="off")
         assert result == "none"
 
-    @patch("gideon.sandbox._probe_unshare", return_value=False)
-    @patch("gideon.sandbox._probe_sandbox_exec", return_value=False)
+    @patch("gideon.security.sandbox._probe_unshare", return_value=False)
+    @patch("gideon.security.sandbox._probe_sandbox_exec", return_value=False)
     def test_no_backend_available(self, mock_sb, mock_ns):
         result = detect_backend(config_mode="auto")
         assert result == "none"
 
-    @patch("gideon.sandbox._probe_unshare", return_value=True)
+    @patch("gideon.security.sandbox._probe_unshare", return_value=True)
     def test_linux_namespace(self, mock_ns):
         result = detect_backend(config_mode="auto")
         assert result == "namespace"
 
-    @patch("gideon.sandbox._probe_unshare", return_value=False)
-    @patch("gideon.sandbox._probe_sandbox_exec", return_value=True)
+    @patch("gideon.security.sandbox._probe_unshare", return_value=False)
+    @patch("gideon.security.sandbox._probe_sandbox_exec", return_value=True)
     def test_macos_sandbox_exec(self, mock_sb, mock_ns):
         result = detect_backend(config_mode="auto")
         assert result == "sandbox-exec"
 
-    @patch("gideon.sandbox._probe_unshare", return_value=True)
+    @patch("gideon.security.sandbox._probe_unshare", return_value=True)
     def test_caches_result(self, mock_ns):
         detect_backend(config_mode="auto")
         detect_backend(config_mode="auto")
-        # Only probed once due to caching
         assert mock_ns.call_count == 1
 
-    @patch("gideon.sandbox._probe_unshare", return_value=True)
+    @patch("gideon.security.sandbox._probe_unshare", return_value=True)
     def test_invalidates_on_mode_change(self, mock_ns):
         detect_backend(config_mode="auto")
         detect_backend(config_mode="off")
-        # Second call with different mode should re-evaluate
-        assert mock_ns.call_count == 1  # off doesn't probe
+        assert mock_ns.call_count == 1
 
 
 class TestWrapArgv:
-    @patch("gideon.sandbox.detect_backend", return_value="none")
+    @patch("gideon.security.sandbox.detect_backend", return_value="none")
     def test_no_sandbox_returns_original(self, mock_detect):
         argv = ["gideon", "acp"]
         result, cleanup = wrap_argv(argv, mode="auto")
@@ -82,15 +80,15 @@ class TestWrapArgv:
         assert result == argv
         assert cleanup is None
 
-    @patch("gideon.sandbox.detect_backend", return_value="namespace")
-    @patch("gideon.sandbox.namespace_argv")
+    @patch("gideon.security.sandbox.detect_backend", return_value="namespace")
+    @patch("gideon.security.sandbox.namespace_argv")
     def test_namespace_backend(self, mock_ns_argv, mock_detect):
         mock_ns_argv.return_value = [sys.executable, "/tmp/launcher.py", "gideon"]
         result, cleanup = wrap_argv(["gideon"], mode="strict")
         mock_ns_argv.assert_called_once_with(["gideon"], "strict")
 
-    @patch("gideon.sandbox.detect_backend", return_value="sandbox-exec")
-    @patch("gideon.sandbox.sandbox_exec_argv")
+    @patch("gideon.security.sandbox.detect_backend", return_value="sandbox-exec")
+    @patch("gideon.security.sandbox.sandbox_exec_argv")
     def test_sandbox_exec_backend(self, mock_sb_argv, mock_detect):
         mock_sb_argv.return_value = (
             ["sandbox-exec", "-f", "/tmp/p.sb", "gideon"],
@@ -117,13 +115,11 @@ class TestBuildSeatbeltProfile:
     def test_standard_does_not_deny_aws(self):
         profile = _build_seatbelt_profile("standard")
         home = str(Path.home())
-        # Standard mode doesn't hide .aws
         assert f'(subpath "{home}/.aws")' not in profile
 
     def test_cc_mode_skips_aws_on_macos(self):
         profile = _build_seatbelt_profile("cc")
         home = str(Path.home())
-        # CC mode on macOS doesn't hide .aws (credential_process needs it)
         assert f'(subpath "{home}/.aws")' not in profile
 
     def test_cc_mode_denies_individual_files(self):
@@ -136,7 +132,6 @@ class TestBuildSeatbeltProfile:
         """CC mode does NOT deny .aws as a directory (credential_process needs it)."""
         profile = _build_seatbelt_profile("cc")
         home = str(Path.home())
-        # .aws should not appear as a subpath deny
         assert f'(subpath "{home}/.aws")' not in profile
 
 
@@ -149,7 +144,6 @@ class TestBuildLauncherScript:
 
     def test_standard_script_excludes_aws(self):
         script = _build_launcher_script("standard")
-        # Standard dirs don't include .aws
         assert "HIDE_SSH = False" in script
 
     def test_cc_script_exposes_aws_config(self):
@@ -164,7 +158,9 @@ class TestBuildLauncherScript:
 
 
 class TestSandboxExecArgv:
-    @patch.dict(os.environ, {"AWS_SECRET_ACCESS_KEY": "fake", "SSH_AUTH_SOCK": "/tmp/ssh"})
+    @patch.dict(
+        os.environ, {"AWS_SECRET_ACCESS_KEY": "fake", "SSH_AUTH_SOCK": "/tmp/ssh"}
+    )
     def test_includes_env_unset_flags(self):
         argv, profile_path = sandbox_exec_argv(["gideon", "acp"], "strict")
         try:
@@ -193,7 +189,8 @@ class TestSandboxExecArgv:
 
 class TestNamespaceArgv:
     @patch(
-        "gideon.sandbox._resolve_real_agent_bin", return_value="/usr/local/bin/gideon"
+        "gideon.security.sandbox._resolve_real_agent_bin",
+        return_value="/usr/local/bin/gideon",
     )
     def test_wraps_with_python_launcher(self, mock_resolve):
         result = namespace_argv(["gideon", "acp"], "strict")
@@ -201,11 +198,11 @@ class TestNamespaceArgv:
         assert result[1].endswith(".py")
         assert result[2] == "/usr/local/bin/gideon"
         assert result[3] == "acp"
-        # Cleanup temp file
         os.unlink(result[1])
 
     @patch(
-        "gideon.sandbox._resolve_real_agent_bin", return_value="/usr/local/bin/gideon"
+        "gideon.security.sandbox._resolve_real_agent_bin",
+        return_value="/usr/local/bin/gideon",
     )
     def test_launcher_script_is_executable(self, mock_resolve):
         result = namespace_argv(["gideon"], "strict")

@@ -19,8 +19,8 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.resilience import doctor
-from gideon.resilience.doctor import (
+from gideon.operations.resilience import doctor
+from gideon.operations.resilience.doctor import (
     DoctorContext,
     Probe,
     ProbeResult,
@@ -28,8 +28,6 @@ from gideon.resilience.doctor import (
     run_capability,
     run_doctor,
 )
-
-# ── probe builders (tiny injected probes; the framework is tested in isolation) ──
 
 
 def _ok(cap: str, tier: Tier, detail: str = "ok") -> Probe:
@@ -53,9 +51,6 @@ def _raiser(cap: str, tier: Tier, exc: Exception) -> Probe:
     return Probe(f"{cap}.raise.{int(tier)}", cap, tier, _run, f"{cap} raise")
 
 
-# ── the doctrine ────────────────────────────────────────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_capability_failure_never_marks_core_or_suggests_restart():
     """§1.3.1 — a tier-3 capability failure degrades ONLY that capability's row.
@@ -72,13 +67,13 @@ async def test_capability_failure_never_marks_core_or_suggests_restart():
     ]
     rep = await run_doctor(DoctorContext(), probes=probes)
 
-    assert rep["core_ok"] is True  # doctrine: capability failure ≠ core failure
-    assert rep["restart_suggested"] is False  # a capability never justifies restart
-    assert rep["ok"] is False  # overall not-ok (a capability is down)...
-    assert rep["worst"] == "local-models"  # ...and it's named
+    assert rep["core_ok"] is True
+    assert rep["restart_suggested"] is False
+    assert rep["ok"] is False
+    assert rep["worst"] == "local-models"
     assert rep["capabilities"]["local-models"]["ok"] is False
     assert rep["capabilities"]["memory"]["ok"] is True
-    assert rep["skipped_capabilities"] == []  # core healthy → nothing skipped
+    assert rep["skipped_capabilities"] == []
 
 
 @pytest.mark.asyncio
@@ -89,14 +84,13 @@ async def test_cheap_rpc_failure_short_circuits_and_suggests_restart():
         _ok("core", Tier.PROCESS),
         _ok("core", Tier.SOCKET),
         _fail("core", Tier.CHEAP_RPC, "status snapshot unreadable"),
-        _ok("memory", Tier.CAPABILITY),  # must NOT run
-        _fail("local-models", Tier.CAPABILITY),  # must NOT run
+        _ok("memory", Tier.CAPABILITY),
+        _fail("local-models", Tier.CAPABILITY),
     ]
     rep = await run_doctor(DoctorContext(), probes=probes)
 
     assert rep["core_ok"] is False
-    assert rep["restart_suggested"] is True  # cheap-RPC failure is the restart trigger
-    # tier-3 packs were skipped, not run:
+    assert rep["restart_suggested"] is True
     assert "memory" not in rep["capabilities"]
     assert "local-models" not in rep["capabilities"]
     assert set(rep["skipped_capabilities"]) == {"memory", "local-models"}
@@ -109,13 +103,13 @@ async def test_socket_failure_short_circuits_without_restart_flag():
     probes = [
         _ok("core", Tier.PROCESS),
         _fail("core", Tier.SOCKET, "port not connectable"),
-        _ok("core", Tier.CHEAP_RPC),  # not reached
-        _ok("memory", Tier.CAPABILITY),  # skipped
+        _ok("core", Tier.CHEAP_RPC),
+        _ok("memory", Tier.CAPABILITY),
     ]
     rep = await run_doctor(DoctorContext(), probes=probes)
 
     assert rep["core_ok"] is False
-    assert rep["restart_suggested"] is False  # only cheap-RPC failure flags restart
+    assert rep["restart_suggested"] is False
     assert rep["skipped_capabilities"] == ["memory"]
 
 
@@ -129,12 +123,12 @@ async def test_probe_that_raises_becomes_ok_false_never_propagates():
         _ok("core", Tier.CHEAP_RPC),
         _raiser("memory", Tier.CAPABILITY, RuntimeError("db handle exploded")),
     ]
-    rep = await run_doctor(DoctorContext(), probes=probes)  # must not raise
+    rep = await run_doctor(DoctorContext(), probes=probes)
 
     row = rep["capabilities"]["memory"]["probes"][0]
     assert row["ok"] is False
     assert "RuntimeError" in row["detail"]
-    assert rep["core_ok"] is True  # a capability probe raising still isn't core
+    assert rep["core_ok"] is True
 
 
 @pytest.mark.asyncio
@@ -145,19 +139,21 @@ async def test_secrets_masked_in_detail_and_evidence():
     covers every shape; that's security.py's contract, not the Doctor's)."""
 
     async def _leaky(ctx: DoctorContext) -> ProbeResult:
-        secret = "AKIA" + "B" * 16  # AWS access-key shape → redact() masks it
+        secret = "AKIA" + "B" * 16
         return ProbeResult(ok=False, detail=f"auth failed with {secret}")
 
     probes = [
         _ok("core", Tier.PROCESS),
         _ok("core", Tier.SOCKET),
         _ok("core", Tier.CHEAP_RPC),
-        Probe("model-providers.leak", "model-providers", Tier.CAPABILITY, _leaky, "leaky"),
+        Probe(
+            "model-providers.leak", "model-providers", Tier.CAPABILITY, _leaky, "leaky"
+        ),
     ]
     rep = await run_doctor(DoctorContext(), probes=probes)
     detail = rep["capabilities"]["model-providers"]["probes"][0]["detail"]
-    assert "AKIABBBB" not in detail  # the raw credential must be gone
-    assert "REDACTED" in detail  # ...replaced by the redaction marker
+    assert "AKIABBBB" not in detail
+    assert "REDACTED" in detail
 
 
 @pytest.mark.asyncio
@@ -171,9 +167,6 @@ async def test_all_healthy_report_is_ok():
     rep = await run_doctor(DoctorContext(), probes=probes)
     assert rep["ok"] is True and rep["core_ok"] is True
     assert rep["worst"] == "" and rep["restart_suggested"] is False
-
-
-# ── run_capability (the single-card re-probe) ────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -194,21 +187,24 @@ def test_doctor_error_codes_ride_the_registry():
     import json
     from pathlib import Path
 
-    import gideon.dashboard.handlers.doctor as doctor_handlers
+    import gideon.interfaces.dashboard.handlers.doctor as doctor_handlers
     from gideon.http_errors import HTTP_ERROR_CODES, json_error
 
     assert "doctor_disabled" in HTTP_ERROR_CODES
     assert "unknown_capability" in HTTP_ERROR_CODES
 
-    # The wire shape both handlers now produce.
-    resp = json_error("unknown_capability", message="No such capability: nope.", status=404)
+    resp = json_error(
+        "unknown_capability", message="No such capability: nope.", status=404
+    )
     body = json.loads(resp.body)
     assert resp.status == 404
     assert body["error"]["code"] == "unknown_capability"
     assert body["error"]["message"] == "No such capability: nope."
 
     source = Path(doctor_handlers.__file__).read_text(encoding="utf-8")
-    assert '"error": {' not in source, "doctor handlers must emit errors via json_error only"
+    assert (
+        '"error": {' not in source
+    ), "doctor handlers must emit errors via json_error only"
 
 
 @pytest.mark.asyncio
@@ -221,9 +217,6 @@ async def test_run_capability_runs_only_that_capability(monkeypatch):
     result = await run_capability("channels", DoctorContext())
     assert result["capability"] == "channels" and result["ok"] is False
     assert [p["capability"] for p in result["probes"]] == ["channels"]
-
-
-# ── the real probe packs (against an isolated tmp home) ──────────────────────
 
 
 @pytest.mark.asyncio
@@ -252,7 +245,7 @@ async def test_socket_probe_skips_when_no_port():
 @pytest.mark.asyncio
 async def test_memory_probe_fresh_home_is_ok(tmp_path, monkeypatch):
     """No memory.db yet (fresh install) → ok with a 'fresh install' note, not a fail."""
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     res = await doctor._probe_memory(DoctorContext(home=tmp_path))
     assert res.ok is True
     assert res.evidence["db_present"] is False
@@ -267,13 +260,13 @@ async def test_memory_probe_detects_faiss_desync(tmp_path):
     db = tmp_path / "memory.db"
     conn = sqlite3.connect(db)
     conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("CREATE TABLE episodic_memories (id TEXT, is_deleted INTEGER, embedding BLOB)")
-    # two embedded, non-deleted rows
+    conn.execute(
+        "CREATE TABLE episodic_memories (id TEXT, is_deleted INTEGER, embedding BLOB)"
+    )
     conn.execute("INSERT INTO episodic_memories VALUES ('a', 0, X'00')")
     conn.execute("INSERT INTO episodic_memories VALUES ('b', 0, X'00')")
     conn.commit()
     conn.close()
-    # faiss sidecar claims only ONE indexed id → desync
     (tmp_path / "memory.ids.json").write_text(json.dumps(["a"]), encoding="utf-8")
 
     res = await doctor._probe_memory(DoctorContext(home=tmp_path))
@@ -288,19 +281,17 @@ async def test_serving_fs_probe_flags_copy_shadowing_symlink(tmp_path, monkeypat
     and must be flagged."""
     import gideon
 
-    # Point the probe's package-dir resolution at a fake pkg with a COPY dist.
     fake_pkg = tmp_path / "pkg"
     (fake_pkg / "static" / "dist").mkdir(parents=True)
-    (fake_pkg / "static" / "dist" / "index.html").write_text("<html></html>", encoding="utf-8")
+    (fake_pkg / "static" / "dist" / "index.html").write_text(
+        "<html></html>", encoding="utf-8"
+    )
     monkeypatch.setattr(gideon, "__file__", str(fake_pkg / "__init__.py"))
 
     res = await doctor._probe_serving_fs(DoctorContext(home=tmp_path))
     assert res.ok is False
     assert res.evidence["dist"]["kind"] == "copy"
     assert "stale SPA" in res.detail
-
-
-# ── 🔴 the state-inventory guard now has a runtime caller (S179) ──
 
 
 @pytest.mark.asyncio
@@ -340,7 +331,7 @@ async def test_the_inventory_probe_passes_a_fully_claimed_home(tmp_path):
     home.mkdir()
     (home / "config.json").write_text("{}", encoding="utf-8")
     (home / "tasks").mkdir()
-    (home / "gateway.log").write_text("noise", encoding="utf-8")  # ignored pattern
+    (home / "gateway.log").write_text("noise", encoding="utf-8")
 
     res = await doctor._probe_state_inventory(DoctorContext(home=home))
 
@@ -355,7 +346,9 @@ async def test_the_inventory_probe_is_registered_as_a_CAPABILITY_probe(tmp_path)
     down:
     a lower tier would short-circuit the capability packs over an unrelated new file."""
     ids = {p.id: p for p in doctor.all_probes()}
-    assert "durability.inventory" in ids, "the probe must be registered, not just defined"
+    assert (
+        "durability.inventory" in ids
+    ), "the probe must be registered, not just defined"
     probe = ids["durability.inventory"]
     assert probe.tier is Tier.CAPABILITY
     assert probe.capability == "durability"
@@ -379,23 +372,16 @@ async def test_the_inventory_probe_CAPS_its_evidence(tmp_path):
     assert res.evidence["undeclared_db_count"] == 30
 
 
-# ── memory-pipeline: the FLUSH_OK-streak alarm over REAL LEARN-R19 records (PR2-9) ──
-#
-# The probe used to report structural presence and never alarm, on the stated grounds that
-# "the richer FLUSH_OK-streak WARN arrives with the flywheel's records". The records exist
-# now, so these tests are written against real ones: a `StagingStore` under `tmp_path`, its
-# own `record_flush`/`stage` writers, and the REGISTERED row (`run_capability`) rather than
-# the probe function alone — a probe that computes a WARN nothing surfaces is not a WARN.
-
-
 def _staging(home):
-    from gideon.learning.staging import StagingStore
+    from gideon.cognition.learning.staging import StagingStore
 
     return StagingStore(home)
 
 
-def _flush(store, outcome: str, *, cadence: str = "per_turn", cost: float = 0.0) -> None:
-    from gideon.learning.staging import FlushOutcome
+def _flush(
+    store, outcome: str, *, cadence: str = "per_turn", cost: float = 0.0
+) -> None:
+    from gideon.cognition.learning.staging import FlushOutcome
 
     store.record_flush(cadence=cadence, outcome=FlushOutcome(outcome), cost_usd=cost)
 
@@ -403,12 +389,16 @@ def _flush(store, outcome: str, *, cadence: str = "per_turn", cost: float = 0.0)
 async def _memory_row(home):
     """The registered `memory-pipeline` capability row, exactly as the Doctor reports it."""
     report = await doctor.run_capability("memory-pipeline", DoctorContext(home=home))
-    assert report["probes"], "the memory-pipeline row must have at least one registered probe"
+    assert report[
+        "probes"
+    ], "the memory-pipeline row must have at least one registered probe"
     return report["probes"][0]
 
 
 @pytest.mark.asyncio
-async def test_memory_pipeline_warns_on_a_flush_ok_streak_with_nothing_produced(tmp_path):
+async def test_memory_pipeline_warns_on_a_flush_ok_streak_with_nothing_produced(
+    tmp_path,
+):
     """The dead-read signature: passes completing, over and over, producing nothing.
 
     Written from real `flush_records` rows, and asserted through the registered capability
@@ -430,11 +420,12 @@ async def test_memory_pipeline_warns_on_a_flush_ok_streak_with_nothing_produced(
 @pytest.mark.asyncio
 async def test_memory_pipeline_stays_ok_when_a_pass_actually_produced(tmp_path):
     """VACUITY. The same twelve OK passes must NOT warn once production is real —
-    otherwise the streak rule is a clock, not a signal, and would light on every home."""
+    otherwise the streak rule is a clock, not a signal, and would light on every home.
+    """
     store = _staging(tmp_path)
     for _ in range(12):
         _flush(store, "flush_ok")
-    _flush(store, "flush_produced")  # most recent → the streak is broken
+    _flush(store, "flush_produced")
     store.close()
 
     row = await _memory_row(tmp_path)
@@ -469,7 +460,7 @@ async def test_memory_pipeline_warns_on_an_unconsumed_staging_backlog(tmp_path):
     store = _staging(tmp_path)
     for i in range(doctor._MEMORY_BACKLOG_WARN + 5):
         store.stage(cadence="per_turn", kind="lesson", content=f"staged lesson {i}")
-    _flush(store, "flush_produced")  # production is real, so ONLY the backlog can warn
+    _flush(store, "flush_produced")
     store.close()
 
     row = await _memory_row(tmp_path)
@@ -507,7 +498,10 @@ async def test_memory_pipeline_reports_the_per_op_cost_split(tmp_path):
     row = await _memory_row(tmp_path)
 
     by_op = row["evidence"]["cost_by_op"]
-    assert [entry["op"] for entry in by_op] == ["session_end", "per_turn"]  # dearest first
+    assert [entry["op"] for entry in by_op] == [
+        "session_end",
+        "per_turn",
+    ]
     assert by_op[0]["cost_usd"] == 0.5
     assert row["evidence"]["cost_usd"] == 0.52
 
@@ -516,11 +510,14 @@ async def test_memory_pipeline_reports_the_per_op_cost_split(tmp_path):
 async def test_memory_pipeline_never_CREATES_the_staging_log(tmp_path):
     """Read-only by contract, in the strict sense. `StagingStore` writes its schema on the
     first cursor, so a probe that "just reads" would materialise `learning.db` in the home
-    on every Doctor run — a write from the one module that promises never to make one."""
-    from gideon.learning.staging import DB_FILE
+    on every Doctor run — a write from the one module that promises never to make one.
+    """
+    from gideon.cognition.learning.staging import DB_FILE
 
     row = await _memory_row(tmp_path)
 
     assert row["ok"] is True, row["detail"]
     assert row["evidence"] == {"staging_log": False}
-    assert not (tmp_path / DB_FILE).exists(), "the probe opened (and so created) the staging log"
+    assert not (
+        tmp_path / DB_FILE
+    ).exists(), "the probe opened (and so created) the staging log"

@@ -10,8 +10,7 @@ hook is dead.
 
 from __future__ import annotations
 
-from gideon.hooks import HOOK_EVENTS, LIFECYCLE_EVENT_CATALOG
-from gideon.triggers.events import (
+from gideon.automation.triggers.events import (
     DORMANCY_NOTES,
     DORMANT_EVENTS,
     PARITY_EXEMPTIONS,
@@ -26,8 +25,7 @@ from gideon.triggers.events import (
     unsupported_response,
     verify_dormancy,
 )
-
-# ── dormancy ──
+from gideon.engine.hooks import HOOK_EVENTS, LIFECYCLE_EVENT_CATALOG
 
 
 def test_dormancy_reconciles_with_the_catalog():
@@ -48,7 +46,9 @@ def test_every_declared_event_gets_exactly_one_status():
     names = [i.name for i in infos]
     assert set(names) == set(HOOK_EVENTS)
     assert len(names) == len(HOOK_EVENTS)
-    assert all(i.status in {EventStatus.LIVE.value, EventStatus.DORMANT.value} for i in infos)
+    assert all(
+        i.status in {EventStatus.LIVE.value, EventStatus.DORMANT.value} for i in infos
+    )
 
 
 def test_dormant_and_live_partition_the_catalog():
@@ -81,7 +81,6 @@ def test_the_dormancy_machinery_survives_an_empty_set():
     """
     regressed, newly = verify_dormancy()
     assert regressed == [] and newly == []
-    # And with a hypothetical declared-but-unwired event, the guard still reports it.
     regressed2, newly2 = verify_dormancy(declared=frozenset({"PreToolUse"}))
     assert isinstance(regressed2, list) and isinstance(newly2, list)
 
@@ -93,7 +92,7 @@ def test_task_complete_is_live_because_a_real_call_site_fires_it():
     `TaskComplete`. Asserted against the payload rather than by grepping, because the fire carries
     no constant reference at all — which is exactly why the scan-based approach called it dormant.
     """
-    from gideon.workflows import pool
+    from gideon.automation.workflows import pool
 
     payload = pool.lifecycle_payload(task_id="t1", title="x", status="done")
     assert payload["event"] == "TaskComplete"
@@ -129,9 +128,6 @@ def test_live_events_carry_no_dormancy_note():
     assert all(not i.dormant and i.note == "" for i in event_status() if not i.dormant)
 
 
-# ── parity ──
-
-
 def test_measured_event_kind_gaps():
     """The shipped `event`-kind surface, as measured off the handler branches before S67.
 
@@ -152,7 +148,6 @@ def test_exemptions_are_honoured_per_kind():
     full = set(PARITY_OPERATIONS)
     assert missing_operations("lifecycle", full - {"run"}) == []
     assert missing_operations("schedule", full - {"test"}) == []
-    # but a non-exempt kind IS faulted for the same omission
     assert "run" in missing_operations("event", full - {"run"})
 
 
@@ -183,9 +178,6 @@ def test_unsupported_response_is_400_with_a_reason_never_404():
     assert "lifecycle" in msg and "fires on an agent event" in msg
     generic, status2 = unsupported_response("event", "toggle")
     assert status2 == 400 and "event" in generic
-
-
-# ── the catalog contract the API depends on ──
 
 
 def test_catalog_rows_cover_every_declared_event():

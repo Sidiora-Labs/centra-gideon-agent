@@ -23,12 +23,14 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.dashboard.handlers import triggers as T
-from gideon.event_triggers import EventTrigger, EventTriggerStore
-from gideon.hooks import ScriptHook, ScriptHookStore
-from gideon.schedule import ScheduleDefinition, ScheduleJob, make_agent_action
-from gideon.schedule_history import ScheduleRun, ScheduleRunStore
-from gideon.triggers.history import (
+from gideon.automation.event_triggers import EventTrigger, EventTriggerStore
+from gideon.automation.schedule import (
+    ScheduleDefinition,
+    ScheduleJob,
+    make_agent_action,
+)
+from gideon.automation.schedule_history import ExecutionJournal, ExecutionRecord
+from gideon.automation.triggers.history import (
     HOOK_STATUS_TO_OUTCOME,
     SCHEDULE_STATUS_TO_OUTCOME,
     event_trigger_to_record,
@@ -40,13 +42,20 @@ from gideon.triggers.history import (
     schedule_run_to_record,
     unified_feed,
 )
-from gideon.triggers.models import FIRE_OUTCOMES, INERT_OUTCOMES, Outcome, RunWeight
+from gideon.automation.triggers.models import (
+    FIRE_OUTCOMES,
+    INERT_OUTCOMES,
+    Outcome,
+    RunWeight,
+)
+from gideon.engine.hooks import ScriptHook, ScriptHookStore
+from gideon.interfaces.dashboard.handlers import triggers as T
 
 NOW = time.time()
 
 
 def _run(**over):
-    """A `ScheduleRun` dict in the shape the real store writes (verified against `_record_run`)."""
+    """A `ExecutionRecord` dict in the shape the real store writes (verified against `_record_run`)."""
     row = {
         "run_id": "r1",
         "job_id": "j1",
@@ -61,9 +70,6 @@ def _run(**over):
     }
     row.update(over)
     return row
-
-
-# ── the schedule projection ──
 
 
 def test_a_successful_run_maps_to_ran():
@@ -91,24 +97,27 @@ def test_a_timeout_folds_into_failed_but_says_so():
 
 def test_launched_maps_to_deferred_not_ran():
     """🔴 The T7 distinction, preserved. `launched` means the action kicked off a background turn and
-    nobody has seen the result; calling it `ran` would report success for unfinished work."""
+    nobody has seen the result; calling it `ran` would report success for unfinished work.
+    """
     rec = schedule_run_to_record(_run(status="launched", summary="", error=""))
     assert rec.outcome == Outcome.DEFERRED.value
     assert rec.outcome != Outcome.RAN.value
     assert "not yet known" in rec.reason
-    # And it has not earned a full run record yet.
     assert rec.weight == RunWeight.LEDGER.value
 
 
 def test_an_unknown_status_becomes_failed_not_ran():
     """`FireRecord.from_dict`'s own rule: a row this build cannot classify must not count as a
-    success, because a success is what the health rollup treats as nothing to look at."""
+    success, because a success is what the health rollup treats as nothing to look at.
+    """
     assert schedule_run_to_record(_run(status="wat")).outcome == Outcome.FAILED.value
 
 
 def test_every_mapped_outcome_is_in_the_typed_vocabulary():
     """A mapping to a name outside `FIRE_OUTCOMES` would make the feed unfilterable."""
-    for value in list(SCHEDULE_STATUS_TO_OUTCOME.values()) + list(HOOK_STATUS_TO_OUTCOME.values()):
+    for value in list(SCHEDULE_STATUS_TO_OUTCOME.values()) + list(
+        HOOK_STATUS_TO_OUTCOME.values()
+    ):
         assert value in FIRE_OUTCOMES
 
 
@@ -120,16 +129,13 @@ def test_a_malformed_timestamp_does_not_raise():
     """One corrupt row must not empty the whole feed — the failure that makes a user think nothing
     ever ran."""
     rec = schedule_run_to_record(_run(started_at="not-a-time", finished_at=None))
-    assert rec.started_at == "not-a-time"  # a string passes through as-is
+    assert rec.started_at == "not-a-time"
     assert rec.finished_at == ""
 
 
 def test_an_empty_run_dict_is_survivable():
     rec = schedule_run_to_record({})
     assert rec.outcome == Outcome.FAILED.value
-
-
-# ── the hook projection ──
 
 
 def test_a_hook_that_ran_projects_its_last_run():
@@ -145,8 +151,12 @@ def test_a_hook_that_ran_projects_its_last_run():
 
 def test_a_hook_with_history_is_marked_incomplete():
     """A hook keeps only its most recent run, so any count above 1 means earlier rows are gone."""
-    once = ScriptHook(id="h1", name="x", event="Stop", run_count=1, last_run=NOW, last_status="ok")
-    many = ScriptHook(id="h2", name="y", event="Stop", run_count=9, last_run=NOW, last_status="ok")
+    once = ScriptHook(
+        id="h1", name="x", event="Stop", run_count=1, last_run=NOW, last_status="ok"
+    )
+    many = ScriptHook(
+        id="h2", name="y", event="Stop", run_count=9, last_run=NOW, last_status="ok"
+    )
     assert hook_to_record(once).incomplete is False
     assert hook_to_record(many).incomplete is True
 
@@ -168,12 +178,14 @@ def test_a_failing_hook_maps_to_failed_with_a_reason():
 
 def test_a_blocked_hook_maps_to_refused():
     hook = ScriptHook(
-        id="h1", name="x", event="PreToolUse", run_count=1, last_run=NOW, last_status="blocked"
+        id="h1",
+        name="x",
+        event="PreToolUse",
+        run_count=1,
+        last_run=NOW,
+        last_status="blocked",
     )
     assert hook_to_record(hook).outcome == Outcome.REFUSED.value
-
-
-# ── the statuses the tables did not name (WV-15) ──
 
 
 def _hook(status: str, **over):
@@ -190,7 +202,6 @@ def test_a_launched_hook_maps_to_deferred_not_ran():
     assert rec.outcome == Outcome.DEFERRED.value
     assert rec.outcome != Outcome.RAN.value
     assert "not yet known" in rec.reason
-    # It has not earned an exit code, so it has not earned `FULL` either.
     assert rec.weight == RunWeight.LEDGER.value
 
 
@@ -233,7 +244,10 @@ def test_a_screened_payload_is_blocked_not_failed():
     key, so a DEFENDED injection attempt read as a broken automation — and `failed` is the only
     member of `TRUE_FAILURE_OUTCOMES`."""
     rec = schedule_run_to_record(
-        _run(status="blocked_injection", error="payload blocked by the injection screen (url)")
+        _run(
+            status="blocked_injection",
+            error="payload blocked by the injection screen (url)",
+        )
     )
     assert rec.outcome == Outcome.BLOCKED_INJECTION.value
     assert rec.outcome != Outcome.FAILED.value
@@ -255,7 +269,9 @@ def test_a_suppressed_fire_projects_as_the_suppression_it_was(status):
 
 def test_a_suppressed_fire_with_no_reason_still_says_something():
     """§7 criterion 8 is that a user can ask "why did my automation not run" and get an answer."""
-    rec = schedule_run_to_record(_run(status=Outcome.SKIPPED_GATE.value, error="", summary=""))
+    rec = schedule_run_to_record(
+        _run(status=Outcome.SKIPPED_GATE.value, error="", summary="")
+    )
     assert "suppressed" in rec.reason
 
 
@@ -264,7 +280,11 @@ def test_the_feed_folds_a_suppressed_row_away_and_a_real_one_forward():
     body = feed_response(
         unified_feed(
             schedule_runs=[
-                _run(run_id="skip1", status=Outcome.SKIPPED_GATE.value, error="quiet hours"),
+                _run(
+                    run_id="skip1",
+                    status=Outcome.SKIPPED_GATE.value,
+                    error="quiet hours",
+                ),
                 _run(run_id="ran1", status="success"),
             ]
         )
@@ -278,9 +298,6 @@ def test_an_unmapped_run_status_is_loud(caplog):
     with caplog.at_level("WARNING"):
         schedule_run_to_record(_run(status="teleported"))
     assert any("teleported" in r.getMessage() for r in caplog.records)
-
-
-# ── the event projection ──
 
 
 def test_a_fire_counter_becomes_ONE_summary_row():
@@ -305,7 +322,12 @@ def test_a_fire_counter_becomes_ONE_summary_row():
 def test_an_event_summary_is_ledger_weight_not_a_run():
     """A reader or health rollup treating it as a run would double-count every fire behind it."""
     trigger = EventTrigger(
-        id="e1", pattern="x", action_provider="p", action_config={}, fire_count=3, last_fired_at=NOW
+        id="e1",
+        pattern="x",
+        action_provider="p",
+        action_config={},
+        fire_count=3,
+        last_fired_at=NOW,
     )
     assert event_trigger_to_record(trigger).weight == RunWeight.LEDGER.value
 
@@ -315,12 +337,14 @@ def test_an_event_trigger_that_never_fired_projects_NOTHING():
     assert event_trigger_to_record(trigger) is None
 
 
-# ── the merged feed ──
-
-
 def _feed():
     hook = ScriptHook(
-        id="h1", name="fmt", event="Stop", run_count=4, last_run=NOW - 300, last_status="ok"
+        id="h1",
+        name="fmt",
+        event="Stop",
+        run_count=4,
+        last_run=NOW - 300,
+        last_status="ok",
     )
     event = EventTrigger(
         id="e1",
@@ -330,7 +354,10 @@ def _feed():
         fire_count=5,
         last_fired_at=NOW - 600,
     )
-    runs = [_run(run_id="r2", started_at=NOW - 30, status="failure", error="boom"), _run()]
+    runs = [
+        _run(run_id="r2", started_at=NOW - 30, status="failure", error="boom"),
+        _run(),
+    ]
     return unified_feed(schedule_runs=runs, hooks=[hook], event_triggers=[event])
 
 
@@ -387,13 +414,10 @@ def test_one_bad_row_does_not_empty_the_feed():
     assert len(feed) == 1
 
 
-# ── the wire shape ──
-
-
 def test_the_response_names_which_kinds_and_how_many_are_summaries():
     payload = feed_response(_feed())
     assert payload["kinds"] == ["event", "lifecycle", "schedule"]
-    assert payload["summaries"] == 2  # the hook's last-run row and the event counter
+    assert payload["summaries"] == 2
     assert payload["total"] == len(payload["runs"])
 
 
@@ -408,15 +432,12 @@ def test_outcome_counts_omits_zero_rows():
     assert all(v > 0 for v in outcome_counts(_feed()).values())
 
 
-# ── the live endpoint ──
-
-
 @pytest.fixture
 def app_with_all_kinds(tmp_path, monkeypatch):
     """A real app with a real hook store, a real event store, and REAL run records.
 
     All three projections read real state. The schedule half used to fake
-    `ScheduleService.list_all_runs`, but S105 re-pointed the history endpoint at `ScheduleRunStore`
+    `ScheduleService.list_all_runs`, but S105 re-pointed the history endpoint at `ExecutionJournal`
     directly — so that fake became unreachable and every schedule assertion silently saw zero rows.
     Writing the rows the store's own `append()` writes is strictly stronger: it also pins the
     on-disk shape, which a hand-built dict does not.
@@ -430,10 +451,10 @@ def app_with_all_kinds(tmp_path, monkeypatch):
     monkeypatch.setattr(T, "config_dir", lambda: pathlib.Path(tmp_path))
     cfg = pathlib.Path(tmp_path)
     hooks = ScriptHookStore(config_dir=cfg)
-    ran = hooks.create({"name": "fmt", "event": "PostToolUse", "provider": "run-prompt"})
+    ran = hooks.create(
+        {"name": "fmt", "event": "PostToolUse", "provider": "run-prompt"}
+    )
     live = hooks.get(ran.id)
-    # `update()`'s allowlist is CONFIG fields only — the runtime fields are written by `_fire`
-    # (hooks.py:712), so a fixture has to set them the way the runtime does.
     live.run_count, live.last_run, live.last_status = 7, NOW - 300, "ok"
     hooks._save()
     hooks.create({"name": "never", "event": "Stop", "provider": "run-prompt"})
@@ -463,11 +484,12 @@ def app_with_all_kinds(tmp_path, monkeypatch):
                 )
             ]
 
-    # Real run records, written the way the runtime writes them (oldest first — the store returns
-    # newest-first, so this yields the r2-then-r1 order the assertions below expect).
-    runs = ScheduleRunStore(cfg)
-    for row in (_run(), _run(run_id="r2", started_at=NOW - 30, status="failure", error="boom")):
-        asyncio.run(runs.append(ScheduleRun.from_dict(row)))
+    runs = ExecutionJournal(cfg)
+    for row in (
+        _run(),
+        _run(run_id="r2", started_at=NOW - 30, status="failure", error="boom"),
+    ):
+        asyncio.run(runs.append(ExecutionRecord.from_dict(row)))
 
     app = web.Application()
 
@@ -518,7 +540,7 @@ def test_the_endpoint_reports_the_schedule_total_separately(app_with_all_kinds):
 
 
 def test_the_legacy_shape_is_still_available(app_with_all_kinds):
-    """The cron-history UI renders the raw `ScheduleRun` fields the typed row does not carry.
+    """The cron-history UI renders the raw `ExecutionRecord` fields the typed row does not carry.
 
     Asserts `summary`, NOT `trace`: the store's cross-job INDEX is written without a trace on
     purpose (`_append_sync` writes `include_trace=False` there), and the FE lazy-loads the full
@@ -570,12 +592,10 @@ def test_the_endpoint_carries_typed_outcome_counts(app_with_all_kinds):
 def test_firerecord_is_now_actually_constructed():
     """It was exported and never constructed — the shape existed on paper and nothing produced it.
     This asserts the module that closed that gap really returns one."""
-    from gideon.triggers.models import FireRecord
+    from gideon.automation.triggers.models import FireRecord
 
     assert isinstance(schedule_run_to_record(_run()), FireRecord)
 
-
-# ── criterion 11: no credential reaches the feed (found while auditing S85's sibling) ──
 
 CANARY = "sk-ant-api03-LEAKCANARY99887766554433"
 
@@ -595,13 +615,17 @@ def test_a_credential_in_a_run_error_never_reaches_the_reason():
 
 
 def test_a_credential_in_a_run_summary_is_redacted_too():
-    rec = schedule_run_to_record(_run(status="success", error="", summary=f"used {CANARY}"))
+    rec = schedule_run_to_record(
+        _run(status="success", error="", summary=f"used {CANARY}")
+    )
     assert CANARY not in rec.reason
 
 
 def test_a_timeout_reason_is_redacted_after_its_prefix_is_added():
     """The timeout branch REWRITES the reason, so redaction has to happen after that, not before."""
-    rec = schedule_run_to_record(_run(status="timeout", error=f"Timed out holding {CANARY}"))
+    rec = schedule_run_to_record(
+        _run(status="timeout", error=f"Timed out holding {CANARY}")
+    )
     assert CANARY not in rec.reason
     assert rec.reason.startswith("timed out:")
 
@@ -622,6 +646,7 @@ def test_no_projected_row_leaks_a_credential_into_the_feed():
         id="h1", name="x", event="Stop", run_count=2, last_run=NOW, last_status=CANARY
     )
     feed = unified_feed(
-        schedule_runs=[_run(status="failure", error=CANARY, summary=CANARY)], hooks=[hook]
+        schedule_runs=[_run(status="failure", error=CANARY, summary=CANARY)],
+        hooks=[hook],
     )
     assert CANARY not in json.dumps([r.to_dict() for r in feed])

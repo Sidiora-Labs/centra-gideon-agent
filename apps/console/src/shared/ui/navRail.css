@@ -1,0 +1,130 @@
+.gideon-nav {
+  padding: 14px 10px 12px;
+  border-right: 1px solid color-mix(in srgb, var(--color-outline-variant) 48%, transparent);
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-on-surface) 16%, transparent) transparent;
+}
+
+.gideon-nav-brand {
+  min-height: 54px;
+  gap: 10px;
+  margin: 0 2px 12px;
+  padding: 0 6px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-outline-variant) 40%, transparent);
+}
+
+.gideon-nav-brand-mark {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+}
+
+.gideon-nav-wordmark {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-on-surface);
+  font-size: 19px;
+  line-height: 1.15;
+  letter-spacing: -0.045em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gideon-nav-row {
+  isolation: isolate;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding-inline: 10px;
+  letter-spacing: -0.012em;
+}
+
+.gideon-nav-row:hover {
+  background: color-mix(in srgb, var(--color-on-surface) 5%, transparent);
+  color: var(--color-on-surface);
+}
+
+.gideon-nav-row:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.gideon-nav-row-active {
+  color: var(--color-on-surface);
+}
+
+.gideon-nav-active {
+  border: 1px solid color-mix(in srgb, var(--color-primary) 25%, transparent);
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--color-primary) 12%, var(--color-rail));
+}
+
+.gideon-nav-active::before {
+  content: '';
+  position: absolute;
+  inset-block: 7px;
+  left: -1px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--color-primary);
+}
+
+.gideon-nav-row-active .gideon-nav-icon {
+  color: var(--color-primary-emphasis);
+}
+
+.gideon-nav-section {
+  margin-top: 18px;
+  padding: 0 10px 6px;
+  color: var(--color-on-surface-low);
+  font-size: 10px;
+  line-height: 1.4;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.gideon-nav-badge {
+  min-width: 20px;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 40%, transparent);
+  border-radius: 5px;
+  padding-inline: 5px;
+  color: var(--color-on-surface-var);
+  background: color-mix(in srgb, var(--color-surface-high) 75%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+
+.gideon-nav-disclosure {
+  margin-top: 7px;
+}
+
+.gideon-nav-count {
+  min-width: 22px;
+  text-align: right;
+  color: var(--color-on-surface-low);
+}
+
+.gideon-nav-utilities {
+  display: grid;
+  gap: 4px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--color-outline-variant) 40%, transparent);
+}
+
+.gideon-nav-utilities:empty {
+  border: 0;
+  padding: 0;
+}
+
+.gideon-nav-collapsed .gideon-nav-brand {
+  margin-inline: 0;
+  padding-inline: 0;
+}
+
+.gideon-nav-row-collapsed {
+  padding-inline: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gideon-nav-row { transition: none; }
+}

@@ -1,6 +1,6 @@
 """Event-trace replay + metrics (§2.2, Python side) — offline, no gateway.
 
-Reads an NDJSON trace (recorded by ``gideon.trace_recorder``) and folds it into
+Reads an NDJSON trace (recorded by ``gideon.assurance.trace_recorder``) and folds it into
 regression metrics that gate against checked-in baselines:
 
 - ``duplicate_event_rate`` — fraction of events that repeat a dedup key. For workflow
@@ -14,7 +14,7 @@ regression metrics that gate against checked-in baselines:
 
 This module reads traces only — it never imports core, and core never imports it. The
 FE-fold half of replay (chat coalescer / run fold) is the vitest driver in
-``web/src/harness/replay.test.ts``; this Python side covers the backend streams.
+``apps/console/src/harness/replay.test.ts``; this Python side covers the backend streams.
 """
 
 from __future__ import annotations
@@ -111,9 +111,6 @@ class Metrics:
     reconnect_loss_count: int = 0
     latency_p50: dict[str, float] = field(default_factory=dict)
     latency_p95: dict[str, float] = field(default_factory=dict)
-    #: The terminal state the workflow event-fold law reconstructs (WF2-R11), present only
-    #: for a scenario carrying a workflow SSE projection. ``None`` for a non-workflow trace,
-    #: so existing (loop/inbox) baselines are untouched. See :func:`fold_workflow`.
     fold: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -124,8 +121,12 @@ class Metrics:
             "event_fanout_ratio": round(self.event_fanout_ratio, 4),
             "order_violation_count": self.order_violation_count,
             "reconnect_loss_count": self.reconnect_loss_count,
-            "latency_p50": {k: round(v, 4) for k, v in sorted(self.latency_p50.items())},
-            "latency_p95": {k: round(v, 4) for k, v in sorted(self.latency_p95.items())},
+            "latency_p50": {
+                k: round(v, 4) for k, v in sorted(self.latency_p50.items())
+            },
+            "latency_p95": {
+                k: round(v, 4) for k, v in sorted(self.latency_p95.items())
+            },
         }
         if self.fold is not None:
             d["fold"] = self.fold
@@ -138,7 +139,6 @@ def compute_metrics(events: list[TraceEvent]) -> Metrics:
     if not events:
         return m
 
-    # Duplicate rate over dedup keys.
     seen: set[str] = set()
     duplicates = 0
     keys: set[str] = set()
@@ -153,7 +153,6 @@ def compute_metrics(events: list[TraceEvent]) -> Metrics:
     m.duplicate_event_rate = duplicates / len(events)
     m.event_fanout_ratio = len(events) / len(keys) if keys else 0.0
 
-    # Order violations + reconnect loss, per key, over events that carry a seq.
     per_key_seqs: dict[str, list[int]] = {}
     for e in events:
         if e.seq is not None:
@@ -162,13 +161,11 @@ def compute_metrics(events: list[TraceEvent]) -> Metrics:
         for a, b in zip(seqs, seqs[1:]):
             if b < a:
                 m.order_violation_count += 1
-        # Reconnect loss: gaps in the monotonic run (b > a + 1). Only count forward gaps.
         ordered = sorted(set(seqs))
         for a, b in zip(ordered, ordered[1:]):
             if b > a + 1:
                 m.reconnect_loss_count += b - a - 1
 
-    # Per-stream inter-event latency percentiles.
     per_stream_ts: dict[str, list[float]] = {}
     for e in events:
         per_stream_ts.setdefault(e.stream, []).append(e.ts)
@@ -196,20 +193,6 @@ def metrics_for_scenario(trace_dir: str | Path) -> Metrics:
         m.fold = fold_workflow(wf)
     return m
 
-
-# ── workflow journal → SSE projection fold (§2.1 / §2.3, WF2-R11) ─────────────
-#
-# The Python mirror of ``web/src/pages/workflows/workflowFold.ts``. The FOLD LAW: folding a
-# run's SSE events over its (empty, for a from-start recording) snapshot reconstructs exactly
-# the state the server would report. This is the invariant SV-5 gates: a change to the
-# journal→projection event format that breaks the law changes the terminal fold, so the
-# checked-in baseline (:mod:`harness.baselines`) stops matching and the compare FAILS.
-#
-# Three guards make the law survive rewind + reconnect — the same three the TS fold enforces:
-#   1. dedup by deterministic ``event_id`` (a reconnect re-delivers events);
-#   2. epoch supersede-drop (an in-flight event from a rewound epoch must not resurrect state);
-#   3. node-keyed patches with a per-node ``seq`` floor (out-of-order delivery must not regress
-#      a node from done back to running).
 
 _TERMINAL_NODE = frozenset(
     {
@@ -253,8 +236,8 @@ class _WfState:
 
     run_id: str = ""
     status: str = ""
-    nodes: dict[str, str] = field(default_factory=dict)  # instance_path -> state
-    node_ids: dict[str, str] = field(default_factory=dict)  # instance_path -> node_id
+    nodes: dict[str, str] = field(default_factory=dict)
+    node_ids: dict[str, str] = field(default_factory=dict)
     epoch: int = 0
     seen: set[str] = field(default_factory=set)
     node_seq: dict[str, int] = field(default_factory=dict)
@@ -284,7 +267,6 @@ def _apply_wf_event(vm: _WfState, event: str, payload: Any) -> None:
             _apply_wf_event(vm, sub_event, sub_payload)
         return
 
-    # Guard 1 — an event for a different run is not ours (a shared-hub bug would be silent).
     run_id = env.get("run_id")
     if run_id and vm.run_id and run_id != vm.run_id:
         vm.dropped += 1
@@ -292,13 +274,11 @@ def _apply_wf_event(vm: _WfState, event: str, payload: Any) -> None:
     if run_id and not vm.run_id:
         vm.run_id = str(run_id)
 
-    # Guard 2 — dedup by deterministic id (a reconnect replay re-delivers events).
     event_id = env.get("event_id")
     if event_id and event_id in vm.seen:
         vm.dropped += 1
         return
 
-    # Guard 3 — epoch supersede-drop (an event from a rewound epoch must not resurrect state).
     epoch = env.get("epoch")
     epoch_i = epoch if isinstance(epoch, int) else vm.epoch
     if epoch_i < vm.epoch:
@@ -309,7 +289,11 @@ def _apply_wf_event(vm: _WfState, event: str, payload: Any) -> None:
         vm.seen.add(str(event_id))
     vm.epoch = max(vm.epoch, epoch_i)
 
-    if event in ("workflow_node_started", "workflow_node_done", "workflow_gate_resolved"):
+    if event in (
+        "workflow_node_started",
+        "workflow_node_done",
+        "workflow_gate_resolved",
+    ):
         default_state = "running" if event == "workflow_node_started" else "done"
         _patch_node(vm, env, default_state)
     elif event == "workflow_run_update":
@@ -322,8 +306,6 @@ def _apply_wf_event(vm: _WfState, event: str, payload: Any) -> None:
             for n in incoming:
                 if isinstance(n, dict) and isinstance(n.get("instance_path"), str):
                     vm.nodes[n["instance_path"]] = str(n.get("state", ""))
-    # needs_input/attention/spec_updated/forked/mutation_rejected + task-projection events do
-    # not move node/run terminal state, so they are no-ops for the fold-law snapshot.
 
 
 def _patch_node(vm: _WfState, env: dict[str, Any], default_state: str) -> None:
@@ -359,9 +341,6 @@ def fold_workflow(events: list[TraceEvent]) -> dict[str, Any]:
     return vm.snapshot()
 
 
-# ── MCP record/replay-as-fake-server (§2.1 rider) ────────────────────────────
-
-
 class FakeMcpServer:
     """Replays a recorded ``mcp`` trace as a deterministic offline tool server.
 
@@ -373,8 +352,6 @@ class FakeMcpServer:
     """
 
     def __init__(self, events: list[TraceEvent]) -> None:
-        # Map (tool, canonical-args) -> queue of recorded (ok, output) responses, so a
-        # repeated call returns successive recorded results rather than only the first.
         self._responses: dict[tuple[str, str], list[tuple[bool, str]]] = {}
         self._cursor: dict[tuple[str, str], int] = {}
         for e in events:

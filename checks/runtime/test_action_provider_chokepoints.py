@@ -36,46 +36,25 @@ import inspect
 
 import pytest
 
-#: Every module that resolves an action provider and RUNS it. Discovered by grepping
-#: `get_action_provider(` across `src/`, then reading each hit to see whether it executes.
-#: `dashboard/handlers/hooks.py` is excluded on purpose: it resolves providers to build the
-#: `/api/action-providers` catalog and never calls `execute`, verified by
-#: `test_the_catalog_site_does_not_execute` below.
 EXECUTION_SITES: tuple[tuple[str, str], ...] = (
-    ("gideon.hooks", "the lifecycle-hook fire path"),
-    ("gideon.gateway", "the clock/file trigger fire path"),
-    ("gideon.event_triggers", "the data-event fire path"),
-    ("gideon.dashboard.handlers.triggers", "the manual Run path"),
-    # INU-7: approving an inbox proposal whose apply case is `action` dispatches a provider
-    # directly (not through `triggers.tools.run`), so it is a real execution site. User-clicked,
-    # so it carries `manual_refusal` — the manual Run path's gate — rather than the unattended
-    # denylist seam; `test_the_denylist_seam_list_covers_every_unattended_execution_site`
-    # therefore lists it beside that documented exemption.
-    ("gideon.proposals_contract", "the inbox proposal apply path"),
-    # AS-2: a TTL dashboard tile re-runs its bound data nodes with nobody watching, so it is a
-    # real UNATTENDED execution site and joins the denylist seams below rather than claiming an
-    # exemption. Its providers are additionally narrowed to a read-only allowlist
-    # (`tile_refresh.DATA_PROVIDERS`) — a second fence, not a substitute for these gates.
-    ("gideon.dashboard.tile_refresh", "the chatless tile-refresh path"),
-    # WF2KNO-12: "Run now" on a scheduled research report dispatches the report provider
-    # directly, so it is a real execution site. User-clicked, so it carries `manual_refusal`
-    # — the same gate and the same documented exemption as the trigger Run path above.
-    ("gideon.dashboard.handlers.research_reports", "the manual report Run path"),
-    # PA-3: §1.6's trivial-tier auto-execution dispatches a provider per approved proposal with
-    # nobody watching, so it is a real UNATTENDED execution site and joins the denylist seams
-    # below rather than claiming an exemption. Its providers are additionally narrowed to a
-    # frozen capability set (`autoexec.AUTO_CAPABLE_PROVIDERS`) and its actions bounded by a
-    # per-run cap and the NEW-1 budget floor — more fences, not a substitute for these gates.
-    ("gideon.proactive.autoexec", "the triage auto-execution path"),
+    ("gideon.engine.hooks", "the lifecycle-hook fire path"),
+    ("gideon.engine.trigger_dispatch", "the clock/file trigger fire path"),
+    ("gideon.automation.event_triggers", "the data-event fire path"),
+    ("gideon.interfaces.dashboard.handlers.triggers", "the manual Run path"),
+    ("gideon.cognition.proposals_contract", "the inbox proposal apply path"),
+    ("gideon.interfaces.dashboard.tile_refresh", "the chatless tile-refresh path"),
+    (
+        "gideon.interfaces.dashboard.handlers.research_reports",
+        "the manual report Run path",
+    ),
+    ("gideon.cognition.proactive.autoexec", "the triage auto-execution path"),
 )
 
 
-REVERSAL_SITE = "gideon.guardrails.ladder"
+REVERSAL_SITE = "gideon.security.guardrails.ladder"
 
-#: Any one of these, present in the module, satisfies the invariant. A LIST rather than one name
-#: because the sites legitimately differ: an unattended fire is gated by the kill switch, a manual
-#: fire by `manual_refusal`, and a store-backed fire additionally walks the whole `firepath`.
 POLICY_CHECKS: tuple[str, ...] = (
+    "enforce_action",
     "incident_active",
     "manual_refusal",
     "capability_allows",
@@ -86,50 +65,20 @@ POLICY_CHECKS: tuple[str, ...] = (
 )
 
 
-#: The THREE seams AUTONOMY-GUARDRAILS §1.2 names, each of which must call `enforce_action`
-#: BEFORE it reaches a provider. This is narrower than `EXECUTION_SITES` by exactly one entry —
-#: the manual Run path, exempted below — and the two lists are cross-checked by
-#: `test_the_denylist_seam_list_covers_every_unattended_execution_site` so a FOURTH unattended
-#: seam cannot appear without joining this one.
-#:
-#: 🔴 Why a rail and not trust: §1.2's third seam was written as `gateway.py:701`
-#: (`_run_action_job`), which retired with `ScheduleService` (S112). The successor
-#: (`_fire_store_trigger`) kept the kill switch and gained the rung ladder but silently lost the
-#: denylist — measured at 1 / 1 / 0 `enforce_action` calls across hooks / event_triggers / gateway
-#: while gateway is the busiest of the three (every clock, file, webhook and chained trigger).
-#: AG-12 restored it; this rail is what stops the next retirement dropping it again.
 DENYLIST_SEAMS: tuple[tuple[str, str], ...] = (
-    ("gideon.hooks", "script hooks"),
-    ("gideon.gateway", "clock / file / webhook / chained triggers"),
-    ("gideon.event_triggers", "memory-event triggers"),
-    ("gideon.dashboard.tile_refresh", "TTL dashboard tiles"),
-    ("gideon.proactive.autoexec", "trivial-tier triage auto-execution"),
+    ("gideon.engine.hooks", "script hooks"),
+    ("gideon.engine.trigger_dispatch", "clock / file / webhook / chained triggers"),
+    ("gideon.automation.event_triggers", "memory-event triggers"),
+    ("gideon.interfaces.dashboard.tile_refresh", "TTL dashboard tiles"),
+    ("gideon.cognition.proactive.autoexec", "trivial-tier triage auto-execution"),
 )
 
-#: The one execution site NOT required to carry the denylist, and why: it runs a trigger because a
-#: human just pressed Run, so it is attended by definition and is gated by `manual_refusal`
-#: instead. Asserted in `test_the_manual_run_path_is_the_documented_denylist_exemption` rather
-#: than merely stated.
-MANUAL_SEAM = "gideon.dashboard.handlers.triggers"
+MANUAL_SEAM = "gideon.interfaces.dashboard.handlers.triggers"
 
-#: The ONE site that resolves an action provider to UNDO an action rather than to run one
-#: (AUTONOMY-GUARDRAILS §6.1). Exempt from the execution invariant, and asserted separately by
-#: `test_the_reversal_site_undoes_and_never_executes` rather than merely trusted. Why it is
-#: exempt: it calls `reverse`, never `execute`; the provider it may reach is bounded by the
-#: recorded action type's own declaration plus the handle kind that provider claims; and the
-#: request is user-initiated and autonomy-REDUCING. An `incident_active` check here would refuse
-#: to take back exactly the automatic action a user turned the kill switch on because of.
-#: The execution sites a USER CLICKS. Each is exempt from the unattended denylist seam, and each
-#: is exempt ONLY while it still carries `manual_refusal` — asserted per-member below, so an
-#: exemption cannot outlive its own gate. Adding a member here is an argument, not a shortcut.
 USER_CLICKED_SEAMS: tuple[str, ...] = (
     MANUAL_SEAM,
-    "gideon.proposals_contract",  # INU-7: Approve on an inbox proposal
-    # WF2KNO-12: "Run now" on a scheduled research report. Attended by definition — the
-    # SCHEDULED fire of the same report goes through the trigger path, which carries the
-    # denylist — so the exemption is the same argument as the trigger Run path, and the
-    # per-member assertion below holds it to carrying `manual_refusal`.
-    "gideon.dashboard.handlers.research_reports",
+    "gideon.cognition.proposals_contract",
+    "gideon.interfaces.dashboard.handlers.research_reports",
 )
 
 
@@ -177,7 +126,8 @@ def test_every_seam_threads_the_session_key(module_name, label):
     """The call SHAPE, not just its presence. `session_key=""` classifies as ATTENDED, so the
     run's `SafetyProfile` (its `denylist_extra` globs and its `path_allowlist` confinement) is
     skipped entirely — the PHF-8 defect. A seam that calls `enforce_action` without threading a
-    session key enforces only the built-ins, which is a quieter version of not enforcing."""
+    session key enforces only the built-ins, which is a quieter version of not enforcing.
+    """
     for call in _enforce_action_calls(module_name):
         assert any(kw.arg == "session_key" for kw in call.keywords), (
             f"the {label} seam ({module_name}) calls enforce_action without session_key=; "
@@ -235,8 +185,10 @@ def test_the_catalog_site_does_not_execute():
     for the catalog. If it ever gained an `execute` call it would become an unfenced execution path,
     so the exemption is asserted rather than assumed.
     """
-    src = _source("gideon.dashboard.handlers.hooks")
-    assert "get_action_provider(" in src, "the exemption is stale if this site no longer resolves"
+    src = _source("gideon.interfaces.dashboard.handlers.hooks")
+    assert (
+        "get_action_provider(" in src
+    ), "the exemption is stale if this site no longer resolves"
     assert ".execute(" not in src, "the catalog site must never execute a provider"
 
 
@@ -250,10 +202,14 @@ def test_the_reversal_site_undoes_and_never_executes():
     (`reversal_kinds`) rather than accept whatever name a caller supplies.
     """
     src = _source(REVERSAL_SITE)
-    assert "get_action_provider(" in src, "the exemption is stale if this site no longer resolves"
+    assert (
+        "get_action_provider(" in src
+    ), "the exemption is stale if this site no longer resolves"
     assert ".execute(" not in src, "the reversal site must never execute a provider"
     assert ".reverse(" in src, "the reversal site must reach the provider's own undo"
-    assert "reversal_kinds" in src, "resolution must be bounded by what the provider claims"
+    assert (
+        "reversal_kinds" in src
+    ), "resolution must be bounded by what the provider claims"
 
 
 def test_the_would_execute_preview_site_only_reads_the_declaration():
@@ -269,12 +225,14 @@ def test_the_would_execute_preview_site_only_reads_the_declaration():
     consults a runner. "It's different" is not an exemption, so the difference is asserted —
     it must never execute, and it must never dispatch a fire with a runner attached.
     """
-    src = _source("gideon.dashboard.handlers.doctor")
-    assert "get_action_provider(" in src, "the exemption is stale if this site no longer resolves"
+    src = _source("gideon.interfaces.dashboard.handlers.doctor")
+    assert (
+        "get_action_provider(" in src
+    ), "the exemption is stale if this site no longer resolves"
     assert ".execute(" not in src, "the preview site must never execute a provider"
-    assert "supports_dry_run" in src, "the only reason to resolve here is the T9 declaration"
-    # 🪤 The load-bearing one. `triggers.tools.run` executes when handed a runner, so a `runner=`
-    # that ever became anything but None would turn this read-only panel into a fire path.
+    assert (
+        "supports_dry_run" in src
+    ), "the only reason to resolve here is the T9 declaration"
     assert "runner=None" in src, "the dry fire must be dispatched with no runner"
 
 
@@ -299,27 +257,12 @@ def test_the_site_list_is_not_STALE():
 
     known = {m for m, _ in EXECUTION_SITES} | {
         REVERSAL_SITE,
-        "gideon.dashboard.handlers.hooks",
-        # The would-execute preview (PR2-7) — reads `supports_dry_run` only; the properties that
-        # earn the exemption are asserted in `test_the_would_execute_preview_site_only_reads_the_
-        # declaration` above, so this entry cannot become a silent bypass.
-        "gideon.dashboard.handlers.doctor",
-        # The create-time existence check (#779) — `triggers.tools.create` resolves a provider to
-        # ask ONE question, "is this name registered?", and refuses the row before it exists when
-        # the answer is no. The result is never bound and nothing executes; the properties that
-        # earn the exemption are asserted in
-        # `test_the_create_time_provider_check_only_asks_existence` below.
-        "gideon.triggers.tools",
-        # The delegating provider (SV-11) -- the one resolve in this set that lives INSIDE a
-        # provider rather than at a fire path. Every other entry in `EXECUTION_SITES` is a seam
-        # a trigger/hook/tile arrives at, and the gate belongs there: `selfqa-commit-watch` is
-        # only reachable THROUGH the gateway file-trigger path, which already carries the
-        # denylist and the kill switch, so a second gate here would fence an already-fenced
-        # call. The properties that earn the exemption are asserted in
-        # `test_the_delegating_provider_only_hands_off_to_a_frozen_name` below.
-        "gideon.action_providers.selfqa_watch_provider",
-        "gideon.action_providers.registry",  # defines it
-        "gideon.action_providers",  # re-exports it
+        "gideon.interfaces.dashboard.handlers.hooks",
+        "gideon.interfaces.dashboard.handlers.doctor",
+        "gideon.automation.triggers.tools",
+        "gideon.integrations.action_providers.selfqa_watch_provider",
+        "gideon.integrations.action_providers.registry",
+        "gideon.integrations.action_providers",
     }
     unaccounted = callers - known
     assert not unaccounted, (
@@ -346,14 +289,16 @@ def test_the_delegating_provider_only_hands_off_to_a_frozen_name():
     """
     import re
 
-    src = _source("gideon.action_providers.selfqa_watch_provider")
+    src = _source("gideon.integrations.action_providers.selfqa_watch_provider")
     calls = re.findall(r"get_action_provider\(([^)]*)\)", src)
     assert calls, "the exemption is stale if the provider no longer delegates"
     assert all(c.strip() in {'"run-workflow"', "'run-workflow'"} for c in calls), (
         "every resolve must be the frozen `run-workflow` literal; a name read from "
         f"action_config would make this a caller-steerable dispatcher. found: {calls}"
     )
-    assert "action_config" not in "".join(calls), "the delegate name must not come from the caller"
+    assert "action_config" not in "".join(
+        calls
+    ), "the delegate name must not come from the caller"
 
 
 def test_the_create_time_provider_check_only_asks_existence():
@@ -367,15 +312,30 @@ def test_the_create_time_provider_check_only_asks_existence():
     the provider it resolves, this test fails and the module must argue its way into
     `EXECUTION_SITES` with a real policy gate instead.
     """
-    import re
+    import ast
 
-    src = _source("gideon.triggers.tools")
-    calls = re.findall(r"get_action_provider\([^)]*\)[^\n]*", src)
+    src = _source("gideon.automation.triggers.tools")
+    tree = ast.parse(src)
+    parents = {
+        child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)
+    }
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "get_action_provider"
+    ]
     assert calls, "the exemption is stale if create no longer resolves a provider"
-    assert all("is None" in c for c in calls), (
-        "every resolve in triggers.tools must be the bare `is None` existence check; "
-        f"found: {calls}"
-    )
+    for call in calls:
+        parent = parents[call]
+        assert isinstance(parent, ast.Compare) and parent.left is call
+        assert len(parent.ops) == 1 and isinstance(parent.ops[0], (ast.Is, ast.IsNot))
+        assert len(parent.comparators) == 1
+        assert (
+            isinstance(parent.comparators[0], ast.Constant)
+            and parent.comparators[0].value is None
+        )
     assert "_ensure_default_providers_registered()" in src, (
         "the existence check must register the built-ins first, or startup order would "
         "make it refuse real providers"
@@ -389,7 +349,7 @@ def test_no_shipped_provider_declares_a_chokepoint_attribute():
     either wire something that READS it or drop it — which is the point. An attribute nothing reads
     is the inert-control defect, and a security-shaped one is worse than none.
     """
-    from gideon.action_providers.registry import (
+    from gideon.integrations.action_providers.registry import (
         _ensure_default_providers_registered,
         get_action_provider,
         list_action_providers,

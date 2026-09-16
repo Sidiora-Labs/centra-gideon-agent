@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from gideon.tasks.models import (
+from gideon.engine.tasks.models import (
     ExitCriteriaStatus,
     Task,
     TaskStatus,
@@ -14,9 +14,7 @@ from gideon.tasks.models import (
     normalize_exit_criterion,
     normalize_note,
 )
-from gideon.tasks.native import NativeTaskProvider
-
-# ── Normalizers ──
+from gideon.engine.tasks.native import NativeTaskProvider
 
 
 class TestExitCriterionNormalize:
@@ -31,7 +29,9 @@ class TestExitCriterionNormalize:
         assert n["met"] is False
 
     def test_canonical_status_kept_and_met_derived(self):
-        n = normalize_exit_criterion({"description": "x", "status": "complete", "comment": "ok"})
+        n = normalize_exit_criterion(
+            {"description": "x", "status": "complete", "comment": "ok"}
+        )
         assert n["status"] == "complete"
         assert n["met"] is True
         assert n["comment"] == "ok"
@@ -51,7 +51,7 @@ class TestActionPlanNormalize:
         a = normalize_action_plan_item({"description": "step"}, 3)
         assert a["sequence"] == 3
         assert a["content"] == "step"
-        assert a["description"] == "step"  # alias emitted
+        assert a["description"] == "step"
 
     def test_explicit_sequence_kept(self):
         a = normalize_action_plan_item({"content": "s", "sequence": 7}, 0)
@@ -71,9 +71,6 @@ class TestNoteNormalize:
         assert normalize_note("hi")["content"] == "hi"
 
 
-# ── can_mark_complete gate ──
-
-
 class TestCompleteGate:
     def test_no_criteria_completable(self):
         assert Task(id="t", title="x").can_mark_complete() is True
@@ -86,20 +83,20 @@ class TestCompleteGate:
         t = Task(
             id="t",
             title="x",
-            exit_criteria=[{"description": "a", "met": True}, {"description": "b", "met": False}],
+            exit_criteria=[
+                {"description": "a", "met": True},
+                {"description": "b", "met": False},
+            ],
         )
         assert t.can_mark_complete() is False
         assert t.incomplete_exit_criteria() == ["b"]
 
 
-# ── Native provider: evolved fields + gate + derivation ──
-
-
 @pytest.fixture()
 def provider(tmp_path):
     with (
-        patch("gideon.tasks.native.config_dir", return_value=tmp_path),
-        patch("gideon.tasks.hierarchy.config_dir", return_value=tmp_path),
+        patch("gideon.engine.tasks.native.config_dir", return_value=tmp_path),
+        patch("gideon.engine.tasks.hierarchy.config_dir", return_value=tmp_path),
     ):
         yield NativeTaskProvider()
 
@@ -120,7 +117,9 @@ class TestNativeEvolvedFields:
 
     @pytest.mark.asyncio
     async def test_exit_criteria_stored_statused(self, provider):
-        t = await provider.create_task(title="x", exit_criteria=[{"description": "a", "met": True}])
+        t = await provider.create_task(
+            title="x", exit_criteria=[{"description": "a", "met": True}]
+        )
         d = (await provider.get_task(t.id)).to_dict()
         assert d["exit_criteria"][0]["status"] == "complete"
         assert d["exit_criteria"][0]["met"] is True
@@ -138,15 +137,14 @@ class TestNativeEvolvedFields:
         t = await provider.create_task(
             title="x", exit_criteria=[{"description": "ship it", "met": False}]
         )
-        await provider.update_task(t.id, exit_criteria=[{"description": "ship it", "met": True}])
+        await provider.update_task(
+            t.id, exit_criteria=[{"description": "ship it", "met": True}]
+        )
         done = await provider.update_task(t.id, status="done")
         assert done.status == TaskStatus.DONE
 
     @pytest.mark.asyncio
     async def test_project_label_is_derived_not_stored(self, provider):
-        # project is a derived, read-only label. A task with no task list has NO
-        # project label — an explicit `project` value (e.g. a stale loop id) is
-        # never surfaced, on create or via a direct edit.
         t = await provider.create_task(title="x", project="ignored-loop-id")
         assert t.project == ""
         reloaded = await provider.get_task(t.id)
@@ -156,23 +154,19 @@ class TestNativeEvolvedFields:
 
     @pytest.mark.asyncio
     async def test_project_derived_from_task_list(self, provider):
-        from gideon.tasks.hierarchy import HierarchyStore
+        from gideon.engine.tasks.hierarchy import HierarchyStore
 
         store = HierarchyStore()
         proj = store.create_project("Website")
         tl = store.create_task_list("Launch", project_id=proj.id)
         t = await provider.create_task(title="x", task_list_id=tl.id)
         assert t.project == "Website"
-        # …and it self-heals on read: rename the project, re-read the task.
         store.update_project(proj.id, name="Website v2")
         assert (await provider.get_task(t.id)).project == "Website v2"
 
     @pytest.mark.asyncio
     async def test_stale_stored_project_id_does_not_leak(self, provider):
-        # A legacy task whose JSON has a raw project id in `project` and no task
-        # list must read back with an empty label (not the opaque id).
         t = await provider.create_task(title="legacy", task_list_id="")
-        # simulate the pre-reform on-disk shape: a project id stamped in `project`
         import json
 
         p = provider._task_path(t.id)

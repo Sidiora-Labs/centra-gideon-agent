@@ -11,7 +11,7 @@ import json
 
 import pytest
 
-from gideon.acp.reader import FrameRouter
+from gideon.integrations.acp.reader import FrameRouter
 
 
 class _FakeStdout:
@@ -62,41 +62,49 @@ async def test_session_update_demuxed_to_its_queue():
     a = await asyncio.wait_for(qa.get(), timeout=2)
     b = await asyncio.wait_for(qb.get(), timeout=2)
     assert a.params["sessionId"] == "A" and b.params["sessionId"] == "B"
-    assert qa.empty() and qb.empty()  # no cross-contamination
+    assert qa.empty() and qb.empty()
     await r.close()
 
 
 @pytest.mark.asyncio
 async def test_session_isolation_interleaved():
-    # The concurrency property: interleaved A/B frames land in the right queues in order.
     out = _FakeStdout()
     r = FrameRouter(out.readline)
     r.start()
     qa = r.register_session("A")
     qb = r.register_session("B")
     for i in range(5):
-        out.feed(_f(method="session/update", params={"sessionId": "A", "update": {"n": i}}))
-        out.feed(_f(method="session/update", params={"sessionId": "B", "update": {"n": i}}))
-    a_ns = [(await asyncio.wait_for(qa.get(), timeout=2)).params["update"]["n"] for _ in range(5)]
-    b_ns = [(await asyncio.wait_for(qb.get(), timeout=2)).params["update"]["n"] for _ in range(5)]
+        out.feed(
+            _f(method="session/update", params={"sessionId": "A", "update": {"n": i}})
+        )
+        out.feed(
+            _f(method="session/update", params={"sessionId": "B", "update": {"n": i}})
+        )
+    a_ns = [
+        (await asyncio.wait_for(qa.get(), timeout=2)).params["update"]["n"]
+        for _ in range(5)
+    ]
+    b_ns = [
+        (await asyncio.wait_for(qb.get(), timeout=2)).params["update"]["n"]
+        for _ in range(5)
+    ]
     assert a_ns == [0, 1, 2, 3, 4] and b_ns == [0, 1, 2, 3, 4]
     await r.close()
 
 
 @pytest.mark.asyncio
 async def test_one_session_unregister_does_not_stall_other():
-    # Cancel/drop session A mid-stream; B must keep receiving (isolation under teardown).
     out = _FakeStdout()
     r = FrameRouter(out.readline)
     r.start()
     r.register_session("A")
     qb = r.register_session("B")
     out.feed(_f(method="session/update", params={"sessionId": "A", "update": {}}))
-    r.unregister_session("A")  # A is gone
+    r.unregister_session("A")
+    out.feed(_f(method="session/update", params={"sessionId": "A", "update": {}}))
     out.feed(
-        _f(method="session/update", params={"sessionId": "A", "update": {}})
-    )  # now routes to broadcast/drop
-    out.feed(_f(method="session/update", params={"sessionId": "B", "update": {"ok": True}}))
+        _f(method="session/update", params={"sessionId": "B", "update": {"ok": True}})
+    )
     b = await asyncio.wait_for(qb.get(), timeout=2)
     assert b.params["update"]["ok"] is True
     await r.close()
@@ -104,19 +112,19 @@ async def test_one_session_unregister_does_not_stall_other():
 
 @pytest.mark.asyncio
 async def test_server_request_routed_to_session_then_handler():
-    # A server→client REQUEST (id + method) with a known sessionId → its queue;
-    # with an unknown session → the on_server_request handler.
     seen: list = []
     out = _FakeStdout()
     r = FrameRouter(out.readline, on_server_request=lambda m: seen.append(m))
     r.start()
     q = r.register_session("A")
     out.feed(_f(id=99, method="session/request_permission", params={"sessionId": "A"}))
-    out.feed(_f(id=100, method="session/request_permission", params={"sessionId": "ZZZ"}))
+    out.feed(
+        _f(id=100, method="session/request_permission", params={"sessionId": "ZZZ"})
+    )
     routed = await asyncio.wait_for(q.get(), timeout=2)
     assert routed.id == 99 and routed.method == "session/request_permission"
     await asyncio.sleep(0.05)
-    assert len(seen) == 1 and seen[0].id == 100  # unknown session → handler
+    assert len(seen) == 1 and seen[0].id == 100
     await r.close()
 
 
@@ -126,8 +134,8 @@ async def test_broadcast_for_idless_and_unknown_session():
     out = _FakeStdout()
     r = FrameRouter(out.readline, on_broadcast=lambda m: seen.append(m))
     r.start()
-    out.feed(_f(method="session/update", params={"sessionId": "unknown"}))  # no such session
-    out.feed(_f(method="_notify", params={}))  # id-less, no session
+    out.feed(_f(method="session/update", params={"sessionId": "unknown"}))
+    out.feed(_f(method="_notify", params={}))
     await asyncio.sleep(0.05)
     assert len(seen) == 2
     await r.close()
@@ -140,30 +148,24 @@ async def test_process_death_fails_pending_and_wakes_sessions():
     r.start()
     fut = r.expect(7)
     q = r.register_session("A")
-    out.eof()  # EOF → connection closed
+    out.eof()
     with pytest.raises(Exception):
         await asyncio.wait_for(fut, timeout=2)
-    # session consumer is woken with a poison frame (doesn't hang forever)
     poison = await asyncio.wait_for(q.get(), timeout=2)
     assert poison.method == "_router/closed"
 
 
 @pytest.mark.asyncio
 async def test_process_death_fans_out_to_ALL_concurrent_sessions():
-    # The P9-specific failure mode (plan risk): process death must fail EVERY pending
-    # request AND wake EVERY registered session queue — not just the first. A regression
-    # that woke only one session would deadlock the co-tenants.
     out = _FakeStdout()
     r = FrameRouter(out.readline)
     r.start()
-    futs = [r.expect(i) for i in (10, 11, 12)]  # 3 in-flight requests
-    queues = [r.register_session(sid) for sid in ("A", "B", "C")]  # 3 concurrent sessions
-    out.eof()  # connection dies
-    # every pending future fails (no request hangs)
+    futs = [r.expect(i) for i in (10, 11, 12)]
+    queues = [r.register_session(sid) for sid in ("A", "B", "C")]
+    out.eof()
     for f in futs:
         with pytest.raises(Exception):
             await asyncio.wait_for(f, timeout=2)
-    # every session queue receives the poison frame (no co-tenant is left hanging)
     for q in queues:
         poison = await asyncio.wait_for(q.get(), timeout=2)
         assert poison.method == "_router/closed"
@@ -176,27 +178,78 @@ async def test_non_json_line_skipped():
     r.start()
     q = r.register_session("A")
     out.feed_raw(b"this is a stray log line, not json\n")
-    out.feed(_f(method="session/update", params={"sessionId": "A", "update": {"ok": 1}}))
-    got = await asyncio.wait_for(q.get(), timeout=2)  # router kept reading past the junk
+    out.feed(
+        _f(method="session/update", params={"sessionId": "A", "update": {"ok": 1}})
+    )
+    got = await asyncio.wait_for(q.get(), timeout=2)
     assert got.params["update"]["ok"] == 1
     await r.close()
 
 
 @pytest.mark.asyncio
 async def test_backpressure_drops_oldest_not_reader():
-    # A tiny queue that overflows must drop-oldest, never block the single reader.
     out = _FakeStdout()
     r = FrameRouter(out.readline)
     r.start()
     q = r.register_session("A")
-    # shrink the queue for the test
     q._maxsize = 3  # type: ignore[attr-defined]
     for i in range(10):
-        out.feed(_f(method="session/update", params={"sessionId": "A", "update": {"n": i}}))
+        out.feed(
+            _f(method="session/update", params={"sessionId": "A", "update": {"n": i}})
+        )
     await asyncio.sleep(0.1)
-    # queue holds at most ~3 and has the NEWEST frames (oldest dropped)
     drained = []
     while not q.empty():
         drained.append(q.get_nowait().params["update"]["n"])
     assert drained and max(drained) == 9 and len(drained) <= 3
     await r.close()
+
+
+@pytest.mark.asyncio
+async def test_real_stream_eof_is_terminal_for_late_consumers():
+    stream = asyncio.StreamReader()
+    router = FrameRouter(stream.readline)
+    pending = router.expect(10)
+    existing = router.register_session("existing")
+    router.start()
+    stream.feed_eof()
+    with pytest.raises(ConnectionError, match="stdout EOF"):
+        await asyncio.wait_for(pending, 1)
+    assert (await existing.get()).method == "_router/closed"
+    with pytest.raises(ConnectionError, match="stdout EOF"):
+        await router.expect(11)
+    late = router.register_session("late")
+    assert (await late.get()).method == "_router/closed"
+    await router.close()
+    await router.close()
+    assert existing.empty() and late.empty()
+
+
+@pytest.mark.asyncio
+async def test_real_stream_early_response_and_cancelled_waiter():
+    stream = asyncio.StreamReader()
+    router = FrameRouter(stream.readline)
+    cancelled = router.expect(12)
+    cancelled.cancel()
+    router.start()
+    stream.feed_data(b'{"id":12,"result":{}}\n{"id":13,"result":{"ok":true}}\n')
+    await asyncio.sleep(0)
+    response = await asyncio.wait_for(router.expect(13), 1)
+    assert response.result == {"ok": True}
+    assert cancelled.cancelled()
+    await router.close()
+
+
+@pytest.mark.asyncio
+async def test_real_stream_external_close_fails_waiters_and_stops_reader():
+    stream = asyncio.StreamReader()
+    router = FrameRouter(stream.readline)
+    pending = router.expect(1)
+    mailbox = router.register_session("one")
+    router.start()
+    task = router._reader_task
+    await router.close(RuntimeError("shutdown"))
+    with pytest.raises(RuntimeError, match="shutdown"):
+        await pending
+    assert task.done()
+    assert mailbox.get_nowait().method == "_router/closed"

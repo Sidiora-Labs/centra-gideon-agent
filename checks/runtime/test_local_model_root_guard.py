@@ -23,17 +23,15 @@ from pathlib import Path
 import pytest
 import real_model_root_guard
 
-from gideon.local_models import layouts
+from gideon.integrations.local_models import layouts
 
 
 def test_the_rail_names_a_non_empty_set_of_real_roots():
     roots = real_model_root_guard.forbidden_roots()
     assert roots, "the model-root rail matches nothing — it would pass on any input"
     home = real_model_root_guard.REAL_HOME
-    # The two the incident actually touched must be in the set.
     assert home / ".cache/huggingface" in roots
     assert home / ".gideon" in roots
-    # And the bare home itself: a sweep of ``~`` is never a legitimate test root.
     assert home in roots
 
 
@@ -63,14 +61,11 @@ def test_a_tilde_spelled_root_is_detected():
 
 def test_a_tmp_root_is_allowed(tmp_path):
     assert real_model_root_guard.offending_root(tmp_path) is None
-    real_model_root_guard.assert_safe("delete_all_layouts", tmp_path)  # does not raise
+    real_model_root_guard.assert_safe("delete_all_layouts", tmp_path)
 
 
 def test_an_unparseable_root_is_not_the_rails_business():
     assert real_model_root_guard.offending_root(None) is None
-
-
-# ── The rail as INSTALLED by the autouse fixture ──────────────────────────────
 
 
 def test_the_installed_wrapper_refuses_a_real_delete():
@@ -99,7 +94,7 @@ def _cache_root_functions() -> set[str]:
     for node in tree.body:
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
-        if node.name.startswith("_"):  # module-private helpers take a path, not a root
+        if node.name.startswith("_"):
             continue
         args = node.args.args
         if args and args[0].arg == "cache_root":
@@ -118,9 +113,6 @@ def test_the_guarded_set_covers_every_cache_root_entry_point():
     module's real surface in both directions.
     """
     derived = _cache_root_functions()
-    # Vacuity: a failed/empty parse would make the equality below trivially true, including
-    # against a GUARDED_FUNCTIONS someone had emptied. Assert the scan really found the
-    # surface, and specifically found the sweep the incident ran.
     assert len(derived) >= 7, f"the cache-root scan found only {sorted(derived)}"
     assert "delete_all_layouts" in derived, derived
 
@@ -153,13 +145,12 @@ def test_every_guarded_entry_point_is_wrapped(fn_name):
     wrapper raises before it forwards.
     """
     fn = getattr(layouts, fn_name)
-    assert fn.__name__ == "_guarded", f"layouts.{fn_name} is not behind the model-root rail"
+    assert (
+        fn.__name__ == "_guarded"
+    ), f"layouts.{fn_name} is not behind the model-root rail"
     real_root = real_model_root_guard.REAL_HOME / ".cache" / "huggingface"
     with pytest.raises(AssertionError, match="REAL model root"):
         fn(real_root, *real_model_root_guard.trailing_args(fn_name))
-
-
-# ── The rail's one soft edge: it is an attribute lookup deep, not alias deep ───
 
 
 def test_the_installed_rail_is_only_an_attribute_lookup_deep():
@@ -172,16 +163,21 @@ def test_the_installed_rail_is_only_an_attribute_lookup_deep():
     object asserted here — a different object, with no guard in front of it.
     """
     recorded = real_model_root_guard.ORIGINALS
-    # Vacuity: an empty ORIGINALS would make the loop below assert nothing at all.
-    assert set(recorded) == set(real_model_root_guard.GUARDED_FUNCTIONS), sorted(recorded)
+    assert set(recorded) == set(real_model_root_guard.GUARDED_FUNCTIONS), sorted(
+        recorded
+    )
     for name, original in recorded.items():
         installed = getattr(layouts, name)
-        assert installed is not original, f"layouts.{name} is not behind the rail at all"
+        assert (
+            installed is not original
+        ), f"layouts.{name} is not behind the rail at all"
         assert installed.__name__ == "_guarded"
         assert getattr(original, "__name__", None) == name
 
 
-def test_an_import_bound_alias_of_the_deletion_sweep_is_still_caught(monkeypatch, tmp_path):
+def test_an_import_bound_alias_of_the_deletion_sweep_is_still_caught(
+    monkeypatch, tmp_path
+):
     """The sweep from the incident is caught even through an import-bound alias.
 
     Not because the fixture reaches aliases — it cannot — but because
@@ -208,7 +204,9 @@ def test_an_import_bound_alias_of_the_deletion_sweep_is_still_caught(monkeypatch
 
 def _test_sources() -> list[tuple[Path, str]]:
     root = Path(__file__).resolve().parent
-    return [(p, p.read_text(encoding="utf-8", errors="ignore")) for p in root.rglob("*.py")]
+    return [
+        (p, p.read_text(encoding="utf-8", errors="ignore")) for p in root.rglob("*.py")
+    ]
 
 
 def test_no_test_module_import_binds_a_guarded_layouts_name():
@@ -225,14 +223,13 @@ def test_no_test_module_import_binds_a_guarded_layouts_name():
     changing, so the suite bans the shape rather than tracking the delegation graph.
 
     The safe shape stays available and is what every module here already uses: import the
-    MODULE (``from gideon.local_models import layouts``) and call through it, or
+    MODULE (``from gideon.integrations.local_models import layouts``) and call through it, or
     import the function inside the test body.
     """
     sources = _test_sources()
-    # Vacuity: a scan that found no files, or one that had stopped recognizing the shape,
-    # would report clean. Assert it really read the suite; the detector's own ability to
-    # flag is asserted in test_the_import_binding_detector_flags_the_offending_shape_only.
-    assert len(sources) >= 900, f"the import-binding scan only read {len(sources)} files"
+    assert (
+        len(sources) >= 900
+    ), f"the import-binding scan only read {len(sources)} files"
 
     offenders = {
         str(path.relative_to(Path(__file__).resolve().parent)): sorted(names)
@@ -242,7 +239,7 @@ def test_no_test_module_import_binds_a_guarded_layouts_name():
     assert not offenders, (
         f"{offenders} bind a guarded layouts function at IMPORT time, which captures the "
         f"UNWRAPPED object and bypasses the model-root rail (LMMV Success Criterion 10). "
-        f"Import the module instead (`from gideon.local_models import layouts`) and "
+        f"Import the module instead (`from gideon.integrations.local_models import layouts`) and "
         f"call `layouts.<fn>(...)`, or move the import inside the test body."
     )
 
@@ -250,29 +247,28 @@ def test_no_test_module_import_binds_a_guarded_layouts_name():
 @pytest.mark.parametrize(
     ("source", "expected"),
     [
-        # The offending shape: bound at import time, before the fixture exists.
         (
-            "from gideon.local_models.layouts import cleanup_candidates",
+            "from gideon.integrations.local_models.layouts import cleanup_candidates",
             {"cleanup_candidates"},
         ),
-        # Aliased, and more than one name — still the same capture.
         (
-            "from gideon.local_models.layouts import (\n"
+            "from gideon.integrations.local_models.layouts import (\n"
             "    delete_all_layouts as nuke,\n"
             "    is_downloaded,\n"
             ")",
             {"delete_all_layouts", "is_downloaded"},
         ),
-        # The safe shapes, none of which may be flagged or the rail becomes a tax nobody keeps.
-        ("from gideon.local_models import layouts", set()),
-        ("import gideon.local_models.layouts", set()),
-        ("def t():\n    from gideon.local_models.layouts import delete_all_layouts", set()),
+        ("from gideon.integrations.local_models import layouts", set()),
+        ("import gideon.integrations.local_models.layouts", set()),
         (
-            "async def t():\n    from gideon.local_models.layouts import cleanup_candidates",
+            "def t():\n    from gideon.integrations.local_models.layouts import delete_all_layouts",
             set(),
         ),
-        # A non-guarded helper from the same module is not this rail's business.
-        ("from gideon.local_models.layouts import hf_repo_dirname", set()),
+        (
+            "async def t():\n    from gideon.integrations.local_models.layouts import cleanup_candidates",
+            set(),
+        ),
+        ("from gideon.integrations.local_models.layouts import hf_repo_dirname", set()),
     ],
 )
 def test_the_import_binding_detector_flags_the_offending_shape_only(source, expected):
@@ -281,7 +277,9 @@ def test_the_import_binding_detector_flags_the_offending_shape_only(source, expe
 
 
 @pytest.mark.parametrize("fn_name", real_model_root_guard.GUARDED_FUNCTIONS)
-def test_the_coverage_cells_call_shape_is_one_the_real_function_accepts(fn_name, tmp_path):
+def test_the_coverage_cells_call_shape_is_one_the_real_function_accepts(
+    fn_name, tmp_path
+):
     """The arity the coverage cell asserts through must be a REAL call, not a lucky raise.
 
     ``test_every_guarded_entry_point_is_wrapped`` proves the wrapper fires on a real root,
@@ -297,7 +295,7 @@ def test_the_coverage_cells_call_shape_is_one_the_real_function_accepts(fn_name,
     """
     original = real_model_root_guard.ORIGINALS[fn_name]
     extra = real_model_root_guard.trailing_args(fn_name)
-    original(tmp_path, *extra)  # must not raise TypeError
+    original(tmp_path, *extra)
 
 
 def test_the_derived_arity_is_not_uniform_across_the_guarded_population():
@@ -314,7 +312,9 @@ def test_the_derived_arity_is_not_uniform_across_the_guarded_population():
     }
     zero_arg = {fn for fn, extra in shapes.items() if extra == ()}
     assert zero_arg == {"cleanup_candidates", "reclaimable_bytes"}, sorted(zero_arg)
-    assert set(shapes) - zero_arg, "every entry point took cache_root alone — derivation is moot"
+    assert (
+        set(shapes) - zero_arg
+    ), "every entry point took cache_root alone — derivation is moot"
 
 
 def test_a_tmp_root_still_reaches_the_real_implementation(tmp_path):
@@ -329,5 +329,4 @@ def test_a_tmp_root_still_reaches_the_real_implementation(tmp_path):
     assert layouts.delete_all_layouts(tmp_path, "org/m")
     assert layouts.is_downloaded(tmp_path, "org/m") is False
     assert not any(p.exists() for p in [model_dir])
-    # Nothing outside tmp_path was involved.
     assert Path(tmp_path).exists()

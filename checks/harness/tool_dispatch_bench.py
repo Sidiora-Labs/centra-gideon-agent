@@ -5,7 +5,7 @@ shown to have helped — so it inherits HC-1's measure-first discipline rather t
 a second one. The three decisions HC-1 made structurally are made the same way here:
 
 * **The benchmark reads the SHIPPED log line; it does not keep its own stopwatch.**
-  Durations come from parsing :data:`~gideon.agents.native.dispatch_plan.
+  Durations come from parsing :data:`~gideon.engine.agents.native.dispatch_plan.
   TIMING_LOG_PREFIX`'s ``tool batch`` row, so the number in this report is the number
   production emits, and the log-line contract gets a real reader — change its fields and
   this benchmark reds.
@@ -26,9 +26,9 @@ and the benchmark would then be measuring the reservation rule instead of the co
 
 Usage::
 
-    python -m harness dispatch-bench                  # synthesize a repo, both arms
-    python -m harness dispatch-bench --trials 7 --json
-    python -m harness dispatch-bench --repo /path/to/repo --contended
+    python -m checks.harness dispatch-bench                  # synthesize a repo, both arms
+    python -m checks.harness dispatch-bench --trials 7 --json
+    python -m checks.harness dispatch-bench --repo /path/to/repo --contended
 
 Never runs against the real Gideon home: the synthesized repo and everything the
 turn touches live under a temp dir that is removed on the way out.
@@ -46,44 +46,24 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterator, Sequence, cast
 
-from gideon.agents.native import dispatch_plan
-from gideon.agents.native import runtime as native_runtime
-from gideon.agents.native.builtin_tools import NativeBuiltinToolProvider
-from gideon.agents.provider import AgentRuntimeDefinition
-from gideon.llm.events import EVENT_COMPLETE, EVENT_TOOL_CALL, AgentEvent
+from gideon.engine.agents.native import dispatch_plan
+from gideon.engine.agents.native import runtime as native_runtime
+from gideon.engine.agents.native.builtin_tools import NativeBuiltinToolProvider
+from gideon.engine.agents.provider import AgentRuntimeDefinition
+from gideon.integrations.llm.events import EVENT_COMPLETE, EVENT_TOOL_CALL, AgentEvent
 
-#: Trials per arm. Seven because the gate is unanimity over the samples and a three-sample
-#: arm on a loaded machine can be unanimous by luck.
 DEFAULT_TRIALS = 7
 
-#: Files in the synthesized repo. Large enough that a grep and a repo_map are real work
-#: (the whole point — concurrency only shows up when the calls cost something), small
-#: enough that a 2-arm × 7-trial run stays under a minute.
 DEFAULT_FILES = 1200
 
-#: Half-width of the band around "no change", as a fraction of the serial baseline's MEDIAN.
-#: Inside it the run reports `unresolved`: 15% of a wall-clock measurement on a shared
-#: machine is not a statistical claim, it is the honest resolution of the instrument.
-#: Narrowing it to extract a "yes, faster" is the move HC-1's band exists to forbid.
-#:
-#: Of the serial arm's MEDIAN and not its mean, for the reason HC-1's own gate gives for
-#: not deciding on a mean: a fan-out arm is right-skewed, so one cold-cache or
-#: contention-hit sample moves the mean by more than the effect being measured. Keyed to
-#: the mean, a single 10s outlier in a ~1.3s arm inflated the band to 419ms and reported
-#: `unresolved` on a run whose arms did not overlap at all — noise in the baseline's TAIL
-#: deciding a question about its FLOOR. The median is a scale estimate; the mean, here,
-#: is not.
 GATE_BAND_FRACTION = 0.15
 
 VERDICT_IMPROVED = "improved"
 VERDICT_NO_IMPROVEMENT = "no_improvement"
 VERDICT_UNRESOLVED = "unresolved"
 
-#: Every verdict this module can return, so a caller asserts the vocabulary instead of
-#: string-matching, and `unresolved` is a first-class outcome rather than an error path.
 VERDICTS = frozenset({VERDICT_IMPROVED, VERDICT_NO_IMPROVEMENT, VERDICT_UNRESOLVED})
 
-#: The representative multi-lookup turn: eight independent read-only lookups.
 MULTI_LOOKUP_TURN: tuple[tuple[str, str], ...] = (
     ("grep", '{"query": "VALUE = 41"}'),
     ("grep", '{"query": "def f900"}'),
@@ -100,13 +80,9 @@ class BenchmarkError(RuntimeError):
     """The benchmark could not run (no git, an unusable repo, no timing row emitted)."""
 
 
-# ── the log-line contract (the benchmark's input) ──
-
-#: Parser for the runtime's dispatch timing line. Anchored on the module's own prefix
-#: constant rather than a copied string, so a renamed prefix is a red test here and not a
-#: silently-empty report.
 _ROW_RE = re.compile(
-    re.escape(dispatch_plan.TIMING_LOG_PREFIX) + r"\s+mode=(?P<mode>\S+)\s+calls=(?P<calls>\d+)"
+    re.escape(dispatch_plan.TIMING_LOG_PREFIX)
+    + r"\s+mode=(?P<mode>\S+)\s+calls=(?P<calls>\d+)"
     r"\s+waves=(?P<waves>\d+)\s+widest=(?P<widest>\d+)\s+ms=(?P<ms>-?\d+)"
 )
 
@@ -177,9 +153,6 @@ def collect_timing_rows() -> Iterator[list[DispatchRow]]:
         log.disabled = prior_disabled
 
 
-# ── the gate ──
-
-
 @dataclass
 class GateVerdict:
     """HC-6's before/after decision plus the reasoning that produced it."""
@@ -195,7 +168,9 @@ class GateVerdict:
         return {"verdict": self.verdict, "notes": list(self.notes)}
 
 
-def evaluate_gate(serial_ms: Sequence[int], concurrent_ms: Sequence[int]) -> GateVerdict:
+def evaluate_gate(
+    serial_ms: Sequence[int], concurrent_ms: Sequence[int]
+) -> GateVerdict:
     """Is the improvement REAL on this benchmark, rather than assumed?
 
     Unanimity, for HC-1's reason: a fan-out on a shared machine is right-skewed, so there is
@@ -245,9 +220,6 @@ def evaluate_gate(serial_ms: Sequence[int], concurrent_ms: Sequence[int]) -> Gat
         "idle machine, or with more trials"
     )
     return GateVerdict(VERDICT_UNRESOLVED, notes)
-
-
-# ── the measurement ──
 
 
 @dataclass
@@ -304,9 +276,13 @@ class DispatchBaseline:
             "trials": self.trials,
             "serial_ms": self.serial_ms,
             "concurrent_ms": self.concurrent_ms,
-            "serial_mean_ms": round(statistics.fmean(self.serial_ms), 1) if self.serial_ms else 0.0,
+            "serial_mean_ms": (
+                round(statistics.fmean(self.serial_ms), 1) if self.serial_ms else 0.0
+            ),
             "concurrent_mean_ms": (
-                round(statistics.fmean(self.concurrent_ms), 1) if self.concurrent_ms else 0.0
+                round(statistics.fmean(self.concurrent_ms), 1)
+                if self.concurrent_ms
+                else 0.0
             ),
             "waves": sorted({r.waves for r in self.concurrent_rows}),
             "widest": sorted({r.widest for r in self.concurrent_rows}),
@@ -335,7 +311,10 @@ class _ScriptedModel:
         if self.calls == 1:
             for i, (name, args) in enumerate(self._turn):
                 yield AgentEvent(
-                    kind=EVENT_TOOL_CALL, tool_call_id=f"c{i}", title=name, tool_input=args
+                    kind=EVENT_TOOL_CALL,
+                    tool_call_id=f"c{i}",
+                    title=name,
+                    tool_input=args,
                 )
         yield AgentEvent(kind=EVENT_COMPLETE)
 
@@ -346,9 +325,6 @@ async def _one_turn(repo: Path, *, max_concurrency: int) -> None:
         definition=AgentRuntimeDefinition(
             name="dispatch-bench", provider="native", model="scripted"
         ),
-        # cast: the scripted stand-in implements the one method the loop calls
-        # (`complete`) plus the two attributes it reads, which is the whole of the
-        # contract this measurement exercises.
         model_provider=cast(Any, _ScriptedModel(MULTI_LOOKUP_TURN)),
         tool_providers=[NativeBuiltinToolProvider(cwd=repo)],
         cwd=repo,
@@ -359,7 +335,9 @@ async def _one_turn(repo: Path, *, max_concurrency: int) -> None:
         pass
 
 
-async def measure(repo: str | Path, *, trials: int, contended: bool = False) -> DispatchBaseline:
+async def measure(
+    repo: str | Path, *, trials: int, contended: bool = False
+) -> DispatchBaseline:
     """Run both arms over ``repo``, baseline (``max_tool_concurrency=1``) first.
 
     Baseline first, deliberately: it is the number the change has to beat, and measuring it
@@ -369,8 +347,6 @@ async def measure(repo: str | Path, *, trials: int, contended: bool = False) -> 
     repo_path = Path(repo).resolve()
     if trials <= 0:
         raise BenchmarkError(f"trials must be positive, got {trials}")
-    # One un-recorded warm turn: the first grep of a fresh checkout pays a cold page cache,
-    # and whichever arm ran first would otherwise carry it alone.
     await _one_turn(repo_path, max_concurrency=1)
     with collect_timing_rows() as serial:
         for _ in range(trials):
@@ -378,7 +354,9 @@ async def measure(repo: str | Path, *, trials: int, contended: bool = False) -> 
     serial_rows = list(serial)
     with collect_timing_rows() as concurrent:
         for _ in range(trials):
-            await _one_turn(repo_path, max_concurrency=dispatch_plan.MAX_CONCURRENT_CALLS)
+            await _one_turn(
+                repo_path, max_concurrency=dispatch_plan.MAX_CONCURRENT_CALLS
+            )
     concurrent_rows = list(concurrent)
     if not serial_rows or not concurrent_rows:
         raise BenchmarkError(
@@ -408,14 +386,14 @@ def run_benchmark(
     second synthetic-repo builder: two of them would drift, and a benchmark whose input
     differs run to run cannot be re-run to check a number.
     """
-    from harness.worktree_bench import BenchmarkError as WtError
-    from harness.worktree_bench import synthesize_repo
+    from checks.harness.worktree_bench import BenchmarkError as WtError
+    from checks.harness.worktree_bench import synthesize_repo
 
     if repo is not None:
         return asyncio.run(measure(repo, trials=trials, contended=contended))
-    with tempfile.TemporaryDirectory(prefix="pclaw-dispatch-bench-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="gideon-dispatch-bench-") as tmp:
         try:
             synthesized = synthesize_repo(Path(tmp) / "repo", files=files)
-        except WtError as exc:  # a missing git / an unusable temp dir
+        except WtError as exc:
             raise BenchmarkError(str(exc)) from exc
         return asyncio.run(measure(synthesized, trials=trials, contended=contended))

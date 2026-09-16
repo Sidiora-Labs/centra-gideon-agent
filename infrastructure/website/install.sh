@@ -1,61 +1,16 @@
 #!/bin/sh
-# Gideon bootstrap installer — the `curl -fsSL https://gideon.dev/install | sh` one-liner.
-#
-# Plan 34 (DISTRIBUTION) §E / T2.2. THIS FILE IS THE SOURCE OF TRUTH for the bytes
-# served at https://gideon.dev/install. It is staged here — rather than living only
-# in the website repo (gideon.dev, plan 36 owns) — because the rail below is here.
-# The website repo's public/install is a MIRROR: re-apply it whenever this file changes,
-# and update install.sh.sha256 in the same commit (deploy/website/README.md §1).
-#
-# What CI actually does with this file. Every claim in this block is asserted by
-# tests/test_website_installer.py, which reds if the job it names stops existing or
-# stops naming this file — an earlier version of this header advertised a weekly
-# full.yml smoke that had never been written, and nothing noticed:
-#   · ci.yml   `lint`          shellcheck -s sh + sh -n + dash -n on this file (every PR)
-#   · ci.yml   `test`          offline contract: --help / --container / unknown-arg, the
-#                              truncation-safe structure, staged-vs-pinned digest
-#   · full.yml `install-smoke` runs BOTH this file AND the bytes actually served at
-#                              /install, in a bare ubuntu container (push to main +
-#                              nightly), and reds when the two disagree. A fetch that
-#                              fails reports `unproven` and reds; it never goes green.
-#
-# What it does (idempotent — re-running upgrades):
-#   1. `--container` → print the Docker Compose snippet and exit (no install).
-#   2. Ensure `uv` is present (installs via the official installer if missing).
-#   3. `uv tool install --upgrade gideon>=$PC_MIN_VERSION` (uv brings its own Python
-#      3.12). The floor bounds a downgrade attack without giving up --upgrade — see
-#      PC_MIN_VERSION below for why it lags the current release by one.
-#   4. Print next steps and offer to run `gideon setup`.
-#
-# POSIX sh only (no bashisms) so it runs under dash/ash/sh on Linux + macOS.
+# Gideon bootstrap installer. Run this file from the checkout, or supply
+# GIDEON_PACKAGE_SOURCE with an explicit package spec, wheel URL, or local path.
+# Publication destinations are configured by the operator; no release registry
+# or hosted install endpoint is assumed. The installer is POSIX sh and keeps
+# execution inside main so an incomplete download cannot execute a partial body.
 
 set -eu
 
-PC_PACKAGE="gideon"
-# Downgrade floor for the PyPI install below, and it is deliberately the PREVIOUS release
-# rather than the version this tree builds.
-#
-# WHAT IT BUYS. `--upgrade` already resolves to the newest release, so on an honest index the
-# floor forbids nothing (measured 2026-09-07, uv 0.12.5: `>=0.1.2` + `--upgrade` installs
-# 0.1.3). Its whole job is the dishonest case: a rolled-back or yanked-and-replaced index
-# that offers only old code. Unfloored, that installs silently — measured `+ gideon==
-# 0.1.0`, exit 0. Floored, uv exits 1 with "unsatisfiable". Loud beats quiet.
-#
-# WHY NOT THE CURRENT VERSION. A floor equal to pyproject's version is unsatisfiable for as
-# long as it takes that release to reach PyPI and its mirrors — measured, `>=0.1.4` exits 1
-# today with "only gideon<=0.1.3 is available". That window would break every install
-# AND full.yml's `install-smoke`, which runs this file for real on every push to main. One
-# release behind has always shipped already, so the floor can never demand a version that
-# does not exist yet. The cost is one unguarded step: a rollback to the immediately-previous
-# release still installs, which is the attacker's weakest move anyway.
-#
-# WHY IT CANNOT ROT. A hand-typed version in a shell script is the defect in #2554 (two
-# copies drifted three weeks). tests/test_website_installer.py pins this constant to
-# CHANGELOG.md's second-newest release heading, so it reds the release after it goes stale.
-PC_MIN_VERSION="0.1.2"
+GIDEON_PACKAGE="${GIDEON_PACKAGE_SOURCE:-}"
 UV_INSTALLER_URL="https://astral.sh/uv/install.sh"
 
-# ── tiny output helpers ──────────────────────────────────────────────────────
+                                                                               
 if [ -t 1 ]; then
     _bold=$(printf '\033[1m')
     _dim=$(printf '\033[2m')
@@ -74,20 +29,20 @@ die() {
 }
 have() { command -v "$1" >/dev/null 2>&1; }
 
-# ── --container: print the compose snippet and exit ──────────────────────────
+                                                                               
 print_container() {
     cat <<'EOF'
 Run Gideon with Docker Compose (self-hosters / Windows):
 
   cp .env.example .env        # optional: set provider keys / options
-  docker compose -f deploy/compose/compose.yaml up -d
+  docker compose -f infrastructure/compose/compose.yaml -f infrastructure/compose/compose.build.yaml up -d --build
 
 The dashboard comes up on http://127.0.0.1:10000 with a persistent volume.
-Details, backups, and updates: https://github.com/Gideon/Gideon/blob/main/docs/guides/containers.md
+Details, backups, and updates: docs/guides/containers.md in this checkout
 EOF
 }
 
-# ── OS / arch detection (informational + guard rails) ────────────────────────
+                                                                               
 detect_platform() {
     os=$(uname -s 2>/dev/null || echo unknown)
     arch=$(uname -m 2>/dev/null || echo unknown)
@@ -101,24 +56,24 @@ detect_platform() {
     say "${_dim}Detected platform: $os $arch${_reset}"
 }
 
-# ── ensure uv is installed ───────────────────────────────────────────────────
+                                                                               
 ensure_uv() {
     if have uv; then
         say "${_dim}uv already installed: $(uv --version 2>/dev/null || echo present)${_reset}"
         return 0
     fi
     step "Installing uv (Astral's Python package/tool manager)…"
-    # The trust chain for THIS fetch is TLS to astral.sh plus Astral's release hygiene, and
-    # nothing else. We do not verify these bytes: no digest, no version pin, and astral.sh
-    # redirects — so a compromised host, a mis-issued certificate or a hostile redirect
-    # would execute here. uv's installer does checksum-pin the uv BINARIES it goes on to
-    # fetch, but that is a different download and says nothing about the script we pipe into
-    # sh. (An earlier version of this comment claimed otherwise — see #2582.) This is the
-    # same posture as rustup, nvm and uv's own documented bootstrap: chosen, not overlooked.
-    # A user who wants a verified fetch can check THIS file's digest against the copy committed
-    # in the GitHub repo first; that path covers our bytes, not Astral's, and is written up
-    # under "Verify the one-liner" in docs/guides/getting-started.md §1.
-    # Prefer curl, fall back to wget.
+                                                                                           
+                                                                                          
+                                                                                       
+                                                                                        
+                                                                                            
+                                                                                         
+                                                                                            
+                                                                                               
+                                                                                           
+                                                                        
+                                     
     if have curl; then
         curl -fsSL "$UV_INSTALLER_URL" | sh
     elif have wget; then
@@ -126,8 +81,8 @@ ensure_uv() {
     else
         die "need curl or wget to install uv. Install one, or install uv manually: https://docs.astral.sh/uv/"
     fi
-    # The installer drops uv in ~/.local/bin (or $XDG_BIN_HOME / ~/.cargo/bin);
-    # make it visible to THIS shell so the tool-install below finds it.
+                                                                               
+                                                                       
     for d in "$HOME/.local/bin" "$HOME/.cargo/bin" "${XDG_BIN_HOME:-}"; do
         [ -n "$d" ] && [ -d "$d" ] && case ":$PATH:" in
             *":$d:"*) : ;;
@@ -138,14 +93,25 @@ ensure_uv() {
     have uv || die "uv was installed but is not on PATH. Open a new shell and re-run, or add ~/.local/bin to PATH."
 }
 
-# ── install / upgrade gideon ───────────────────────────────────────────
+                                                                         
+resolve_package_source() {
+    if [ -n "$GIDEON_PACKAGE" ]; then
+        return
+    fi
+    installer_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+    checkout=$(CDPATH='' cd -- "$installer_dir/../.." && pwd)
+    if [ -f "$checkout/pyproject.toml" ]; then
+        GIDEON_PACKAGE="$checkout"
+    else
+        die "set GIDEON_PACKAGE_SOURCE to a Gideon wheel, checkout path, or versioned package specification"
+    fi
+}
+
 install_gideon() {
-    step "Installing $PC_PACKAGE with uv (this brings its own Python 3.12)…"
-    # --upgrade makes re-runs idempotent: a fresh install the first time, an
-    # in-place upgrade to the latest release afterwards. The >= floor does not narrow that —
-    # --upgrade still resolves to the newest release; it only refuses an index that offers
-    # nothing at or above PC_MIN_VERSION. See PC_MIN_VERSION at the top of this file.
-    uv tool install --upgrade "$PC_PACKAGE>=$PC_MIN_VERSION"
+    step "Installing Gideon from $GIDEON_PACKAGE with uv…"
+    # An explicit source avoids installing an unrelated package with a similar name.
+    # Versioned release specifications are supplied by the configured publisher.
+    uv tool install --upgrade "$GIDEON_PACKAGE"
     have gideon || {
         warn "gideon installed but not yet on PATH."
         warn "Run 'uv tool update-shell' (or open a new shell), then 'gideon setup'."
@@ -153,7 +119,7 @@ install_gideon() {
     }
 }
 
-# ── offer to run setup ───────────────────────────────────────────────────────
+                                                                               
 offer_setup() {
     have gideon || return 0
     say ""
@@ -161,14 +127,14 @@ offer_setup() {
     say "  gideon setup      # configure your workspace directory + timezone"
     say "  gideon gateway    # start the dashboard on http://localhost:10000"
     say ""
-    # Only prompt when we have a real TTY (piped `curl | sh` has none — don't hang).
+                                                                                    
     if [ -t 0 ]; then
-        # The backticks below are prose the USER reads — they quote the command name in the
-        # prompt. Single quotes are deliberate: no expansion is wanted, and double quotes
-        # would turn `gideon setup` into a real command substitution. SC2016 flags the
-        # shape without knowing that, so it is silenced on the next line only.
-        # NOTE: a shellcheck directive must be a line of its own — trailing prose after the
-        # key=value is parsed as another pair and errors with SC1125.
+                                                                                           
+                                                                                         
+                                                                                      
+                                                                              
+                                                                                           
+                                                                     
         # shellcheck disable=SC2016
         printf 'Run `gideon setup` now? [y/N] '
         read -r reply || reply=n
@@ -190,7 +156,7 @@ main() {
                 ;;
             -h | --help)
                 say "Usage: install.sh [--container]"
-                say "  (no args)    install gideon via uv"
+                say "  (no args)    install Gideon from this checkout or GIDEON_PACKAGE_SOURCE via uv"
                 say "  --container  print the Docker Compose snippet instead"
                 exit 0
                 ;;
@@ -200,6 +166,7 @@ main() {
 
     say "${_bold}Gideon installer${_reset}"
     detect_platform
+    resolve_package_source
     ensure_uv
     install_gideon
     offer_setup

@@ -6,7 +6,7 @@ statement: >
   that text through `fence_untrusted` (or the documented fencing helper) before it reaches
   the model, so untrusted content can't be interpreted as instructions.
 appliesTo:
-  - src/gideon/**/*.py
+  - runtime/gideon/**/*.py
 scanner: fence-at-ingestion
 source: >
   Prompt-injection defense: untrusted text (inbound channel messages, fetched web pages,

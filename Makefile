@@ -1,242 +1,152 @@
-# Gideon build & deploy targets
+.DEFAULT_GOAL := help
 
-# The virtualenv lives INSIDE this repo at .venv/ (recreated here during the S12
-# workspace split — venvs are not relocatable). PyInstaller output stays intra-repo
-# too. Override VENV=... / PYI_BUNDLE_DIR=... if yours differ.
-PYTHON  ?= python3
-VENV    ?= .venv/bin
-PKG     := src/gideon
-TESTS   := tests
-# The self-development harness (Self-Verification): repo-inner dev infra beside src/,
-# linted to the same bar. Not shipped in the wheel (packages.find scopes to src/).
-HARNESS := harness
+PYTHON ?= .venv/bin/python
+VENV ?= .venv/bin
+DEV_HOME ?= $(CURDIR)/.dev-home
+DEV_PORT ?= 10000
 
-# Docker / Podman / Finch — the runtime is auto-detected (override with COMPOSE=...)
-COMPOSE ?= $(shell \
-	if command -v docker >/dev/null 2>&1; then echo "docker compose"; \
-	elif command -v podman-compose >/dev/null 2>&1; then echo "podman-compose"; \
-	elif command -v finch >/dev/null 2>&1; then echo "finch compose"; \
-	else echo "docker compose"; fi)
+PKG := runtime/gideon
+TESTS := checks/runtime
+HARNESS := checks/harness
+WEB_DIR := apps/console
+DESKTOP_DIR := apps/desktop
+PYI_BUNDLE_DIR := dist/gideon-backend
+BACKEND_RECIPE := tooling/packaging/runtime-bundle.spec
+PYTHON_SOURCES := $(PKG) $(TESTS) $(HARNESS)
 
-COMPOSE_DIR  := deploy/compose
-BASE_FILE    := -f $(COMPOSE_DIR)/compose.yaml
-BUILD_OVERLAY:= $(BASE_FILE) -f $(COMPOSE_DIR)/compose.build.yaml
+COMPOSE ?= $(or $(and $(shell command -v docker 2>/dev/null),docker compose),$(and $(shell command -v podman-compose 2>/dev/null),podman-compose),$(and $(shell command -v finch 2>/dev/null),finch compose),docker compose)
+COMPOSE_DIR := infrastructure/compose
+BASE_FILE := -f $(COMPOSE_DIR)/compose.yaml
+BUILD_OVERLAY := $(BASE_FILE) -f $(COMPOSE_DIR)/compose.build.yaml
 PROD_OVERLAY := $(BASE_FILE) -f $(COMPOSE_DIR)/compose.prod.yaml
-DEV_OVERLAY  := $(BUILD_OVERLAY) -f $(COMPOSE_DIR)/compose.dev.yaml
+DEV_OVERLAY := $(BUILD_OVERLAY) -f $(COMPOSE_DIR)/compose.dev.yaml
 
-WEB_DIR         := web
-DESKTOP_DIR     := desktop
-PYI_BUNDLE_DIR  := dist/gideon-backend
+RUN_COMMANDS := serve serve-fresh serve-web
+CHECK_COMMANDS := format lint test test-e2e test-visual harness-validate gates
+PACKAGE_COMMANDS := build web-build pyinstaller backend-build desktop desktop-dist desktop-dist-linux
+CONTAINER_COMMANDS := docker-build docker-up docker-down docker-logs docker-deploy dev-up dev-down
+COMMANDS := help $(RUN_COMMANDS) $(CHECK_COMMANDS) $(PACKAGE_COMMANDS) $(CONTAINER_COMMANDS) clean
 
-.PHONY: help format lint test test-e2e test-visual build clean harness-validate gates \
-        serve serve-fresh serve-web \
-        web-build backend-build pyinstaller \
-        desktop desktop-dist desktop-dist-linux \
-        docker-build docker-up docker-down docker-logs docker-deploy \
-        dev-up dev-down
+help.help := Show workspace commands
+help.serve := Run the gateway and compiled console
+help.serve-fresh := Compile the console before starting the gateway
+help.serve-web := Start the console development server
+help.format := Format Python runtime and checks
+help.lint := Check Python formatting, lint and types
+help.test := Run Python tests
+help.test-e2e := Run Chromium interaction checks
+help.test-visual := Compare Chromium visual snapshots
+help.harness-validate := Validate development harness specifications
+help.gates := Report all configured maintenance gates
+help.build := Package Python source and wheel distributions
+help.web-build := Install workspace dependencies and compile the console
+help.pyinstaller := Freeze the console and Python runtime
+help.backend-build := Build the standalone runtime bundle
+help.desktop := Stage the runtime bundle for Electron
+help.desktop-dist := Package the desktop application for macOS
+help.desktop-dist-linux := Package the Linux AppImage and Debian application
+help.docker-build := Build container images from this checkout
+help.docker-up := Start the default container stack
+help.docker-down := Stop the default container stack
+help.docker-logs := Follow container output
+help.docker-deploy := Build images and start the production stack
+help.dev-up := Build and start containers with live source mounts
+help.dev-down := Stop development containers
+help.clean := Remove generated packages, console output and caches
 
-## help: list available targets
+.PHONY: $(COMMANDS)
+
 help:
-	@grep -E '^##' Makefile | sed 's/^## //'
+	@printf '%-21s %s\n' $(foreach command,$(COMMANDS),'$(command)' '$(help.$(command))')
 
-# ── Python ─────────────────────────────────────────────────────────────────────
+serve:
+	GIDEON_HOME="$(DEV_HOME)" GIDEON_WORKSPACE="$(DEV_HOME)/workspace" \
+		GIDEON_BIND_HOST=0.0.0.0 GIDEON_BYPASS_LOCAL_NETWORKS=1 \
+		"$(VENV)/gideon" gateway --no-open --port "$(DEV_PORT)" --json-ready
 
-## format: auto-format source and tests with black + isort
+serve-fresh: web-build
+	$(MAKE) serve
+
+serve-web:
+	GIDEON_PORT="$(DEV_PORT)" npm --prefix "$(WEB_DIR)" run dev
+
 format:
-	$(PYTHON) -m black $(PKG) $(TESTS) $(HARNESS)
-	$(PYTHON) -m isort $(PKG) $(TESTS) $(HARNESS)
+	$(PYTHON) -m black $(PYTHON_SOURCES)
+	$(PYTHON) -m isort $(PYTHON_SOURCES)
 
-## lint: check formatting, run flake8 and mypy
 lint:
-	$(PYTHON) -m black --check $(PKG) $(TESTS) $(HARNESS)
-	$(PYTHON) -m isort --check-only $(PKG) $(TESTS) $(HARNESS)
-	$(PYTHON) -m flake8 $(PKG) $(TESTS) $(HARNESS)
+	$(PYTHON) -m black --check $(PYTHON_SOURCES)
+	$(PYTHON) -m isort --check-only $(PYTHON_SOURCES)
+	$(PYTHON) -m flake8 $(PYTHON_SOURCES)
 	$(PYTHON) -m mypy $(PKG) $(HARNESS)
 
-## test: run pytest
 test:
 	$(PYTHON) -m pytest
 
-## test-e2e: run the BROWSER gate against an isolated gateway (axe-per-route a11y, PWA,
-## visual regression, one real end-to-end chat turn). Deliberately NOT part of `make test`:
-## a bare pytest must stay a fast, offline, browser-free unit run, and this needs a built SPA
-## plus a booted gateway.
-##
-## Offline and credential-free by construction, which is the property worth stating: playwright's
-## own webServer boots the gateway with GIDEON_HOME under $$TMPDIR (never a real home), so
-## nothing here can touch a user's state. The gateway DOES have a model — the SCRIPTED provider
-## (src/gideon/llm/scripted.py), bound as the only providers[] entry and pinned as chat's
-## active model, which is what lets e2e/chat.spec.ts complete a real turn instead of every spec
-## carefully avoiding one. That changes neither property: the scripted provider is deterministic,
-## makes ZERO network calls and needs NO credential, and it refuses to construct unless
-## GIDEON_SCRIPTED_MODEL_SCRIPT names a script file, so it is inert everywhere the harness
-## has not explicitly opted in. So: still offline, still credential-free, and now also model-bound.
-## Readiness is the GIDEON_READY line, not a port probe, so the run cannot proceed
-## against a bound-but-unauthenticated gateway.
-##
-## One-time per machine: `npm ci` (from the REPO ROOT — never inside web/, see web-build) and
-## `npx playwright install chromium`. No spec list here on purpose: a new spec joins the gate the
-## moment it lands.
-## Screenshot assertions are IGNORED here, deliberately, and `test-visual` below owns them.
-## Measured on an untouched `main` checkout in this Darwin dev environment: e2e/visual.spec.ts is
-## 28 failed / 11 passed. The baselines are platform-qualified (see snapshotPathTemplate) and have
-## drifted from what this machine renders, which is a real thing to fix but has nothing to do with
-## whether the app is accessible, installable or functional. Folding an always-red suite into the
-## default browser gate would make the gate mean nothing — the failure mode every rail in this repo
-## is written to avoid.
-##
-## MEASURED OFFLINE AND CREDENTIAL-FREE (PHF-7's last clause), Darwin dev machine, 2026-08-26:
-## 484 passed / 8 skipped / 0 failed, 7.8m of Playwright time, 469s wall clock including `npm run
-## build` and both webServer boots. Run with HTTP_PROXY/HTTPS_PROXY/ALL_PROXY pointed at the closed
-## port 127.0.0.1:1 and NO_PROXY=localhost (localhost MUST stay exempt or the harness cannot reach
-## the gateway it just started), and with every provider credential unset from the environment.
-## Egress was DENIED, not merely unused — which is the distinction that makes the number mean
-## something. The gateway's update checker reached for `git fetch` and was refused 537 times over
-## the run, and the gate stayed green anyway. A run where nothing had tried would have proved
-## nothing about being offline; this one proves the app degrades rather than depends.
 test-e2e:
 	cd $(WEB_DIR) && npx playwright test --project=chromium --ignore-snapshots
 
-## test-visual: the visual-regression suite with screenshot assertions ENFORCED. Split out of
-## test-e2e because its baselines are environment-sensitive (28/39 red on a clean main checkout on
-## this dev machine) — run it when you intend to inspect or refresh them (`-u` updates), not as a
-## precondition for every other browser check.
 test-visual:
 	cd $(WEB_DIR) && npx playwright test e2e/visual.spec.ts --project=chromium
 
-## harness-validate: shape-validate + reference-resolve the self-dev harness specs
 harness-validate:
-	$(PYTHON) -m harness validate
+	$(PYTHON) -m checks.harness validate
 
-## gates: run the platform-hardening drift/inert/structural gates (config-baseline,
-## inert-surface, docs-lint, structural-size, structural-import-direction,
-## structural-duplication) and print ONE aggregate table — every failure in a single run
-## (never short-circuits). Exit 0 iff all gates pass. Each gate also has its own pytest
-## ratchet, and every baseline is shrink-only and FORBIDDEN to raise.
 gates:
-	$(PYTHON) scripts/gate_report.py
+	$(PYTHON) tooling/scripts/gate_report.py
 
-## build: build a distributable wheel + sdist
 build:
 	$(PYTHON) -m build
 
-## clean: remove build artifacts and caches
-clean:
-	rm -rf build/ dist/ *.egg-info src/*.egg-info
-	rm -rf .pytest_cache .mypy_cache .hypothesis .coverage htmlcov
-	rm -rf $(PKG)/static/dist $(WEB_DIR)/dist
-	rm -rf $(DESKTOP_DIR)/dist $(DESKTOP_DIR)/backend-dist
-	rm -f $(WEB_DIR)/tsconfig.tsbuildinfo
-	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-	find . -name .DS_Store -delete 2>/dev/null || true
-
-# ── Bare local dev servers (no container runtime, no desktop bundle) ───────────
-# The simplest way to run + debug: plain processes you can curl, tail, and
-# restart directly. GIDEON_HOME defaults to an isolated ./.dev-home so a
-# dev run never touches your real ~/.gideon.
-
-DEV_HOME      ?= $(CURDIR)/.dev-home
-DEV_PORT      ?= 10000
-
-## serve: run ONE gateway process that serves both the API and the built SPA on
-## DEV_PORT (default 10000). Requires a built web/dist (run `make web-build` once,
-## or `make serve-fresh`). Binds to the local network (0.0.0.0) and SKIPS token
-## auth for local-network clients (loopback + RFC1918/link-local/ULA) via
-## GIDEON_BYPASS_LOCAL_NETWORKS=1 — so any device on the dev LAN reaches the
-## dashboard with no token. (This is the IP-gated bypass, NOT AUTH_MODE=none,
-## which would force loopback-only; public/non-private origins still need a token.)
-serve:
-	GIDEON_HOME=$(DEV_HOME) GIDEON_WORKSPACE=$(DEV_HOME)/workspace \
-		GIDEON_BIND_HOST=0.0.0.0 \
-		GIDEON_BYPASS_LOCAL_NETWORKS=1 \
-		$(VENV)/gideon gateway --no-open --port $(DEV_PORT) --json-ready
-
-## serve-fresh: build the SPA, then `serve` (use after frontend changes).
-serve-fresh: web-build serve
-
-## serve-web: Vite dev server (HMR) on :3000, proxying /api + /ws to the gateway
-## on DEV_PORT. Run `make serve` in another shell first. Best for frontend
-## iteration; the gateway is the API/backend.
-serve-web:
-	cd $(WEB_DIR) && GIDEON_PORT=$(DEV_PORT) npm run dev
-
-# ── Web app & PyInstaller bundle ───────────────────────────────────────────────
-
-## web-build: compile the React SPA (web) into dist/ + link static/dist -> web/dist
-##
-## static/dist is a SYMLINK, not a copy: the gateway serves from
-## $(PKG)/static/dist (dashboard/handlers/core.py _DIST_DIR) while Vite builds to
-## $(WEB_DIR)/dist. Linking (not copying) keeps them a single source of truth so a
-## later `npm run build` is live immediately — matching what the runtime resolver
-## frontend.ensure_dev_dist_symlink() creates. A `cp -R` here would leave a frozen
-## real directory that shadows the runtime symlink and silently serves a stale SPA.
-# Install + build from the WORKSPACE ROOT (never `cd web`): the root package.json
-# owns the npm workspace (web, desktop) and its single package-lock.json. Running
-# npm inside a workspace member trips npm's optional-dependency bug (npm/cli#4828)
-# and skips platform-native binaries (rollup/esbuild/lightningcss) → a broken build.
 web-build:
 	npm ci
-	npm run build --workspace $(WEB_DIR)
-	mkdir -p $(PKG)/static
-	rm -rf $(PKG)/static/dist
-	ln -s ../../../$(WEB_DIR)/dist $(PKG)/static/dist
+	npm run build --workspace "$(WEB_DIR)"
+	mkdir -p "$(PKG)/static"
+	rm -rf "$(PKG)/static/dist"
+	ln -s "../../../$(WEB_DIR)/dist" "$(PKG)/static/dist"
 
-## pyinstaller: build a standalone backend bundle in dist/gideon-backend/
 pyinstaller: web-build
-	$(VENV)/pyinstaller gideon-backend.spec --noconfirm
+	"$(VENV)/pyinstaller" "$(BACKEND_RECIPE)" --noconfirm
 
-## backend-build: alias for `pyinstaller`
 backend-build: pyinstaller
 
-# ── Electron desktop app ───────────────────────────────────────────────────────
-
-## desktop: refresh web + backend bundle and stage them for the desktop app
 desktop: pyinstaller
-	rm -rf $(DESKTOP_DIR)/backend-dist
-	mkdir -p $(DESKTOP_DIR)/backend-dist
-	cp -R $(PYI_BUNDLE_DIR) $(DESKTOP_DIR)/backend-dist/
-	npm ci  # workspace root install (see web-build note); covers the desktop member
+	rm -rf "$(DESKTOP_DIR)/backend-dist"
+	mkdir -p "$(DESKTOP_DIR)/backend-dist"
+	cp -R "$(PYI_BUNDLE_DIR)" "$(DESKTOP_DIR)/backend-dist/"
 
-## desktop-dist: build a signed .dmg in desktop/dist/
 desktop-dist: desktop
-	cd $(DESKTOP_DIR) && npm run dist
+	npm --prefix "$(DESKTOP_DIR)" run dist
 
-## desktop-dist-linux: build the UNSIGNED Linux AppImage + .deb in desktop/dist/ (DC-6).
-## Run on a Linux host — release.yml's `desktop-linux` job is the canonical caller.
-## No signing step by design: Linux has no OS-level code-signing gate (nothing
-## analogous to Gatekeeper consumes a signature) — see docs/guides/desktop.md.
 desktop-dist-linux: desktop
-	cd $(DESKTOP_DIR) && npm run dist:linux
+	npm --prefix "$(DESKTOP_DIR)" run dist:linux
 
-# ── Container stack (runtime auto-detected; override e.g. COMPOSE="podman-compose") ──
-
-## docker-build: build images locally from the working tree
 docker-build:
 	$(COMPOSE) $(BUILD_OVERLAY) build
 
-## docker-up: start the stack in detached mode (uses published images by default)
 docker-up:
 	$(COMPOSE) $(BASE_FILE) up -d
 
-## docker-down: stop and remove containers (named volumes preserved)
 docker-down:
 	$(COMPOSE) $(BASE_FILE) down
 
-## docker-logs: tail logs from all containers
 docker-logs:
 	$(COMPOSE) $(BASE_FILE) logs -f
 
-## docker-deploy: build images and bring up the prod stack in one shot
-docker-deploy:
-	$(COMPOSE) $(BUILD_OVERLAY) build
+docker-deploy: docker-build
 	$(COMPOSE) $(PROD_OVERLAY) up -d
 
-# ── Dev compose stack (builds from the working tree + live source mount) ───────
-
-## dev-up: build from the working tree and start the dev stack with live reload
 dev-up:
 	$(COMPOSE) $(DEV_OVERLAY) up -d --build
 
-## dev-down: stop the dev stack
 dev-down:
 	$(COMPOSE) $(DEV_OVERLAY) down
+
+clean:
+	rm -rf build dist *.egg-info runtime/*.egg-info
+	rm -rf .pytest_cache .mypy_cache .hypothesis .coverage htmlcov
+	rm -rf "$(PKG)/static/dist" "$(WEB_DIR)/dist"
+	rm -rf "$(DESKTOP_DIR)/dist" "$(DESKTOP_DIR)/backend-dist"
+	rm -f "$(WEB_DIR)/tsconfig.tsbuildinfo"
+	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+	find . -name .DS_Store -delete 2>/dev/null || true

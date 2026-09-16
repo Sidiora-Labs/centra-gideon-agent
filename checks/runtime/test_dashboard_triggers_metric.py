@@ -21,8 +21,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from gideon.dashboard.handlers.triggers import api_triggers, unified_trigger_count
-from gideon.dashboard.state import DashboardState
+from gideon.interfaces.dashboard.handlers.triggers import (
+    api_triggers,
+    unified_trigger_count,
+)
+from gideon.interfaces.dashboard.state import ConsoleState
 
 
 @pytest.fixture
@@ -38,17 +41,18 @@ def home(tmp_path, monkeypatch):
     h = tmp_path / "home"
     h.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(h))
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: h)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: h)
     monkeypatch.setattr(
-        "gideon.dashboard.handlers.triggers.config_dir", lambda: h, raising=False
+        "gideon.interfaces.dashboard.handlers.triggers.config_dir",
+        lambda: h,
+        raising=False,
     )
-    monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: h, raising=False)
-    import gideon.event_triggers as et
-    from gideon.hooks import set_global_hook_store
+    monkeypatch.setattr(
+        "gideon.interfaces.dashboard.state.config_dir", lambda: h, raising=False
+    )
+    import gideon.automation.event_triggers as et
+    from gideon.engine.hooks import set_global_hook_store
 
-    # `EventTriggerEngine` memoizes its store on first use and `get_engine()` is process-global —
-    # reset before and after so a leak in either direction cannot make this read another test's
-    # store (the exact hazard `test_trigger_sources` documents).
     et._engine = None
     try:
         yield h
@@ -59,8 +63,8 @@ def home(tmp_path, monkeypatch):
 
 def _seed_schedule(home, trigger_id: str) -> None:
     """A real clock schedule, written to the unified store the way the runtime does."""
-    from gideon.triggers.models import Trigger
-    from gideon.triggers.store import TriggerStore
+    from gideon.automation.triggers.models import Trigger
+    from gideon.automation.triggers.store import TriggerStore
 
     TriggerStore(base_dir=home).upsert(
         Trigger(
@@ -75,13 +79,15 @@ def _seed_schedule(home, trigger_id: str) -> None:
 
 def _seed_lifecycle_hook(home, name: str) -> None:
     """A real lifecycle hook — a MemoryWrite hook, the globally-fired kind #773 names."""
-    from gideon.hooks import ScriptHookStore
+    from gideon.engine.hooks import ScriptHookStore
 
-    ScriptHookStore(home).create({"name": name, "event": "MemoryWrite", "provider": "notify"})
+    ScriptHookStore(home).create(
+        {"name": name, "event": "MemoryWrite", "provider": "notify"}
+    )
 
 
-def _state() -> DashboardState:
-    return DashboardState(
+def _state() -> ConsoleState:
+    return ConsoleState(
         sessions=MagicMock(count=0),
         start_time=time.time(),
         subagents=None,
@@ -89,7 +95,7 @@ def _state() -> DashboardState:
     )
 
 
-def _req(state: DashboardState, path: str = "/api/triggers"):
+def _req(state: ConsoleState, path: str = "/api/triggers"):
     from aiohttp import web
     from aiohttp.test_utils import make_mocked_request
 
@@ -137,10 +143,8 @@ def test_the_rail_count_equals_the_triggers_page(home) -> None:
 def test_api_status_surfaces_the_unified_triggers_field(home, monkeypatch) -> None:
     """End to end: /api/status carries `triggers` (unified) and no `cron_jobs`, while the
     schedule-store count still ships as the `cron` block."""
-    from gideon.dashboard import handlers_system
-
-    # Skip the background update-recheck task so the probe stays a pure read.
-    from gideon.dashboard.handlers import updates as _updates_mod
+    from gideon.interfaces.dashboard import handlers_system
+    from gideon.interfaces.dashboard.handlers import updates as _updates_mod
 
     monkeypatch.setattr(_updates_mod, "_last_update_check", time.time())
 
@@ -148,10 +152,12 @@ def test_api_status_surfaces_the_unified_triggers_field(home, monkeypatch) -> No
     _seed_lifecycle_hook(home, "hook-a")
 
     state = _state()
-    state._owner_hash = "test-hash"  # avoid the owner-hash executor round trip
+    state._owner_hash = "test-hash"
     resp = asyncio.run(handlers_system.api_status(_req(state, path="/api/status")))
     body = json.loads(resp.body.decode())
 
     assert body["triggers"] == 2, "schedule + lifecycle hook"
     assert "cron_jobs" not in body, "the flat schedule-only mirror is gone (#773)"
-    assert body["cron"]["total"] == 1, "the schedule-store block is unchanged and narrower"
+    assert (
+        body["cron"]["total"] == 1
+    ), "the schedule-store block is unchanged and narrower"

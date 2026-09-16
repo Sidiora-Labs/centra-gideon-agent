@@ -4,16 +4,16 @@ from unittest.mock import AsyncMock, MagicMock
 
 from aiohttp import web
 
-from gideon.dashboard.state import DashboardState
-from gideon.history import ConversationLog
+from gideon.cognition.history import ConversationLog
+from gideon.interfaces.dashboard.state import ConsoleState
 
 
 def _make_state(tmp_path, **kwargs):
-    """Create a DashboardState with mocked services and real ConversationLog."""
+    """Create a ConsoleState with mocked services and real ConversationLog."""
     sessions = MagicMock(count=0)
     sessions.remove = AsyncMock()
     sessions.get_pid = MagicMock(return_value=None)
-    return DashboardState(
+    return ConsoleState(
         sessions=sessions,
         start_time=0.0,
         conversation_log=ConversationLog(base_dir=tmp_path),
@@ -21,9 +21,9 @@ def _make_state(tmp_path, **kwargs):
     )
 
 
-def _make_app(state: DashboardState) -> web.Application:
+def _make_app(state: ConsoleState) -> web.Application:
     """Minimal aiohttp app with chat endpoints."""
-    from gideon.dashboard.chat import (
+    from gideon.interfaces.dashboard.chat import (
         api_chat,
         api_chat_mode,
         api_chat_session_approve,
@@ -49,7 +49,9 @@ def _make_app(state: DashboardState) -> web.Application:
     app.router.add_get("/api/chat/sessions", api_chat_sessions)
     app.router.add_post("/api/chat/sessions/cleanup", api_chat_sessions_cleanup)
     app.router.add_get("/api/chat/sessions/{session}", api_chat_session_detail)
-    app.router.add_post("/api/chat/sessions/{session}/approve", api_chat_session_approve)
+    app.router.add_post(
+        "/api/chat/sessions/{session}/approve", api_chat_session_approve
+    )
     app.router.add_post("/api/chat/sessions/{session}/stop", api_chat_session_stop)
     app.router.add_delete("/api/chat/sessions/{session}", api_chat_session_delete)
     app.router.add_post("/api/chat/sessions/{session}/resume", api_chat_session_resume)
@@ -58,7 +60,9 @@ def _make_app(state: DashboardState) -> web.Application:
     app.router.add_patch(
         "/api/chat/sessions/{session}/natural-voice", api_chat_session_natural_voice
     )
-    app.router.add_post("/api/chat/sessions/{session}/regenerate", api_chat_session_regenerate)
+    app.router.add_post(
+        "/api/chat/sessions/{session}/regenerate", api_chat_session_regenerate
+    )
     app.router.add_post("/api/chat/sessions/{session}/fork", api_chat_session_fork)
     app.router.add_post("/api/chat/sessions/{session}/undo", api_chat_session_undo)
     app.router.add_post(
@@ -69,9 +73,9 @@ def _make_app(state: DashboardState) -> web.Application:
     return app
 
 
-def _make_app_with_agent_routes(state: DashboardState) -> web.Application:
+def _make_app_with_agent_routes(state: ConsoleState) -> web.Application:
     """Minimal aiohttp app with chat endpoints including agent and create routes."""
-    from gideon.dashboard.chat import (
+    from gideon.interfaces.dashboard.chat import (
         api_chat_session_acp_agent,
         api_chat_session_agent,
         api_chat_session_approve,
@@ -88,19 +92,23 @@ def _make_app_with_agent_routes(state: DashboardState) -> web.Application:
     app.router.add_get("/api/chat/sessions", api_chat_sessions)
     app.router.add_post("/api/chat/sessions", api_chat_session_create)
     app.router.add_get("/api/chat/sessions/{session}", api_chat_session_detail)
-    app.router.add_post("/api/chat/sessions/{session}/approve", api_chat_session_approve)
+    app.router.add_post(
+        "/api/chat/sessions/{session}/approve", api_chat_session_approve
+    )
     app.router.add_post("/api/chat/sessions/{session}/agent", api_chat_session_agent)
-    app.router.add_post("/api/chat/sessions/{session}/acp-agent", api_chat_session_acp_agent)
+    app.router.add_post(
+        "/api/chat/sessions/{session}/acp-agent", api_chat_session_acp_agent
+    )
     app.router.add_delete("/api/chat/sessions/{session}", api_chat_session_delete)
     app.router.add_post("/api/chat/sessions/{session}/resume", api_chat_session_resume)
     app.router.add_patch("/api/chat/sessions/{session}/title", api_chat_session_rename)
     return app
 
 
-def _make_folder_app(state: DashboardState) -> web.Application:
+def _make_folder_app(state: ConsoleState) -> web.Application:
     """Minimal aiohttp app with folder endpoints."""
-    from gideon.dashboard.chat import api_chat_sessions
-    from gideon.dashboard.chat_folders import (
+    from gideon.interfaces.dashboard.chat import api_chat_sessions
+    from gideon.interfaces.dashboard.chat_folders import (
         api_chat_folder_create,
         api_chat_folder_delete,
         api_chat_folder_update,
@@ -121,9 +129,9 @@ def _make_folder_app(state: DashboardState) -> web.Application:
     return app
 
 
-def _make_tags_app(state: DashboardState) -> web.Application:
+def _make_tags_app(state: ConsoleState) -> web.Application:
     """Minimal aiohttp app with chat_tags endpoints (vocabulary, columns, drop, slot tags)."""
-    from gideon.dashboard.chat_tags import (
+    from gideon.interfaces.dashboard.chat_tags import (
         api_chat_session_drop,
         api_chat_session_tags,
         api_chat_tag_column_create,

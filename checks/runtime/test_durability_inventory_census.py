@@ -11,7 +11,7 @@ coverage test is a hard-coded list of nine paths that were fixed once (`TestGapC
 could never have caught a tenth. The nine before it were found the same way: by someone
 looking. This walks the source instead.
 
-**How it reads the source.** Every `config_dir() / X` in `src/gideon`, where `X` is a
+**How it reads the source.** Every `config_dir() / X` in `runtime/gideon`, where `X` is a
 string literal or a module-level constant resolved in the same file. That second form is not a
 nicety: `themes` is spelled `config_dir() / _THEMES_DIR_NAME`, so a literal-only scan would
 have missed exactly the bug that prompted this.
@@ -33,11 +33,10 @@ from __future__ import annotations
 import pathlib
 import re
 
-from gideon.durability import inventory as inv
+from gideon.operations.durability import inventory as inv
 
-_SRC = pathlib.Path(__file__).resolve().parent.parent / "src" / "gideon"
+_SRC = pathlib.Path(__file__).resolve().parent.parent.parent / "runtime" / "gideon"
 
-#: `config_dir() / "literal"` or `config_dir() / CONSTANT`.
 _USE = re.compile(r'config_dir\(\)\s*/\s*(?:"([^"]+)"|([A-Za-z_][A-Za-z0-9_]*))')
 
 
@@ -60,10 +59,6 @@ def _censused() -> tuple[dict[str, set[str]], set[str]]:
     return resolved, unresolved
 
 
-#: Undeclared home locations, pinned. Each line is debt or a deliberate non-state file.
-#:
-#: DELIBERATE — logs, pids and locks are runtime noise, re-created on demand, and a backup
-#: that restored a stale lock or a dead pid would be worse than one that omits them:
 _NOT_STATE = frozenset(
     {
         "agent_pids.txt",
@@ -72,27 +67,15 @@ _NOT_STATE = frozenset(
         "gateway.log",
         "gateway-restart.log",
         "locks",
-        "loop.md",  # a rendered prompt, re-rendered per run
-        # The socket this gateway bound + the pid that bound it (`gateway_base.RUNTIME_FILE`,
-        # #2539). Not state: written after bind, removed on shutdown, ignored once its pid is
-        # gone. Carrying it in a snapshot would be the exact bug it exists to fix — a restored
-        # home would address its children at a port a DIFFERENT instance bound. Also in
-        # `durability.inventory.IGNORED`, for the same reason `machine_id` is.
+        "loop.md",
         "gateway.runtime.json",
     }
 )
 
-#: DEBT — real state that is not declared, so `gideon snapshot` does not carry it.
-#: Filed as its own issue; each needs a `kind`/`domain`/`merge` decision that must not be
-#: guessed. Shrinking this set is the point; adding to it should require the same argument.
 _UNDECLARED_DEBT = frozenset(
     {
         "app_messages",
         "auth",
-        # BA-5's browse kill switch, the sibling of `incident.json` below. Whether a restore
-        # should carry "browse is stopped" is a real kind/domain/merge decision: a human pulled
-        # it, so re-enabling browsing on restore may be wrong, yet carrying the stop onto a
-        # different machine may be too. Pinned as debt rather than guessed.
         "browse_kill.json",
         "chat_plans",
         "control_bridge.json",
@@ -107,18 +90,7 @@ _UNDECLARED_DEBT = frozenset(
         "incident.json",
         "onboarding",
         "packs",
-        # Caught BY THIS RAIL during review, on code that landed while the PR was open
-        # (MOBILE-COMPANION MC-5's web-push delivery). Web-push subscriptions identify a
-        # specific browser/device, so whether a restore should carry them is a real question —
-        # keeping them means notifications survive a same-machine restore, and means stale
-        # endpoints on a different one. Pinned rather than guessed, and raised on the debt issue
-        # for the atom's owner.
         "push_subscriptions.json",
-        # MC-9's native-push sibling of the entry above, pinned on the same argument: a relay
-        # token identifies one physical handset, so whether a restore should carry it is the
-        # SAME real kind/domain/merge question — keeping it means native pings survive a
-        # same-machine restore, and means a stale token pointed at a different machine's app
-        # install on any other. Raised on the same debt issue as push_subscriptions.json.
         "push_relay_tokens.json",
         "recent_projects.json",
         "research_reports.json",
@@ -129,12 +101,6 @@ _UNDECLARED_DEBT = frozenset(
         "sources",
         "surfaces",
         "update_check.json",
-        # RUM-2's releases-LIST cache — the direct twin of update_check.json above,
-        # written by the same self_update.py. It is the ETag-cached, offline-tolerant
-        # releases view the channel/pin resolver reads, refetched on the next poll, and
-        # (like its twin) it is IGNORED by the durability inventory. Pinned here for the
-        # same reason: it carries no unique truth, so a restored stale release list would
-        # be worse than the empty one the next check refills.
         "update_releases.json",
     }
 )
@@ -147,7 +113,9 @@ def _declared_tops() -> set[str]:
 def test_the_census_is_not_vacuous():
     """The floor: a scan that finds nothing would make every assertion below pass."""
     resolved, _ = _censused()
-    assert len(resolved) >= 60, f"only {len(resolved)} home locations censused — regex broke"
+    assert (
+        len(resolved) >= 60
+    ), f"only {len(resolved)} home locations censused — regex broke"
     assert len(_declared_tops()) >= 50, "the inventory read back nearly empty"
 
 
@@ -182,7 +150,8 @@ def test_every_censused_location_is_declared_or_pinned():
 
 def test_the_pinned_sets_have_no_stale_entries():
     """A pin for a location nothing uses any more, or one that has since been declared, is a
-    row that pins nothing — and it would hide the next real gap behind a passing test."""
+    row that pins nothing — and it would hide the next real gap behind a passing test.
+    """
     resolved, _ = _censused()
     declared = _declared_tops()
     gone = sorted((_NOT_STATE | _UNDECLARED_DEBT) - set(resolved))

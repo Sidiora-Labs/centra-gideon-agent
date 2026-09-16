@@ -27,8 +27,7 @@ import asyncio
 
 import pytest
 
-from gideon.tasks.models import Task, TaskStatus
-from gideon.workflows.verified_done import (
+from gideon.automation.workflows.verified_done import (
     AGENT_BLOCKED_KINDS,
     ALLOWED_TARGETS,
     CASCADE_BLOCKED_KIND,
@@ -55,12 +54,10 @@ from gideon.workflows.verified_done import (
     sticky_cancel,
     sweep,
 )
+from gideon.engine.tasks.models import Task, TaskStatus
 
 HOUR = 3600.0
 NOW = 1_700_000_000.0
-
-
-# ── the tristate is real ──
 
 
 def test_the_REAL_verify_machinery_returns_a_tristate():
@@ -69,7 +66,7 @@ def test_the_REAL_verify_machinery_returns_a_tristate():
     missing binary and a command the safety screen refuses are indistinguishable from a failing
     check
     unless the tristate is honored."""
-    from gideon.loop.gates import run_verify_command
+    from gideon.automation.loop.gates import run_verify_command
 
     async def probe():
         return (
@@ -87,32 +84,38 @@ def test_the_REAL_verify_machinery_returns_a_tristate():
 
 
 def test_an_UNRUNNABLE_check_is_not_a_pass():
-    verdict = Verdict(results=[CheckResult("command", True), CheckResult("command", None)])
+    verdict = Verdict(
+        results=[CheckResult("command", True), CheckResult("command", None)]
+    )
     assert verdict.passed is None
 
 
 def test_UNRUNNABLE_wins_over_failed():
     """ "One check failed and one could not run" is a criterion nobody has evaluated. Calling it a
     failure would send the user after the wrong problem."""
-    verdict = Verdict(results=[CheckResult("command", False), CheckResult("command", None)])
+    verdict = Verdict(
+        results=[CheckResult("command", False), CheckResult("command", None)]
+    )
     assert verdict.passed is None
 
 
 def test_every_check_must_pass_for_a_pass():
     """Not a threshold: an acceptance criterion with a failed check has not been met, and a 0.8
     score is
-    not "mostly done" — it is one unmet requirement. The scoring exists for the report."""
-    verdict = Verdict(results=[CheckResult("command", True), CheckResult("command", False)])
+    not "mostly done" — it is one unmet requirement. The scoring exists for the report.
+    """
+    verdict = Verdict(
+        results=[CheckResult("command", True), CheckResult("command", False)]
+    )
     assert verdict.passed is False
     assert 0 < verdict.score < 1
 
 
-# ── pass-state gating ──
-
-
 def test_a_claimed_completion_with_a_FAILED_criterion_projects_BLOCKED():
     """The worker's claim is an input, not the answer."""
-    status, kind = project_verified_status(Verdict(results=[CheckResult("command", False)]))
+    status, kind = project_verified_status(
+        Verdict(results=[CheckResult("command", False)])
+    )
     assert status is TaskStatus.BLOCKED
     assert kind == "needs_input"
 
@@ -121,13 +124,17 @@ def test_an_UNRUNNABLE_criterion_blocks_with_CAPABILITY():
     """The check needs something the environment lacks — a different problem from the work being
     wrong,
     and it points at a different fix."""
-    status, kind = project_verified_status(Verdict(results=[CheckResult("command", None)]))
+    status, kind = project_verified_status(
+        Verdict(results=[CheckResult("command", None)])
+    )
     assert status is TaskStatus.BLOCKED
     assert kind == "capability"
 
 
 def test_a_PASSING_criterion_projects_done():
-    status, kind = project_verified_status(Verdict(results=[CheckResult("command", True)]))
+    status, kind = project_verified_status(
+        Verdict(results=[CheckResult("command", True)])
+    )
     assert status is TaskStatus.DONE
     assert kind == ""
 
@@ -145,7 +152,8 @@ def test_a_CRITERION_FREE_task_stays_completable():
 
 def test_the_gating_agrees_with_the_EXISTING_exit_criteria_seam():
     """`Task.can_mark_complete` already says a task with no exit criteria is freely completable. Two
-    seams disagreeing about the same question would make completability depend on which one ran."""
+    seams disagreeing about the same question would make completability depend on which one ran.
+    """
     assert Task(id="t", title="x").can_mark_complete() is True
     assert project_verified_status(Verdict())[0] is TaskStatus.DONE
 
@@ -163,9 +171,6 @@ def test_a_non_done_claim_passes_through_unjudged():
 def test_the_engines_flip_is_IRREVERSIBLE():
     """Re-evaluating would make "done" depend on when you asked."""
     assert criterion_is_irreversible() is True
-
-
-# ── the actor matrix ──
 
 
 def test_an_AGENT_cannot_mark_its_own_task_done():
@@ -191,7 +196,9 @@ def test_an_AGENT_cannot_claim_IN_PROGRESS():
 
 
 def test_an_AGENT_may_PROPOSE_a_block():
-    ok, why = may_transition(Actor.AGENT, TaskStatus.BLOCKED, blocked_kind="needs_input")
+    ok, why = may_transition(
+        Actor.AGENT, TaskStatus.BLOCKED, blocked_kind="needs_input"
+    )
     assert ok is True
     assert why == ""
 
@@ -261,9 +268,6 @@ def test_the_projection_pausing_statuses_are_ENUMERATED():
     assert TaskStatus.CANCELLED in PROJECTION_PAUSING_STATUSES
 
 
-# ── the acceptance schema ──
-
-
 def test_a_BARE_STRING_criterion_becomes_one_command_check():
     """The common authoring shape (`done_criterion: "pytest -q"`). Demanding the object form would
     make
@@ -318,11 +322,10 @@ def test_the_score_is_WEIGHTED():
 
 
 def test_a_check_round_trips():
-    check = Check(kind=CheckKind.FILE_PHRASE, path="README.md", required_phrases=["install"])
+    check = Check(
+        kind=CheckKind.FILE_PHRASE, path="README.md", required_phrases=["install"]
+    )
     assert Check.from_dict(check.to_dict()) == check
-
-
-# ── file_phrase evaluation ──
 
 
 def test_a_present_phrase_PASSES():
@@ -332,7 +335,9 @@ def test_a_present_phrase_PASSES():
 
 
 def test_a_MISSING_phrase_fails_and_names_it():
-    check = Check(kind=CheckKind.FILE_PHRASE, path="a.md", required_phrases=["hello", "world"])
+    check = Check(
+        kind=CheckKind.FILE_PHRASE, path="a.md", required_phrases=["hello", "world"]
+    )
     result = evaluate_file_phrase(check, lambda _p: "say hello")
     assert result.passed is False
     assert "world" in result.detail
@@ -354,9 +359,6 @@ def test_a_RAISING_reader_is_not_a_failure_either():
     result = evaluate_file_phrase(check, boom)
     assert result.passed is None
     assert "PermissionError" in result.detail
-
-
-# ── cascade-fail ──
 
 
 def graph() -> dict[str, list[str]]:
@@ -443,9 +445,6 @@ def test_an_empty_graph_cascades_nothing():
     assert cascade_blocked("gather", "x", {}).blocked == []
 
 
-# ── the completion record ──
-
-
 def test_every_completion_SECTION_is_present():
     """An absent "risks and follow-ups" reads as "there are none", which is the claim a reader most
     wants
@@ -489,9 +488,6 @@ def test_an_OPEN_task_with_no_evidence_is_not_flagged():
     assert done_without_evidence(TaskStatus.OPEN, []) is False
 
 
-# ── the stuck-work sweep ──
-
-
 class FakeTask:
     def __init__(self, task_id, status, **kw):
         self.id = task_id
@@ -505,7 +501,11 @@ class FakeTask:
 def iso(epoch: float) -> str:
     from datetime import datetime, timezone
 
-    return datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+    return (
+        datetime.fromtimestamp(epoch, tz=timezone.utc)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
 
 
 def test_a_SILENT_in_progress_task_is_flagged():
@@ -528,7 +528,9 @@ def test_a_RECENTLY_beating_task_is_not_flagged():
 
 def test_an_UNCLAIMED_ready_task_is_flagged():
     """A task nobody picked up is either mis-scoped or waiting on something nobody recorded."""
-    old = FakeTask("t2", TaskStatus.OPEN, created_at=iso(NOW - (UNCLAIMED_STALE_HOURS + 1) * HOUR))
+    old = FakeTask(
+        "t2", TaskStatus.OPEN, created_at=iso(NOW - (UNCLAIMED_STALE_HOURS + 1) * HOUR)
+    )
     findings = sweep([old], now=NOW)
     assert [f.kind for f in findings] == ["unclaimed"]
 
@@ -547,10 +549,12 @@ def test_the_sweep_reports_rather_than_FIXES():
     """Auto-resolving a stall would hide the condition that caused it, and the same stall would
     recur with
     nothing recorded."""
-    stale = FakeTask("t1", TaskStatus.IN_PROGRESS, last_heartbeat_at=iso(NOW - 999 * 60))
+    stale = FakeTask(
+        "t1", TaskStatus.IN_PROGRESS, last_heartbeat_at=iso(NOW - 999 * 60)
+    )
     findings = sweep([stale], now=NOW)
     assert findings
-    assert stale.status is TaskStatus.IN_PROGRESS  # untouched
+    assert stale.status is TaskStatus.IN_PROGRESS
 
 
 def test_an_UNPARSEABLE_timestamp_does_not_stop_the_sweep():
@@ -579,9 +583,6 @@ def test_an_empty_sweep_finds_nothing():
     assert sweep([], now=NOW) == []
 
 
-# ── idempotent timing ──
-
-
 def test_CANCELLED_is_sticky():
     """Projection is an idempotent REBUILD — the normal path. Without stickiness every rebuild
     would
@@ -596,9 +597,11 @@ def test_a_non_cancelled_task_takes_the_new_status():
 def test_started_at_is_written_ONCE():
     """A retry that rewrote it would make a task running for an hour look like it
     started thirty seconds ago — and the heartbeat sweep reads exactly that field.
-    ago — and the heartbeat sweep reads exactly that field to decide whether work has stalled."""
+    ago — and the heartbeat sweep reads exactly that field to decide whether work has stalled.
+    """
     assert (
-        coalesce_started("2026-01-01T00:00:00Z", "2026-08-02T00:00:00Z") == "2026-01-01T00:00:00Z"
+        coalesce_started("2026-01-01T00:00:00Z", "2026-08-02T00:00:00Z")
+        == "2026-01-01T00:00:00Z"
     )
 
 

@@ -36,7 +36,7 @@ from pathlib import Path
 
 import pytest
 
-from gideon.computer_use import enable_state as ES
+from gideon.integrations.computer_use import enable_state as ES
 
 
 @pytest.fixture()
@@ -50,7 +50,7 @@ def keystone(tmp_path, monkeypatch):
     """
     path = tmp_path / "governance" / ES.ENABLE_FILENAME
     path.parent.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     monkeypatch.setenv(ES.ENABLE_PATH_ENV, str(path))
     ES.reset_enable_state()
@@ -64,9 +64,6 @@ def _write(path: Path, document: str) -> None:
     ES.reset_enable_state()
 
 
-#: Names an operator did NOT write when they wrote "TextEdit". Each is one normalisation a
-#: generous implementation might apply: case-folding, superstring, substring, bundle-id
-#: equivalence, whitespace tolerance, path/extension tolerance.
 _NEARBY_TO_TEXTEDIT = (
     "textedit",
     "TEXTEDIT",
@@ -81,20 +78,19 @@ _NEARBY_TO_TEXTEDIT = (
 )
 
 
-# ── 1. the allowlist parses, and the accessor is deterministic ────────────────
-
-
 def test_an_allowlist_parses_and_reads_back_in_a_deterministic_order(keystone):
     """The positive case. Sorted rather than document-ordered so two documents naming the
     same targets resolve identically — an allowlist is a set, and a caller that happened to
     depend on typing order would be depending on nothing."""
-    _write(keystone, '{"version": 1, "enabled": true, "apps": ["Safari", "Mail", "Notes"]}')
+    _write(
+        keystone, '{"version": 1, "enabled": true, "apps": ["Safari", "Mail", "Notes"]}'
+    )
     state = ES.active_enable_state()
     assert state.enabled is True
     assert ES.allowed_apps() == ("Mail", "Notes", "Safari")
-    # Same set, different typing order → same tuple. Without this the order assertion above
-    # could be satisfied by "whatever the operator typed", which is not deterministic.
-    _write(keystone, '{"version": 1, "enabled": true, "apps": ["Notes", "Safari", "Mail"]}')
+    _write(
+        keystone, '{"version": 1, "enabled": true, "apps": ["Notes", "Safari", "Mail"]}'
+    )
     assert ES.allowed_apps() == ("Mail", "Notes", "Safari")
 
 
@@ -105,9 +101,6 @@ def test_the_allowlist_is_read_through_the_accessor_not_the_field(keystone):
     assert ES.allowed_apps() == ES.active_enable_state().apps == ("Mail",)
 
 
-# ── 2. fail closed: empty means NOTHING, never everything ────────────────────
-
-
 @pytest.mark.parametrize(
     "document",
     [
@@ -116,7 +109,9 @@ def test_the_allowlist_is_read_through_the_accessor_not_the_field(keystone):
     ],
     ids=["absent-apps", "explicit-empty-apps"],
 )
-def test_an_empty_allowlist_permits_nothing_while_the_keystone_stays_armed(keystone, document):
+def test_an_empty_allowlist_permits_nothing_while_the_keystone_stays_armed(
+    keystone, document
+):
     """Absent and `[]` behave IDENTICALLY, and both mean no app may be driven.
 
     They are identical by construction (`data.get("apps", [])`) rather than by two branches,
@@ -130,15 +125,14 @@ def test_an_empty_allowlist_permits_nothing_while_the_keystone_stays_armed(keyst
     `EnableState.detail` exists to preserve.
     """
     _write(keystone, document)
-    assert ES.is_enabled() is True, "the capability is armed; only its target list is empty"
+    assert (
+        ES.is_enabled() is True
+    ), "the capability is armed; only its target list is empty"
 
     allowed = ES.allowed_apps()
     assert allowed == ()
     assert len(allowed) == 0
     assert bool(allowed) is False
-    # The meaning, asserted rather than implied: a consumer's `if name in allowed_apps()`
-    # says no to every name there is. An empty tuple that some caller read as "unset, so
-    # allow all" is exactly the fail-open this test exists to make impossible.
     for name in ("TextEdit", "Mail", "Safari", "1Password", "Terminal", "*", ""):
         assert name not in allowed, f"an empty allowlist admitted {name!r}"
 
@@ -153,29 +147,53 @@ def test_the_empty_allowlist_is_visible_in_the_state_detail(keystone):
     assert "no app" in detail
 
 
-# ── 3. refused, never normalised ─────────────────────────────────────────────
-
-
 @pytest.mark.parametrize(
     ("document", "needle"),
     [
         ('{"version": 1, "enabled": true, "apps": "Mail"}', "not a list of app names"),
-        ('{"version": 1, "enabled": true, "apps": {"Mail": true}}', "not a list of app names"),
+        (
+            '{"version": 1, "enabled": true, "apps": {"Mail": true}}',
+            "not a list of app names",
+        ),
         ('{"version": 1, "enabled": true, "apps": true}', "not a list of app names"),
         ('{"version": 1, "enabled": true, "apps": 3}', "not a list of app names"),
         ('{"version": 1, "enabled": true, "apps": null}', "not a list of app names"),
-        ('{"version": 1, "enabled": true, "apps": ["Mail", 7]}', "which is not a string"),
-        ('{"version": 1, "enabled": true, "apps": ["Mail", null]}', "which is not a string"),
-        ('{"version": 1, "enabled": true, "apps": [["Mail"]]}', "which is not a string"),
-        ('{"version": 1, "enabled": true, "apps": ["Mail", true]}', "which is not a string"),
+        (
+            '{"version": 1, "enabled": true, "apps": ["Mail", 7]}',
+            "which is not a string",
+        ),
+        (
+            '{"version": 1, "enabled": true, "apps": ["Mail", null]}',
+            "which is not a string",
+        ),
+        (
+            '{"version": 1, "enabled": true, "apps": [["Mail"]]}',
+            "which is not a string",
+        ),
+        (
+            '{"version": 1, "enabled": true, "apps": ["Mail", true]}',
+            "which is not a string",
+        ),
         ('{"version": 1, "enabled": true, "apps": [""]}', "an empty name"),
         ('{"version": 1, "enabled": true, "apps": ["Mail", ""]}', "an empty name"),
         ('{"version": 1, "enabled": true, "apps": ["   "]}', "an empty name"),
-        ('{"version": 1, "enabled": true, "apps": [" Mail "]}', "padded with whitespace"),
-        ('{"version": 1, "enabled": true, "apps": ["Mail\\n"]}', "padded with whitespace"),
-        ('{"version": 1, "enabled": true, "apps": ["\\tMail"]}', "padded with whitespace"),
+        (
+            '{"version": 1, "enabled": true, "apps": [" Mail "]}',
+            "padded with whitespace",
+        ),
+        (
+            '{"version": 1, "enabled": true, "apps": ["Mail\\n"]}',
+            "padded with whitespace",
+        ),
+        (
+            '{"version": 1, "enabled": true, "apps": ["\\tMail"]}',
+            "padded with whitespace",
+        ),
         ('{"version": 1, "enabled": true, "apps": ["Mail", "Mail"]}', "twice"),
-        ('{"version": 1, "enabled": true, "apps": ["Mail", "Safari", "Mail"]}', "twice"),
+        (
+            '{"version": 1, "enabled": true, "apps": ["Mail", "Safari", "Mail"]}',
+            "twice",
+        ),
     ],
     ids=[
         "apps-is-a-string",
@@ -197,7 +215,9 @@ def test_the_empty_allowlist_is_visible_in_the_state_detail(keystone):
         "duplicate-among-others",
     ],
 )
-def test_a_malformed_allowlist_is_refused_rather_than_normalised(keystone, document, needle):
+def test_a_malformed_allowlist_is_refused_rather_than_normalised(
+    keystone, document, needle
+):
     """Every malformed shape resolves to OFF with an allowlist of nothing.
 
     The `enabled is False` assertion is the one that catches normalisation: an implementation
@@ -229,9 +249,6 @@ def test_a_padded_entry_is_not_silently_trimmed_into_a_working_one(keystone):
     assert " Mail " not in ES.allowed_apps()
 
 
-# ── 4. exact comparison, including the names that must NOT match ─────────────
-
-
 def test_the_allowlist_is_exactly_what_was_written_and_nothing_near_it(keystone):
     """The comparison rule: EXACT string equality, no coercion of any kind.
 
@@ -251,7 +268,9 @@ def test_the_allowlist_is_exactly_what_was_written_and_nothing_near_it(keystone)
     allowed = ES.allowed_apps()
     assert allowed == ("TextEdit",)
     for nearby in _NEARBY_TO_TEXTEDIT:
-        assert nearby not in allowed, f"the allowlist admitted the nearby name {nearby!r}"
+        assert (
+            nearby not in allowed
+        ), f"the allowlist admitted the nearby name {nearby!r}"
 
 
 def test_case_variant_names_are_two_distinct_entries_not_a_duplicate(keystone):
@@ -267,9 +286,6 @@ def test_case_variant_names_are_two_distinct_entries_not_a_duplicate(keystone):
     _write(keystone, '{"version": 1, "enabled": true, "apps": ["Mail", "mail"]}')
     assert ES.is_enabled() is True
     assert ES.allowed_apps() == ("Mail", "mail")
-
-
-# ── 5. DCU-1's strict parse survives the extension ───────────────────────────
 
 
 def test_an_unknown_key_is_still_refused_alongside_a_valid_allowlist(keystone):
@@ -297,16 +313,30 @@ def test_a_different_schema_version_is_still_refused_not_best_effort_parsed(keys
     state = ES.active_enable_state()
     assert state.enabled is False
     assert "declares version 2" in state.detail
-    assert ES.allowed_apps() == (), "a version this build cannot read granted an allowlist"
+    assert (
+        ES.allowed_apps() == ()
+    ), "a version this build cannot read granted an allowlist"
     assert ES.SCHEMA_VERSION == 1
 
 
 @pytest.mark.parametrize(
     ("key", "document", "needle"),
     [
-        ("version", '{"version": 9, "enabled": true, "apps": ["Mail"]}', "declares version 9"),
-        ("enabled", '{"version": 1, "enabled": "yes", "apps": ["Mail"]}', "not the literal true"),
-        ("apps", '{"version": 1, "enabled": true, "apps": "Mail"}', "not a list of app names"),
+        (
+            "version",
+            '{"version": 9, "enabled": true, "apps": ["Mail"]}',
+            "declares version 9",
+        ),
+        (
+            "enabled",
+            '{"version": 1, "enabled": "yes", "apps": ["Mail"]}',
+            "not the literal true",
+        ),
+        (
+            "apps",
+            '{"version": 1, "enabled": true, "apps": "Mail"}',
+            "not a list of app names",
+        ),
         (
             "unattended",
             '{"version": 1, "enabled": true, "unattended": "computer_click"}',
@@ -341,9 +371,6 @@ def test_the_allowed_key_set_is_exactly_these_four(keystone):
     assert set(json.loads(ES.ENABLE_DOCUMENT)) <= set(ES._ALLOWED_KEYS)
 
 
-# ── 6. the quoted document is a document that works ─────────────────────────
-
-
 def test_the_quoted_enable_document_parses_and_can_actually_drive_something(keystone):
     """The invariant the module's own comment claims: the bytes the FIX line tells an operator
     to write are bytes this parser accepts, resolving to a state that can drive something.
@@ -361,7 +388,6 @@ def test_the_quoted_enable_document_parses_and_can_actually_drive_something(keys
     assert state.enabled is True
     assert state.detail and "EMPTY" not in state.detail
     assert ES.allowed_apps(), "the document quoted in the FIX line can drive nothing"
-    # And the FIX line still quotes it verbatim, so the two cannot drift apart.
     fix = ES.disabled_error("computer_fixture_press", ES.EnableState()).fix
     assert ES.ENABLE_DOCUMENT in fix
     assert "apps" in fix, "the FIX line must say what the allowlist is for"
@@ -370,7 +396,8 @@ def test_the_quoted_enable_document_parses_and_can_actually_drive_something(keys
 
 def test_the_boot_record_names_the_allowlist(keystone, caplog):
     """The armed log line is the tamper-evidence surface, and "armed" and "armed for what"
-    are different facts to an operator skimming it. The second one is the blast radius."""
+    are different facts to an operator skimming it. The second one is the blast radius.
+    """
     _write(keystone, '{"version": 1, "enabled": true, "apps": ["Mail", "Safari"]}')
     with caplog.at_level("WARNING"):
         state = ES.ensure_computer_use_boot()
@@ -378,9 +405,6 @@ def test_the_boot_record_names_the_allowlist(keystone, caplog):
     armed = [r.getMessage() for r in caplog.records if "ENABLED" in r.getMessage()]
     assert armed, "an armed keystone must be logged at WARNING"
     assert "Mail" in armed[0] and "Safari" in armed[0]
-
-
-# ── 7. one reader ────────────────────────────────────────────────────────────
 
 
 def test_the_apps_field_has_exactly_one_reader(keystone):

@@ -1,36 +1,13 @@
-"""First-run seeding of the curated app registry, railed on the REAL boot path.
-
-ET-4 ships ``https://github.com/Gideon/registry.git`` as a *seeded* default git
-source: the gateway writes it into ``apps/app-sources.json`` once, as an ordinary
-REMOVABLE row, alongside a ``"seeded": ["registry"]`` marker whose job is to keep a
-user's removal from being undone by the next start.
-
-``tests/test_app_catalog.py`` rails the SEEDER — every assertion there calls
-``catalog.seed_default_git_sources()`` itself. That leaves the WIRE unrailed: deleting
-``app.on_startup.append(_app_sources_seed_startup)`` from ``dashboard/server.py`` keeps
-that entire suite green while first-run seeding silently never happens (measured — see
-the module docstring of that file for the seeder's own rails, and this file's history
-for the falsification). A seeder nobody calls is an inert control, and the done-clause
-is "seeds into app-sources.json on first run", not "a helper exists". So these rails
-boot the real gateway and assert what the user's Store actually reads — over HTTP, from
-the file — never by calling the seeder.
-
-Isolation: ``GIDEON_HOME`` is the seam, because ``config_dir()`` reads the env var
-on every call and so redirects BOTH bindings at once — ``config/loader.py``'s and the
-one ``config/__init__.py`` binds at import. Patching the loader attribute instead misses
-the import-bound copy. The redirect is asserted through both bindings before any boot
-runs, or these rails would write the real ``~/.gideon``.
-"""
+"""Configured registry seeding and durable source removal through the real gateway."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
-REGISTRY_URL = "https://github.com/Gideon/registry.git"
+REGISTRY_URL = "https://registry.example.test/apps.git"
 
 
 @pytest.fixture
@@ -43,9 +20,11 @@ def boot_home(tmp_path, monkeypatch):
     """
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     monkeypatch.setenv("GIDEON_AUTH_MODE", "none")
+    monkeypatch.setenv("GIDEON_APP_REGISTRY_URL", REGISTRY_URL)
+    monkeypatch.delenv("GIDEON_APP_CATALOG_URLS", raising=False)
 
-    import gideon.config as config_pkg
-    import gideon.config.loader as config_loader
+    import gideon.core.config as config_pkg
+    import gideon.core.config.loader as config_loader
 
     assert config_loader.config_dir().resolve() == tmp_path.resolve()
     assert config_pkg.config_dir().resolve() == tmp_path.resolve()
@@ -59,9 +38,12 @@ def _sources_file(home: Path) -> dict[str, list[str]]:
 
 async def _boot():
     """Boot the real gateway on an ephemeral port; return ``(runner, port)``."""
-    from gideon.dashboard.server import start_dashboard
+    from gideon.core.config.loader import AppConfig
+    from gideon.engine.session import ConversationDirectory
+    from gideon.interfaces.dashboard.server import start_dashboard
 
-    runner, _state = await start_dashboard(sessions=MagicMock(count=0), port=0)
+    sessions = ConversationDirectory(AppConfig.load())
+    runner, _state = await start_dashboard(sessions=sessions, port=0)
     return runner, runner.addresses[0][1]
 
 
@@ -92,21 +74,14 @@ async def test_first_run_boot_seeds_the_registry_as_a_removable_default(boot_hom
     """Booting a fresh home writes the registry row — and the Store can remove it."""
     runner, port = await _boot()
     try:
-        # The wire fired: the file the Store reads now holds the row, plus the marker
-        # that will keep a removal removed.
         raw = _sources_file(boot_home)
         assert raw["git"] == [REGISTRY_URL]
         assert raw["seeded"] == ["registry"]
 
-        # …and the user sees it listed.
         assert REGISTRY_URL in await _get_sources(port)
 
-        from gideon.apps import catalog
+        from gideon.extensions.apps import catalog
 
-        # "Default" (labelled as shipped, not typed by the user) but NOT builtin — the
-        # bundled tuple is folded into every read of list_git_sources(), so a builtin
-        # cannot be removed. The registry has to be in the first set and not the second
-        # or the Store would either mislabel it or hide the remove control.
         assert REGISTRY_URL in catalog.default_git_sources()
         assert REGISTRY_URL not in catalog.builtin_git_sources()
     finally:
@@ -123,12 +98,10 @@ async def test_a_removal_made_in_the_store_survives_the_next_boot(boot_home):
     finally:
         await runner.cleanup()
 
-    # The row is gone; the marker is what outlives it.
     raw = _sources_file(boot_home)
     assert raw["git"] == []
     assert raw["seeded"] == ["registry"]
 
-    # A genuinely new boot over the same home — the moment a re-seed would happen.
     runner, port = await _boot()
     try:
         assert REGISTRY_URL not in await _get_sources(port)
@@ -152,6 +125,17 @@ async def test_the_flag_off_boot_acquires_no_network_source(boot_home, monkeypat
     runner, port = await _boot()
     try:
         assert REGISTRY_URL not in await _get_sources(port)
+        assert not (boot_home / "apps" / "app-sources.json").exists()
+    finally:
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_unconfigured_boot_adds_no_remote_source(boot_home, monkeypatch):
+    monkeypatch.delenv("GIDEON_APP_REGISTRY_URL")
+    runner, port = await _boot()
+    try:
+        assert await _get_sources(port) == []
         assert not (boot_home / "apps" / "app-sources.json").exists()
     finally:
         await runner.cleanup()
